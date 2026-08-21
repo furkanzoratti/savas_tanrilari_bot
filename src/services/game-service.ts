@@ -1,7 +1,8 @@
 import type { DbClient } from "../db/pool.js";
 import { pool, withTransaction } from "../db/pool.js";
 import { BUILD_COSTS, BUILD_DURATIONS, BUILDINGS, MOBILIZATION_RULES, SHIPS, UNITS } from "../domain/catalog.js";
-import { buildingSlotLimit, calculatePopulationGain, calculateSettlementEconomy, calculateShipUpkeep, calculateUnitUpkeep, nextRuinStage } from "../domain/economy.js";
+import { buildingSlotLimit, calculatePopulationGain, calculateShipUpkeep, calculateUnitUpkeep, nextRuinStage } from "../domain/economy.js";
+import { addIncomeBreakdowns, calculateCategorizedIncome, incomeTotal, scaleIncome, type IncomeBreakdown } from "../domain/income.js";
 import { createRecruitmentWaves, isAcquisitionTurn, militaryLimit, settlementRecruitmentCapacity } from "../domain/mobilization.js";
 import type { Mobilization, RuinStage, ShipStatus, UnitStatus } from "../domain/types.js";
 
@@ -11,7 +12,8 @@ interface GuildRow { discord_id: string; current_turn: number; turn_phase: strin
 interface CountryRow { id: string; guild_id: string; name: string; treasury: number; mobilization: Mobilization; mobilization_started_turn: number | null }
 interface SettlementRow {
   id: string; country_id: string; name: string; population: number; slave_population: number;
-  base_income: number; base_population_growth: number; manual_flat_income: number;
+  base_income: number; tax_income: number; land_trade_income: number; sea_trade_income: number;
+  base_population_growth: number; manual_flat_income: number;
   manual_income_percent: number; ruin_stage: RuinStage;
 }
 interface BuildingRow { settlement_id: string; building_type: string; level: number; target_level: number | null; status: "ACTIVE" | "BUILDING"; completion_turn: number | null }
@@ -19,16 +21,25 @@ interface BuildingRow { settlement_id: string; building_type: string; level: num
 export interface CountryDocument {
   guild: GuildRow;
   country: CountryRow;
+  playerIds: string[];
   freePopulation: number;
   militaryUsed: number;
   militaryLimit: number;
   totalGrossIncome: number;
   totalPayableIncome: number;
+  totalIncomeBreakdown: IncomeBreakdown;
   totalUpkeep: number;
   netIncome: number;
+  tradeAgreements: Array<{ id: string; route: "LAND" | "SEA"; status: "PENDING" | "ACTIVE"; partner_name: string; income_per_country: number }>;
   settlements: Array<SettlementRow & {
     grossIncome: number;
     payableIncome: number;
+    incomeBreakdown: IncomeBreakdown;
+    buildingIncomeBonus: IncomeBreakdown;
+    buildingUpkeep: number;
+    unitUpkeep: number;
+    shipUpkeep: number;
+    totalSettlementUpkeep: number;
     populationGain: number;
     slotLimit: number;
     buildings: BuildingRow[];
@@ -94,7 +105,33 @@ async function audit(client: DbClient, guildId: string, actorId: string, action:
   );
 }
 
+async function activeTradeBonuses(client: DbClient, countryId: string): Promise<Map<string, { land: number; sea: number }>> {
+  const result = await client.query<{ settlement_id: string; route: "LAND" | "SEA"; amount: number }>(
+    `SELECT settlement_id,route,SUM(income_per_country)::integer AS amount FROM (
+       SELECT proposer_settlement_id AS settlement_id,route,income_per_country
+         FROM trade_agreements WHERE proposer_country_id=$1 AND status='ACTIVE'
+       UNION ALL
+       SELECT receiver_settlement_id AS settlement_id,route,income_per_country
+         FROM trade_agreements WHERE receiver_country_id=$1 AND status='ACTIVE' AND receiver_settlement_id IS NOT NULL
+     ) active_routes GROUP BY settlement_id,route`,
+    [countryId]
+  );
+  const bonuses = new Map<string, { land: number; sea: number }>();
+  for (const row of result.rows) {
+    const current = bonuses.get(row.settlement_id) ?? { land: 0, sea: 0 };
+    if (row.route === "LAND") current.land += row.amount;
+    else current.sea += row.amount;
+    bonuses.set(row.settlement_id, current);
+  }
+  return bonuses;
+}
+
 export const gameService = {
+  async guildState(guildId: string): Promise<GuildRow> {
+    const client = await pool.connect();
+    try { return await ensureGuild(client, guildId); } finally { client.release(); }
+  },
+
   async ensureGuild(guildId: string): Promise<void> {
     const client = await pool.connect();
     try { await ensureGuild(client, guildId); } finally { client.release(); }
@@ -154,15 +191,16 @@ export const gameService = {
 
   async createSettlement(input: {
     guildId: string; actorId: string; countryId: string; name: string; population: number;
-    slaves: number; baseIncome: number; basePopulationGrowth: number;
+    slaves: number; baseIncome: number; taxIncome: number; landTradeIncome: number; seaTradeIncome: number; basePopulationGrowth: number;
   }): Promise<SettlementRow> {
     return withTransaction(async (client) => {
       const country = await getCountry(client, input.countryId);
       if (country.guild_id !== input.guildId) throw new GameError("Ülke bu sunucuya ait değil.");
       const result = await client.query<SettlementRow>(
-        `INSERT INTO settlements(country_id,name,population,slave_population,base_income,base_population_growth)
-         VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-        [input.countryId, input.name.trim(), input.population, input.slaves, input.baseIncome, input.basePopulationGrowth]
+        `INSERT INTO settlements(
+          country_id,name,population,slave_population,base_income,tax_income,land_trade_income,sea_trade_income,base_population_growth
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+        [input.countryId, input.name.trim(), input.population, input.slaves, input.baseIncome, input.taxIncome, input.landTradeIncome, input.seaTradeIncome, input.basePopulationGrowth]
       );
       const settlement = result.rows[0]!;
       await audit(client, input.guildId, input.actorId, "SETTLEMENT_CREATE", "settlement", settlement.id, input);
@@ -175,73 +213,109 @@ export const gameService = {
     try {
       const country = await getCountry(client, countryId);
       const guild = await getGuild(client, country.guild_id);
+      const playerIds = (await client.query<{ discord_user_id: string }>("SELECT discord_user_id FROM country_members WHERE country_id=$1 ORDER BY discord_user_id", [countryId])).rows.map((row) => row.discord_user_id);
       const settlements = (await client.query<SettlementRow>("SELECT * FROM settlements WHERE country_id = $1 ORDER BY name", [countryId])).rows;
-      const settlementIds = settlements.map((s) => s.id);
+      const settlementIds = settlements.map((settlement) => settlement.id);
       const buildings = settlementIds.length ? (await client.query<BuildingRow>("SELECT * FROM buildings WHERE settlement_id = ANY($1::uuid[]) ORDER BY building_type", [settlementIds])).rows : [];
       const units = settlementIds.length ? (await client.query<{ settlement_id: string; unit_type: keyof typeof UNITS; quantity: number; status: UnitStatus }>("SELECT * FROM unit_stacks WHERE settlement_id = ANY($1::uuid[]) ORDER BY unit_type", [settlementIds])).rows : [];
       const ships = settlementIds.length ? (await client.query<{ settlement_id: string; ship_type: keyof typeof SHIPS; quantity: number; status: ShipStatus }>("SELECT * FROM naval_units WHERE settlement_id = ANY($1::uuid[]) ORDER BY ship_type", [settlementIds])).rows : [];
       const assets = (await client.query<{ settlement_id: string | null; asset_type: string; quantity: number; location_note: string | null }>("SELECT * FROM siege_assets WHERE country_id = $1 ORDER BY asset_type", [countryId])).rows;
       const waves = (await client.query<{ settlement_id: string; unit_type: keyof typeof UNITS; due_turn: number; quantity: number }>(
-        `SELECT ro.settlement_id, ro.unit_type, rw.due_turn, rw.quantity FROM recruitment_waves rw
-          JOIN recruitment_orders ro ON ro.id = rw.order_id
-         WHERE ro.country_id = $1 AND rw.processed_at IS NULL ORDER BY rw.due_turn`, [countryId]
+        `SELECT ro.settlement_id,ro.unit_type,rw.due_turn,rw.quantity FROM recruitment_waves rw
+          JOIN recruitment_orders ro ON ro.id=rw.order_id
+         WHERE ro.country_id=$1 AND rw.processed_at IS NULL ORDER BY rw.due_turn`, [countryId]
       )).rows;
       const pendingShips = (await client.query<{ settlement_id: string; ship_type: keyof typeof SHIPS; quantity: number; completion_turn: number }>(
         "SELECT settlement_id,ship_type,quantity,completion_turn FROM naval_orders WHERE country_id=$1 AND status='BUILDING' ORDER BY completion_turn", [countryId]
       )).rows;
+      const tradeAgreements = (await client.query<{ id: string; route: "LAND" | "SEA"; status: "PENDING" | "ACTIVE"; partner_name: string; income_per_country: number }>(
+        `SELECT ta.id,ta.route,ta.status,ta.income_per_country,
+          CASE WHEN ta.proposer_country_id=$1 THEN receiver.name ELSE proposer.name END AS partner_name
+          FROM trade_agreements ta
+          JOIN countries proposer ON proposer.id=ta.proposer_country_id
+          JOIN countries receiver ON receiver.id=ta.receiver_country_id
+         WHERE (ta.proposer_country_id=$1 OR ta.receiver_country_id=$1) AND ta.status IN ('PENDING','ACTIVE')
+         ORDER BY ta.status,partner_name`, [countryId]
+      )).rows;
+      const tradeBonuses = await activeTradeBonuses(client, countryId);
       const manpower = await countryManpower(client, countryId);
 
-      let totalGrossIncome = 0;
-      let totalPayableIncome = 0;
+      let totalGrossBreakdown: IncomeBreakdown = { settlement: 0, tax: 0, landTrade: 0, seaTrade: 0 };
+      let totalPayableBreakdown: IncomeBreakdown = { settlement: 0, tax: 0, landTrade: 0, seaTrade: 0 };
       let totalUpkeep = 0;
       const enriched = settlements.map((settlement) => {
-        const settlementBuildings = buildings.filter((b) => b.settlement_id === settlement.id);
-        const activeBuildings = settlementBuildings.filter((b) => b.status === "ACTIVE" && b.level > 0)
-          .map((b) => ({ buildingType: b.building_type, level: b.level }));
-        const economy = calculateSettlementEconomy({
-          baseIncome: settlement.base_income,
+        const settlementBuildings = buildings.filter((building) => building.settlement_id === settlement.id);
+        const activeBuildings = settlementBuildings
+          .filter((building) => building.status === "ACTIVE" && building.level > 0)
+          .map((building) => ({ buildingType: building.building_type, level: building.level }));
+        const agreementBonus = tradeBonuses.get(settlement.id) ?? { land: 0, sea: 0 };
+        const economy = calculateCategorizedIncome({
+          settlementIncome: settlement.base_income,
+          taxIncome: settlement.tax_income,
+          landTradeIncome: settlement.land_trade_income,
+          seaTradeIncome: settlement.sea_trade_income,
+          agreementLandIncome: agreementBonus.land,
+          agreementSeaIncome: agreementBonus.sea,
           manualFlatIncome: settlement.manual_flat_income,
           manualIncomePercent: settlement.manual_income_percent,
           buildings: activeBuildings,
           ruinStage: settlement.ruin_stage
         });
+        const incomeBreakdown = scaleIncome(economy.payable, MOBILIZATION_RULES[country.mobilization].incomeMultiplier);
         const populationGain = calculatePopulationGain({
           basePopulationGrowth: settlement.base_population_growth,
           buildings: activeBuildings,
           ruinStage: settlement.ruin_stage,
           mobilization: country.mobilization
         });
-        const settlementUnits = units.filter((u) => u.settlement_id === settlement.id);
-        const settlementShips = ships.filter((s) => s.settlement_id === settlement.id);
-        const unitUpkeep = settlementUnits.reduce((sum, u) => sum + calculateUnitUpkeep(u.unit_type, u.quantity, u.status, country.mobilization), 0);
-        const shipUpkeep = settlementShips.reduce((sum, s) => sum + calculateShipUpkeep(s.ship_type, s.quantity, s.status, country.mobilization), 0);
-        totalGrossIncome += economy.grossIncome;
-        totalPayableIncome += economy.payableIncome;
-        totalUpkeep += economy.buildingUpkeep + unitUpkeep + shipUpkeep;
+        const settlementUnits = units.filter((unit) => unit.settlement_id === settlement.id);
+        const settlementShips = ships.filter((ship) => ship.settlement_id === settlement.id);
+        const unitUpkeep = settlementUnits.reduce((sum, unit) => sum + calculateUnitUpkeep(unit.unit_type, unit.quantity, unit.status, country.mobilization), 0);
+        const shipUpkeep = settlementShips.reduce((sum, ship) => sum + calculateShipUpkeep(ship.ship_type, ship.quantity, ship.status, country.mobilization), 0);
+        const totalSettlementUpkeep = economy.buildingUpkeep + unitUpkeep + shipUpkeep;
+        totalGrossBreakdown = addIncomeBreakdowns(totalGrossBreakdown, economy.gross);
+        totalPayableBreakdown = addIncomeBreakdowns(totalPayableBreakdown, incomeBreakdown);
+        totalUpkeep += totalSettlementUpkeep;
         return {
           ...settlement,
-          grossIncome: economy.grossIncome,
-          payableIncome: economy.payableIncome,
+          grossIncome: incomeTotal(economy.gross),
+          payableIncome: incomeTotal(incomeBreakdown),
+          incomeBreakdown,
+          buildingIncomeBonus: economy.buildingBonuses,
+          buildingUpkeep: economy.buildingUpkeep,
+          unitUpkeep,
+          shipUpkeep,
+          totalSettlementUpkeep,
           populationGain,
           slotLimit: buildingSlotLimit(settlement.population),
           buildings: settlementBuildings,
           units: settlementUnits,
           ships: settlementShips,
-          siegeAssets: assets.filter((a) => a.settlement_id === settlement.id),
-          pendingRecruitment: waves.filter((w) => w.settlement_id === settlement.id),
-          pendingShips: pendingShips.filter((s) => s.settlement_id === settlement.id)
+          siegeAssets: assets.filter((asset) => asset.settlement_id === settlement.id),
+          pendingRecruitment: waves.filter((wave) => wave.settlement_id === settlement.id),
+          pendingShips: pendingShips.filter((ship) => ship.settlement_id === settlement.id)
         };
       });
-      const mobilizedIncome = Math.floor(totalPayableIncome * MOBILIZATION_RULES[country.mobilization].incomeMultiplier);
+      const totalPayableIncome = incomeTotal(totalPayableBreakdown);
       return {
-        guild, country, freePopulation: manpower.population, militaryUsed: manpower.used,
+        guild,
+        country,
+        playerIds,
+        freePopulation: manpower.population,
+        militaryUsed: manpower.used,
         militaryLimit: militaryLimit(manpower.population, country.mobilization),
-        totalGrossIncome, totalPayableIncome: mobilizedIncome, totalUpkeep,
-        netIncome: mobilizedIncome - totalUpkeep, settlements: enriched
+        totalGrossIncome: incomeTotal(totalGrossBreakdown),
+        totalPayableIncome,
+        totalIncomeBreakdown: totalPayableBreakdown,
+        totalUpkeep,
+        netIncome: totalPayableIncome - totalUpkeep,
+        tradeAgreements,
+        settlements: enriched
       };
-    } finally { client.release(); }
+    } finally {
+      client.release();
+    }
   },
-
   async purchaseBuilding(input: { guildId: string; actorId: string; countryId: string; settlementId: string; buildingType: string }): Promise<{ targetLevel: number; completionTurn: number; cost: number }> {
     return withTransaction(async (client) => {
       const guild = await getGuild(client, input.guildId);
@@ -253,9 +327,10 @@ export const gameService = {
       if (!settlement) throw new GameError("Yerleşke bulunamadı.");
       const definition = BUILDINGS[input.buildingType];
       if (!definition) throw new GameError("Bina türü bulunamadı.");
-      const activeConstruction = await client.query("SELECT 1 FROM buildings WHERE settlement_id=$1 AND status='BUILDING' LIMIT 1", [settlement.id]);
-      if (activeConstruction.rowCount) throw new GameError("Bu yerleşkede hâlihazırda bir inşaat devam ediyor.");
+      const activeConstruction = await client.query<{ count: number }>("SELECT COUNT(*)::integer AS count FROM buildings WHERE settlement_id=$1 AND status='BUILDING'", [settlement.id]);
+      if ((activeConstruction.rows[0]?.count ?? 0) >= 2) throw new GameError("Bu yerleşkede aynı anda en fazla iki inşaat devam edebilir.");
       const existing = await client.query<BuildingRow>("SELECT * FROM buildings WHERE settlement_id=$1 AND building_type=$2 FOR UPDATE", [settlement.id, input.buildingType]);
+      if (existing.rows[0]?.status === "BUILDING") throw new GameError("Bu binanın inşaatı veya seviye yükseltmesi zaten devam ediyor.");
       const currentLevel = existing.rows[0]?.level ?? 0;
       const targetLevel = currentLevel + 1;
       if (targetLevel > definition.maxLevel) throw new GameError("Bu bina azami seviyede.");
@@ -334,6 +409,33 @@ export const gameService = {
     });
   },
 
+  async disbandUnits(input: {
+    guildId: string; actorId: string; countryId: string; settlementId: string;
+    unitType: keyof typeof UNITS; status: UnitStatus; quantity: number;
+  }): Promise<{ remaining: number }> {
+    if (!Number.isSafeInteger(input.quantity) || input.quantity < 1) throw new GameError("Terhis edilecek asker sayısı pozitif bir tam sayı olmalıdır.");
+    return withTransaction(async (client) => {
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`country:${input.countryId}`]);
+      const country = await getCountry(client, input.countryId);
+      if (country.guild_id !== input.guildId) throw new GameError("Ülke bu sunucuya ait değil.");
+      const stack = (await client.query<{ id: string; quantity: number }>(
+        `SELECT u.id,u.quantity FROM unit_stacks u
+          JOIN settlements s ON s.id=u.settlement_id
+         WHERE u.settlement_id=$1 AND s.country_id=$2 AND u.unit_type=$3 AND u.status=$4 FOR UPDATE`,
+        [input.settlementId, input.countryId, input.unitType, input.status]
+      )).rows[0];
+      if (!stack) throw new GameError("Seçilen yerleşkede bu birlik bulunamadı.");
+      if (input.quantity > stack.quantity) throw new GameError(`En fazla ${stack.quantity.toLocaleString("tr-TR")} asker terhis edilebilir.`);
+      const remaining = stack.quantity - input.quantity;
+      if (remaining === 0) await client.query("DELETE FROM unit_stacks WHERE id=$1", [stack.id]);
+      else await client.query("UPDATE unit_stacks SET quantity=$1 WHERE id=$2", [remaining, stack.id]);
+      await audit(client, input.guildId, input.actorId, "UNIT_DISBAND", "unit_stack", stack.id, {
+        settlementId: input.settlementId, unitType: input.unitType, status: input.status,
+        quantity: input.quantity, remaining
+      });
+      return { remaining };
+    });
+  },
   async purchaseShips(input: { guildId: string; actorId: string; countryId: string; settlementId: string; shipType: keyof typeof SHIPS; quantity: number }): Promise<{ cost: number; completionTurn: number }> {
     if (input.quantity < 1) throw new GameError("Gemi miktarı en az 1 olmalıdır.");
     return withTransaction(async (client) => {
@@ -425,14 +527,27 @@ export const gameService = {
         const countries = (await client.query<CountryRow>("SELECT * FROM countries WHERE guild_id=$1 FOR UPDATE", [guildId])).rows;
         for (const country of countries) {
           const settlements = (await client.query<SettlementRow>("SELECT * FROM settlements WHERE country_id=$1 FOR UPDATE", [country.id])).rows;
-          let income = 0;
+          const tradeBonuses = await activeTradeBonuses(client, country.id);
+          let incomeBreakdown: IncomeBreakdown = { settlement: 0, tax: 0, landTrade: 0, seaTrade: 0 };
           let upkeep = 0;
           for (const settlement of settlements) {
             const buildings = (await client.query<BuildingRow>("SELECT * FROM buildings WHERE settlement_id=$1", [settlement.id])).rows;
             const active = buildings.filter((b) => b.status === "ACTIVE" && b.level > 0).map((b) => ({ buildingType: b.building_type, level: b.level }));
-            const economy = calculateSettlementEconomy({ baseIncome: settlement.base_income, manualFlatIncome: settlement.manual_flat_income, manualIncomePercent: settlement.manual_income_percent, buildings: active, ruinStage: settlement.ruin_stage });
+            const agreementBonus = tradeBonuses.get(settlement.id) ?? { land: 0, sea: 0 };
+            const economy = calculateCategorizedIncome({
+              settlementIncome: settlement.base_income,
+              taxIncome: settlement.tax_income,
+              landTradeIncome: settlement.land_trade_income,
+              seaTradeIncome: settlement.sea_trade_income,
+              agreementLandIncome: agreementBonus.land,
+              agreementSeaIncome: agreementBonus.sea,
+              manualFlatIncome: settlement.manual_flat_income,
+              manualIncomePercent: settlement.manual_income_percent,
+              buildings: active,
+              ruinStage: settlement.ruin_stage
+            });
             const popGain = calculatePopulationGain({ basePopulationGrowth: settlement.base_population_growth, buildings: active, ruinStage: settlement.ruin_stage, mobilization: country.mobilization });
-            income += economy.payableIncome;
+            incomeBreakdown = addIncomeBreakdowns(incomeBreakdown, economy.payable);
             upkeep += economy.buildingUpkeep;
             await client.query("UPDATE settlements SET population=population+$1,ruin_stage=$2 WHERE id=$3", [popGain, nextRuinStage(settlement.ruin_stage), settlement.id]);
           }
@@ -440,10 +555,14 @@ export const gameService = {
           const ships = (await client.query<{ ship_type: keyof typeof SHIPS; quantity: number; status: ShipStatus }>(`SELECT n.ship_type,n.quantity,n.status FROM naval_units n JOIN settlements s ON s.id=n.settlement_id WHERE s.country_id=$1`, [country.id])).rows;
           upkeep += units.reduce((sum, unit) => sum + calculateUnitUpkeep(unit.unit_type, unit.quantity, unit.status, country.mobilization), 0);
           upkeep += ships.reduce((sum, ship) => sum + calculateShipUpkeep(ship.ship_type, ship.quantity, ship.status, country.mobilization), 0);
-          const adjustedIncome = Math.floor(income * MOBILIZATION_RULES[country.mobilization].incomeMultiplier);
+          const adjustedBreakdown = scaleIncome(incomeBreakdown, MOBILIZATION_RULES[country.mobilization].incomeMultiplier);
+          const adjustedIncome = incomeTotal(adjustedBreakdown);
           const net = adjustedIncome - upkeep;
           await client.query("UPDATE countries SET treasury=treasury+$1 WHERE id=$2", [net, country.id]);
-          await client.query("INSERT INTO transactions(country_id,turn,kind,amount,description) VALUES($1,$2,'ACQUISITION_TURN',$3,$4)", [country.id, newTurn, net, `Gelir ${adjustedIncome}; bakım ${upkeep}`]);
+          await client.query(
+            "INSERT INTO transactions(country_id,turn,kind,amount,description) VALUES($1,$2,'ACQUISITION_TURN',$3,$4)",
+            [country.id, newTurn, net, `Yerleşke ${adjustedBreakdown.settlement}; vergi ${adjustedBreakdown.tax}; kara ticareti ${adjustedBreakdown.landTrade}; deniz ticareti ${adjustedBreakdown.seaTrade}; bakım ${upkeep}`]
+          );
         }
       }
 

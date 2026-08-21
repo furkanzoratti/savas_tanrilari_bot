@@ -4,18 +4,22 @@ Railway üzerinde sürekli çalışan, Discord komutlarıyla yönetilen ve Postg
 
 ## Neleri otomatikleştirir?
 
-- Oyuncunun yalnızca kendi ülkesine ait güncel belgeyi gösterir.
-- Yerleşke, nüfus, köle nüfusu, gelir, hazine, bina, asker, gemi, kuşatma aleti ve bakım giderlerini tek belgede toplar.
-- Bina alımını yerleşke ve bina seçmeli bir akışla yürütür; seviye ön şartını, slotu, maliyeti ve tamamlanma turunu denetler.
+- Oyuncunun yalnızca kendi ülkesine ait güncel belgeyi gösterir; ülkeye atanmış oyuncuları Discord etiketi olarak listeler ve şehir kartlarını antik tapınak görseliyle sunar.
+- Yerleşke, nüfus, köle nüfusu, hazine, bina, asker, gemi, kuşatma aleti ve bakım giderlerini açıklamalı bir devlet belgesinde toplar.
+- Geliri yerleşke, vergi, kara ticareti ve deniz ticareti olarak ayırır; şehir bazında ve ülke toplamında gösterir.
+- Bina alımını yerleşke ve bina seçmeli bir akışla yürütür; seviye ön şartını, slotu, maliyeti ve tamamlanma turunu denetler. Her yerleşkede aynı anda en fazla iki inşaat sürer.
 - Her turda tamamlanan binaları etkinleştirir. Gelir etkileri veritabanına üst üste eklenmez; aktif binalardan yeniden hesaplandığı için aynı bonusun iki kez uygulanması engellenir.
 - Seferberlik seviyesine göre toplam asker sınırını ve yerleşke eğitim kapasitesini hesaplar.
 - Askere alınan birlikleri seferberlik kademesinin dalgalarına böler; gelecekte katılacak askerleri belgede gösterir ve zamanı gelince garnizona ekler.
-- Birlik ve donanma bakımını konumlarına ve seferberlik durumuna göre hesaplar.
+- Birlik ve donanma bakımını konumlarına ve seferberlik durumuna göre hesaplar; mevcut birlikleri iadesiz ve kalıcı olarak terhis eder.
 - Tersane seviyesi, maliyet ve yapım süresi denetimli gemi siparişi alır; tamamlanan gemileri rezerv filoya ekler.
 - Harap yerleşkeyi ilk alım turunda `%0`, ikinci alım turunda `%50`, üçüncü alım turunda `%100` gelir ve nüfus üretimine geçirir.
-- Yetkili rol kanallarında kelime sayar; son 24 saat ve son 7 gün sıralaması üretir.
+- Yalnızca yönetimin seçtiği rol kanallarında kelime sayar; son 24 saat/7 gün sıralaması ve seçilen rapor kanalında otomatik günlük rapor üretir.
+- Oyuncular arasında teklif, kabul/ret ve fesih akışlı kara veya deniz ticareti antlaşmaları kurar.
 - Genel zar komutu sağlar.
 - Bütün kritik işlemleri denetim kaydına yazar ve aynı turun yanlışlıkla iki kez işlenmesini engeller.
+- Yönetici olmayan oyuncuların slash komutlarını başarı/başarısızlık durumuyla saklar; yönetici geçmişi görebilir veya canlı log kanalı ayarlayabilir.
+- Tur açma, atlama, durdurma ve kapatma işlemlerini hazır metinli, markalı ve herkese açık Discord duyuruları olarak yayımlar.
 
 ## Yetki modeli
 
@@ -31,12 +35,23 @@ Railway üzerinde sürekli çalışan, Discord komutlarıyla yönetilen ve Postg
 - `/belge [ulke]`
 - `/alim [ulke]`
 - `/asker-alimi [ulke]`
+- `/asker-terhis yerleske birim durum miktar [ulke]`
 - `/gemi-alimi [ulke]`
 - `/seferberlik seviye [ulke]`
+- `/ticaret teklif|yanit|liste|feshet`
 - `/zar adet yuz [bonus] [gizli]`
 - `/rol-siralama donem`
 
 Köşeli parantezli `ulke` alanı yalnızca oyun yöneticisinin başka bir ülke adına işlem yapması içindir.
+
+### Herkesin görebildiği, yalnızca yöneticinin çalıştırabildiği
+
+- `/tur atla`
+- `/tur ac`
+- `/tur durdur`
+- `/tur kapat`
+
+Bu komutların sonuçları gizli değildir; markalı resmî tur duyurusu olarak kullanıldıkları kanala gönderilir.
 
 ### Yalnızca yönetici
 
@@ -48,7 +63,10 @@ Köşeli parantezli `ulke` alanı yalnızca oyun yöneticisinin başka bir ülke
 - `/yonetim hazine`
 - `/yonetim harap`
 - `/yonetim oyunu-sifirla onay:SIFIRLA`
-- `/yonetim rol-kanali`
+- `/yonetim komut-log-kanali islem [kanal]`
+- `/yonetim komut-gecmisi [adet]`
+- `/yonetim rol-kanali islem kanal`
+- `/yonetim rol-rapor-kanali islem [kanal]`
 
 `oyunu-sifirla` yalnızca yetkili GM tarafından ve tam `SIFIRLA` onayıyla çalışır. Komut, o Discord sunucusundaki ülkeleri ve bunlara bağlı bütün oyun kayıtlarını siler; turu 0/Kapalı durumuna döndürür. Rol kanalları ile kelime istatistikleri korunur.
 

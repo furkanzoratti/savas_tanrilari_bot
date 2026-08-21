@@ -1,16 +1,22 @@
 import {
-  ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ModalBuilder,
+  ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ModalBuilder,
   StringSelectMenuBuilder, TextInputBuilder, TextInputStyle,
   type ButtonInteraction, type ChatInputCommandInteraction, type Client,
   type Interaction, type ModalSubmitInteraction, type StringSelectMenuInteraction
 } from "discord.js";
 import { BUILD_COSTS, BUILDINGS, MOBILIZATION_RULES, SHIPS, UNITS } from "../domain/catalog.js";
 import { gold, number } from "../domain/format.js";
-import type { Mobilization } from "../domain/types.js";
+import type { Mobilization, UnitStatus } from "../domain/types.js";
+import { TRADE_ROUTE_LABELS, type TradeRoute } from "../domain/trade.js";
 import { gameService, GameError } from "../services/game-service.js";
-import { assertCountryAccess, requireGameMaster, resolveCountry } from "./auth.js";
+import { commandLogService } from "../services/command-log-service.js";
+import { roleReportService } from "../services/role-report-service.js";
+import { tradeService } from "../services/trade-service.js";
+import { assertCountryAccess, isGameMaster, requireGameMaster, resolveCountry } from "./auth.js";
 import { buildingChoices, shipChoices, unitChoices } from "./commands.js";
 import { renderDocument } from "./document.js";
+import { BRAND_BANNER_PATH, BRAND_BANNER_NAME, TEMPLE_BANNER_PATH, TEMPLE_BANNER_NAME } from "./assets.js";
+import { turnAnnouncement } from "./turn-announcements.js";
 
 function settlementSelect(customId: string, settlements: Array<{ id: string; name: string; population: number }>, placeholder: string) {
   if (!settlements.length) throw new GameError("Bu ülkeye ait yerleşke bulunmuyor.");
@@ -25,8 +31,8 @@ async function sendDocument(interaction: ChatInputCommandInteraction, countryId:
   const embeds = renderDocument(await gameService.document(countryId));
   const batches: EmbedBuilder[][] = [];
   for (let index = 0; index < embeds.length; index += 10) batches.push(embeds.slice(index, index + 10));
-  await interaction.editReply({ embeds: batches[0] ?? [] });
-  for (const batch of batches.slice(1)) await interaction.followUp({ embeds: batch, ephemeral: true });
+  await interaction.editReply({ embeds: batches[0] ?? [], files: [new AttachmentBuilder(TEMPLE_BANNER_PATH, { name: TEMPLE_BANNER_NAME })] });
+  for (const batch of batches.slice(1)) await interaction.followUp({ embeds: batch, files: [new AttachmentBuilder(TEMPLE_BANNER_PATH, { name: TEMPLE_BANNER_NAME })], ephemeral: true });
 }
 
 async function startPurchase(interaction: ChatInputCommandInteraction, kind: "build" | "unit" | "ship"): Promise<void> {
@@ -37,6 +43,103 @@ async function startPurchase(interaction: ChatInputCommandInteraction, kind: "bu
   await interaction.reply({ content: `**${country.name}** — ${label}`, components: [settlementSelect(`${prefix}|${country.id}`, settlements, label)], ephemeral: true });
 }
 
+async function findSettlement(countryId: string, name: string) {
+  const settlements = await gameService.listSettlements(countryId);
+  const settlement = settlements.find((item) => item.name.toLocaleLowerCase("tr-TR") === name.trim().toLocaleLowerCase("tr-TR"));
+  if (!settlement) throw new GameError("Yerleşke bulunamadı. Adı belgede göründüğü biçimde yazın.");
+  return settlement;
+}
+
+async function handleTrade(interaction: ChatInputCommandInteraction): Promise<void> {
+  if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
+  const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
+  const sub = interaction.options.getSubcommand();
+  await interaction.deferReply({ ephemeral: true });
+  if (sub === "teklif") {
+    const settlement = await findSettlement(country.id, interaction.options.getString("yerleske", true));
+    const agreement = await tradeService.createOffer({
+      guildId: interaction.guildId,
+      actorId: interaction.user.id,
+      proposerCountryId: country.id,
+      receiverCountryName: interaction.options.getString("hedef-ulke", true),
+      proposerSettlementId: settlement.id,
+      route: interaction.options.getString("tur", true) as TradeRoute
+    });
+    await interaction.editReply(`📨 **${agreement.receiver_country_name}** ülkesine ${TRADE_ROUTE_LABELS[agreement.route]} teklifi gönderildi.\nBağlantı: **${agreement.proposer_settlement_name}** • Gelir: taraf başına **${gold(agreement.income_per_country)}** / Alım Turu\nAntlaşma ID: \`${agreement.id}\``);
+  } else if (sub === "yanit") {
+    const accept = interaction.options.getString("yanit", true) === "accept";
+    const settlementName = interaction.options.getString("yerleske");
+    const settlement = accept && settlementName ? await findSettlement(country.id, settlementName) : undefined;
+    const agreement = await tradeService.respond({
+      guildId: interaction.guildId,
+      actorId: interaction.user.id,
+      receiverCountryId: country.id,
+      agreementId: interaction.options.getString("id", true),
+      accept,
+      ...(settlement ? { receiverSettlementId: settlement.id } : {})
+    });
+    await interaction.editReply(accept
+      ? `✅ **${agreement.proposer_country_name}** ile ${TRADE_ROUTE_LABELS[agreement.route]} antlaşması etkinleştirildi.`
+      : `❌ **${agreement.proposer_country_name}** ülkesinin ticaret teklifi reddedildi.`);
+  } else if (sub === "liste") {
+    const agreements = await tradeService.list(country.id);
+    const lines = agreements.map((agreement) => {
+      const partner = agreement.proposer_country_id === country.id ? agreement.receiver_country_name : agreement.proposer_country_name;
+      const direction = agreement.status === "PENDING" && agreement.receiver_country_id === country.id ? "📥 Gelen teklif" : agreement.status === "PENDING" ? "📤 Gönderilen teklif" : agreement.status === "ACTIVE" ? "✅ Aktif" : "⛔ Sona ermiş";
+      return `${direction} • **${partner}** • ${TRADE_ROUTE_LABELS[agreement.route]} • ${gold(agreement.income_per_country)}\n\`${agreement.id}\``;
+    });
+    await interaction.editReply(lines.length ? lines.join("\n\n") : "Bu ülkeye ait ticaret teklifi veya antlaşması bulunmuyor.");
+  } else if (sub === "feshet") {
+    await tradeService.end({ guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id, agreementId: interaction.options.getString("id", true) });
+    await interaction.editReply("✅ Ticaret antlaşması sona erdirildi; sonraki Alım Turunda gelir üretmeyecek.");
+  }
+}
+
+function commandText(interaction: ChatInputCommandInteraction): string {
+  const flatten = (options: readonly any[]): string[] => options.flatMap((option) => {
+    if (option.options?.length) return [option.name, ...flatten(option.options)];
+    if (option.value === undefined) return [option.name];
+    return [`${option.name}:${String(option.value)}`];
+  });
+  return [`/${interaction.commandName}`, ...flatten(interaction.options.data)].join(" ").slice(0, 1_500);
+}
+
+async function publishCommandLog(interaction: ChatInputCommandInteraction, channelId: string | null, success: boolean): Promise<void> {
+  if (!channelId) return;
+  try {
+    const channel = await interaction.client.channels.fetch(channelId);
+    if (!channel?.isTextBased() || channel.isDMBased()) return;
+    await channel.send({ embeds: [new EmbedBuilder()
+      .setColor(success ? 0x3f7f5f : 0x8b1e1e)
+      .setTitle(success ? "✅ Oyuncu Komutu" : "❌ Başarısız Oyuncu Komutu")
+      .setDescription(`Oyuncu: <@${interaction.user.id}>\nKomut: \`${commandText(interaction).replaceAll("`", "ˋ")}\``)
+      .setTimestamp()] });
+  } catch (error) {
+    console.error("Komut log kanalı bildirimi gönderilemedi", error);
+  }
+}
+
+async function handleTurn(interaction: ChatInputCommandInteraction): Promise<void> {
+  requireGameMaster(interaction);
+  if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
+  const sub = interaction.options.getSubcommand();
+  await interaction.deferReply();
+  let embed: EmbedBuilder;
+  if (sub === "atla") {
+    const result = await gameService.advanceTurn(interaction.guildId, interaction.user.id);
+    embed = turnAnnouncement({
+      kind: "ADVANCE", turn: result.turn, acquisition: result.acquisition,
+      completedBuildings: result.completedBuildings, recruitmentArrivals: result.recruitmentArrivals,
+      completedShips: result.completedShips
+    });
+  } else {
+    const phase = sub === "ac" ? "OPEN" : sub === "durdur" ? "RESOLVING" : "CLOSED";
+    await gameService.setTurnPhase(interaction.guildId, interaction.user.id, phase);
+    const guild = await gameService.guildState(interaction.guildId);
+    embed = turnAnnouncement({ kind: sub === "ac" ? "OPEN" : sub === "durdur" ? "PAUSE" : "CLOSE", turn: guild.current_turn });
+  }
+  await interaction.editReply({ embeds: [embed], files: [new AttachmentBuilder(BRAND_BANNER_PATH, { name: BRAND_BANNER_NAME })] });
+}
 async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<void> {
   requireGameMaster(interaction);
   if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
@@ -58,7 +161,11 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
     const settlement = await gameService.createSettlement({
       guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id,
       name: interaction.options.getString("ad", true), population: interaction.options.getInteger("nufus", true),
-      slaves: interaction.options.getInteger("kole", true), baseIncome: interaction.options.getInteger("gelir", true),
+      slaves: interaction.options.getInteger("kole", true),
+      baseIncome: interaction.options.getInteger("gelir", true),
+      taxIncome: interaction.options.getInteger("vergi-geliri", true),
+      landTradeIncome: interaction.options.getInteger("kara-ticareti", true),
+      seaTradeIncome: interaction.options.getInteger("deniz-ticareti", true),
       basePopulationGrowth: interaction.options.getInteger("nufus-artisi", true)
     });
     await interaction.editReply(`✅ **${settlement.name}**, ${country.name} ülkesine eklendi.`);
@@ -90,6 +197,26 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
     if (confirmation !== "SIFIRLA") throw new GameError("İşlem iptal edildi. Onay alanına tam olarak **SIFIRLA** yazmalısınız.");
     const result = await gameService.resetGame(interaction.guildId, interaction.user.id);
     await interaction.editReply(`🧹 Oyun sıfırlandı. **${result.deletedCountries} ülke** ve bunlara bağlı bütün oyun kayıtları silindi. Tur **0 / Kapalı** durumuna döndürüldü. Rol istatistikleri korundu.`);
+  } else if (sub === "komut-log-kanali") {
+    const operation = interaction.options.getString("islem", true);
+    const channel = interaction.options.getChannel("kanal");
+    if (operation === "set" && !channel) throw new GameError("Komut kayıt kanalını ayarlamak için bir kanal seçmelisiniz.");
+    await commandLogService.setChannel(interaction.guildId, operation === "set" ? channel!.id : null);
+    await interaction.editReply(operation === "set" ? `✅ Oyuncu bot komutları ${channel} kanalına aktarılacak.` : "✅ Oyuncu komut kanalı bildirimi kapatıldı; veritabanı geçmişi tutulmaya devam edecek.");
+  } else if (sub === "komut-gecmisi") {
+    const rows = await commandLogService.recent(interaction.guildId, interaction.options.getInteger("adet") ?? 15);
+    const text = rows.length ? rows.map((row) => {
+      const state = row.success === true ? "✅" : row.success === false ? "❌" : "⏳";
+      const timestamp = Math.floor(new Date(row.created_at).getTime() / 1_000);
+      return `${state} <@${row.discord_user_id}> • <t:${timestamp}:R>\n\`${row.command_text.replaceAll("`", "ˋ")}\``;
+    }).join("\n\n") : "Henüz oyuncu komutu kaydedilmemiş.";
+    await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle("🧾 Oyuncu Komut Geçmişi").setDescription(text.slice(0, 4_000))] });
+  } else if (sub === "rol-rapor-kanali") {
+    const operation = interaction.options.getString("islem", true);
+    const channel = interaction.options.getChannel("kanal");
+    if (operation === "set" && !channel) throw new GameError("Rapor kanalını ayarlamak için bir kanal seçmelisiniz.");
+    await roleReportService.setReportChannel(interaction.guildId, operation === "set" ? channel!.id : null);
+    await interaction.editReply(operation === "set" ? `✅ Günlük rol sıralaması ${channel} kanalına gönderilecek.` : "✅ Otomatik günlük rol raporu kapatıldı.");
   } else if (sub === "rol-kanali") {
     const channel = interaction.options.getChannel("kanal", true);
     const operation = interaction.options.getString("islem", true);
@@ -107,12 +234,27 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     await startPurchase(interaction, "build");
   } else if (interaction.commandName === "asker-alimi") {
     await startPurchase(interaction, "unit");
+  } else if (interaction.commandName === "asker-terhis") {
+    const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
+    const settlement = await findSettlement(country.id, interaction.options.getString("yerleske", true));
+    const unitType = interaction.options.getString("birim", true) as keyof typeof UNITS;
+    const quantity = interaction.options.getInteger("miktar", true);
+    const result = await gameService.disbandUnits({
+      guildId: interaction.guildId!, actorId: interaction.user.id, countryId: country.id,
+      settlementId: settlement.id, unitType,
+      status: interaction.options.getString("durum", true) as UnitStatus, quantity
+    });
+    await interaction.reply({ content: `✅ ${number(quantity)} **${UNITS[unitType].name}** terhis edildi. Birlikte kalan: **${number(result.remaining)}**. Terhis kalıcıdır ve ücret iadesi sağlamaz.`, ephemeral: true });
   } else if (interaction.commandName === "gemi-alimi") {
     await startPurchase(interaction, "ship");
   } else if (interaction.commandName === "seferberlik") {
     const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
     await gameService.setMobilization({ guildId: interaction.guildId!, actorId: interaction.user.id, countryId: country.id, mobilization: interaction.options.getString("seviye", true) as Mobilization });
     await interaction.reply({ content: `✅ **${country.name}** artık **${MOBILIZATION_RULES[interaction.options.getString("seviye", true) as Mobilization].label}** durumunda.`, ephemeral: true });
+  } else if (interaction.commandName === "ticaret") {
+    await handleTrade(interaction);
+  } else if (interaction.commandName === "tur") {
+    await handleTurn(interaction);
   } else if (interaction.commandName === "zar") {
     const count = interaction.options.getInteger("adet", true);
     const sides = interaction.options.getInteger("yuz", true);
@@ -212,7 +354,32 @@ async function reportError(interaction: Interaction, error: unknown): Promise<vo
 export function attachInteractionHandler(client: Client): void {
   client.on("interactionCreate", async (interaction) => {
     try {
-      if (interaction.isChatInputCommand()) await handleCommand(interaction);
+      if (interaction.isChatInputCommand()) {
+        let playerLog: { id: string; channelId: string | null } | null = null;
+        if (interaction.guildId && !isGameMaster(interaction)) {
+          try {
+            playerLog = await commandLogService.record({
+              guildId: interaction.guildId, userId: interaction.user.id,
+              commandName: interaction.commandName, commandText: commandText(interaction)
+            });
+          } catch (error) {
+            console.error("Oyuncu komutu kaydedilemedi", error);
+          }
+        }
+        try {
+          await handleCommand(interaction);
+          if (playerLog) {
+            await commandLogService.markResult(playerLog.id, true);
+            await publishCommandLog(interaction, playerLog.channelId, true);
+          }
+        } catch (error) {
+          if (playerLog) {
+            await commandLogService.markResult(playerLog.id, false).catch(() => undefined);
+            await publishCommandLog(interaction, playerLog.channelId, false);
+          }
+          throw error;
+        }
+      }
       else if (interaction.isStringSelectMenu()) await handleSelect(interaction);
       else if (interaction.isButton()) await handleButton(interaction);
       else if (interaction.isModalSubmit()) await handleModal(interaction);

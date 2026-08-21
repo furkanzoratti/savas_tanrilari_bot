@@ -184,5 +184,64 @@ export const migrations = [
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
     `
-  }
-] as const;
+  },
+  {
+    version: 2,
+    name: "income_trade_and_role_reports",
+    sql: `
+      ALTER TABLE guilds ADD COLUMN IF NOT EXISTS role_report_channel_id TEXT;
+      ALTER TABLE guilds DROP CONSTRAINT IF EXISTS guilds_current_turn_check;
+      ALTER TABLE guilds ADD CONSTRAINT guilds_current_turn_check CHECK (current_turn >= 0);
+
+      ALTER TABLE settlements ADD COLUMN IF NOT EXISTS tax_income BIGINT NOT NULL DEFAULT 0 CHECK (tax_income >= 0);
+      ALTER TABLE settlements ADD COLUMN IF NOT EXISTS land_trade_income BIGINT NOT NULL DEFAULT 0 CHECK (land_trade_income >= 0);
+      ALTER TABLE settlements ADD COLUMN IF NOT EXISTS sea_trade_income BIGINT NOT NULL DEFAULT 0 CHECK (sea_trade_income >= 0);
+
+      CREATE TABLE IF NOT EXISTS trade_agreements (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        guild_id TEXT NOT NULL REFERENCES guilds(discord_id) ON DELETE CASCADE,
+        proposer_country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        receiver_country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        proposer_settlement_id UUID NOT NULL REFERENCES settlements(id) ON DELETE CASCADE,
+        receiver_settlement_id UUID REFERENCES settlements(id) ON DELETE CASCADE,
+        route TEXT NOT NULL CHECK (route IN ('LAND', 'SEA')),
+        status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'ACTIVE', 'REJECTED', 'ENDED')),
+        income_per_country BIGINT NOT NULL DEFAULT 250 CHECK (income_per_country >= 0),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        accepted_at TIMESTAMPTZ,
+        ended_at TIMESTAMPTZ,
+        CHECK (proposer_country_id <> receiver_country_id)
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS active_trade_pair_route_idx
+        ON trade_agreements(
+          guild_id,
+          (LEAST(proposer_country_id, receiver_country_id)),
+          (GREATEST(proposer_country_id, receiver_country_id)),
+          route
+        ) WHERE status IN ('PENDING', 'ACTIVE');
+
+      CREATE INDEX IF NOT EXISTS trade_agreements_country_idx
+        ON trade_agreements(proposer_country_id, receiver_country_id, status);
+    `
+  },
+  {
+    version: 3,
+    name: "player_command_logs",
+    sql: `
+      ALTER TABLE guilds ADD COLUMN IF NOT EXISTS command_log_channel_id TEXT;
+
+      CREATE TABLE IF NOT EXISTS player_command_logs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        guild_id TEXT NOT NULL REFERENCES guilds(discord_id) ON DELETE CASCADE,
+        discord_user_id TEXT NOT NULL,
+        command_name TEXT NOT NULL,
+        command_text TEXT NOT NULL,
+        success BOOLEAN,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS player_command_logs_recent_idx
+        ON player_command_logs(guild_id, created_at DESC);
+    `
+  }] as const;
