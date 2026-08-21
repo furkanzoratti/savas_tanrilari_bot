@@ -35,7 +35,7 @@ client.on("messageCreate", async (message) => {
   }
 });
 
-client.once("ready", async (readyClient) => {
+client.once("clientReady", async (readyClient) => {
   logger.info({ user: readyClient.user.tag, guilds: readyClient.guilds.cache.size }, "Discord botu hazır");
   for (const guild of readyClient.guilds.cache.values()) await gameService.ensureGuild(guild.id);
 });
