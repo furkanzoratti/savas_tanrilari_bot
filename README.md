@@ -57,6 +57,7 @@ Bu komutların sonuçları gizli değildir; markalı resmî tur duyurusu olarak 
 
 - `/yonetim ulke-olustur`
 - `/yonetim oyuncu-ata`
+- `/yonetim oyuncu-cikar ulke oyuncu`
 - `/yonetim yerleske-ekle`
 - `/yonetim tur-ilerlet`
 - `/yonetim tur-durumu`

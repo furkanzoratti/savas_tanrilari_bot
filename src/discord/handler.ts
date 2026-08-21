@@ -155,6 +155,12 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
     const user = interaction.options.getUser("oyuncu", true);
     await gameService.assignPlayer(interaction.guildId, interaction.user.id, country.id, user.id);
     await interaction.editReply(`✅ ${user} → **${country.name}** ataması yapıldı.`);
+  } else if (sub === "oyuncu-cikar") {
+    const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
+    if (!country) throw new GameError("Ülke bulunamadı.");
+    const user = interaction.options.getUser("oyuncu", true);
+    await gameService.removePlayer(interaction.guildId, interaction.user.id, country.id, user.id);
+    await interaction.editReply(`✅ ${user} oyuncusunun **${country.name}** ülke ataması kaldırıldı.`);
   } else if (sub === "yerleske-ekle") {
     const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
     if (!country) throw new GameError("Ülke bulunamadı.");

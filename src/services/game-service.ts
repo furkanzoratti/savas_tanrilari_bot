@@ -189,6 +189,18 @@ export const gameService = {
     });
   },
 
+  async removePlayer(guildId: string, actorId: string, countryId: string, userId: string): Promise<void> {
+    await withTransaction(async (client) => {
+      const country = await getCountry(client, countryId);
+      if (country.guild_id !== guildId) throw new GameError("Ülke bu sunucuya ait değil.");
+      const removed = await client.query(
+        "DELETE FROM country_members WHERE country_id=$1 AND discord_user_id=$2 RETURNING discord_user_id",
+        [countryId, userId]
+      );
+      if (!removed.rowCount) throw new GameError("Bu oyuncu seçilen ülkeye atanmış değil.");
+      await audit(client, guildId, actorId, "PLAYER_REMOVE", "country", countryId, { userId });
+    });
+  },
   async createSettlement(input: {
     guildId: string; actorId: string; countryId: string; name: string; population: number;
     slaves: number; baseIncome: number; taxIncome: number; landTradeIncome: number; seaTradeIncome: number; basePopulationGrowth: number;
