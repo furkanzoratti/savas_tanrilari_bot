@@ -265,4 +265,59 @@ export const migrations = [
       UPDATE trade_agreements SET status='REJECTED',ended_at=NOW()
        WHERE status='PENDING' AND receiver_settlement_id IS NULL;
     `
+  },
+  {
+    version: 5,
+    name: "persistent_battle_system",
+    sql: `
+      CREATE TABLE IF NOT EXISTS battles (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(), guild_id TEXT NOT NULL REFERENCES guilds(discord_id) ON DELETE CASCADE,
+        channel_id TEXT NOT NULL, public_message_id TEXT,
+        terrain TEXT NOT NULL CHECK (terrain IN ('OPEN_PLAIN','DESERT','FOREST','MARSH','MOUNTAIN','MOUNTAIN_PASS','RIVER_CROSSING','SIEGE','NAVAL')),
+        narrative TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT','WAITING_FIRST_ROLL','WAITING_SECOND_ROLL','READY_TO_RESOLVE','FINISHED','CANCELLED')),
+        round_number INTEGER NOT NULL DEFAULT 1 CHECK (round_number >= 1), first_side TEXT NOT NULL CHECK (first_side IN ('A','B')),
+        winner_side TEXT CHECK (winner_side IN ('A','B')), finish_reason TEXT, created_by TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS one_active_battle_per_channel ON battles(guild_id,channel_id) WHERE status NOT IN ('FINISHED','CANCELLED');
+      CREATE TABLE IF NOT EXISTS battle_sides (
+        battle_id UUID NOT NULL REFERENCES battles(id) ON DELETE CASCADE, side_key TEXT NOT NULL CHECK (side_key IN ('A','B')),
+        country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE, controller TEXT NOT NULL CHECK (controller IN ('PLAYERS','GM')),
+        initial_total INTEGER NOT NULL DEFAULT 0 CHECK (initial_total >= 0), current_total INTEGER NOT NULL DEFAULT 0 CHECK (current_total >= 0),
+        total_losses INTEGER NOT NULL DEFAULT 0 CHECK (total_losses >= 0), pressure INTEGER NOT NULL DEFAULT 0 CHECK (pressure >= 0),
+        composition JSONB NOT NULL DEFAULT '{}'::jsonb, seal TEXT NOT NULL, PRIMARY KEY (battle_id,side_key), UNIQUE (battle_id,country_id)
+      );
+      CREATE TABLE IF NOT EXISTS battle_rolls (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(), battle_id UUID NOT NULL REFERENCES battles(id) ON DELETE CASCADE,
+        round_number INTEGER NOT NULL, side_key TEXT NOT NULL CHECK (side_key IN ('A','B')), roller_user_id TEXT NOT NULL,
+        clash_total INTEGER NOT NULL CHECK (clash_total >= 0), damage_total INTEGER NOT NULL CHECK (damage_total >= 0),
+        detail JSONB NOT NULL DEFAULT '{}'::jsonb, is_proxy BOOLEAN NOT NULL DEFAULT FALSE, manual BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), UNIQUE (battle_id,round_number,side_key)
+      );
+      CREATE TABLE IF NOT EXISTS battle_rounds (
+        battle_id UUID NOT NULL REFERENCES battles(id) ON DELETE CASCADE, round_number INTEGER NOT NULL,
+        tier TEXT NOT NULL CHECK (tier IN ('BALANCED','MINOR','CLEAR','CRUSHING')), winner_side TEXT CHECK (winner_side IN ('A','B')),
+        loss_a INTEGER NOT NULL, loss_b INTEGER NOT NULL, pressure_a INTEGER NOT NULL, pressure_b INTEGER NOT NULL,
+        order_a TEXT NOT NULL CHECK (order_a IN ('ORDERED','WORN','SHAKEN','BROKEN')),
+        order_b TEXT NOT NULL CHECK (order_b IN ('ORDERED','WORN','SHAKEN','BROKEN')),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY (battle_id,round_number)
+      );
+    `
+  },
+  {
+    version: 6,
+    name: "ambush_siege_and_naval_battles",
+    sql: `
+      ALTER TABLE battles DROP CONSTRAINT IF EXISTS battles_terrain_check;
+      ALTER TABLE battles ADD CONSTRAINT battles_terrain_check CHECK (terrain IN (
+        'OPEN_PLAIN','AMBUSH','DESERT','FOREST','MARSH','MOUNTAIN','MOUNTAIN_PASS','RIVER_CROSSING','SIEGE','NAVAL'
+      ));
+      ALTER TABLE battles ADD COLUMN IF NOT EXISTS wall_max_hp INTEGER CHECK (wall_max_hp IS NULL OR wall_max_hp >= 0);
+      ALTER TABLE battles ADD COLUMN IF NOT EXISTS wall_current_hp INTEGER CHECK (wall_current_hp IS NULL OR wall_current_hp >= 0);
+      ALTER TABLE battle_sides ADD COLUMN IF NOT EXISTS support_assets JSONB NOT NULL DEFAULT '{}'::jsonb;
+      ALTER TABLE battle_rolls ADD COLUMN IF NOT EXISTS wall_damage INTEGER NOT NULL DEFAULT 0 CHECK (wall_damage >= 0);
+      ALTER TABLE battle_rounds ADD COLUMN IF NOT EXISTS wall_damage INTEGER NOT NULL DEFAULT 0 CHECK (wall_damage >= 0);
+      UPDATE battles SET wall_max_hp=5000,wall_current_hp=5000 WHERE terrain='SIEGE' AND wall_max_hp IS NULL;
+    `
   }] as const;

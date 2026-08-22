@@ -18,6 +18,7 @@ import { buildingChoices, shipChoices, unitChoices } from "./commands.js";
 import { renderDocument } from "./document.js";
 import { BRAND_BANNER_PATH, BRAND_BANNER_NAME, TEMPLE_BANNER_PATH, TEMPLE_BANNER_NAME } from "./assets.js";
 import { turnAnnouncement } from "./turn-announcements.js";
+import { handleBattleButton, handleBattleCommand } from "./battle-ui.js";
 
 function settlementSelect(customId: string, settlements: Array<{ id: string; name: string; population: number }>, placeholder: string) {
   if (!settlements.length) throw new GameError("Bu ülkeye ait yerleşke bulunmuyor.");
@@ -295,6 +296,8 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     const rows = await gameService.leaderboard(interaction.guildId, period);
     const text = rows.length ? rows.map((row, index) => `**${index + 1}.** <@${row.discord_user_id}> — ${number(row.words)} kelime / ${row.messages} mesaj`).join("\n") : "Bu dönem için kayıt bulunmuyor.";
     await interaction.reply({ embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle(period === "daily" ? "📊 Günlük Rol Sıralaması" : "📊 Haftalık Rol Sıralaması").setDescription(text)] });
+  } else if (interaction.commandName === "savas") {
+    await handleBattleCommand(interaction);
   } else if (interaction.commandName === "yonetim") {
     await handleAdmin(interaction);
   }
@@ -348,6 +351,7 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
 }
 
 async function handleButton(interaction: ButtonInteraction): Promise<void> {
+  if (await handleBattleButton(interaction)) return;
   if (interaction.customId.startsWith("trade_accept|") || interaction.customId.startsWith("trade_reject|")) {
     if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
     const [action, agreementId] = interaction.customId.split("|");

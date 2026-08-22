@@ -1,6 +1,7 @@
 import { ChannelType, SlashCommandBuilder } from "discord.js";
 import { BUILDINGS, MOBILIZATION_RULES, SHIPS, UNITS } from "../domain/catalog.js";
 import { RESOURCE_CHOICES } from "../domain/resources.js";
+import { BATTLE_TERRAINS, BATTLE_UNIT_STATS, NAVAL_UNIT_STATS, SIEGE_ASSET_BATTLE_STATS } from "../domain/battle.js";
 
 const countryOption = (option: any) => option.setName("ulke").setDescription("Yalnızca DM: işlem yapılacak ülke").setRequired(false);
 
@@ -59,6 +60,34 @@ export const commandBuilders = [
     .setName("rol-siralama").setDescription("Rol kanallarındaki kelime sıralamasını gösterir")
     .addStringOption((option) => option.setName("donem").setDescription("Sıralama dönemi").setRequired(true)
       .addChoices({ name: "Son 24 saat", value: "daily" }, { name: "Son 7 gün", value: "weekly" })),
+  new SlashCommandBuilder()
+    .setName("savas").setDescription("Kalıcılığa sahip açık zar savaş sistemini yönetir")
+    .addSubcommand((sub) => sub.setName("baslat").setDescription("Bu kanalda yeni savaş taslağı oluşturur")
+      .addStringOption((o) => o.setName("taraf-a").setDescription("A tarafındaki ülke").setRequired(true))
+      .addStringOption((o) => o.setName("taraf-b").setDescription("B tarafındaki ülke").setRequired(true))
+      .addStringOption((o) => o.setName("arazi").setDescription("Savaş alanı hazır ayarı").setRequired(true).addChoices(...Object.entries(BATTLE_TERRAINS).map(([value, terrain]) => ({ name: terrain.label, value }))))
+      .addStringOption((o) => o.setName("kontrol-a").setDescription("A tarafının zar yetkisi").setRequired(true).addChoices({ name: "Ülke Oyuncuları", value: "PLAYERS" }, { name: "Oyun Yöneticisi / NPC", value: "GM" }))
+      .addStringOption((o) => o.setName("kontrol-b").setDescription("B tarafının zar yetkisi").setRequired(true).addChoices({ name: "Ülke Oyuncuları", value: "PLAYERS" }, { name: "Oyun Yöneticisi / NPC", value: "GM" }))
+      .addStringOption((o) => o.setName("anlatim").setDescription("Herkese açık savaş açılış metni").setMaxLength(1000)))
+    .addSubcommand((sub) => sub.setName("birlik-ayarla").setDescription("Taslağın gizli birlik kadrosuna bir birlik yazar")
+      .addStringOption((o) => o.setName("taraf").setDescription("Savaş tarafı").setRequired(true).addChoices({ name: "A Tarafı", value: "A" }, { name: "B Tarafı", value: "B" }))
+      .addStringOption((o) => o.setName("birim").setDescription("Birim türü").setRequired(true).addChoices(...Object.entries(BATTLE_UNIT_STATS).map(([value, unit]) => ({ name: unit.label, value }))))
+      .addIntegerOption((o) => o.setName("miktar").setDescription("Bu türden asker sayısı; silmek için 0").setMinValue(0).setRequired(true)))
+    .addSubcommand((sub) => sub.setName("gemi-ayarla").setDescription("Deniz savaşı taslağının gizli gemi kadrosunu düzenler")
+      .addStringOption((o) => o.setName("taraf").setDescription("Savaş tarafı").setRequired(true).addChoices({ name: "A Tarafı", value: "A" }, { name: "B Tarafı", value: "B" }))
+      .addStringOption((o) => o.setName("gemi").setDescription("Gemi türü").setRequired(true).addChoices(...Object.entries(NAVAL_UNIT_STATS).map(([value, unit]) => ({ name: unit.label, value }))))
+      .addIntegerOption((o) => o.setName("miktar").setDescription("Gemi sayısı; silmek için 0").setMinValue(0).setRequired(true)))
+    .addSubcommand((sub) => sub.setName("kusatma-aleti-ayarla").setDescription("Kuşatma taslağının gizli savaş aletlerini düzenler")
+      .addStringOption((o) => o.setName("taraf").setDescription("A saldıran, B savunandır").setRequired(true).addChoices({ name: "A — Kuşatan", value: "A" }, { name: "B — Savunan", value: "B" }))
+      .addStringOption((o) => o.setName("alet").setDescription("Kuşatma aleti").setRequired(true).addChoices(...Object.entries(SIEGE_ASSET_BATTLE_STATS).map(([value, asset]) => ({ name: asset.label, value }))))
+      .addIntegerOption((o) => o.setName("miktar").setDescription("Alet sayısı; silmek için 0").setMinValue(0).setRequired(true)))
+    .addSubcommand((sub) => sub.setName("yayinla").setDescription("Taslağı herkese açık savaş kartı olarak yayımlar"))
+    .addSubcommand((sub) => sub.setName("tur-oynat").setDescription("İki açık zar tamamlanınca savaş turunu çözer"))
+    .addSubcommand((sub) => sub.setName("ordu-detay").setDescription("Tam birlik kompozisyonunu yalnızca yöneticiye gösterir"))
+    .addSubcommand((sub) => sub.setName("bitir").setDescription("Savaşı yönetici kararıyla sonuçlandırır")
+      .addStringOption((o) => o.setName("galip").setDescription("Galip taraf").setRequired(true).addChoices({ name: "A Tarafı", value: "A" }, { name: "B Tarafı", value: "B" }, { name: "Galip Yok", value: "NONE" }))
+      .addStringOption((o) => o.setName("neden").setDescription("Herkese açık sonuç açıklaması").setRequired(true).setMaxLength(500)))
+    .addSubcommand((sub) => sub.setName("iptal").setDescription("Etkin savaşı iptal eder")),
   new SlashCommandBuilder()
     .setName("yonetim").setDescription("Oyun yöneticisi komutları")
     .addSubcommand((sub) => sub.setName("ulke-olustur").setDescription("Yeni ülke oluşturur")
