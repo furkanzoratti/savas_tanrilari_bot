@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { commandBuilders } from "./commands.js";
 
 describe("ticaret ve rol raporu komutları", () => {
-  it("ticaret teklif, yanıt, liste ve fesih akışlarını kaydeder", () => {
+  it("ticaret teklif, liste ve düğmeli fesih akışlarını kaydeder", () => {
     const trade = commandBuilders.find((command) => command.name === "ticaret");
-    expect(trade?.options?.map((option) => option.name)).toEqual(["teklif", "yanit", "liste", "feshet"]);
+    expect(trade?.options?.map((option) => option.name)).toEqual(["teklif", "liste", "feshet"]);
   });
 
   it("rol kanalı ve günlük rapor kanalı yönetimini ayrı tutar", () => {

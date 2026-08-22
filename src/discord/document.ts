@@ -2,6 +2,7 @@ import { EmbedBuilder } from "discord.js";
 import { BUILDINGS, MOBILIZATION_RULES, SHIPS, SIEGE_ASSETS, UNITS } from "../domain/catalog.js";
 import { calculateShipUpkeep, calculateUnitUpkeep } from "../domain/economy.js";
 import { TRADE_ROUTE_LABELS } from "../domain/trade.js";
+import { RESOURCES } from "../domain/resources.js";
 import { gold, number } from "../domain/format.js";
 import type { CountryDocument } from "../services/game-service.js";
 import { TEMPLE_BANNER_URL } from "./assets.js";
@@ -18,7 +19,7 @@ function incomeLine(label: string, amount: number, buildingBonus: number): strin
 export function renderDocument(document: CountryDocument): EmbedBuilder[] {
   const templeHeader = new EmbedBuilder().setColor(0xc59b45).setImage(TEMPLE_BANNER_URL);
   const tradeSummary = document.tradeAgreements.length
-    ? document.tradeAgreements.map((agreement) => `${agreement.status === "ACTIVE" ? "✅" : "⏳"} ${agreement.partner_name} • ${TRADE_ROUTE_LABELS[agreement.route]} • ${gold(agreement.income_per_country)}`).join("\n")
+    ? document.tradeAgreements.map((agreement) => `${agreement.status === "ACTIVE" ? "✅" : "⏳"} ${agreement.partner_name} • ${TRADE_ROUTE_LABELS[agreement.route]}\n${agreement.proposer_settlement_name} (${RESOURCES[agreement.proposer_resource].label}) ⇄ ${agreement.receiver_settlement_name} (${RESOURCES[agreement.receiver_resource].label})`).join("\n\n")
     : "Aktif veya bekleyen antlaşma yok.";
 
   const summary = new EmbedBuilder()
@@ -64,7 +65,7 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
 
     const units = settlement.units.length
       ? settlement.units.map((unit) => {
-          const upkeep = calculateUnitUpkeep(unit.unit_type, unit.quantity, unit.status, document.country.mobilization);
+          const upkeep = calculateUnitUpkeep(unit.unit_type, unit.quantity, unit.status, document.country.mobilization, settlement.effectiveResources);
           return `• ${number(unit.quantity)} ${UNITS[unit.unit_type]?.name ?? unit.unit_type}\n  ${unitStatusLabels[unit.status]} • Bakım ${gold(upkeep)}`;
         }).join("\n")
       : "Birlik yok.";
@@ -85,6 +86,11 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
       ...settlement.pendingShips.map((ship) => `🚢 Tur ${ship.completion_turn}: ${ship.quantity} ${SHIPS[ship.ship_type]?.name ?? ship.ship_type}`)
     ].join("\n") || "Bekleyen teslimat yok.";
 
+    const resourceDetails = settlement.effectiveResources.map((resource, index) => {
+      const source = index === 0 ? "Üretim" : "Ticaret";
+      return `**${RESOURCES[resource].label}** (${source})\n${RESOURCES[resource].effects.map((effect) => `• ${effect}`).join("\n")}`;
+    }).join("\n\n");
+
     const incomes = [
       incomeLine("🏛️ Yerleşke", settlement.incomeBreakdown.settlement, settlement.buildingIncomeBonus.settlement),
       incomeLine("⚖️ Vergi", settlement.incomeBreakdown.tax, settlement.buildingIncomeBonus.tax),
@@ -101,6 +107,7 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
         `Bina slotları: **${occupiedSlots}/${settlement.slotLimit}** • Devam eden inşaat: **${activeConstruction}/2**`
       ].join("\n"))
       .addFields(
+        { name: "📦 Hammadde ve Etkileri", value: resourceDetails.slice(0, 1024) },
         { name: "👥 Nüfus", value: `${number(settlement.population)} özgür\n${number(settlement.slave_population)} köle\nSonraki Alım Turu: +${number(settlement.populationGain)}`, inline: true },
         { name: "💰 Gelir Kalemleri", value: incomes.slice(0, 1024), inline: true },
         { name: "🧾 Şehir Bakımı", value: `Binalar: ${gold(settlement.buildingUpkeep)}\nAskerler: ${gold(settlement.unitUpkeep)}\nDonanma: ${gold(settlement.shipUpkeep)}\n**Toplam: ${gold(settlement.totalSettlementUpkeep)}**`, inline: true },

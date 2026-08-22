@@ -15,7 +15,8 @@ Railway üzerinde sürekli çalışan, Discord komutlarıyla yönetilen ve Postg
 - Tersane seviyesi, maliyet ve yapım süresi denetimli gemi siparişi alır; tamamlanan gemileri rezerv filoya ekler.
 - Harap yerleşkeyi ilk alım turunda `%0`, ikinci alım turunda `%50`, üçüncü alım turunda `%100` gelir ve nüfus üretimine geçirir.
 - Yalnızca yönetimin seçtiği rol kanallarında kelime sayar; son 24 saat/7 gün sıralaması ve seçilen rapor kanalında otomatik günlük rapor üretir.
-- Oyuncular arasında teklif, kabul/ret ve fesih akışlı kara veya deniz ticareti antlaşmaları kurar.
+- Yerleşkelere 15 hammaddeden birini atar; üretim ve ticaret kaynaklarının gelir, nüfus, bakım, inşa ve alım etkilerini otomatik hesaplar.
+- Yerleşkeden yerleşkeye kaynak ticareti kurar; hedef oyuncuları etiketleyen teklif kartı tek tıklamalı kabul/red düğmeleri sunar. Ticaret doğrudan altın üretmez.
 - Genel zar komutu sağlar.
 - Bütün kritik işlemleri denetim kaydına yazar ve aynı turun yanlışlıkla iki kez işlenmesini engeller.
 - Yönetici olmayan oyuncuların slash komutlarını başarı/başarısızlık durumuyla saklar; yönetici geçmişi görebilir veya canlı log kanalı ayarlayabilir.
@@ -38,7 +39,7 @@ Railway üzerinde sürekli çalışan, Discord komutlarıyla yönetilen ve Postg
 - `/asker-terhis yerleske birim durum miktar [ulke]`
 - `/gemi-alimi [ulke]`
 - `/seferberlik seviye [ulke]`
-- `/ticaret teklif|yanit|liste|feshet`
+- `/ticaret teklif|liste|feshet`
 - `/zar adet yuz [bonus] [gizli]`
 - `/rol-siralama donem`
 
@@ -58,7 +59,8 @@ Bu komutların sonuçları gizli değildir; markalı resmî tur duyurusu olarak 
 - `/yonetim ulke-olustur`
 - `/yonetim oyuncu-ata`
 - `/yonetim oyuncu-cikar ulke oyuncu`
-- `/yonetim yerleske-ekle`
+- `/yonetim yerleske-ekle` (hammadde seçimi dâhil)
+- `/yonetim hammadde-ayarla`
 - `/yonetim tur-ilerlet`
 - `/yonetim tur-durumu`
 - `/yonetim hazine`

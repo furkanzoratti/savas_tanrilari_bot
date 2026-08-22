@@ -244,4 +244,25 @@ export const migrations = [
       CREATE INDEX IF NOT EXISTS player_command_logs_recent_idx
         ON player_command_logs(guild_id, created_at DESC);
     `
+  },
+  {
+    version: 4,
+    name: "settlement_resources_and_resource_trade",
+    sql: `
+      ALTER TABLE settlements ADD COLUMN IF NOT EXISTS resource_type TEXT NOT NULL DEFAULT 'GRAIN';
+      ALTER TABLE settlements DROP CONSTRAINT IF EXISTS settlements_resource_type_check;
+      ALTER TABLE settlements ADD CONSTRAINT settlements_resource_type_check CHECK (resource_type IN (
+        'GRAIN','IRON','TIMBER','MARBLE','HORSES','LEATHER','WINE','OLIVE','GLASS','GOLD','LEAD','AMBER','SILK','SPICES','PURPLE_DYE'
+      ));
+
+      DROP INDEX IF EXISTS active_trade_pair_route_idx;
+      CREATE UNIQUE INDEX IF NOT EXISTS active_trade_settlement_pair_idx
+        ON trade_agreements((LEAST(proposer_settlement_id,receiver_settlement_id)),(GREATEST(proposer_settlement_id,receiver_settlement_id)),route)
+        WHERE status IN ('PENDING','ACTIVE');
+
+      UPDATE trade_agreements SET income_per_country=0;
+      ALTER TABLE trade_agreements ALTER COLUMN income_per_country SET DEFAULT 0;
+      UPDATE trade_agreements SET status='REJECTED',ended_at=NOW()
+       WHERE status='PENDING' AND receiver_settlement_id IS NULL;
+    `
   }] as const;

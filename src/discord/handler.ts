@@ -8,6 +8,7 @@ import { BUILD_COSTS, BUILDINGS, MOBILIZATION_RULES, SHIPS, UNITS } from "../dom
 import { gold, number } from "../domain/format.js";
 import type { Mobilization, UnitStatus } from "../domain/types.js";
 import { TRADE_ROUTE_LABELS, type TradeRoute } from "../domain/trade.js";
+import { RESOURCES, buildingCostMultiplier, buildingDurationReduction, shipCostMultiplier, unitCostMultiplier, type ResourceType } from "../domain/resources.js";
 import { gameService, GameError } from "../services/game-service.js";
 import { commandLogService } from "../services/command-log-service.js";
 import { roleReportService } from "../services/role-report-service.js";
@@ -54,47 +55,59 @@ async function handleTrade(interaction: ChatInputCommandInteraction): Promise<vo
   if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
   const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
   const sub = interaction.options.getSubcommand();
-  await interaction.deferReply({ ephemeral: true });
+
   if (sub === "teklif") {
-    const settlement = await findSettlement(country.id, interaction.options.getString("yerleske", true));
+    await interaction.deferReply();
+    const receiver = await gameService.countryByName(interaction.guildId, interaction.options.getString("hedef-ulke", true));
+    if (!receiver) throw new GameError("Hedef ülke bulunamadı.");
+    const proposerSettlement = await findSettlement(country.id, interaction.options.getString("kendi-yerlesken", true));
+    const receiverSettlement = await findSettlement(receiver.id, interaction.options.getString("hedef-yerleske", true));
     const agreement = await tradeService.createOffer({
-      guildId: interaction.guildId,
-      actorId: interaction.user.id,
-      proposerCountryId: country.id,
-      receiverCountryName: interaction.options.getString("hedef-ulke", true),
-      proposerSettlementId: settlement.id,
+      guildId: interaction.guildId, actorId: interaction.user.id,
+      proposerCountryId: country.id, receiverCountryId: receiver.id,
+      proposerSettlementId: proposerSettlement.id, receiverSettlementId: receiverSettlement.id,
       route: interaction.options.getString("tur", true) as TradeRoute
     });
-    await interaction.editReply(`📨 **${agreement.receiver_country_name}** ülkesine ${TRADE_ROUTE_LABELS[agreement.route]} teklifi gönderildi.\nBağlantı: **${agreement.proposer_settlement_name}** • Gelir: taraf başına **${gold(agreement.income_per_country)}** / Alım Turu\nAntlaşma ID: \`${agreement.id}\``);
-  } else if (sub === "yanit") {
-    const accept = interaction.options.getString("yanit", true) === "accept";
-    const settlementName = interaction.options.getString("yerleske");
-    const settlement = accept && settlementName ? await findSettlement(country.id, settlementName) : undefined;
-    const agreement = await tradeService.respond({
-      guildId: interaction.guildId,
-      actorId: interaction.user.id,
-      receiverCountryId: country.id,
-      agreementId: interaction.options.getString("id", true),
-      accept,
-      ...(settlement ? { receiverSettlementId: settlement.id } : {})
-    });
-    await interaction.editReply(accept
-      ? `✅ **${agreement.proposer_country_name}** ile ${TRADE_ROUTE_LABELS[agreement.route]} antlaşması etkinleştirildi.`
-      : `❌ **${agreement.proposer_country_name}** ülkesinin ticaret teklifi reddedildi.`);
+    const players = await gameService.playerIds(receiver.id);
+    const mentions = players.length ? players.map((id) => `<@${id}>`).join(" ") : `**${receiver.name} yöneticileri**`;
+    const embed = new EmbedBuilder()
+      .setColor(0xc59b45)
+      .setTitle("🤝 Yeni Hammadde Ticaret Teklifi")
+      .setDescription(`**${country.name}**, **${receiver.name}** ülkesine ticaret teklif ediyor.`)
+      .addFields(
+        { name: "📤 Gönderen", value: `**${agreement.proposer_country_name}**\n${agreement.proposer_settlement_name} • **${RESOURCES[agreement.proposer_resource].label}**`, inline: true },
+        { name: "📥 Hedef", value: `**${agreement.receiver_country_name}**\n${agreement.receiver_settlement_name} • **${RESOURCES[agreement.receiver_resource].label}**`, inline: true },
+        { name: "🛤️ Güzergâh", value: TRADE_ROUTE_LABELS[agreement.route], inline: true },
+        { name: "Kaynak Paylaşımı", value: `Kabul edilirse ${agreement.proposer_settlement_name}, **${RESOURCES[agreement.receiver_resource].label}** etkilerini; ${agreement.receiver_settlement_name} ise **${RESOURCES[agreement.proposer_resource].label}** etkilerini kazanır.` }
+      )
+      .setFooter({ text: "Hedef ülkenin oyuncularından biri teklifi yalnızca bir kez sonuçlandırabilir." });
+    const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(`trade_accept|${agreement.id}`).setLabel("Kabul Et").setEmoji("✅").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`trade_reject|${agreement.id}`).setLabel("Reddet").setEmoji("❌").setStyle(ButtonStyle.Danger)
+    );
+    await interaction.editReply({ content: mentions, embeds: [embed], components: [buttons], allowedMentions: { users: players } });
   } else if (sub === "liste") {
+    await interaction.deferReply({ ephemeral: true });
     const agreements = await tradeService.list(country.id);
     const lines = agreements.map((agreement) => {
       const partner = agreement.proposer_country_id === country.id ? agreement.receiver_country_name : agreement.proposer_country_name;
-      const direction = agreement.status === "PENDING" && agreement.receiver_country_id === country.id ? "📥 Gelen teklif" : agreement.status === "PENDING" ? "📤 Gönderilen teklif" : agreement.status === "ACTIVE" ? "✅ Aktif" : "⛔ Sona ermiş";
-      return `${direction} • **${partner}** • ${TRADE_ROUTE_LABELS[agreement.route]} • ${gold(agreement.income_per_country)}\n\`${agreement.id}\``;
+      const direction = agreement.status === "PENDING" && agreement.receiver_country_id === country.id ? "📥 Gelen" : agreement.status === "PENDING" ? "📤 Gönderilen" : agreement.status === "ACTIVE" ? "✅ Aktif" : "⛔ Sona ermiş";
+      return `${direction} • **${partner}** • ${TRADE_ROUTE_LABELS[agreement.route]}\n${agreement.proposer_settlement_name} (${RESOURCES[agreement.proposer_resource].label}) ⇄ ${agreement.receiver_settlement_name} (${RESOURCES[agreement.receiver_resource].label})`;
     });
     await interaction.editReply(lines.length ? lines.join("\n\n") : "Bu ülkeye ait ticaret teklifi veya antlaşması bulunmuyor.");
   } else if (sub === "feshet") {
-    await tradeService.end({ guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id, agreementId: interaction.options.getString("id", true) });
-    await interaction.editReply("✅ Ticaret antlaşması sona erdirildi; sonraki Alım Turunda gelir üretmeyecek.");
+    await interaction.deferReply({ ephemeral: true });
+    const agreements = (await tradeService.list(country.id)).filter((agreement) => agreement.status === "ACTIVE");
+    if (!agreements.length) throw new GameError("Feshedilebilecek aktif ticaret antlaşması yok.");
+    const menu = new StringSelectMenuBuilder().setCustomId(`trade_end|${country.id}`).setPlaceholder("Feshedilecek antlaşmayı seç")
+      .addOptions(agreements.map((agreement) => ({
+        label: `${agreement.proposer_country_name} ⇄ ${agreement.receiver_country_name}`.slice(0, 100),
+        description: `${RESOURCES[agreement.proposer_resource].label} ⇄ ${RESOURCES[agreement.receiver_resource].label} • ${TRADE_ROUTE_LABELS[agreement.route]}`.slice(0, 100),
+        value: agreement.id
+      })));
+    await interaction.editReply({ content: "Sona erdirmek istediğin aktif ticaret antlaşmasını seç:", components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)] });
   }
 }
-
 function commandText(interaction: ChatInputCommandInteraction): string {
   const flatten = (options: readonly any[]): string[] => options.flatMap((option) => {
     if (option.options?.length) return [option.name, ...flatten(option.options)];
@@ -172,9 +185,17 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
       taxIncome: interaction.options.getInteger("vergi-geliri", true),
       landTradeIncome: interaction.options.getInteger("kara-ticareti", true),
       seaTradeIncome: interaction.options.getInteger("deniz-ticareti", true),
-      basePopulationGrowth: interaction.options.getInteger("nufus-artisi", true)
+      basePopulationGrowth: interaction.options.getInteger("nufus-artisi", true),
+      resourceType: interaction.options.getString("hammadde", true) as ResourceType
     });
-    await interaction.editReply(`✅ **${settlement.name}**, ${country.name} ülkesine eklendi.`);
+    await interaction.editReply(`✅ **${settlement.name}**, ${country.name} ülkesine **${RESOURCES[settlement.resource_type].label}** hammaddesiyle eklendi.`);
+  } else if (sub === "hammadde-ayarla") {
+    const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
+    if (!country) throw new GameError("Ülke bulunamadı.");
+    const settlement = await findSettlement(country.id, interaction.options.getString("yerleske", true));
+    const resourceType = interaction.options.getString("hammadde", true) as ResourceType;
+    await gameService.setSettlementResource({ guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id, settlementId: settlement.id, resourceType });
+    await interaction.editReply(`✅ **${settlement.name}** artık **${RESOURCES[resourceType].label}** üretiyor.`);
   } else if (sub === "tur-ilerlet") {
     const result = await gameService.advanceTurn(interaction.guildId, interaction.user.id);
     await interaction.editReply(`✅ **Tur ${result.turn}** açıldı.${result.acquisition ? " Bu bir **Alım Turudur**." : ""}\n🏗️ ${result.completedBuildings} bina tamamlandı.\n⚔️ ${number(result.recruitmentArrivals)} asker katıldı.\n🚢 ${result.completedShips} gemi tamamlandı.`);
@@ -283,7 +304,10 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
   const [kind, countryId, settlementIdFromId] = interaction.customId.split("|");
   if (!countryId) throw new GameError("Etkileşim bilgisi bozuk.");
   await assertCountryAccess(interaction, countryId);
-  if (kind === "bs") {
+  if (kind === "trade_end") {
+    await tradeService.end({ guildId: interaction.guildId!, actorId: interaction.user.id, countryId, agreementId: interaction.values[0]! });
+    await interaction.update({ content: "✅ Ticaret antlaşması sona erdirildi; kaynak etkileri iki yerleşkeden de kaldırıldı.", components: [] });
+  } else if (kind === "bs") {
     const settlementId = interaction.values[0]!;
     const doc = await gameService.document(countryId);
     const settlement = doc.settlements.find((s) => s.id === settlementId);
@@ -291,7 +315,7 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
     const options = buildingChoices.map((building) => {
       const current = settlement.buildings.find((b) => b.building_type === building.key);
       const next = (current?.level ?? 0) + 1;
-      return { label: `${building.name} Sv${next}`.slice(0, 100), description: next <= building.maxLevel ? `${gold(BUILD_COSTS[next]!)} • ${next * 3} tur` : "Azami seviyede", value: building.key, default: false };
+      return { label: `${building.name} Sv${next}`.slice(0, 100), description: next <= building.maxLevel ? `${gold(Math.ceil(BUILD_COSTS[next]! * buildingCostMultiplier(building.key, settlement.effectiveResources)))} • ${Math.max(1, next * 3 - buildingDurationReduction(building.key, settlement.effectiveResources))} tur` : "Azami seviyede", value: building.key, default: false };
     }).filter((option) => !option.description.includes("Azami"));
     if (!options.length) throw new GameError("Bu yerleşkede alınabilecek bina kalmadı.");
     await interaction.update({ content: `**${settlement.name}** için binayı seç:`, components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder().setCustomId(`bc|${countryId}|${settlementId}`).setPlaceholder("Bina seç").addOptions(options.slice(0, 25)))] });
@@ -302,7 +326,9 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
     await interaction.update({ content: `**${building.name}** alımını onaylıyor musun? Kesin seviye, fiyat ve süre onay anında yeniden kontrol edilir.`, components: [new ActionRowBuilder<ButtonBuilder>().addComponents(new ButtonBuilder().setCustomId(`bx|${countryId}|${settlementIdFromId}|${buildingType}`).setLabel("Satın Al").setStyle(ButtonStyle.Success), new ButtonBuilder().setCustomId("cancel").setLabel("İptal").setStyle(ButtonStyle.Secondary))] });
   } else if (kind === "us") {
     const settlementId = interaction.values[0]!;
-    await interaction.update({ content: "Alınacak birim türünü seç:", components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder().setCustomId(`uc|${countryId}|${settlementId}`).setPlaceholder("Birim seç").addOptions(unitChoices.map(([key, unit]) => ({ label: unit.name, description: `${gold(unit.price)} / 1.000`, value: key }))))] });
+    const settlement = (await gameService.document(countryId)).settlements.find((item) => item.id === settlementId);
+    if (!settlement) throw new GameError("Yerleşke bulunamadı.");
+    await interaction.update({ content: "Alınacak birim türünü seç:", components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder().setCustomId(`uc|${countryId}|${settlementId}`).setPlaceholder("Birim seç").addOptions(unitChoices.map(([key, unit]) => ({ label: unit.name, description: `${gold(Math.ceil(unit.price * unitCostMultiplier(key, settlement.effectiveResources)))} / 1.000`, value: key }))))] });
   } else if (kind === "uc" && settlementIdFromId) {
     const unitType = interaction.values[0]!;
     const modal = new ModalBuilder().setCustomId(`um|${countryId}|${settlementIdFromId}|${unitType}`).setTitle("Asker Alımı");
@@ -310,7 +336,9 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
     await interaction.showModal(modal);
   } else if (kind === "ss") {
     const settlementId = interaction.values[0]!;
-    await interaction.update({ content: "Üretilecek gemi türünü seç:", components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder().setCustomId(`sc|${countryId}|${settlementId}`).setPlaceholder("Gemi seç").addOptions(shipChoices.map(([key, ship]) => ({ label: ship.name, description: `${gold(ship.price)} / gemi`, value: key }))))] });
+    const settlement = (await gameService.document(countryId)).settlements.find((item) => item.id === settlementId);
+    if (!settlement) throw new GameError("Yerleşke bulunamadı.");
+    await interaction.update({ content: "Üretilecek gemi türünü seç:", components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder().setCustomId(`sc|${countryId}|${settlementId}`).setPlaceholder("Gemi seç").addOptions(shipChoices.map(([key, ship]) => ({ label: ship.name, description: `${gold(Math.ceil(ship.price * shipCostMultiplier(settlement.effectiveResources)))} / gemi`, value: key }))))] });
   } else if (kind === "sc" && settlementIdFromId) {
     const shipType = interaction.values[0]!;
     const modal = new ModalBuilder().setCustomId(`sm|${countryId}|${settlementIdFromId}|${shipType}`).setTitle("Gemi Alımı");
@@ -320,6 +348,22 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
 }
 
 async function handleButton(interaction: ButtonInteraction): Promise<void> {
+  if (interaction.customId.startsWith("trade_accept|") || interaction.customId.startsWith("trade_reject|")) {
+    if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
+    const [action, agreementId] = interaction.customId.split("|");
+    const agreement = await tradeService.get(agreementId!);
+    if (!agreement) throw new GameError("Ticaret teklifi bulunamadı.");
+    if (!isGameMaster(interaction)) {
+      const playerCountry = await gameService.countryForUser(interaction.guildId, interaction.user.id);
+      if (!playerCountry || playerCountry.id !== agreement.receiver_country_id) throw new GameError("Bu teklifi yalnızca hedef ülkenin oyuncuları yanıtlayabilir.");
+    }
+    await interaction.deferUpdate();
+    const accepted = action === "trade_accept";
+    const result = await tradeService.respond({ guildId: interaction.guildId, actorId: interaction.user.id, receiverCountryId: agreement.receiver_country_id, agreementId: agreement.id, accept: accepted });
+    const embed = EmbedBuilder.from(interaction.message.embeds[0]!).setColor(accepted ? 0x2e8b57 : 0xb22222).setTitle(accepted ? "✅ Hammadde Ticareti Kabul Edildi" : "❌ Hammadde Ticareti Reddedildi").setFooter({ text: `${interaction.user.username} tarafından sonuçlandırıldı.` });
+    await interaction.editReply({ content: accepted ? `✅ **${result.proposer_country_name}** ile **${result.receiver_country_name}** arasındaki kaynak paylaşımı etkinleşti.` : `❌ **${result.receiver_country_name}** ticaret teklifini reddetti.`, embeds: [embed], components: [] });
+    return;
+  }
   if (interaction.customId === "cancel") {
     await interaction.update({ content: "İşlem iptal edildi.", components: [] });
     return;

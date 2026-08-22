@@ -1,4 +1,5 @@
 import { BUILDINGS, MOBILIZATION_RULES, SHIPS, UNITS } from "./catalog.js";
+import { armyUpkeepMultiplier, type ResourceType } from "./resources.js";
 import type { Mobilization, RuinStage, ShipStatus, UnitStatus } from "./types.js";
 
 export interface ActiveBuilding {
@@ -58,11 +59,12 @@ export function calculateUnitUpkeep(
   unitType: keyof typeof UNITS,
   quantity: number,
   status: UnitStatus,
-  mobilization: Mobilization
+  mobilization: Mobilization,
+  resources: readonly ResourceType[] = []
 ): number {
   const unit = UNITS[unitType];
   const multiplier = statusMultiplier[status] + MOBILIZATION_RULES[mobilization].upkeepExtra;
-  return Math.ceil((quantity / 1_000) * unit.upkeep * multiplier);
+  return Math.ceil((quantity / 1_000) * unit.upkeep * multiplier * armyUpkeepMultiplier(resources));
 }
 
 export function calculateShipUpkeep(
@@ -85,6 +87,7 @@ export function calculatePopulationGain(input: {
   buildings: ActiveBuilding[];
   ruinStage: RuinStage;
   mobilization: Mobilization;
+  resources?: readonly ResourceType[];
 }): number {
   let healerGrowth = 0;
   let growthPercent = 0;
@@ -93,7 +96,7 @@ export function calculatePopulationGain(input: {
   for (const building of input.buildings) {
     const effect = BUILDINGS[building.buildingType]?.levels[building.level];
     if (!effect) continue;
-    if (building.buildingType === "healer") healerGrowth = effect.populationFlat ?? 0;
+    if (building.buildingType === "healer") healerGrowth = (effect.populationFlat ?? 0) * (input.resources?.includes("OLIVE") ? 1.2 : 1);
     if (building.buildingType === "aqueduct") growthPercent += effect.populationPercent ?? 0;
     if (building.buildingType === "lupanar") lupanarLevel = building.level;
   }
@@ -104,6 +107,8 @@ export function calculatePopulationGain(input: {
   if (lupanarLevel === 3) rawGrowth = healerGrowth;
 
   rawGrowth *= 1 + growthPercent;
+  if (input.resources?.includes("GRAIN")) rawGrowth *= 1.10;
+  if (input.resources?.includes("SPICES")) rawGrowth *= 1.05;
   rawGrowth *= ruinIncomeMultiplier(input.ruinStage);
   rawGrowth *= MOBILIZATION_RULES[input.mobilization].populationMultiplier;
   return Math.max(0, Math.floor(rawGrowth));

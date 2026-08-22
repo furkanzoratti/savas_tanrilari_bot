@@ -1,5 +1,6 @@
 import { ChannelType, SlashCommandBuilder } from "discord.js";
 import { BUILDINGS, MOBILIZATION_RULES, SHIPS, UNITS } from "../domain/catalog.js";
+import { RESOURCE_CHOICES } from "../domain/resources.js";
 
 const countryOption = (option: any) => option.setName("ulke").setDescription("Yalnızca DM: işlem yapılacak ülke").setRequired(false);
 
@@ -31,21 +32,16 @@ export const commandBuilders = [
       .addChoices(...Object.entries(MOBILIZATION_RULES).map(([value, rule]) => ({ name: rule.label, value }))))
     .addStringOption(countryOption),
   new SlashCommandBuilder()
-    .setName("ticaret").setDescription("Ülkeler arası ticaret antlaşmalarını yönetir")
-    .addSubcommand((sub) => sub.setName("teklif").setDescription("Başka bir ülkeye ticaret teklifi gönderir")
+    .setName("ticaret").setDescription("Ülkeler arası hammadde ticaretini yönetir")
+    .addSubcommand((sub) => sub.setName("teklif").setDescription("Bir ülkenin yerleşkesine kaynak ticareti teklif eder")
       .addStringOption((o) => o.setName("hedef-ulke").setDescription("Teklif gönderilecek ülke").setRequired(true))
+      .addStringOption((o) => o.setName("kendi-yerlesken").setDescription("Kaynak gönderecek yerleşkeniz").setRequired(true))
+      .addStringOption((o) => o.setName("hedef-yerleske").setDescription("Karşı tarafın kaynak gönderecek yerleşkesi").setRequired(true))
       .addStringOption((o) => o.setName("tur").setDescription("Ticaret güzergâhı").setRequired(true).addChoices({ name: "Kara Ticareti", value: "LAND" }, { name: "Deniz Ticareti", value: "SEA" }))
-      .addStringOption((o) => o.setName("yerleske").setDescription("Ticaretin bağlanacağı kendi yerleşkeniz").setRequired(true))
       .addStringOption(countryOption))
-    .addSubcommand((sub) => sub.setName("yanit").setDescription("Ülkenize gelen ticaret teklifini kabul veya reddeder")
-      .addStringOption((o) => o.setName("id").setDescription("Listede görünen antlaşma kimliği").setRequired(true))
-      .addStringOption((o) => o.setName("yanit").setDescription("Teklife verilecek yanıt").setRequired(true).addChoices({ name: "Kabul et", value: "accept" }, { name: "Reddet", value: "reject" }))
-      .addStringOption((o) => o.setName("yerleske").setDescription("Kabulde ticaretin bağlanacağı yerleşkeniz"))
+    .addSubcommand((sub) => sub.setName("liste").setDescription("Bekleyen ve aktif kaynak ticaretlerini gösterir")
       .addStringOption(countryOption))
-    .addSubcommand((sub) => sub.setName("liste").setDescription("Bekleyen ve aktif ticaret antlaşmalarını gösterir")
-      .addStringOption(countryOption))
-    .addSubcommand((sub) => sub.setName("feshet").setDescription("Aktif bir ticaret antlaşmasını sona erdirir")
-      .addStringOption((o) => o.setName("id").setDescription("Antlaşma kimliği").setRequired(true))
+    .addSubcommand((sub) => sub.setName("feshet").setDescription("Aktif antlaşmalar arasından feshedilecek olanı seçtirir")
       .addStringOption(countryOption)),
   new SlashCommandBuilder()
     .setName("tur").setDescription("Resmî tur durumunu yönetir ve herkese açık duyuru yayımlar")
@@ -82,7 +78,12 @@ export const commandBuilders = [
       .addIntegerOption((o) => o.setName("vergi-geliri").setDescription("Temel vergi geliri").setMinValue(0).setRequired(true))
       .addIntegerOption((o) => o.setName("kara-ticareti").setDescription("Temel kara ticareti geliri").setMinValue(0).setRequired(true))
       .addIntegerOption((o) => o.setName("deniz-ticareti").setDescription("Temel deniz ticareti geliri").setMinValue(0).setRequired(true))
-      .addIntegerOption((o) => o.setName("nufus-artisi").setDescription("Alım Turu temel nüfus artışı").setMinValue(0).setRequired(true)))
+      .addIntegerOption((o) => o.setName("nufus-artisi").setDescription("Alım Turu temel nüfus artışı").setMinValue(0).setRequired(true))
+      .addStringOption((o) => o.setName("hammadde").setDescription("Yerleşkenin ürettiği hammadde").setRequired(true).addChoices(...RESOURCE_CHOICES)))
+    .addSubcommand((sub) => sub.setName("hammadde-ayarla").setDescription("Mevcut yerleşkenin hammaddesini değiştirir")
+      .addStringOption((o) => o.setName("ulke").setDescription("Ülke adı").setRequired(true))
+      .addStringOption((o) => o.setName("yerleske").setDescription("Yerleşke adı").setRequired(true))
+      .addStringOption((o) => o.setName("hammadde").setDescription("Yeni hammadde").setRequired(true).addChoices(...RESOURCE_CHOICES)))
     .addSubcommand((sub) => sub.setName("tur-ilerlet").setDescription("Yeni turu açar ve bütün otomasyonları işler"))
     .addSubcommand((sub) => sub.setName("tur-durumu").setDescription("Turun hareket durumunu değiştirir")
       .addStringOption((o) => o.setName("durum").setDescription("Yeni durum").setRequired(true)
