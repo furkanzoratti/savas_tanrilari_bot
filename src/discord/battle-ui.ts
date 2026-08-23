@@ -1,5 +1,5 @@
-import { ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, type ButtonInteraction, type ChatInputCommandInteraction } from "discord.js";
-import { BATTLE_TERRAINS, BATTLE_UNIT_STATS, NAVAL_UNIT_STATS, SIEGE_ASSET_BATTLE_STATS, orderState, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain, type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeTarget } from "../domain/battle.js";
+import { ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, type ButtonInteraction, type ChatInputCommandInteraction, type Client } from "discord.js";
+import { BATTLE_TERRAINS, BATTLE_UNIT_STATS, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, SIEGE_ASSET_BATTLE_STATS, orderState, remainingBombardments, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain, type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeTarget } from "../domain/battle.js";
 import { number } from "../domain/format.js";
 import { battleService, type BattleView, type SiegePhase } from "../services/battle-service.js";
 import { GameError } from "../services/game-service.js";
@@ -22,10 +22,14 @@ export function battleEmbed(view: BattleView, roundResult?: { tier: string; winn
   const terrain = BATTLE_TERRAINS[view.battle.terrain];
   const sideField = (key: BattleSideKey) => {
     const side = view.sides[key];
-    const order = orderState(side.pressure, side.initial_total, side.current_total);
+    let order = orderState(side.pressure, side.initial_total, side.current_total);
+    // A siege defender can pass the generic "broken" threshold without the
+    // city being captured. Keep the public card consistent with the siege
+    // resolution until an access + capture condition actually ends the battle.
+    if (view.battle.terrain === "SIEGE" && key === "B" && !["FINISHED", "CANCELLED"].includes(view.battle.status) && order === "BROKEN") order = "SHAKEN";
     const control = side.controller === "GM" ? "Oyun Yöneticisi (NPC)" : "Ülke Oyuncuları";
-    if (view.battle.terrain === "SIEGE" && key === "B") return `**Toplam Asker:** Gizli\n**Toplam Kayıp:** ${number(side.total_losses)}\n**Düzen:** ${orderLabels[order]}\n**Zar Yetkisi:** ${control}`;
-    return `**Başlangıç:** ${number(side.initial_total)}\n**Mevcut:** ${number(side.current_total)}\n**Toplam Kayıp:** ${number(side.total_losses)}\n**Düzen:** ${orderLabels[order]}\n**Zar Yetkisi:** ${control}`;
+    if (view.battle.terrain === "SIEGE" && key === "B") return `**Toplam Asker:** Gizli\n**Toplam Kayıp:** ${number(side.total_losses)}\n**Baskı:** ${number(side.pressure)} puan\n**Düzen:** ${orderLabels[order]}\n**Zar Yetkisi:** ${control}`;
+    return `**Başlangıç:** ${number(side.initial_total)}\n**Mevcut:** ${number(side.current_total)}\n**Toplam Kayıp:** ${number(side.total_losses)}\n**Baskı:** ${number(side.pressure)} puan\n**Düzen:** ${orderLabels[order]}\n**Zar Yetkisi:** ${control}`;
   };
   const frontage = view.battle.terrain === "NAVAL"
     ? `Filo kapasitesi: ${view.sides.A.country_name} ${number(terrain.frontageA)} • ${view.sides.B.country_name} ${number(terrain.frontageB)} gemi`
@@ -34,7 +38,7 @@ export function battleEmbed(view: BattleView, roundResult?: { tier: string; winn
       : `Cephe kapasitesi: ${view.sides.A.country_name} ${number(terrain.frontageA)} • ${view.sides.B.country_name} ${number(terrain.frontageB)} asker`;
   const siegeStage = view.battle.terrain === "SIEGE"
     ? view.battle.siege_phase === "BOMBARDMENT"
-      ? `\n**Kuşatma Durumu:** Bombardıman — ordular temas etmiyor\n**Bombardıman Turu:** ${view.battle.bombardment_round}`
+      ? `\n**Kuşatma Durumu:** Bombardıman — ordular temas etmiyor\n**Toplam Bombardıman:** ${view.battle.bombardment_round}\n**Oyun Turu ${view.battle.game_turn ?? 0}:** ${view.battle.bombardments_this_turn ?? 0}/${MAX_BOMBARDMENTS_PER_GAME_TURN} kullanıldı • ${remainingBombardments(view.battle.bombardments_this_turn ?? 0)} hak kaldı`
       : "\n**Kuşatma Durumu:** Hücum — ordular temas hâlinde"
     : "";
   const embed = new EmbedBuilder().setColor(view.battle.status === "FINISHED" ? 0x8b1a1a : 0xb68b36)
@@ -66,7 +70,7 @@ function components(view: BattleView) {
   if (["FINISHED", "CANCELLED", "DRAFT"].includes(view.battle.status)) return [];
   const expected = expectedSide(view);
   if (view.battle.terrain === "SIEGE" && view.battle.siege_phase === "BOMBARDMENT") return [new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(`battle_bombard|${view.battle.id}`).setLabel(`${view.sides.A.country_name} Katapult Bombardımanı Yap`.slice(0, 80)).setEmoji("💥").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`battle_bombard|${view.battle.id}`).setLabel(((view.battle.bombardments_this_turn ?? 0) >= MAX_BOMBARDMENTS_PER_GAME_TURN ? "Bombardıman Hakkı Doldu" : `${view.sides.A.country_name} Katapult Bombardımanı Yap`).slice(0, 80)).setEmoji("💥").setStyle(ButtonStyle.Primary).setDisabled((view.battle.bombardments_this_turn ?? 0) >= MAX_BOMBARDMENTS_PER_GAME_TURN),
     new ButtonBuilder().setCustomId(`battle_retreat|${view.battle.id}`).setLabel("Geri Çekil").setEmoji("🏳️").setStyle(ButtonStyle.Danger)
   )];
   const label = expected ? `${view.sides[expected].country_name} Savaş Zarlarını At` : "Tur Çözümü Bekleniyor";
@@ -74,6 +78,29 @@ function components(view: BattleView) {
     new ButtonBuilder().setCustomId(`battle_roll|${view.battle.id}`).setLabel(label).setEmoji("🎲").setStyle(ButtonStyle.Primary).setDisabled(!expected),
     new ButtonBuilder().setCustomId(`battle_retreat|${view.battle.id}`).setLabel("Geri Çekil").setEmoji("🏳️").setStyle(ButtonStyle.Danger).setDisabled(!expected)
   )];
+}
+export async function refreshActiveBattleCards(client: Client, guildId: string): Promise<{ updated: number; failed: number }> {
+  let updated = 0;
+  let failed = 0;
+  try {
+    for (const view of await battleService.activeForGuild(guildId)) {
+      if (!view.battle.public_message_id) continue;
+      try {
+        const channel = await client.channels.fetch(view.battle.channel_id);
+        if (!channel?.isTextBased() || channel.isDMBased() || !("messages" in channel)) { failed += 1; continue; }
+        const message = await channel.messages.fetch(view.battle.public_message_id);
+        await message.edit(publicPayload(view));
+        updated += 1;
+      } catch (error) {
+        failed += 1;
+        console.error("Aktif savaş kartı yenilenemedi", { battleId: view.battle.id, error });
+      }
+    }
+  } catch (error) {
+    failed += 1;
+    console.error("Aktif savaşlar tur değişiminde listelenemedi", error);
+  }
+  return { updated, failed };
 }
 function publicPayload(view: BattleView, result?: Parameters<typeof battleEmbed>[1]) {
   const asset = battlefieldAsset(view.battle.terrain);

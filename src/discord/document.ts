@@ -104,6 +104,7 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
       .setTitle(`🏛️ ${settlement.name}`)
       .setDescription([
         `Durum: **${ruinLabels[settlement.ruin_stage]}**`,
+        `Statü: **${settlement.is_conquered ? `Fethedilmiş${settlement.conquered_turn !== null ? ` — Tur ${settlement.conquered_turn}` : ""}` : "Yerleşik Toprak"}**`,
         `Bina slotları: **${occupiedSlots}/${settlement.slotLimit}** • Devam eden inşaat: **${activeConstruction}/2**`
       ].join("\n"))
       .addFields(

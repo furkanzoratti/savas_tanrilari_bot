@@ -15,7 +15,7 @@ function siegeView(): BattleView {
       terrain: "SIEGE", narrative: "Roma surlara yaklaşıyor.", status: "WAITING_FIRST_ROLL",
       round_number: 2, first_side: "A", winner_side: null, finish_reason: null,
       wall_max_hp: 30_000, wall_current_hp: 25_000, gate_max_hp: 1_000, gate_current_hp: 800,
-      siege_phase: "BOMBARDMENT", bombardment_round: 2, losses_applied_at: null, created_by: "gm", created_at: new Date(), updated_at: new Date()
+      siege_phase: "BOMBARDMENT", bombardment_round: 5, game_turn: 12, bombardments_this_turn: 2, losses_applied_at: null, created_by: "gm", created_at: new Date(), updated_at: new Date()
     },
     sides: {
       A: {
@@ -43,6 +43,9 @@ describe("kuşatma bilgi gizliliği", () => {
     expect(json).toContain("3.580");
     expect(json).toContain("Toplam Asker:** Gizli");
     expect(json).toContain("Sarsılmış");
+    expect(json).toContain("Oyun Turu 12");
+    expect(json).toContain("2/3 kullanıldı");
+    expect(json).toContain("1 hak kaldı");
     expect(json).not.toContain("ATTACKER");
     expect(json).not.toContain("DEFENDER");
     expect(json).not.toContain("Savunma Kademesi");
@@ -50,6 +53,17 @@ describe("kuşatma bilgi gizliliği", () => {
     expect(json).not.toContain("B cephesi");
   });
 
+  it("şehir ele geçirilmeden savunucuyu dağılmış göstermez ve baskıyı açıklar", () => {
+    const view = siegeView();
+    view.sides.B.pressure = 6;
+    const json = JSON.stringify(battleEmbed(view).toJSON());
+    expect(json).toContain("Baskı:** 6 puan");
+    expect(json).toContain("Sarsılmış");
+    expect(json).toContain("Oyun Turu 12");
+    expect(json).toContain("2/3 kullanıldı");
+    expect(json).toContain("1 hak kaldı");
+    expect(json).not.toContain("Dağılmış");
+  });
   it("açık tur sonucunda savunucunun kaybını gösterir", () => {
     const json = JSON.stringify(battleEmbed(siegeView(), {
       tier: "CLEAR", winner: "A", lossA: 500, lossB: 1_234,

@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { DbClient } from "../db/pool.js";
 import { pool, withTransaction } from "../db/pool.js";
 import {
-  BATTLE_TERRAINS, BATTLE_UNIT_STATS, NAVAL_UNIT_STATS, baseRetreatRate, battleEnds, compositionTotal, orderState, resolveRound, siegeDefenderCaptured, siegeDefenseModifiers,
+  BATTLE_TERRAINS, BATTLE_UNIT_STATS, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, baseRetreatRate, battleEnds, compositionTotal, orderState, resolveRound, siegeDefenderCaptured, siegeDefenseModifiers,
   rollBattlePool, rollNavalPool, rollSiegeSupport,
   type BattleComposition, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain,
   type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeComposition, type SiegeTarget, type SiegeTargets
@@ -23,6 +23,7 @@ export interface BattleRow {
   status: BattleStatus; round_number: number; first_side: BattleSideKey; winner_side: BattleSideKey | null; finish_reason: string | null;
   wall_max_hp: number | null; wall_current_hp: number | null; gate_max_hp: number | null; gate_current_hp: number | null;
   siege_phase: SiegePhase | null; bombardment_round: number;
+  game_turn?: number; bombardments_this_turn?: number;
   losses_applied_at: Date | null; created_by: string; created_at: Date; updated_at: Date;
 }
 
@@ -54,6 +55,14 @@ async function loadView(client: DbClient, battleId: string, lock = false): Promi
     "SELECT side_key,roller_user_id,clash_total,damage_total,is_proxy,manual,wall_damage,gate_damage FROM battle_rolls WHERE battle_id=$1 AND round_number=$2 ORDER BY created_at",
     [battleId, battle.round_number]
   )).rows;
+  const bombardmentState = (await client.query<{ current_turn: number; used: number }>(
+    `SELECT g.current_turn,COUNT(bb.battle_id)::integer AS used
+       FROM battles b JOIN guilds g ON g.discord_id=b.guild_id
+       LEFT JOIN battle_bombardments bb ON bb.battle_id=b.id AND bb.game_turn=g.current_turn
+      WHERE b.id=$1 GROUP BY g.current_turn`, [battleId]
+  )).rows[0];
+  battle.game_turn = bombardmentState?.current_turn ?? 0;
+  battle.bombardments_this_turn = bombardmentState?.used ?? 0;
   return { battle, sides: { A: rows.find((row) => row.side_key === "A")!, B: rows.find((row) => row.side_key === "B")! }, rolls };
 }
 
@@ -273,6 +282,7 @@ export const battleService = {
 
   async bombard(input: { guildId: string; channelId: string; actorId: string; isGameMaster: boolean }): Promise<{ view: BattleView; wallDamage: number; catapultCount: number; isProxy: boolean }> {
     return withTransaction(async (client) => {
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`turn:${input.guildId}`]);
       const battle = await activeInChannel(client, input.guildId, input.channelId);
       if (!battle || battle.terrain !== "SIEGE") throw new GameError("Bu kanalda etkin bir kuşatma savaşı yok.");
       if (battle.status !== "WAITING_FIRST_ROLL" || battle.siege_phase !== "BOMBARDMENT") throw new GameError("Bombardıman yalnız yayımlanmış ve bombardıman aşamasındaki kuşatmada oynatılabilir.");
@@ -283,6 +293,8 @@ export const battleService = {
       const member = Boolean((await client.query("SELECT 1 FROM country_members WHERE country_id=$1 AND discord_user_id=$2", [attacker.country_id, input.actorId])).rows[0]);
       if (attacker.controller === "GM" && !input.isGameMaster) throw new GameError("Kuşatan taraf NPC olarak yönetiliyor; bombardımanı yalnız oyun yöneticisi yapabilir.");
       if (attacker.controller === "PLAYERS" && !member && !input.isGameMaster) throw new GameError("Bombardımanı yalnız kuşatan ülkenin oyuncuları yapabilir.");
+      const usedThisTurn = view.battle.bombardments_this_turn ?? 0;
+      if (usedThisTurn >= MAX_BOMBARDMENTS_PER_GAME_TURN) throw new GameError(`Oyun Turu ${view.battle.game_turn ?? 0} için ${MAX_BOMBARDMENTS_PER_GAME_TURN}/${MAX_BOMBARDMENTS_PER_GAME_TURN} bombardıman hakkı kullanıldı. Yeni oyun turunu bekleyin.`);
       const isProxy = input.isGameMaster && attacker.controller === "PLAYERS" && !member;
       if ((view.battle.wall_current_hp ?? 0) <= 0) throw new GameError("Sur zaten yıkılmış; hücum aşamasına geçin.");
       const configured = view.sides.A.support_assets.catapult ?? 0;
@@ -293,7 +305,7 @@ export const battleService = {
       const wallDamage = Math.min(view.battle.wall_current_hp ?? 0, support.wallDamage);
       const wallAfter = Math.max(0, (view.battle.wall_current_hp ?? 0) - wallDamage);
       const bombardmentNumber = view.battle.bombardment_round + 1;
-      await client.query("INSERT INTO battle_bombardments(battle_id,bombardment_number,actor_user_id,catapult_count,wall_damage,wall_hp_after) VALUES($1,$2,$3,$4,$5,$6)", [battle.id, bombardmentNumber, input.actorId, catapultCount, wallDamage, wallAfter]);
+      await client.query("INSERT INTO battle_bombardments(battle_id,bombardment_number,actor_user_id,catapult_count,wall_damage,wall_hp_after,game_turn) VALUES($1,$2,$3,$4,$5,$6,$7)", [battle.id, bombardmentNumber, input.actorId, catapultCount, wallDamage, wallAfter, view.battle.game_turn ?? 0]);
       await client.query("UPDATE battles SET wall_current_hp=$1,bombardment_round=$2,updated_at=NOW() WHERE id=$3", [wallAfter, bombardmentNumber, battle.id]);
       return { view: await loadView(client, battle.id), wallDamage, catapultCount, isProxy };
     });
@@ -310,6 +322,17 @@ export const battleService = {
     });
   },
 
+  async activeForGuild(guildId: string): Promise<BattleView[]> {
+    const client = await pool.connect();
+    try {
+      const ids = (await client.query<{ id: string }>("SELECT id FROM battles WHERE guild_id=$1 AND public_message_id IS NOT NULL AND status NOT IN ('FINISHED','CANCELLED') ORDER BY created_at", [guildId])).rows;
+      const views: BattleView[] = [];
+      for (const row of ids) views.push(await loadView(client, row.id));
+      return views;
+    } finally {
+      client.release();
+    }
+  },
   async setPublicMessage(battleId: string, messageId: string): Promise<void> { await pool.query("UPDATE battles SET public_message_id=$1 WHERE id=$2", [messageId, battleId]); },
 
   async roll(input: { guildId: string; channelId: string; battleId: string; actorId: string; isGameMaster: boolean }): Promise<{ view: BattleView; side: BattleSideKey; isProxy: boolean }> {

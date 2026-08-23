@@ -16,7 +16,7 @@ interface SettlementRow {
   id: string; country_id: string; name: string; population: number; slave_population: number;
   base_income: number; tax_income: number; land_trade_income: number; sea_trade_income: number;
   base_population_growth: number; manual_flat_income: number;
-  manual_income_percent: number; ruin_stage: RuinStage; resource_type: ResourceType;
+  manual_income_percent: number; ruin_stage: RuinStage; resource_type: ResourceType; is_conquered: boolean; conquered_turn: number | null;
 }
 interface BuildingRow { settlement_id: string; building_type: string; level: number; target_level: number | null; status: "ACTIVE" | "BUILDING"; completion_turn: number | null }
 
@@ -228,6 +228,86 @@ export const gameService = {
     });
   },
 
+  async deleteCountry(input: { guildId: string; actorId: string; countryId: string }): Promise<{ name: string; settlements: number; battles: number }> {
+    return withTransaction(async (client) => {
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`turn:${input.guildId}`]);
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`country:${input.countryId}`]);
+      const country = (await client.query<CountryRow>("SELECT * FROM countries WHERE id=$1 AND guild_id=$2 FOR UPDATE", [input.countryId, input.guildId])).rows[0];
+      if (!country) throw new GameError("Ülke bulunamadı.");
+      const settlements = Number((await client.query<{ count: number }>("SELECT COUNT(*)::integer AS count FROM settlements WHERE country_id=$1", [country.id])).rows[0]?.count ?? 0);
+      const battles = await client.query<{ id: string }>("SELECT DISTINCT battle_id AS id FROM battle_sides WHERE country_id=$1", [country.id]);
+      if (battles.rows.length) await client.query("DELETE FROM battles WHERE id=ANY($1::uuid[])", [battles.rows.map((row) => row.id)]);
+      await client.query("DELETE FROM countries WHERE id=$1", [country.id]);
+      await audit(client, input.guildId, input.actorId, "COUNTRY_DELETE", "country", country.id, { name: country.name, settlements, battles: battles.rows.length });
+      return { name: country.name, settlements, battles: battles.rows.length };
+    });
+  },
+
+  async deleteSettlement(input: { guildId: string; actorId: string; countryId: string; settlementId: string }): Promise<{ name: string }> {
+    return withTransaction(async (client) => {
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`turn:${input.guildId}`]);
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`country:${input.countryId}`]);
+      const country = await getCountry(client, input.countryId);
+      if (country.guild_id !== input.guildId) throw new GameError("Ülke bu sunucuya ait değil.");
+      const settlement = (await client.query<SettlementRow>("SELECT * FROM settlements WHERE id=$1 AND country_id=$2 FOR UPDATE", [input.settlementId, country.id])).rows[0];
+      if (!settlement) throw new GameError("Yerleşke bulunamadı.");
+      await client.query("DELETE FROM settlements WHERE id=$1", [settlement.id]);
+      await audit(client, input.guildId, input.actorId, "SETTLEMENT_DELETE", "settlement", settlement.id, { name: settlement.name, countryId: country.id });
+      return { name: settlement.name };
+    });
+  },
+
+  async reduceSettlementPopulation(input: { guildId: string; actorId: string; countryId: string; settlementId: string; populationType: "FREE" | "SLAVE"; amount: number }): Promise<{ remaining: number }> {
+    return withTransaction(async (client) => {
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`turn:${input.guildId}`]);
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`country:${input.countryId}`]);
+      if (!Number.isInteger(input.amount) || input.amount <= 0) throw new GameError("Silinecek nüfus miktarı pozitif bir tam sayı olmalıdır.");
+      const country = await getCountry(client, input.countryId);
+      if (country.guild_id !== input.guildId) throw new GameError("Ülke bu sunucuya ait değil.");
+      const settlement = (await client.query<SettlementRow>("SELECT * FROM settlements WHERE id=$1 AND country_id=$2 FOR UPDATE", [input.settlementId, country.id])).rows[0];
+      if (!settlement) throw new GameError("Yerleşke bulunamadı.");
+      const current = input.populationType === "FREE" ? settlement.population : settlement.slave_population;
+      if (input.amount > current) throw new GameError(`Yerleşkede yalnızca ${current.toLocaleString("tr-TR")} ${input.populationType === "FREE" ? "özgür" : "köle"} nüfus bulunuyor.`);
+      const column = input.populationType === "FREE" ? "population" : "slave_population";
+      const remaining = current - input.amount;
+      await client.query(`UPDATE settlements SET ${column}=$1 WHERE id=$2`, [remaining, settlement.id]);
+      await audit(client, input.guildId, input.actorId, "SETTLEMENT_POPULATION_DELETE", "settlement", settlement.id, { populationType: input.populationType, amount: input.amount, remaining });
+      return { remaining };
+    });
+  },
+
+  async transferSettlement(input: { guildId: string; actorId: string; sourceCountryId: string; targetCountryId: string; settlementId: string }): Promise<{ settlementName: string; sourceName: string; targetName: string; cancelledRecruitmentOrders: number; endedTrades: number }> {
+    return withTransaction(async (client) => {
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`turn:${input.guildId}`]);
+      if (input.sourceCountryId === input.targetCountryId) throw new GameError("Kaynak ve hedef ülke aynı olamaz.");
+      for (const countryId of [input.sourceCountryId, input.targetCountryId].sort()) await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`country:${countryId}`]);
+      for (const countryId of [input.sourceCountryId, input.targetCountryId].sort()) await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`trade:${countryId}`]);
+      const countries = (await client.query<CountryRow>("SELECT * FROM countries WHERE guild_id=$1 AND id=ANY($2::uuid[]) FOR UPDATE", [input.guildId, [input.sourceCountryId, input.targetCountryId]])).rows;
+      const source = countries.find((country) => country.id === input.sourceCountryId);
+      const target = countries.find((country) => country.id === input.targetCountryId);
+      if (!source || !target) throw new GameError("Kaynak veya hedef ülke bulunamadı.");
+      const settlement = (await client.query<SettlementRow>("SELECT * FROM settlements WHERE id=$1 AND country_id=$2 FOR UPDATE", [input.settlementId, source.id])).rows[0];
+      if (!settlement) throw new GameError("Yerleşke kaynak ülkeye bağlı değil veya bulunamadı.");
+      const duplicate = await client.query("SELECT 1 FROM settlements WHERE country_id=$1 AND lower(name)=lower($2) AND id<>$3", [target.id, settlement.name, settlement.id]);
+      if (duplicate.rowCount) throw new GameError("Hedef ülkede aynı ada sahip bir yerleşke bulunuyor.");
+      const activeOrders = await client.query<{ id: string }>("SELECT id FROM recruitment_orders WHERE settlement_id=$1 AND status='TRAINING' FOR UPDATE", [settlement.id]);
+      if (activeOrders.rows.length) {
+        const orderIds = activeOrders.rows.map((row) => row.id);
+        await client.query("DELETE FROM recruitment_waves WHERE order_id=ANY($1::uuid[]) AND processed_at IS NULL", [orderIds]);
+        await client.query("UPDATE recruitment_orders SET status='CANCELLED',remaining_quantity=0 WHERE id=ANY($1::uuid[])", [orderIds]);
+      }
+      await client.query("DELETE FROM recruitment_usage WHERE settlement_id=$1", [settlement.id]);
+      const trades = await client.query("UPDATE trade_agreements SET status='ENDED',ended_at=NOW() WHERE status IN ('PENDING','ACTIVE') AND (proposer_settlement_id=$1 OR receiver_settlement_id=$1) RETURNING id", [settlement.id]);
+      const guild = await getGuild(client, input.guildId);
+      await client.query("UPDATE settlements SET country_id=$1,is_conquered=TRUE,conquered_turn=$2 WHERE id=$3", [target.id, guild.current_turn, settlement.id]);
+      await client.query("UPDATE naval_orders SET country_id=$1 WHERE settlement_id=$2", [target.id, settlement.id]);
+      await client.query("UPDATE siege_assets SET country_id=$1 WHERE settlement_id=$2", [target.id, settlement.id]);
+      await audit(client, input.guildId, input.actorId, "SETTLEMENT_TRANSFER", "settlement", settlement.id, {
+        fromCountryId: source.id, toCountryId: target.id, cancelledRecruitmentOrders: activeOrders.rows.length, endedTrades: trades.rowCount ?? 0, conqueredTurn: guild.current_turn
+      });
+      return { settlementName: settlement.name, sourceName: source.name, targetName: target.name, cancelledRecruitmentOrders: activeOrders.rows.length, endedTrades: trades.rowCount ?? 0 };
+    });
+  },
   async document(countryId: string): Promise<CountryDocument> {
     const client = await pool.connect();
     try {
@@ -629,6 +709,7 @@ export const gameService = {
     return withTransaction(async (client) => {
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`turn:${guildId}`]);
       await ensureGuild(client, guildId);
+      await client.query("DELETE FROM battles WHERE guild_id=$1", [guildId]);
       const deleted = await client.query("DELETE FROM countries WHERE guild_id=$1 RETURNING id", [guildId]);
       await client.query("DELETE FROM processed_events WHERE guild_id=$1", [guildId]);
       await client.query("UPDATE guilds SET current_turn=0,turn_phase='CLOSED',updated_at=NOW() WHERE discord_id=$1", [guildId]);

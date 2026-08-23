@@ -26,6 +26,9 @@ export type SiegeTarget = "WALL" | "GATE" | "ARMY" | "ASSAULT";
 export type SiegeTargets = Partial<Record<SiegeAssetType, SiegeTarget>>;
 export type BattleOrder = "ORDERED" | "WORN" | "SHAKEN" | "BROKEN";
 
+export const MAX_BOMBARDMENTS_PER_GAME_TURN = 3;
+export const remainingBombardments = (used: number): number => Math.max(0, MAX_BOMBARDMENTS_PER_GAME_TURN - Math.max(0, Math.floor(used)));
+
 export const BATTLE_UNIT_STATS: Record<BattleUnitType, {
   label: string; clashDice: number; clashSides: number; damageDice: number; damageSides: number; durability: 1 | 2 | 3;
 }> = {

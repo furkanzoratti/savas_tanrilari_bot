@@ -18,7 +18,7 @@ import { buildingChoices, shipChoices, unitChoices } from "./commands.js";
 import { renderDocument } from "./document.js";
 import { BRAND_BANNER_PATH, BRAND_BANNER_NAME, TEMPLE_BANNER_PATH, TEMPLE_BANNER_NAME } from "./assets.js";
 import { turnAnnouncement } from "./turn-announcements.js";
-import { handleBattleButton, handleBattleCommand } from "./battle-ui.js";
+import { handleBattleButton, handleBattleCommand, refreshActiveBattleCards } from "./battle-ui.js";
 
 function settlementSelect(customId: string, settlements: Array<{ id: string; name: string; population: number }>, placeholder: string) {
   if (!settlements.length) throw new GameError("Bu ülkeye ait yerleşke bulunmuyor.");
@@ -141,6 +141,7 @@ async function handleTurn(interaction: ChatInputCommandInteraction): Promise<voi
   let embed: EmbedBuilder;
   if (sub === "atla") {
     const result = await gameService.advanceTurn(interaction.guildId, interaction.user.id);
+    await refreshActiveBattleCards(interaction.client, interaction.guildId);
     embed = turnAnnouncement({
       kind: "ADVANCE", turn: result.turn, acquisition: result.acquisition,
       completedBuildings: result.completedBuildings, recruitmentArrivals: result.recruitmentArrivals,
@@ -163,6 +164,63 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
   if (sub === "ulke-olustur") {
     const country = await gameService.createCountry(interaction.guildId, interaction.user.id, interaction.options.getString("ad", true), interaction.options.getInteger("hazine", true));
     await interaction.editReply(`✅ **${country.name}** oluşturuldu.`);
+  } else if (sub === "ulkeleri-listele") {
+    const countries = await gameService.listCountries(interaction.guildId);
+    if (!countries.length) {
+      await interaction.editReply("Oyunda kayıtlı aktif devlet bulunmuyor.");
+    } else {
+      const rows = await Promise.all(countries.map(async (country) => {
+        const [settlements, players] = await Promise.all([gameService.listSettlements(country.id), gameService.playerIds(country.id)]);
+        return `• **${country.name}** — ${settlements.length} yerleşke • ${players.length ? players.map((id) => `<@${id}>`).join(" ") : "Oyuncu yok"}`;
+      }));
+      const pages: string[] = [];
+      for (let index = 0; index < rows.length; index += 20) pages.push(rows.slice(index, index + 20).join("\n"));
+      await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0xc59b45).setTitle(`🌍 Aktif Devletler — ${countries.length}`).setDescription(pages[0]!)] });
+      for (let index = 1; index < pages.length; index += 1) await interaction.followUp({ embeds: [new EmbedBuilder().setColor(0xc59b45).setTitle(`🌍 Aktif Devletler — Devam ${index + 1}`).setDescription(pages[index]!)], ephemeral: true });
+    }
+  } else if (sub === "devlet-belgeleri") {
+    const countries = await gameService.listCountries(interaction.guildId);
+    if (!countries.length) {
+      await interaction.editReply("Oyunda kayıtlı aktif devlet bulunmuyor.");
+    } else {
+      let firstBatch = true;
+      for (const country of countries) {
+        const embeds = renderDocument(await gameService.document(country.id));
+        for (let index = 0; index < embeds.length; index += 10) {
+          const payload = { embeds: embeds.slice(index, index + 10), files: [new AttachmentBuilder(TEMPLE_BANNER_PATH, { name: TEMPLE_BANNER_NAME })] };
+          if (firstBatch) { await interaction.editReply(payload); firstBatch = false; }
+          else await interaction.followUp({ ...payload, ephemeral: true });
+        }
+      }
+    }
+  } else if (sub === "ulke-sil") {
+    if (interaction.options.getString("onay", true) !== "SIL") throw new GameError("Ülke silme iptal edildi. Onay alanına tam olarak **SIL** yazmalısınız.");
+    const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
+    if (!country) throw new GameError("Ülke bulunamadı.");
+    const result = await gameService.deleteCountry({ guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id });
+    await interaction.editReply(`🗑️ **${result.name}** kalıcı olarak silindi. ${result.settlements} yerleşke ve ${result.battles} bağlı savaş kaydı kaldırıldı.`);
+  } else if (sub === "yerleske-sil") {
+    if (interaction.options.getString("onay", true) !== "SIL") throw new GameError("Yerleşke silme iptal edildi. Onay alanına tam olarak **SIL** yazmalısınız.");
+    const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
+    if (!country) throw new GameError("Ülke bulunamadı.");
+    const settlement = await findSettlement(country.id, interaction.options.getString("yerleske", true));
+    const result = await gameService.deleteSettlement({ guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id, settlementId: settlement.id });
+    await interaction.editReply(`🗑️ **${result.name}**, **${country.name}** devletinden kalıcı olarak silindi. Bağlı bina, birlik, emir ve ticaret kayıtları da kaldırıldı.`);
+  } else if (sub === "nufus-sil") {
+    const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
+    if (!country) throw new GameError("Ülke bulunamadı.");
+    const settlement = await findSettlement(country.id, interaction.options.getString("yerleske", true));
+    const populationType = interaction.options.getString("nufus-turu", true) as "FREE" | "SLAVE";
+    const amount = interaction.options.getInteger("miktar", true);
+    const result = await gameService.reduceSettlementPopulation({ guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id, settlementId: settlement.id, populationType, amount });
+    await interaction.editReply(`✅ **${settlement.name}** yerleşkesinden ${number(amount)} ${populationType === "FREE" ? "özgür" : "köle"} nüfus silindi. Kalan: **${number(result.remaining)}**.`);
+  } else if (sub === "yerleske-devret") {
+    const source = await gameService.countryByName(interaction.guildId, interaction.options.getString("kaynak-ulke", true));
+    const target = await gameService.countryByName(interaction.guildId, interaction.options.getString("hedef-ulke", true));
+    if (!source || !target) throw new GameError("Kaynak veya hedef ülke bulunamadı.");
+    const settlement = await findSettlement(source.id, interaction.options.getString("yerleske", true));
+    const result = await gameService.transferSettlement({ guildId: interaction.guildId, actorId: interaction.user.id, sourceCountryId: source.id, targetCountryId: target.id, settlementId: settlement.id });
+    await interaction.editReply(`🏳️ **${result.settlementName}**, **${result.sourceName}** devletinden **${result.targetName}** devletine aktarıldı ve **Fethedilmiş** olarak işaretlendi.\n⚔️ İptal edilen aktif asker alımı: **${result.cancelledRecruitmentOrders}**\n🤝 Feshedilen/bekleyen ticaret: **${result.endedTrades}**`);
   } else if (sub === "oyuncu-ata") {
     const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
     if (!country) throw new GameError("Ülke bulunamadı.");
@@ -199,6 +257,7 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
     await interaction.editReply(`✅ **${settlement.name}** artık **${RESOURCES[resourceType].label}** üretiyor.`);
   } else if (sub === "tur-ilerlet") {
     const result = await gameService.advanceTurn(interaction.guildId, interaction.user.id);
+    await refreshActiveBattleCards(interaction.client, interaction.guildId);
     await interaction.editReply(`✅ **Tur ${result.turn}** açıldı.${result.acquisition ? " Bu bir **Alım Turudur**." : ""}\n🏗️ ${result.completedBuildings} bina tamamlandı.\n⚔️ ${number(result.recruitmentArrivals)} asker katıldı.\n🚢 ${result.completedShips} gemi tamamlandı.`);
   } else if (sub === "tur-durumu") {
     const phase = interaction.options.getString("durum", true) as "OPEN" | "CLOSED" | "RESOLVING";

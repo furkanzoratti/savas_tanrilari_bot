@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { commandBuilders } from "./commands.js";
 
-describe("yönetim sıfırlama komutu", () => {
+describe("yönetim komutları", () => {
   it("zorunlu SIFIRLA onay alanıyla kaydedilir", () => {
     const admin = commandBuilders.find((command) => command.name === "yonetim");
     const reset = admin?.options?.find((option) => option.name === "oyunu-sifirla");
@@ -9,5 +9,16 @@ describe("yönetim sıfırlama komutu", () => {
 
     expect(reset).toBeDefined();
     expect(confirmation).toMatchObject({ required: true });
+  });
+
+  it("devlet ve yerleşke yönetimi komutlarını kaydeder", () => {
+    const admin = commandBuilders.find((command) => command.name === "yonetim");
+    const names = admin?.options?.map((option) => option.name) ?? [];
+    expect(names).toEqual(expect.arrayContaining([
+      "ulkeleri-listele", "devlet-belgeleri", "ulke-sil", "yerleske-sil", "nufus-sil", "yerleske-devret"
+    ]));
+    for (const destructive of ["ulke-sil", "yerleske-sil"]) {
+      expect(admin?.options?.find((option) => option.name === destructive)?.options?.find((option) => option.name === "onay")).toMatchObject({ required: true });
+    }
   });
 });

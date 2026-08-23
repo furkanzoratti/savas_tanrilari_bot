@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { advantageTier, baseRetreatRate, battleEnds, compositionTotal, engagedComposition, orderState, resolveRound, rollBattlePool, rollNavalPool, rollSiegeSupport, siegeDefenderCaptured, siegeDefenseModifiers } from "./battle.js";
+import { MAX_BOMBARDMENTS_PER_GAME_TURN, advantageTier, remainingBombardments, baseRetreatRate, battleEnds, compositionTotal, engagedComposition, orderState, resolveRound, rollBattlePool, rollNavalPool, rollSiegeSupport, siegeDefenderCaptured, siegeDefenseModifiers } from "./battle.js";
 
 describe("savaş motoru", () => {
   it("cephe kapasitesini aşan orduyu gizli olarak ölçekler", () => {
@@ -80,5 +80,12 @@ describe("savaş motoru", () => {
     expect(baseRetreatRate(1)).toBe(0);
     expect(baseRetreatRate(2)).toBe(0.05);
     expect(baseRetreatRate(5)).toBeGreaterThan(baseRetreatRate(2));
+  });
+  it("oyun turu başına üç bombardıman hakkını sınırlar", () => {
+    expect(MAX_BOMBARDMENTS_PER_GAME_TURN).toBe(3);
+    expect(remainingBombardments(0)).toBe(3);
+    expect(remainingBombardments(2)).toBe(1);
+    expect(remainingBombardments(3)).toBe(0);
+    expect(remainingBombardments(7)).toBe(0);
   });
 });

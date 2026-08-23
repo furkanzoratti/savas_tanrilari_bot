@@ -385,4 +385,21 @@ export const migrations = [
         PRIMARY KEY (battle_id,bombardment_number)
       );
     `
+  },
+  {
+    version: 9,
+    name: "turn_bombardment_limits_and_conquered_settlements",
+    sql: `
+      ALTER TABLE battle_bombardments ADD COLUMN IF NOT EXISTS game_turn INTEGER;
+      UPDATE battle_bombardments bb
+         SET game_turn=g.current_turn
+        FROM battles b JOIN guilds g ON g.discord_id=b.guild_id
+       WHERE bb.battle_id=b.id AND bb.game_turn IS NULL;
+      ALTER TABLE battle_bombardments ALTER COLUMN game_turn SET NOT NULL;
+      CREATE INDEX IF NOT EXISTS battle_bombardments_turn_idx
+        ON battle_bombardments(battle_id,game_turn);
+
+      ALTER TABLE settlements ADD COLUMN IF NOT EXISTS is_conquered BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE settlements ADD COLUMN IF NOT EXISTS conquered_turn INTEGER;
+    `
   }] as const;

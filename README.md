@@ -57,6 +57,12 @@ Bu komutların sonuçları gizli değildir; markalı resmî tur duyurusu olarak 
 ### Yalnızca yönetici
 
 - `/yonetim ulke-olustur`
+- `/yonetim ulkeleri-listele`
+- `/yonetim devlet-belgeleri`
+- `/yonetim ulke-sil ulke onay:SIL`
+- `/yonetim yerleske-sil ulke yerleske onay:SIL`
+- `/yonetim nufus-sil ulke yerleske nufus-turu miktar`
+- `/yonetim yerleske-devret kaynak-ulke yerleske hedef-ulke`
 - `/yonetim oyuncu-ata`
 - `/yonetim oyuncu-cikar ulke oyuncu`
 - `/yonetim yerleske-ekle` (hammadde seçimi dâhil)
@@ -70,6 +76,8 @@ Bu komutların sonuçları gizli değildir; markalı resmî tur duyurusu olarak 
 - `/yonetim komut-gecmisi [adet]`
 - `/yonetim rol-kanali islem kanal`
 - `/yonetim rol-rapor-kanali islem [kanal]`
+
+`yerleske-devret`, yerleşkeyi hedef devlete geçirip Fethedilmiş olarak işaretler; aktif asker alım emirlerini iptal eder, kullanılmamış dalgaları kaldırır ve yerleşkeye bağlı bekleyen/aktif ticaretleri sona erdirir. Mevcut bina, birlik ve filolar yerleşkeyle birlikte yeni devlete geçer. Ordu ve filolara eşzamanlı savaş kullanım kilidi uygulanmaz.
 
 `oyunu-sifirla` yalnızca yetkili GM tarafından ve tam `SIFIRLA` onayıyla çalışır. Komut, o Discord sunucusundaki ülkeleri ve bunlara bağlı bütün oyun kayıtlarını siler; turu 0/Kapalı durumuna döndürür. Rol kanalları ile kelime istatistikleri korunur.
 
@@ -144,7 +152,7 @@ Oyuncu geri çekilmesi kart düğmesiyle yapılır. İlk savaş turu kayıpsızd
 ### Pusu, kuşatma ve deniz savaşı
 
 - **Pusu:** `/savas baslat` sırasında `Pusu` seçilir. A tarafı pusuyu kurandır ve ilk zarı atar. İlk tur A tarafının çarpışma toplamı %25, hasar toplamı %10 artar. Dar cephe nedeniyle A en fazla 15.000, B en fazla 8.000 askerini aynı anda kullanır.
-- **Kuşatma:** A kuşatan, B savunandır. Sur 30.000, kapı 1.000 canla başlar. Kuşatma Bombardıman durumunda açılır; bu sırada yalnız Katapultlar sura ateş eder, ordular temas etmez ve asker kaybı/baskı oluşmaz. DM `/savas kusatma-asamasi` ile Hücuma geçer. Koçbaşı yalnız kapıyı; Katapult ve Balista seçilen hedefe göre suru veya savunan orduyu vurur. Merdiven, mantlet ve kuşatma kulesi hücumu destekler. Tahkimat sağlamken savunucu Çarpışma +%50 ve Hasar +%35 alır; saldıranın birlik Hasarı %50 etkinliktedir. Şehir için sur/kapı gediği veya merdiven/kule erişimi ve ayrıca savunucunun %30'a düşmesi, 8 baskıya ulaşması ya da tükenmesi gerekir. Her mantlet saldırana gelen Hasarı %5 azaltır; toplam sınır %50'dir. B yalnızca Hafif Sur Balistası kullanabilir.
+- **Kuşatma:** A kuşatan, B savunandır. Sur 30.000, kapı 1.000 canla başlar. Kuşatma Bombardıman durumunda açılır; bu sırada yalnız Katapultlar sura ateş eder, ordular temas etmez ve asker kaybı/baskı oluşmaz. Her kuşatma oyun turu başına en fazla 3 kez bombalanabilir; yeni oyun turunda hak otomatik yenilenir ve aktif savaşın bütün durumu korunur. DM `/savas kusatma-asamasi` ile Hücuma geçer. Koçbaşı yalnız kapıyı; Katapult ve Balista seçilen hedefe göre suru veya savunan orduyu vurur. Merdiven, mantlet ve kuşatma kulesi hücumu destekler. Tahkimat sağlamken savunucu Çarpışma +%50 ve Hasar +%35 alır; saldıranın birlik Hasarı %50 etkinliktedir. Şehir için sur/kapı gediği veya merdiven/kule erişimi ve ayrıca savunucunun %30'a düşmesi, 8 baskıya ulaşması ya da tükenmesi gerekir. Her mantlet saldırana gelen Hasarı %5 azaltır; toplam sınır %50'dir. B yalnızca Hafif Sur Balistası kullanabilir.
 - **Deniz savaşı:** Kara birliği yerine `/savas gemi-ayarla` kullanılır. Kerkouros 1d6/1d6, Trireme 2d8/2d8, Quinquereme 3d10/3d10 çarpışma/hasar zarı üretir. Her gemi ayrı zar birimidir; filo cephesi taraf başına 30 gemidir. Kayıplar gemi adedi olarak hesaplanır ve ağır gemiler daha dayanıklıdır.
 
 Kuşatmada saldıran toplamı açık, savunan toplamı gizli; iki tarafın kayıpları açıktır. Tam kadro ile kuşatma aleti türleri `/savas ordu-detay` içinde kalır. Savaş sonunda kayıplar ülke belgelerine tek sefer otomatik işlenir; kara askeri kayıpları bağlı yerleşkelerin nüfusundan da düşülür ve yöneticiye hesaplanan/uygulanan/fark dökümü verilir. Oyunculara dağıtılacak eksiksiz metin `docs/discord-savas-sistemi.md` içindedir.
