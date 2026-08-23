@@ -10,6 +10,7 @@ import {
 import { GameError } from "./game-service.js";
 
 export type BattleStatus = "DRAFT" | "WAITING_FIRST_ROLL" | "WAITING_SECOND_ROLL" | "READY_TO_RESOLVE" | "FINISHED" | "CANCELLED";
+export type SiegePhase = "BOMBARDMENT" | "ASSAULT";
 
 export interface BattleSideRow {
   battle_id: string; side_key: BattleSideKey; country_id: string; country_name: string; controller: BattleController;
@@ -21,6 +22,7 @@ export interface BattleRow {
   id: string; guild_id: string; channel_id: string; public_message_id: string | null; terrain: BattleTerrain; narrative: string;
   status: BattleStatus; round_number: number; first_side: BattleSideKey; winner_side: BattleSideKey | null; finish_reason: string | null;
   wall_max_hp: number | null; wall_current_hp: number | null; gate_max_hp: number | null; gate_current_hp: number | null;
+  siege_phase: SiegePhase | null; bombardment_round: number;
   losses_applied_at: Date | null; created_by: string; created_at: Date; updated_at: Date;
 }
 
@@ -31,6 +33,7 @@ export interface BattleRollRow {
 
 export interface CasualtyApplication {
   side_key: BattleSideKey; force_type: string; calculated_loss: number; applied_loss: number; shortfall: number;
+  population_loss_applied: number; population_shortfall: number;
 }
 
 export interface BattleView { battle: BattleRow; sides: Record<BattleSideKey, BattleSideRow>; rolls: BattleRollRow[] }
@@ -113,7 +116,7 @@ function retreatLoss(view: BattleView, side: BattleSideKey): number {
 }
 
 async function casualtyRows(client: DbClient, battleId: string): Promise<CasualtyApplication[]> {
-  return (await client.query<CasualtyApplication>("SELECT side_key,force_type,calculated_loss,applied_loss,shortfall FROM battle_casualty_applications WHERE battle_id=$1 ORDER BY side_key,force_type", [battleId])).rows;
+  return (await client.query<CasualtyApplication>("SELECT side_key,force_type,calculated_loss,applied_loss,shortfall,population_loss_applied,population_shortfall FROM battle_casualty_applications WHERE battle_id=$1 ORDER BY side_key,force_type", [battleId])).rows;
 }
 
 async function applyLossesToDocuments(client: DbClient, battleId: string, guildId: string, actorId: string): Promise<CasualtyApplication[]> {
@@ -128,21 +131,29 @@ async function applyLossesToDocuments(client: DbClient, battleId: string, guildI
       if (!calculated) continue;
       const naval = forceType in NAVAL_UNIT_STATS;
       const rows = naval
-        ? (await client.query<{ id: string; quantity: number }>(`SELECT n.id,n.quantity FROM naval_units n JOIN settlements s ON s.id=n.settlement_id WHERE s.country_id=$1 AND n.ship_type=$2 ORDER BY CASE n.status WHEN 'HOSTILE' THEN 0 WHEN 'ACTIVE' THEN 1 ELSE 2 END,n.id FOR UPDATE OF n`, [side.country_id, forceType])).rows
-        : (await client.query<{ id: string; quantity: number }>(`SELECT u.id,u.quantity FROM unit_stacks u JOIN settlements s ON s.id=u.settlement_id WHERE s.country_id=$1 AND u.unit_type=$2 ORDER BY CASE u.status WHEN 'FIELD_HOSTILE' THEN 0 WHEN 'FIELD_FRIENDLY' THEN 1 ELSE 2 END,u.id FOR UPDATE OF u`, [side.country_id, forceType])).rows;
+        ? (await client.query<{ id: string; quantity: number; settlement_id: string }>(`SELECT n.id,n.quantity,n.settlement_id FROM naval_units n JOIN settlements s ON s.id=n.settlement_id WHERE s.country_id=$1 AND n.ship_type=$2 ORDER BY CASE n.status WHEN 'HOSTILE' THEN 0 WHEN 'ACTIVE' THEN 1 ELSE 2 END,n.id FOR UPDATE OF n`, [side.country_id, forceType])).rows
+        : (await client.query<{ id: string; quantity: number; settlement_id: string }>(`SELECT u.id,u.quantity,u.settlement_id FROM unit_stacks u JOIN settlements s ON s.id=u.settlement_id WHERE s.country_id=$1 AND u.unit_type=$2 ORDER BY CASE u.status WHEN 'FIELD_HOSTILE' THEN 0 WHEN 'FIELD_FRIENDLY' THEN 1 ELSE 2 END,u.id FOR UPDATE OF u`, [side.country_id, forceType])).rows;
       let remaining = calculated;
+      let populationApplied = 0;
       for (const row of rows) {
         if (remaining <= 0) break;
         const deducted = Math.min(row.quantity, remaining);
         const next = row.quantity - deducted;
         if (next === 0) await client.query(`DELETE FROM ${naval ? "naval_units" : "unit_stacks"} WHERE id=$1`, [row.id]);
         else await client.query(`UPDATE ${naval ? "naval_units" : "unit_stacks"} SET quantity=$1 WHERE id=$2`, [next, row.id]);
+        if (!naval && deducted > 0) {
+          const population = Number((await client.query<{ population: number }>("SELECT population FROM settlements WHERE id=$1 FOR UPDATE", [row.settlement_id])).rows[0]?.population ?? 0);
+          const populationLoss = Math.min(population, deducted);
+          if (populationLoss > 0) await client.query("UPDATE settlements SET population=population-$1 WHERE id=$2", [populationLoss, row.settlement_id]);
+          populationApplied += populationLoss;
+        }
         remaining -= deducted;
       }
       const applied = calculated - remaining;
-      await client.query(`INSERT INTO battle_casualty_applications(battle_id,side_key,force_type,calculated_loss,applied_loss,shortfall)
-        VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(battle_id,side_key,force_type) DO UPDATE SET calculated_loss=EXCLUDED.calculated_loss,applied_loss=EXCLUDED.applied_loss,shortfall=EXCLUDED.shortfall`,
-      [battleId, side.side_key, forceType, calculated, applied, remaining]);
+      const populationShortfall = naval ? 0 : Math.max(0, applied - populationApplied);
+      await client.query(`INSERT INTO battle_casualty_applications(battle_id,side_key,force_type,calculated_loss,applied_loss,shortfall,population_loss_applied,population_shortfall)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(battle_id,side_key,force_type) DO UPDATE SET calculated_loss=EXCLUDED.calculated_loss,applied_loss=EXCLUDED.applied_loss,shortfall=EXCLUDED.shortfall,population_loss_applied=EXCLUDED.population_loss_applied,population_shortfall=EXCLUDED.population_shortfall`,
+      [battleId, side.side_key, forceType, calculated, applied, remaining, populationApplied, populationShortfall]);
     }
   }
   await client.query("UPDATE battles SET losses_applied_at=NOW() WHERE id=$1", [battleId]);
@@ -178,9 +189,10 @@ export const battleService = {
       const id = randomUUID();
       const firstSide: BattleSideKey = input.terrain === "AMBUSH" ? "A" : Math.random() < 0.5 ? "A" : "B";
       const wallHp = input.terrain === "SIEGE" ? 30_000 : null;
-      const gateHp = input.terrain === "SIEGE" ? 15_000 : null;
-      await client.query(`INSERT INTO battles(id,guild_id,channel_id,terrain,narrative,status,round_number,first_side,created_by,wall_max_hp,wall_current_hp,gate_max_hp,gate_current_hp)
-        VALUES($1,$2,$3,$4,$5,'DRAFT',1,$6,$7,$8,$8,$9,$9)`, [id, input.guildId, input.channelId, input.terrain, input.narrative, firstSide, input.actorId, wallHp, gateHp]);
+      const gateHp = input.terrain === "SIEGE" ? 1_000 : null;
+      const siegePhase: SiegePhase | null = input.terrain === "SIEGE" ? "BOMBARDMENT" : null;
+      await client.query(`INSERT INTO battles(id,guild_id,channel_id,terrain,narrative,status,round_number,first_side,created_by,wall_max_hp,wall_current_hp,gate_max_hp,gate_current_hp,siege_phase)
+        VALUES($1,$2,$3,$4,$5,'DRAFT',1,$6,$7,$8,$8,$9,$9,$10)`, [id, input.guildId, input.channelId, input.terrain, input.narrative, firstSide, input.actorId, wallHp, gateHp, siegePhase]);
       await client.query("INSERT INTO battle_sides(battle_id,side_key,country_id,controller,composition,initial_composition,seal) VALUES($1,'A',$2,$3,'{}'::jsonb,'{}'::jsonb,$4),($1,'B',$5,$6,'{}'::jsonb,'{}'::jsonb,$4)", [id, a.id, input.controllerA, sealFor({}), b.id, input.controllerB]);
       await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'battle.create','battle',$3,$4::jsonb)", [input.guildId, input.actorId, id, JSON.stringify({ terrain: input.terrain, a: a.name, b: b.name })]);
       return loadView(client, id);
@@ -241,6 +253,51 @@ export const battleService = {
     });
   },
 
+  async setSiegePhase(input: { guildId: string; channelId: string; actorId: string; phase: SiegePhase }): Promise<BattleView> {
+    return withTransaction(async (client) => {
+      const battle = await activeInChannel(client, input.guildId, input.channelId);
+      if (!battle || battle.terrain !== "SIEGE") throw new GameError("Bu kanalda etkin bir kuşatma savaşı yok.");
+      if (!["DRAFT", "WAITING_FIRST_ROLL"].includes(battle.status)) throw new GameError("Tur zarları başladıktan sonra kuşatma aşaması değiştirilemez.");
+      const view = await loadView(client, battle.id, true);
+      if (!["DRAFT", "WAITING_FIRST_ROLL"].includes(view.battle.status)) throw new GameError("Tur zarları başladıktan sonra kuşatma aşaması değiştirilemez.");
+      if (view.rolls.length) throw new GameError("Mevcut turun zarları başladıktan sonra kuşatma aşaması değiştirilemez.");
+      if (input.phase === "BOMBARDMENT") {
+        const combatStarted = Boolean((await client.query("SELECT 1 FROM battle_rounds WHERE battle_id=$1 LIMIT 1", [battle.id])).rows[0]);
+        if (combatStarted) throw new GameError("Ordu hücumu başladıktan sonra yeniden bombardıman aşamasına dönülemez.");
+        if ((view.battle.wall_current_hp ?? 0) <= 0) throw new GameError("Sur zaten yıkılmış; artık hücum aşamasına geçilmelidir.");
+      }
+      await client.query("UPDATE battles SET siege_phase=$1,updated_at=NOW() WHERE id=$2", [input.phase, battle.id]);
+      return loadView(client, battle.id);
+    });
+  },
+
+  async bombard(input: { guildId: string; channelId: string; actorId: string; isGameMaster: boolean }): Promise<{ view: BattleView; wallDamage: number; catapultCount: number; isProxy: boolean }> {
+    return withTransaction(async (client) => {
+      const battle = await activeInChannel(client, input.guildId, input.channelId);
+      if (!battle || battle.terrain !== "SIEGE") throw new GameError("Bu kanalda etkin bir kuşatma savaşı yok.");
+      if (battle.status !== "WAITING_FIRST_ROLL" || battle.siege_phase !== "BOMBARDMENT") throw new GameError("Bombardıman yalnız yayımlanmış ve bombardıman aşamasındaki kuşatmada oynatılabilir.");
+      const view = await loadView(client, battle.id, true);
+      if (view.battle.status !== "WAITING_FIRST_ROLL" || view.battle.siege_phase !== "BOMBARDMENT") throw new GameError("Bombardıman yalnız yayımlanmış ve bombardıman aşamasındaki kuşatmada oynatılabilir.");
+      if (view.rolls.length) throw new GameError("Bu turda savaş zarları atıldığı için bombardıman yapılamaz.");
+      const attacker = view.sides.A;
+      const member = Boolean((await client.query("SELECT 1 FROM country_members WHERE country_id=$1 AND discord_user_id=$2", [attacker.country_id, input.actorId])).rows[0]);
+      if (attacker.controller === "GM" && !input.isGameMaster) throw new GameError("Kuşatan taraf NPC olarak yönetiliyor; bombardımanı yalnız oyun yöneticisi yapabilir.");
+      if (attacker.controller === "PLAYERS" && !member && !input.isGameMaster) throw new GameError("Bombardımanı yalnız kuşatan ülkenin oyuncuları yapabilir.");
+      const isProxy = input.isGameMaster && attacker.controller === "PLAYERS" && !member;
+      if ((view.battle.wall_current_hp ?? 0) <= 0) throw new GameError("Sur zaten yıkılmış; hücum aşamasına geçin.");
+      const configured = view.sides.A.support_assets.catapult ?? 0;
+      if (configured <= 0) throw new GameError("Kuşatan tarafta Katapult bulunmuyor.");
+      if (view.sides.A.support_targets.catapult !== "WALL") throw new GameError("Bombardıman için Katapult hedefi Sur olarak ayarlanmalıdır.");
+      const catapultCount = Math.min(configured, 25);
+      const support = rollSiegeSupport({ catapult: catapultCount }, { catapult: "WALL" });
+      const wallDamage = Math.min(view.battle.wall_current_hp ?? 0, support.wallDamage);
+      const wallAfter = Math.max(0, (view.battle.wall_current_hp ?? 0) - wallDamage);
+      const bombardmentNumber = view.battle.bombardment_round + 1;
+      await client.query("INSERT INTO battle_bombardments(battle_id,bombardment_number,actor_user_id,catapult_count,wall_damage,wall_hp_after) VALUES($1,$2,$3,$4,$5,$6)", [battle.id, bombardmentNumber, input.actorId, catapultCount, wallDamage, wallAfter]);
+      await client.query("UPDATE battles SET wall_current_hp=$1,bombardment_round=$2,updated_at=NOW() WHERE id=$3", [wallAfter, bombardmentNumber, battle.id]);
+      return { view: await loadView(client, battle.id), wallDamage, catapultCount, isProxy };
+    });
+  },
   async publish(input: { guildId: string; channelId: string; actorId: string }): Promise<BattleView> {
     return withTransaction(async (client) => {
       const battle = await activeInChannel(client, input.guildId, input.channelId);
@@ -260,6 +317,7 @@ export const battleService = {
       const active = await activeInChannel(client, input.guildId, input.channelId);
       if (!active || active.id !== input.battleId) throw new GameError("Bu düğme artık geçerli değil; güncel savaş kartını kullanın.");
       const view = await loadView(client, active.id, true);
+      if (view.battle.terrain === "SIEGE" && view.battle.siege_phase === "BOMBARDMENT") throw new GameError("Ordular henüz temas etmiyor. Önce kuşatma aşamasını Hücum olarak değiştirin.");
       if (!["WAITING_FIRST_ROLL", "WAITING_SECOND_ROLL"].includes(view.battle.status)) throw new GameError("Savaş şu anda zar beklemiyor.");
       const side = expectedSide(view), target = view.sides[side];
       const member = Boolean((await client.query("SELECT 1 FROM country_members WHERE country_id=$1 AND discord_user_id=$2", [target.country_id, input.actorId])).rows[0]);
@@ -288,6 +346,7 @@ export const battleService = {
       const active = await activeInChannel(client, input.guildId, input.channelId);
       if (!active) throw new GameError("Bu kanalda etkin savaş yok.");
       const view = await loadView(client, active.id, true);
+      if (view.battle.terrain === "SIEGE" && view.battle.siege_phase === "BOMBARDMENT") throw new GameError("Bombardıman aşamasında ordu çarpışması çözülemez.");
       if (view.battle.status !== "READY_TO_RESOLVE" || view.rolls.length !== 2) throw new GameError("Turun iki taraf zarı da tamamlanmadı.");
       const rollA = view.rolls.find((roll) => roll.side_key === "A")!, rollB = view.rolls.find((roll) => roll.side_key === "B")!;
       const naval = view.battle.terrain === "NAVAL", siege = view.battle.terrain === "SIEGE";
@@ -339,10 +398,7 @@ export const battleService = {
       const total = compositionTotal(applied.remaining);
       await client.query("UPDATE battle_sides SET composition=$1::jsonb,current_total=$2,total_losses=initial_total-$2,seal=$3 WHERE battle_id=$4 AND side_key=$5", [JSON.stringify(applied.remaining), total, sealFor({ ...applied.remaining, ...view.sides[side].support_assets }), active.id, side]);
       const winner: BattleSideKey = side === "A" ? "B" : "A";
-      const hiddenSiegeLoss = view.battle.terrain === "SIEGE" && side === "B";
-      const finishReason = hiddenSiegeLoss
-        ? `${view.sides[side].country_name} geri çekildi. Takip kaybı gizlidir.`
-        : `${view.sides[side].country_name} geri çekildi.${applied.applied ? ` Takip sırasında ${applied.applied} kayıp verdi.` : " İlk turda temas kesildiği için ek kayıp yaşanmadı."}`;
+      const finishReason = `${view.sides[side].country_name} geri çekildi.${applied.applied ? ` Takip sırasında ${applied.applied} kayıp verdi.` : " İlk turda temas kesildiği için ek kayıp yaşanmadı."}`;
       await client.query("UPDATE battles SET status='FINISHED',winner_side=$1,finish_reason=$2,updated_at=NOW() WHERE id=$3", [winner, finishReason, active.id]);
       const report = await applyLossesToDocuments(client, active.id, input.guildId, input.actorId);
       return { view: await loadView(client, active.id), side, retreatLoss: applied.applied, report };

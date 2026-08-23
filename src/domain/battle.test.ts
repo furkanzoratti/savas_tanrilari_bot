@@ -64,16 +64,16 @@ describe("savaş motoru", () => {
   });
 
   it("şehir, gedik açılmadan veya savunma kırılmadan düşmez", () => {
-    expect(siegeDefenderCaptured(12_000, 8_000, 6, 0, 15_000)).toBe(false);
-    expect(siegeDefenderCaptured(12_000, 8_000, 8, 0, 15_000)).toBe(true);
+    expect(siegeDefenderCaptured(12_000, 8_000, 6, 0, 1_000)).toBe(false);
+    expect(siegeDefenderCaptured(12_000, 8_000, 8, 0, 1_000)).toBe(true);
     expect(siegeDefenderCaptured(12_000, 3_600, 4, 30_000, 0)).toBe(true);
-    expect(siegeDefenderCaptured(12_000, 0, 8, 30_000, 15_000)).toBe(false);
-    expect(siegeDefenderCaptured(12_000, 0, 8, 30_000, 15_000, true)).toBe(true);
+    expect(siegeDefenderCaptured(12_000, 0, 8, 30_000, 1_000)).toBe(false);
+    expect(siegeDefenderCaptured(12_000, 0, 8, 30_000, 1_000, true)).toBe(true);
   });
 
   it("sağlam tahkimat savunana belirgin üstünlük verir", () => {
-    expect(siegeDefenseModifiers(30_000, 15_000)).toEqual({ defenderClash: 1.50, defenderDamage: 1.35, attackerDamage: 0.50 });
-    expect(siegeDefenseModifiers(0, 15_000)).toEqual({ defenderClash: 1.25, defenderDamage: 1.15, attackerDamage: 0.75 });
+    expect(siegeDefenseModifiers(30_000, 1_000)).toEqual({ defenderClash: 1.50, defenderDamage: 1.35, attackerDamage: 0.50 });
+    expect(siegeDefenseModifiers(0, 1_000)).toEqual({ defenderClash: 1.25, defenderDamage: 1.15, attackerDamage: 0.75 });
   });
 
   it("geri çekilme yalnızca ilk turda kayıpsızdır", () => {

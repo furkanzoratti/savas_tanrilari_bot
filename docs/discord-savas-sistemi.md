@@ -58,8 +58,9 @@ Böylece haritadaki konum önemlidir: kalabalık ordular açık arazide sayılar
 Kuşatmada A saldıran, B savunandır.
 
 • Sur Canı: **30.000**
-• Kapı Canı: **15.000**
+• Kapı Canı: **1.000**
 
+**Bombardıman aşaması:** Kuşatma bu durumda başlatılır. Ordular henüz temas etmez; normal savaş zarları, asker kaybı ve baskı oluşmaz. Yalnızca hedefi Sur olarak ayarlanmış Katapultlar ateş eder. Kuşatan ülkenin oyuncusu açık **Katapult Bombardımanı Yap** düğmesini kullanır; NPC adına DM atar. `/savas bombardiman` DM için yedek komuttur. Kuşatan taraf istediği kadar bombardıman turu bekleyebilir. DM `/savas kusatma-asamasi` ile Hücum durumuna geçtiğinde normal savaş zarları açılır. Hücum başladıktan sonra bombardımana geri dönülemez.
 **Savunma avantajı:**
 • Sur ve kapı sağlam: savunucu Çarpışma +%50, Hasar +%35; saldıran birlik Hasarı %50 etkinlikte.
 • Sur veya kapıdan biri düşmüş: savunucu Çarpışma +%25, Hasar +%15; saldıran birlik Hasarı %75 etkinlikte.
@@ -112,14 +113,16 @@ Geri çekilme savaşı derhâl bitirir; rakip taraf galip sayılır.
 
 **Açık bilgiler:** savaş anlatısı, arazi, zar sırası, zar sonuçları, tur sonucu, meydan/deniz savaşında toplam kuvvet, kuşatmada saldıran toplamı, sur ve kapı canı.
 
-**Gizli bilgiler:** tam birlik kompozisyonları, kuşatma savunucusunun toplam asker sayısı ve tur kaybı, kuşatma aleti dökümü/hedefleri. DM bunları özel yönetici ekranından görür. Her gizli kadro, sonradan değişiklik yapılmadığını kanıtlayan bir mühür taşır.
+**Gizli bilgiler:** tam birlik kompozisyonları, kuşatma savunucusunun toplam asker sayısı ve kuşatma aleti dökümü/hedefleri. Savunucunun tur ve toplam kayıpları açıkça gösterilir. DM gizli ayrıntıları özel yönetici ekranından görür.
 
-Savaş bittiğinde bot birim ve gemi kayıplarını ülke belgelerine **bir kez ve otomatik** işler. Ardından yalnız DM'in görebildiği raporda hesaplanan kayıp, belgeden düşülen miktar ve varsa eksik kayıt gösterilir. Belge yetersizse fark sessizce kaybolmaz; yönetici raporunda açıkça işaretlenir.
+Savaş bittiğinde bot birim ve gemi kayıplarını ülke belgelerine **bir kez ve otomatik** işler. Ölen kara askerleri, birliklerin bağlı olduğu yerleşkelerin nüfusundan da düşülür. Gemi başına mürettebat sayısı tanımlı olmadığı için gemi kaybı doğrudan nüfusa çevrilmez. Yalnız DM'in görebildiği raporda hesaplanan kayıp, birlikten ve nüfustan düşülen miktar ile varsa kayıt açığı gösterilir.
 
 **DM komutları:**
 • `/savas kadro-ayarla`: Bir kara ordusunun bütün birimlerini tek komutta girer.
 • `/savas filo-ayarla`: Bütün filoyu tek komutta girer.
 • `/savas kusatma-aleti-ayarla`: Alet, adet ve hedef belirler.
+• `/savas kusatma-asamasi`: Bombardıman veya Hücum durumuna geçer.
+• `/savas bombardiman`: Yalnız Katapultların sura ateş ettiği, orduların temas etmediği bir tur oynatır.
 • `/savas ordu-detay`: İki tarafın gizli tam dökümünü açar.
 • `/savas kayip-raporu`: Son savaşın özel kayıp aktarım raporunu açar.
 

@@ -5,7 +5,7 @@ describe("savaş komutları", () => {
   it("taslak, gizli kadro, yayın, tur ve özel detay akışını kaydeder", () => {
     const battle = commandBuilders.find((command) => command.name === "savas");
     const names = battle?.options?.map((option) => option.name) ?? [];
-    expect(names).toEqual(expect.arrayContaining(["baslat", "birlik-ayarla", "kadro-ayarla", "gemi-ayarla", "filo-ayarla", "kusatma-aleti-ayarla", "yayinla", "tur-oynat", "ordu-detay", "kayip-raporu", "bitir", "iptal"]));
+    expect(names).toEqual(expect.arrayContaining(["baslat", "birlik-ayarla", "kadro-ayarla", "gemi-ayarla", "filo-ayarla", "kusatma-aleti-ayarla", "kusatma-asamasi", "bombardiman", "yayinla", "tur-oynat", "ordu-detay", "kayip-raporu", "bitir", "iptal"]));
   });
 
   it("on savaş alanı hazır ayarını sunar", () => {

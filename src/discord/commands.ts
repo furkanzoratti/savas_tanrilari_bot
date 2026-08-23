@@ -96,6 +96,12 @@ export const commandBuilders = [
       .addStringOption((o) => o.setName("alet").setDescription("Kuşatma aleti").setRequired(true).addChoices(...Object.entries(SIEGE_ASSET_BATTLE_STATS).map(([value, asset]) => ({ name: asset.label, value }))))
       .addStringOption((o) => o.setName("hedef").setDescription("Aletin bu savaşta vuracağı hedef").setRequired(true).addChoices({ name: "Sur", value: "WALL" }, { name: "Kapı", value: "GATE" }, { name: "Düşman Ordusu", value: "ARMY" }, { name: "Hücum Desteği", value: "ASSAULT" }))
       .addIntegerOption((o) => o.setName("miktar").setDescription("Alet sayısı; silmek için 0").setMinValue(0).setRequired(true)))
+    .addSubcommand((sub) => sub.setName("kusatma-asamasi").setDescription("Kuşatmayı bombardıman veya hücum durumuna geçirir")
+      .addStringOption((o) => o.setName("asama").setDescription("Yeni kuşatma durumu").setRequired(true).addChoices(
+        { name: "Bombardıman — yalnız Katapultlar sura ateş eder", value: "BOMBARDMENT" },
+        { name: "Hücum — ordular temas eder ve savaş zarları açılır", value: "ASSAULT" }
+      )))
+    .addSubcommand((sub) => sub.setName("bombardiman").setDescription("Katapultlarla bir bombardıman turu oynatır; ordular temas etmez"))
     .addSubcommand((sub) => sub.setName("yayinla").setDescription("Taslağı herkese açık savaş kartı olarak yayımlar"))
     .addSubcommand((sub) => sub.setName("tur-oynat").setDescription("İki açık zar tamamlanınca savaş turunu çözer"))
     .addSubcommand((sub) => sub.setName("ordu-detay").setDescription("Tam birlik kompozisyonunu yalnızca yöneticiye gösterir"))

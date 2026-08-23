@@ -14,8 +14,8 @@ function siegeView(): BattleView {
       id: "battle", guild_id: "guild", channel_id: "channel", public_message_id: null,
       terrain: "SIEGE", narrative: "Roma surlara yaklaşıyor.", status: "WAITING_FIRST_ROLL",
       round_number: 2, first_side: "A", winner_side: null, finish_reason: null,
-      wall_max_hp: 30_000, wall_current_hp: 25_000, gate_max_hp: 15_000, gate_current_hp: 12_000,
-      losses_applied_at: null, created_by: "gm", created_at: new Date(), updated_at: new Date()
+      wall_max_hp: 30_000, wall_current_hp: 25_000, gate_max_hp: 1_000, gate_current_hp: 800,
+      siege_phase: "BOMBARDMENT", bombardment_round: 2, losses_applied_at: null, created_by: "gm", created_at: new Date(), updated_at: new Date()
     },
     sides: {
       A: {
@@ -36,21 +36,26 @@ function siegeView(): BattleView {
 }
 
 describe("kuşatma bilgi gizliliği", () => {
-  it("açık kartta savunucunun toplamını, kaybını ve düzenini göstermez", () => {
+  it("açık kartta yalnız savunucunun toplam asker sayısını gizler", () => {
     const json = JSON.stringify(battleEmbed(siegeView()).toJSON());
     expect(json).not.toContain("12.345");
     expect(json).not.toContain("8.765");
-    expect(json).not.toContain("3.580");
-    expect(json).toContain("Asker Sayısı:** Gizli");
-    expect(json).toContain("Savunma Durumu:** Gizli");
+    expect(json).toContain("3.580");
+    expect(json).toContain("Toplam Asker:** Gizli");
+    expect(json).toContain("Sarsılmış");
+    expect(json).not.toContain("ATTACKER");
+    expect(json).not.toContain("DEFENDER");
+    expect(json).not.toContain("Savunma Kademesi");
+    expect(json).not.toContain("A cephesi");
+    expect(json).not.toContain("B cephesi");
   });
 
-  it("açık tur sonucunda savunucunun tur kaybını gizler", () => {
+  it("açık tur sonucunda savunucunun kaybını gösterir", () => {
     const json = JSON.stringify(battleEmbed(siegeView(), {
       tier: "CLEAR", winner: "A", lossA: 500, lossB: 1_234,
       orderA: "ORDERED", orderB: "SHAKEN", wallDamage: 400, gateDamage: 200, ended: false
     }).toJSON());
-    expect(json).not.toContain("1.234");
-    expect(json).toContain("Kayıp gizli");
+    expect(json).toContain("1.234");
+    expect(json).not.toContain("Kayıp gizli");
   });
 });

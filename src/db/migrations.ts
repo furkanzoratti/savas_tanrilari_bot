@@ -355,4 +355,34 @@ export const migrations = [
         UNIQUE (battle_id,side_key,force_type)
       );
     `
+  },
+  {
+    version: 8,
+    name: "siege_bombardment_gate_and_population_casualties",
+    sql: `
+      ALTER TABLE battles ADD COLUMN IF NOT EXISTS siege_phase TEXT;
+      ALTER TABLE battles DROP CONSTRAINT IF EXISTS battles_siege_phase_check;
+      ALTER TABLE battles ADD CONSTRAINT battles_siege_phase_check CHECK (siege_phase IS NULL OR siege_phase IN ('BOMBARDMENT','ASSAULT'));
+      ALTER TABLE battles ADD COLUMN IF NOT EXISTS bombardment_round INTEGER NOT NULL DEFAULT 0 CHECK (bombardment_round >= 0);
+
+      UPDATE battles
+         SET gate_current_hp=ROUND(COALESCE(gate_current_hp,15000)::numeric / GREATEST(COALESCE(gate_max_hp,15000),1) * 1000),
+             gate_max_hp=1000,
+             siege_phase=COALESCE(siege_phase,'BOMBARDMENT')
+       WHERE terrain='SIEGE';
+
+      ALTER TABLE battle_casualty_applications ADD COLUMN IF NOT EXISTS population_loss_applied INTEGER NOT NULL DEFAULT 0 CHECK (population_loss_applied >= 0);
+      ALTER TABLE battle_casualty_applications ADD COLUMN IF NOT EXISTS population_shortfall INTEGER NOT NULL DEFAULT 0 CHECK (population_shortfall >= 0);
+
+      CREATE TABLE IF NOT EXISTS battle_bombardments (
+        battle_id UUID NOT NULL REFERENCES battles(id) ON DELETE CASCADE,
+        bombardment_number INTEGER NOT NULL CHECK (bombardment_number >= 1),
+        actor_user_id TEXT NOT NULL,
+        catapult_count INTEGER NOT NULL CHECK (catapult_count > 0),
+        wall_damage INTEGER NOT NULL CHECK (wall_damage >= 0),
+        wall_hp_after INTEGER NOT NULL CHECK (wall_hp_after >= 0),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (battle_id,bombardment_number)
+      );
+    `
   }] as const;
