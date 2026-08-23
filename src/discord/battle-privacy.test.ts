@@ -1,0 +1,56 @@
+import { describe, expect, it, vi } from "vitest";
+
+vi.hoisted(() => {
+  process.env.DISCORD_TOKEN = "test-token";
+  process.env.DISCORD_CLIENT_ID = "test-client";
+  process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
+});
+import { battleEmbed } from "./battle-ui.js";
+import type { BattleView } from "../services/battle-service.js";
+
+function siegeView(): BattleView {
+  return {
+    battle: {
+      id: "battle", guild_id: "guild", channel_id: "channel", public_message_id: null,
+      terrain: "SIEGE", narrative: "Roma surlara yaklaşıyor.", status: "WAITING_FIRST_ROLL",
+      round_number: 2, first_side: "A", winner_side: null, finish_reason: null,
+      wall_max_hp: 30_000, wall_current_hp: 25_000, gate_max_hp: 15_000, gate_current_hp: 12_000,
+      losses_applied_at: null, created_by: "gm", created_at: new Date(), updated_at: new Date()
+    },
+    sides: {
+      A: {
+        battle_id: "battle", side_key: "A", country_id: "rome", country_name: "Roma", controller: "PLAYERS",
+        initial_total: 12_000, current_total: 10_000, total_losses: 2_000, pressure: 1,
+        composition: { heavy_infantry: 10_000 }, initial_composition: { heavy_infantry: 12_000 },
+        support_assets: {}, support_targets: {}, seal: "ATTACKER"
+      },
+      B: {
+        battle_id: "battle", side_key: "B", country_id: "city", country_name: "Savunucu", controller: "GM",
+        initial_total: 12_345, current_total: 8_765, total_losses: 3_580, pressure: 4,
+        composition: { spear: 8_765 }, initial_composition: { spear: 12_345 },
+        support_assets: {}, support_targets: {}, seal: "DEFENDER"
+      }
+    },
+    rolls: []
+  };
+}
+
+describe("kuşatma bilgi gizliliği", () => {
+  it("açık kartta savunucunun toplamını, kaybını ve düzenini göstermez", () => {
+    const json = JSON.stringify(battleEmbed(siegeView()).toJSON());
+    expect(json).not.toContain("12.345");
+    expect(json).not.toContain("8.765");
+    expect(json).not.toContain("3.580");
+    expect(json).toContain("Asker Sayısı:** Gizli");
+    expect(json).toContain("Savunma Durumu:** Gizli");
+  });
+
+  it("açık tur sonucunda savunucunun tur kaybını gizler", () => {
+    const json = JSON.stringify(battleEmbed(siegeView(), {
+      tier: "CLEAR", winner: "A", lossA: 500, lossB: 1_234,
+      orderA: "ORDERED", orderB: "SHAKEN", wallDamage: 400, gateDamage: 200, ended: false
+    }).toJSON());
+    expect(json).not.toContain("1.234");
+    expect(json).toContain("Kayıp gizli");
+  });
+});

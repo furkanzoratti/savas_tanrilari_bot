@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { advantageTier, battleEnds, compositionTotal, engagedComposition, orderState, resolveRound, rollBattlePool, rollNavalPool, rollSiegeSupport } from "./battle.js";
+import { advantageTier, baseRetreatRate, battleEnds, compositionTotal, engagedComposition, orderState, resolveRound, rollBattlePool, rollNavalPool, rollSiegeSupport, siegeDefenderCaptured, siegeDefenseModifiers } from "./battle.js";
 
 describe("savaş motoru", () => {
   it("cephe kapasitesini aşan orduyu gizli olarak ölçekler", () => {
@@ -52,10 +52,33 @@ describe("savaş motoru", () => {
   });
 
   it("kuşatma aletleri sur hasarı ve savaş desteği üretir", () => {
-    const support = rollSiegeSupport({ ram: 2, catapult: 1, siege_tower: 1, mantlet: 2 }, () => 0);
+    const support = rollSiegeSupport({ ram: 2, catapult: 1, siege_tower: 1, mantlet: 2 }, { ram: "GATE", catapult: "WALL", siege_tower: "ASSAULT", mantlet: "ASSAULT" }, () => 0);
     expect(support.wallDamage).toBeGreaterThan(0);
+    expect(support.gateDamage).toBeGreaterThan(0);
     expect(support.clash).toBeGreaterThan(0);
     expect(support.defense).toBeCloseTo(0.10);
   });
-});
+  it("on katapult ve on balista suru iki turda yıkamaz", () => {
+    const support = rollSiegeSupport({ catapult: 10, ballista: 10 }, { catapult: "WALL", ballista: "WALL" }, (max) => max - 1);
+    expect(support.wallDamage * 2).toBeLessThan(30_000);
+  });
 
+  it("şehir, gedik açılmadan veya savunma kırılmadan düşmez", () => {
+    expect(siegeDefenderCaptured(12_000, 8_000, 6, 0, 15_000)).toBe(false);
+    expect(siegeDefenderCaptured(12_000, 8_000, 8, 0, 15_000)).toBe(true);
+    expect(siegeDefenderCaptured(12_000, 3_600, 4, 30_000, 0)).toBe(true);
+    expect(siegeDefenderCaptured(12_000, 0, 8, 30_000, 15_000)).toBe(false);
+    expect(siegeDefenderCaptured(12_000, 0, 8, 30_000, 15_000, true)).toBe(true);
+  });
+
+  it("sağlam tahkimat savunana belirgin üstünlük verir", () => {
+    expect(siegeDefenseModifiers(30_000, 15_000)).toEqual({ defenderClash: 1.50, defenderDamage: 1.35, attackerDamage: 0.50 });
+    expect(siegeDefenseModifiers(0, 15_000)).toEqual({ defenderClash: 1.25, defenderDamage: 1.15, attackerDamage: 0.75 });
+  });
+
+  it("geri çekilme yalnızca ilk turda kayıpsızdır", () => {
+    expect(baseRetreatRate(1)).toBe(0);
+    expect(baseRetreatRate(2)).toBe(0.05);
+    expect(baseRetreatRate(5)).toBeGreaterThan(baseRetreatRate(2));
+  });
+});

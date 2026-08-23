@@ -320,4 +320,39 @@ export const migrations = [
       ALTER TABLE battle_rounds ADD COLUMN IF NOT EXISTS wall_damage INTEGER NOT NULL DEFAULT 0 CHECK (wall_damage >= 0);
       UPDATE battles SET wall_max_hp=5000,wall_current_hp=5000 WHERE terrain='SIEGE' AND wall_max_hp IS NULL;
     `
+  },
+  {
+    version: 7,
+    name: "siege_structures_retreat_and_battle_casualties",
+    sql: `
+      ALTER TABLE battles ADD COLUMN IF NOT EXISTS gate_max_hp INTEGER CHECK (gate_max_hp IS NULL OR gate_max_hp >= 0);
+      ALTER TABLE battles ADD COLUMN IF NOT EXISTS gate_current_hp INTEGER CHECK (gate_current_hp IS NULL OR gate_current_hp >= 0);
+      ALTER TABLE battles ADD COLUMN IF NOT EXISTS losses_applied_at TIMESTAMPTZ;
+      ALTER TABLE battle_sides ADD COLUMN IF NOT EXISTS support_targets JSONB NOT NULL DEFAULT '{}'::jsonb;
+      ALTER TABLE battle_sides ADD COLUMN IF NOT EXISTS initial_composition JSONB NOT NULL DEFAULT '{}'::jsonb;
+      UPDATE battle_sides SET initial_composition=composition WHERE initial_composition='{}'::jsonb;
+      ALTER TABLE battle_rolls ADD COLUMN IF NOT EXISTS gate_damage INTEGER NOT NULL DEFAULT 0 CHECK (gate_damage >= 0);
+      ALTER TABLE battle_rounds ADD COLUMN IF NOT EXISTS gate_damage INTEGER NOT NULL DEFAULT 0 CHECK (gate_damage >= 0);
+      ALTER TABLE battle_rounds ADD COLUMN IF NOT EXISTS retreat_loss_a INTEGER NOT NULL DEFAULT 0 CHECK (retreat_loss_a >= 0);
+      ALTER TABLE battle_rounds ADD COLUMN IF NOT EXISTS retreat_loss_b INTEGER NOT NULL DEFAULT 0 CHECK (retreat_loss_b >= 0);
+
+      UPDATE battles
+         SET wall_current_hp=ROUND(COALESCE(wall_current_hp,5000)::numeric / GREATEST(COALESCE(wall_max_hp,5000),1) * 30000),
+             wall_max_hp=30000,
+             gate_max_hp=15000,
+             gate_current_hp=COALESCE(gate_current_hp,15000)
+       WHERE terrain='SIEGE';
+
+      CREATE TABLE IF NOT EXISTS battle_casualty_applications (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        battle_id UUID NOT NULL REFERENCES battles(id) ON DELETE CASCADE,
+        side_key TEXT NOT NULL CHECK (side_key IN ('A','B')),
+        force_type TEXT NOT NULL,
+        calculated_loss INTEGER NOT NULL CHECK (calculated_loss >= 0),
+        applied_loss INTEGER NOT NULL CHECK (applied_loss >= 0),
+        shortfall INTEGER NOT NULL CHECK (shortfall >= 0),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (battle_id,side_key,force_type)
+      );
+    `
   }] as const;

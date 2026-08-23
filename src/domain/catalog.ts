@@ -85,7 +85,7 @@ export const SIEGE_ASSETS = {
   mantlet: { name: "Mantlet Grubu", price: 1_000, workshop: 2, buildTurns: 1 },
   ballista: { name: "Balista", price: 3_000, workshop: 1, buildTurns: 2 },
   wall_ballista: { name: "Hafif Sur Balistası", price: 2_500, workshop: 2, buildTurns: 2 },
-  catapult: { name: "Mancınık", price: 4_000, workshop: 2, buildTurns: 3 },
+  catapult: { name: "Katapult", price: 4_000, workshop: 2, buildTurns: 3 },
   siege_tower: { name: "Kuşatma Kulesi", price: 5_000, workshop: 3, buildTurns: 3 }
 } as const;
 

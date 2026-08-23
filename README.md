@@ -134,17 +134,17 @@ pnpm dev
 Savaşlar kanal bazında ve PostgreSQL üzerinde kalıcıdır. Aynı kanalda aynı anda yalnızca bir etkin savaş bulunabilir.
 
 1. DM `/savas baslat` ile ülkeleri, savaş alanını ve iki tarafın zar yetkisini seçer.
-2. DM `/savas birlik-ayarla` komutunu her birlik türü için kullanarak iki gizli kadroyu oluşturur. Komut yanıtı yalnızca DM'e görünür.
+2. DM `/savas kadro-ayarla` veya `/savas filo-ayarla` ile bütün gizli kadroyu tek komutta oluşturur. Tekil düzeltmeler için `/savas birlik-ayarla` ve `/savas gemi-ayarla` kullanılabilir. Komut yanıtı yalnızca DM'e görünür.
 3. DM `/savas yayinla` ile açık savaş kartını gönderir. Kart yalnızca toplam asker, toplam kayıp, düzen, zar yetkisi ve ordu mührünü gösterir.
 4. Botun belirlediği sıradaki ülke oyuncusu veya NPC için DM, `Savaş Zarlarını At` düğmesini kullanır. Çarpışma ve hasar toplamları kanalda açık yayımlanır.
 5. İki zar tamamlanınca DM `/savas tur-oynat` kullanır. Ana çarpışma ordulardan biri dağılana, geri çekilene veya DM savaşı bitirene kadar tekrar eder.
-6. DM tam birim bileşimi ve gizli kalan birlikleri `/savas ordu-detay` ile özel olarak görebilir.
+6. DM tam birim bileşimi ve gizli kalan birlikleri `/savas ordu-detay`, otomatik belge aktarımını `/savas kayip-raporu` ile özel olarak görebilir.
 
-Oyuncu geri çekilmesi kart düğmesiyle yapılır. DM oyuncu ülkesinin zarını vekâleten atabilir; sonuç açıkça `DM vekili` olarak işaretlenir. NPC taraflar yalnızca DM tarafından oynatılır. Dokuz hazır görsel `assets/battlefields` altında bulunur ve Docker imajına otomatik kopyalanır.
+Oyuncu geri çekilmesi kart düğmesiyle yapılır. İlk savaş turu kayıpsızdır; sonraki turlarda savaşın uzaması, rakibin süvari/hafif gemi oranı ve arazi takip kaybı doğurur. DM oyuncu ülkesinin zarını vekâleten atabilir; sonuç açıkça `DM vekili` olarak işaretlenir. NPC taraflar yalnızca DM tarafından oynatılır. On hazır görsel `assets/battlefields` altında bulunur ve Docker imajına otomatik kopyalanır.
 ### Pusu, kuşatma ve deniz savaşı
 
 - **Pusu:** `/savas baslat` sırasında `Pusu` seçilir. A tarafı pusuyu kurandır ve ilk zarı atar. İlk tur A tarafının çarpışma toplamı %25, hasar toplamı %10 artar. Dar cephe nedeniyle A en fazla 15.000, B en fazla 8.000 askerini aynı anda kullanır.
-- **Kuşatma:** A kuşatan, B savunandır. Kara kadroları `/savas birlik-ayarla`, araçlar `/savas kusatma-aleti-ayarla` ile girilir. Surlar 5.000 HP ile başlar. Surlar ayaktayken A tarafının birlik hasarı %35 etkinlikte, B tarafının hasarı %110 etkinlikte uygulanır. Koçbaşı, balista ve mancınık sur hasarı; merdiven, mantlet ve kuşatma kulesi çarpışma desteği sağlar. Her mantlet, saldırana gelen hasarı %5 azaltır; toplam azaltma %50 ile sınırlıdır. B yalnızca Hafif Sur Balistası kullanabilir.
+- **Kuşatma:** A kuşatan, B savunandır. Sur 30.000, kapı 15.000 canla başlar. Koçbaşı yalnız kapıyı; Katapult ve Balista seçilen hedefe göre suru veya savunan orduyu vurur. Merdiven, mantlet ve kuşatma kulesi hücumu destekler. Tahkimat sağlamken savunucu Çarpışma +%50 ve Hasar +%35 alır; saldıranın birlik Hasarı %50 etkinliktedir. Şehir için sur/kapı gediği veya merdiven/kule erişimi ve ayrıca savunucunun %30'a düşmesi, 8 baskıya ulaşması ya da tükenmesi gerekir. Her mantlet saldırana gelen Hasarı %5 azaltır; toplam sınır %50'dir. B yalnızca Hafif Sur Balistası kullanabilir.
 - **Deniz savaşı:** Kara birliği yerine `/savas gemi-ayarla` kullanılır. Kerkouros 1d6/1d6, Trireme 2d8/2d8, Quinquereme 3d10/3d10 çarpışma/hasar zarı üretir. Her gemi ayrı zar birimidir; filo cephesi taraf başına 30 gemidir. Kayıplar gemi adedi olarak hesaplanır ve ağır gemiler daha dayanıklıdır.
 
-Pusu, sur ve gemi ayrıntıları açık savaş kartında yalnızca toplam olarak görünür. Tam kadro ile kuşatma aleti türleri `/savas ordu-detay` içinde gizli kalır.
+Kuşatmada saldıran toplamı açık, savunan toplamı ve kayıpları gizlidir. Tam kadro ile kuşatma aleti türleri `/savas ordu-detay` içinde kalır. Savaş sonunda kayıplar ülke belgelerine tek sefer otomatik işlenir ve yöneticiye hesaplanan/uygulanan/fark dökümü verilir. Oyunculara dağıtılacak eksiksiz metin `docs/discord-savas-sistemi.md` içindedir.

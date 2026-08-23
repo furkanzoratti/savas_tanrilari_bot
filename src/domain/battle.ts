@@ -22,6 +22,8 @@ export type SiegeAssetType = "ladder_group" | "ram" | "mantlet" | "ballista" | "
 export type BattleForceType = BattleUnitType | NavalUnitType;
 export type BattleComposition = Partial<Record<BattleForceType, number>>;
 export type SiegeComposition = Partial<Record<SiegeAssetType, number>>;
+export type SiegeTarget = "WALL" | "GATE" | "ARMY" | "ASSAULT";
+export type SiegeTargets = Partial<Record<SiegeAssetType, SiegeTarget>>;
 export type BattleOrder = "ORDERED" | "WORN" | "SHAKEN" | "BROKEN";
 
 export const BATTLE_UNIT_STATS: Record<BattleUnitType, {
@@ -46,7 +48,7 @@ export const NAVAL_UNIT_STATS: Record<NavalUnitType, {
 
 export const SIEGE_ASSET_BATTLE_STATS: Record<SiegeAssetType, { label: string }> = {
   ladder_group: { label: "Merdiven Grubu" }, ram: { label: "Koçbaşı" }, mantlet: { label: "Mantlet Grubu" },
-  ballista: { label: "Balista" }, wall_ballista: { label: "Hafif Sur Balistası" }, catapult: { label: "Mancınık" }, siege_tower: { label: "Kuşatma Kulesi" }
+  ballista: { label: "Balista" }, wall_ballista: { label: "Hafif Sur Balistası" }, catapult: { label: "Katapult" }, siege_tower: { label: "Kuşatma Kulesi" }
 };
 export interface BattleRoll {
   clash: number;
@@ -141,19 +143,29 @@ export function rollNavalPool(composition: BattleComposition, frontage: number, 
   return { clash, damage, detail };
 }
 
-export function rollSiegeSupport(composition: SiegeComposition, randomInt = (max: number) => Math.floor(Math.random() * max)): { clash: number; damage: number; wallDamage: number; defense: number; detail: Record<string, number> } {
+export function rollSiegeSupport(
+  composition: SiegeComposition, targets: SiegeTargets = {}, randomInt = (max: number) => Math.floor(Math.random() * max)
+): { clash: number; damage: number; wallDamage: number; gateDamage: number; defense: number; detail: Record<string, number | string> } {
   const roll = (count: number, dice: number, sides: number) => rollPool(Math.min(count, 25), dice, sides, randomInt, 1);
   const ladder = composition.ladder_group ?? 0, ram = composition.ram ?? 0, mantlet = composition.mantlet ?? 0;
   const ballista = composition.ballista ?? 0, wallBallista = composition.wall_ballista ?? 0, catapult = composition.catapult ?? 0, tower = composition.siege_tower ?? 0;
   const ladderClash = roll(ladder, 1, 4), towerClash = roll(tower, 1, 10), mantletClash = roll(mantlet, 1, 4);
-  const ballistaDamage = roll(ballista, 1, 8), wallBallistaDamage = roll(wallBallista, 2, 8), catapultDamage = roll(catapult, 1, 10), towerDamage = roll(tower, 1, 6);
-  const ramWall = roll(ram, 1, 8) * 40, ballistaWall = roll(ballista, 1, 4) * 10, catapultWall = roll(catapult, 2, 10) * 25;
+  const ballistaRoll = roll(ballista, 1, 8), wallBallistaDamage = roll(wallBallista, 2, 8), catapultRoll = roll(catapult, 1, 10), towerDamage = roll(tower, 1, 6);
+  const ramGate = roll(ram, 1, 8) * 35;
+  const ballistaWall = targets.ballista === "WALL" ? roll(ballista, 1, 6) * 5 : 0;
+  const catapultWall = targets.catapult === "WALL" ? roll(catapult, 2, 10) * 20 : 0;
+  const ballistaArmy = targets.ballista === "ARMY" ? ballistaRoll : 0;
+  const catapultArmy = targets.catapult === "ARMY" ? catapultRoll : 0;
   return {
     clash: ladderClash + towerClash + mantletClash,
-    damage: ballistaDamage + wallBallistaDamage + catapultDamage + towerDamage,
-    wallDamage: ramWall + ballistaWall + catapultWall,
+    damage: ballistaArmy + wallBallistaDamage + catapultArmy + towerDamage,
+    wallDamage: ballistaWall + catapultWall,
+    gateDamage: ramGate,
     defense: Math.min(0.50, mantlet * 0.05),
-    detail: { ladderClash, towerClash, mantletClash, ballistaDamage, wallBallistaDamage, catapultDamage, towerDamage, ramWall, ballistaWall, catapultWall }
+    detail: {
+      ladderClash, towerClash, mantletClash, ballistaArmy, wallBallistaDamage, catapultArmy, towerDamage,
+      ramGate, ballistaWall, catapultWall, ballistaTarget: targets.ballista ?? "WALL", catapultTarget: targets.catapult ?? "WALL"
+    }
   };
 }
 export function advantageTier(a: number, b: number): { tier: RoundResolution["tier"]; winner: BattleSideKey | null } {
@@ -215,6 +227,21 @@ export function resolveRound(
     pressureDeltaA: outcome.winner === "B" ? pressure : outcome.winner === "A" ? -1 : 0,
     pressureDeltaB: outcome.winner === "A" ? pressure : outcome.winner === "B" ? -1 : 0
   };
+}
+export function siegeDefenseModifiers(wallHp: number, gateHp: number): { defenderClash: number; defenderDamage: number; attackerDamage: number } {
+  if (wallHp > 0 && gateHp > 0) return { defenderClash: 1.50, defenderDamage: 1.35, attackerDamage: 0.50 };
+  if (wallHp > 0 || gateHp > 0) return { defenderClash: 1.25, defenderDamage: 1.15, attackerDamage: 0.75 };
+  return { defenderClash: 1.10, defenderDamage: 1.00, attackerDamage: 1.00 };
+}
+
+export function siegeDefenderCaptured(initial: number, remaining: number, pressure: number, wallHp: number, gateHp: number, assaultAccess = false): boolean {
+  const access = wallHp <= 0 || gateHp <= 0 || assaultAccess;
+  return access && (remaining <= Math.floor(initial * 0.30) || pressure >= 8 || remaining <= 0);
+}
+
+export function baseRetreatRate(roundNumber: number): number {
+  if (roundNumber <= 1) return 0;
+  return 0.05 + Math.min(0.09, Math.max(0, roundNumber - 2) * 0.03);
 }
 export function orderState(pressure: number, initial: number, remaining: number): BattleOrder {
   const casualtyRate = initial > 0 ? 1 - remaining / initial : 1;
