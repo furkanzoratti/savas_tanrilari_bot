@@ -40,11 +40,14 @@ describe("kültür ve yerleşke kartı", () => {
     const embeds = renderDocument(document);
     expect(embeds).toHaveLength(2);
     const fields = embeds[1]!.data.fields ?? [];
-    expect(fields.map((field) => field.name)).toEqual(expect.arrayContaining(["🏺 Kültür", "🛡️ Sabit Garnizon", "⚔️ Ordu"]));
+    expect(fields.map((field) => field.name)).toEqual(expect.arrayContaining(["🏺 Kültür", "🛡️ Garnizon", "⚔️ Ordu"]));
     expect(fields.find((field) => field.name === "🏺 Kültür")?.value).toContain("İtalik");
-    expect(fields.find((field) => field.name === "⚔️ Ordu")?.value).toContain("Yerleşkede");
+    expect(fields.find((field) => field.name === "⚔️ Ordu")?.value).not.toContain("Yerleşkede");
+    expect(fields.find((field) => field.name === "👥 Nüfus")?.value).not.toContain("Sonraki Alım");
+    expect(fields.find((field) => field.name === "💰 Gelir Kalemleri")?.value).toContain("Toplam:");
+    expect(fields.find((field) => field.name === "💰 Gelir Kalemleri")?.value).not.toContain("Tahsil edilecek");
     expect(fields.find((field) => field.name === "🏦 Yerel Hazine")?.value).toContain("500 Altın");
-    expect(fields.find((field) => field.name === "🎖️ Asker Alım Payı")?.value).toContain("7.500");
+    expect(fields.find((field) => field.name === "🎖️ Ordu Limiti")?.value).toContain("7.500");
     expect(fields.find((field) => field.name === "💰 Gelir Kalemleri")?.value).not.toContain("Deniz Ticareti");
   });
 });

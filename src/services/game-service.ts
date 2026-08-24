@@ -88,6 +88,41 @@ async function getGuild(client: DbClient, guildId: string): Promise<GuildRow> {
   return ensureGuild(client, guildId);
 }
 
+async function syncCountryTreasury(client: DbClient, countryId: string): Promise<number> {
+  const result = await client.query<{ treasury: number }>(
+    `UPDATE countries
+        SET treasury=(SELECT COALESCE(SUM(local_treasury),0)::bigint FROM settlements WHERE country_id=$1)
+      WHERE id=$1 RETURNING treasury`,
+    [countryId]
+  );
+  return Number(result.rows[0]?.treasury ?? 0);
+}
+
+async function adjustCountryLocalTreasuries(client: DbClient, countryId: string, amount: number): Promise<number> {
+  const settlements = (await client.query<{ id: string; local_treasury: number }>(
+    "SELECT id,local_treasury FROM settlements WHERE country_id=$1 ORDER BY local_treasury DESC,name,id FOR UPDATE",
+    [countryId]
+  )).rows;
+  if (!settlements.length) {
+    const changed = await client.query<{ treasury: number }>("UPDATE countries SET treasury=treasury+$1 WHERE id=$2 RETURNING treasury", [amount, countryId]);
+    return Number(changed.rows[0]?.treasury ?? 0);
+  }
+  const currentTotal = settlements.reduce((sum, settlement) => sum + Number(settlement.local_treasury), 0);
+  if (currentTotal + amount < 0) throw new GameError("Devlet hazinesi sıfırın altına düşemez.");
+  if (amount >= 0) {
+    await client.query("UPDATE settlements SET local_treasury=local_treasury+$1 WHERE id=$2", [amount, settlements[0]!.id]);
+  } else {
+    let remaining = -amount;
+    for (const settlement of settlements) {
+      if (remaining <= 0) break;
+      const deduction = Math.min(Math.max(0, Number(settlement.local_treasury)), remaining);
+      if (deduction > 0) await client.query("UPDATE settlements SET local_treasury=local_treasury-$1 WHERE id=$2", [deduction, settlement.id]);
+      remaining -= deduction;
+    }
+  }
+  return syncCountryTreasury(client, countryId);
+}
+
 async function countryManpower(client: DbClient, countryId: string): Promise<{ population: number; used: number }> {
   const populationResult = await client.query<{ total: number }>(
     "SELECT COALESCE(SUM(population), 0)::bigint AS total FROM settlements WHERE country_id = $1",
@@ -276,11 +311,13 @@ export const gameService = {
     return withTransaction(async (client) => {
       const country = await getCountry(client, input.countryId);
       if (country.guild_id !== input.guildId) throw new GameError("Ülke bu sunucuya ait değil.");
+      const existingSettlementCount = Number((await client.query<{ count: number }>("SELECT COUNT(*)::integer AS count FROM settlements WHERE country_id=$1", [country.id])).rows[0]?.count ?? 0);
+      const startingLocalTreasury = existingSettlementCount === 0 ? country.treasury : 0;
       const result = await client.query<SettlementRow>(
         `INSERT INTO settlements(
-          country_id,name,population,slave_population,base_income,tax_income,land_trade_income,sea_trade_income,base_land_trade_income,base_population_growth,resource_type,culture_group
-        ) VALUES ($1,$2,$3,$4,0,0,0,0,$5,$6,$7,$8) RETURNING *`,
-        [input.countryId, input.name.trim(), input.population, input.slaves, landTradeIncome, input.basePopulationGrowth, input.resourceType, input.cultureGroup]
+          country_id,name,population,slave_population,base_income,tax_income,land_trade_income,sea_trade_income,base_land_trade_income,base_population_growth,resource_type,culture_group,local_treasury
+        ) VALUES ($1,$2,$3,$4,0,0,0,0,$5,$6,$7,$8,$9) RETURNING *`,
+        [input.countryId, input.name.trim(), input.population, input.slaves, landTradeIncome, input.basePopulationGrowth, input.resourceType, input.cultureGroup, startingLocalTreasury]
       );
       const settlement = result.rows[0]!;
       await ensureStandardGarrison(client, settlement.id, settlement.population, settlement.garrison_level, true);
@@ -324,6 +361,7 @@ export const gameService = {
       const settlement = (await client.query<SettlementRow>("SELECT * FROM settlements WHERE id=$1 AND country_id=$2 FOR UPDATE", [input.settlementId, country.id])).rows[0];
       if (!settlement) throw new GameError("Yerleşke bulunamadı.");
       await client.query("DELETE FROM settlements WHERE id=$1", [settlement.id]);
+      await syncCountryTreasury(client, country.id);
       await audit(client, input.guildId, input.actorId, "SETTLEMENT_DELETE", "settlement", settlement.id, { name: settlement.name, countryId: country.id });
       return { name: settlement.name };
     });
@@ -374,6 +412,8 @@ export const gameService = {
       await client.query("UPDATE settlements SET country_id=$1,is_conquered=TRUE,conquered_turn=$2 WHERE id=$3", [target.id, guild.current_turn, settlement.id]);
       await client.query("UPDATE naval_orders SET country_id=$1 WHERE settlement_id=$2", [target.id, settlement.id]);
       await client.query("UPDATE siege_assets SET country_id=$1 WHERE settlement_id=$2", [target.id, settlement.id]);
+      await syncCountryTreasury(client, source.id);
+      await syncCountryTreasury(client, target.id);
       await audit(client, input.guildId, input.actorId, "SETTLEMENT_TRANSFER", "settlement", settlement.id, {
         fromCountryId: source.id, toCountryId: target.id, cancelledRecruitmentOrders: activeOrders.rows.length, endedTrades: trades.rowCount ?? 0, conqueredTurn: guild.current_turn
       });
@@ -387,6 +427,7 @@ export const gameService = {
       const guild = await getGuild(client, country.guild_id);
       const playerIds = (await client.query<{ discord_user_id: string }>("SELECT discord_user_id FROM country_members WHERE country_id=$1 ORDER BY discord_user_id", [countryId])).rows.map((row) => row.discord_user_id);
       const settlements = (await client.query<SettlementRow>("SELECT * FROM settlements WHERE country_id = $1 ORDER BY name", [countryId])).rows;
+      const displayedCountry = { ...country, treasury: settlements.length ? settlements.reduce((sum, settlement) => sum + Number(settlement.local_treasury), 0) : country.treasury };
       const settlementIds = settlements.map((settlement) => settlement.id);
       const buildings = settlementIds.length ? (await client.query<BuildingRow>("SELECT * FROM buildings WHERE settlement_id = ANY($1::uuid[]) ORDER BY building_type", [settlementIds])).rows : [];
       const units = settlementIds.length ? (await client.query<{ settlement_id: string; unit_type: keyof typeof UNITS; quantity: number; status: UnitStatus; force_type: ForceType }>("SELECT * FROM unit_stacks WHERE settlement_id = ANY($1::uuid[]) ORDER BY force_type,unit_type", [settlementIds])).rows : [];
@@ -486,7 +527,7 @@ export const gameService = {
       const totalPayableIncome = incomeTotal(totalPayableBreakdown);
       return {
         guild,
-        country,
+        country: displayedCountry,
         playerIds,
         freePopulation: manpower.population,
         militaryUsed: manpower.used,
@@ -531,9 +572,10 @@ export const gameService = {
       }
       const effectiveResources = (await settlementResourceAccess(client, country.id)).get(settlement.id) ?? [settlement.resource_type];
       const cost = Math.ceil(BUILD_COSTS[targetLevel]! * buildingCostMultiplier(input.buildingType, effectiveResources));
-      if (country.treasury < cost) throw new GameError("Hazinede yeterli altın yok.");
+      if (settlement.local_treasury < cost) throw new GameError("Yerel hazinede yeterli altın yok.");
       const completionTurn = guild.current_turn + Math.max(1, BUILD_DURATIONS[targetLevel]! - buildingDurationReduction(input.buildingType, effectiveResources));
-      await client.query("UPDATE countries SET treasury=treasury-$1 WHERE id=$2", [cost, country.id]);
+      await client.query("UPDATE settlements SET local_treasury=local_treasury-$1 WHERE id=$2", [cost, settlement.id]);
+      await syncCountryTreasury(client, country.id);
       await client.query(
         `INSERT INTO buildings(settlement_id,building_type,level,target_level,status,started_turn,completion_turn)
          VALUES ($1,$2,0,$3,'BUILDING',$4,$5)
@@ -571,7 +613,7 @@ export const gameService = {
       if (!isAcquisitionTurn(guild.current_turn, guild.acquisition_interval)) throw new GameError("Asker alımı yalnızca Alım Turunda yapılabilir.");
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`country:${input.countryId}`]);
       const country = await getCountry(client, input.countryId);
-      const settlement = (await client.query<SettlementRow>("SELECT * FROM settlements WHERE id=$1 AND country_id=$2", [input.settlementId, country.id])).rows[0];
+      const settlement = (await client.query<SettlementRow>("SELECT * FROM settlements WHERE id=$1 AND country_id=$2 FOR UPDATE", [input.settlementId, country.id])).rows[0];
       if (!settlement) throw new GameError("Yerleşke bulunamadı.");
       const unit = UNITS[input.unitType];
       if (!unit) throw new GameError("Birim türü bulunamadı.");
@@ -584,14 +626,15 @@ export const gameService = {
       if (manpower.used + input.quantity > limit) throw new GameError(`Askerî personel sınırında yalnızca ${(limit - manpower.used).toLocaleString("tr-TR")} kişilik yer var.`);
       const effectiveResources = (await settlementResourceAccess(client, country.id)).get(settlement.id) ?? [settlement.resource_type];
       const cost = Math.ceil((input.quantity / 1_000) * unit.price * unitCostMultiplier(input.unitType, effectiveResources));
-      if (country.treasury < cost) throw new GameError("Hazinede yeterli altın yok.");
+      if (settlement.local_treasury < cost) throw new GameError("Yerel hazinede yeterli altın yok.");
       const waves = createRecruitmentWaves(input.quantity, country.mobilization, guild.current_turn);
       const order = await client.query<{ id: string }>(
         `INSERT INTO recruitment_orders(country_id,settlement_id,unit_type,total_quantity,remaining_quantity,paid_amount,ordered_turn)
          VALUES($1,$2,$3,$4,$4,$5,$6) RETURNING id`, [country.id, settlement.id, input.unitType, input.quantity, cost, guild.current_turn]
       );
       for (const wave of waves) await client.query("INSERT INTO recruitment_waves(order_id,due_turn,quantity) VALUES($1,$2,$3)", [order.rows[0]!.id, wave.dueTurn, wave.quantity]);
-      await client.query("UPDATE countries SET treasury=treasury-$1 WHERE id=$2", [cost, country.id]);
+      await client.query("UPDATE settlements SET local_treasury=local_treasury-$1 WHERE id=$2", [cost, settlement.id]);
+      await syncCountryTreasury(client, country.id);
       await client.query("INSERT INTO transactions(country_id,turn,kind,amount,description) VALUES($1,$2,'UNIT_PURCHASE',$3,$4)", [country.id, guild.current_turn, -cost, `${settlement.name}: ${input.quantity} ${unit.name}`]);
       await audit(client, input.guildId, input.actorId, "UNIT_PURCHASE", "settlement", settlement.id, { unitType: input.unitType, quantity: input.quantity, cost, waves });
       return { cost, waves };
@@ -632,7 +675,7 @@ export const gameService = {
       if (!isAcquisitionTurn(guild.current_turn, guild.acquisition_interval)) throw new GameError("Gemi alımı yalnızca Alım Turunda yapılabilir.");
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`country:${input.countryId}`]);
       const country = await getCountry(client, input.countryId);
-      const settlement = (await client.query<SettlementRow>("SELECT * FROM settlements WHERE id=$1 AND country_id=$2", [input.settlementId, country.id])).rows[0];
+      const settlement = (await client.query<SettlementRow>("SELECT * FROM settlements WHERE id=$1 AND country_id=$2 FOR UPDATE", [input.settlementId, country.id])).rows[0];
       if (!settlement) throw new GameError("Yerleşke bulunamadı.");
       const shipyard = await client.query<{ level: number }>("SELECT level FROM buildings WHERE settlement_id=$1 AND building_type='shipyard' AND status='ACTIVE'", [settlement.id]);
       const shipyardLevel = shipyard.rows[0]?.level ?? 0;
@@ -648,10 +691,11 @@ export const gameService = {
       if (manpower.used + personNeed > militaryLimit(manpower.population, country.mobilization)) throw new GameError("Gemi mürettebatı askerî personel sınırını aşıyor.");
       const effectiveResources = (await settlementResourceAccess(client, country.id)).get(settlement.id) ?? [settlement.resource_type];
       const cost = Math.ceil(ship.price * input.quantity * shipCostMultiplier(effectiveResources));
-      if (country.treasury < cost) throw new GameError("Hazinede yeterli altın yok.");
+      if (settlement.local_treasury < cost) throw new GameError("Yerel hazinede yeterli altın yok.");
       const completionTurn = guild.current_turn + ship.buildTurns;
       await client.query(`INSERT INTO naval_orders(country_id,settlement_id,ship_type,quantity,paid_amount,ordered_turn,completion_turn) VALUES($1,$2,$3,$4,$5,$6,$7)`, [country.id, settlement.id, input.shipType, input.quantity, cost, guild.current_turn, completionTurn]);
-      await client.query("UPDATE countries SET treasury=treasury-$1 WHERE id=$2", [cost, country.id]);
+      await client.query("UPDATE settlements SET local_treasury=local_treasury-$1 WHERE id=$2", [cost, settlement.id]);
+      await syncCountryTreasury(client, country.id);
       await client.query("INSERT INTO transactions(country_id,turn,kind,amount,description) VALUES($1,$2,'SHIP_PURCHASE',$3,$4)", [country.id, guild.current_turn, -cost, `${settlement.name}: ${input.quantity} ${ship.name}`]);
       await audit(client, input.guildId, input.actorId, "SHIP_PURCHASE", "settlement", settlement.id, { shipType: input.shipType, quantity: input.quantity, cost, completionTurn });
       return { cost, completionTurn };
@@ -686,6 +730,7 @@ export const gameService = {
       const balance = settlement.local_treasury + input.amount;
       if (balance < 0) throw new GameError("Yerleşke hazinesi sıfırın altına düşemez.");
       await client.query("UPDATE settlements SET local_treasury=$1 WHERE id=$2", [balance, settlement.id]);
+      await syncCountryTreasury(client, country.id);
       await audit(client, input.guildId, input.actorId, "SETTLEMENT_TREASURY_ADJUST", "settlement", settlement.id, { amount: input.amount, reason: input.reason, balance });
       return { balance };
     });
@@ -695,7 +740,7 @@ export const gameService = {
     await withTransaction(async (client) => {
       const guild = await getGuild(client, input.guildId);
       const country = await getCountry(client, input.countryId);
-      await client.query("UPDATE countries SET treasury=treasury+$1 WHERE id=$2", [input.amount, country.id]);
+      await adjustCountryLocalTreasuries(client, country.id, input.amount);
       await client.query("INSERT INTO transactions(country_id,turn,kind,amount,description) VALUES($1,$2,'ADMIN_ADJUSTMENT',$3,$4)", [country.id, guild.current_turn, input.amount, input.reason]);
       await audit(client, input.guildId, input.actorId, "TREASURY_ADJUST", "country", country.id, { amount: input.amount, reason: input.reason });
     });
@@ -777,26 +822,28 @@ export const gameService = {
               resources: effectiveResources
             });
             const popGain = calculatePopulationGain({ basePopulationGrowth: settlement.base_population_growth, buildings: active, ruinStage: settlement.ruin_stage, mobilization: country.mobilization, resources: effectiveResources });
-            incomeBreakdown = addIncomeBreakdowns(incomeBreakdown, economy.payable);
-            upkeep += economy.buildingUpkeep;
+            const adjustedSettlementIncome = scaleIncome(economy.payable, MOBILIZATION_RULES[country.mobilization].incomeMultiplier);
             const settlementUnits = (await client.query<{ unit_type: keyof typeof UNITS; quantity: number; status: UnitStatus }>("SELECT unit_type,quantity,status FROM unit_stacks WHERE settlement_id=$1", [settlement.id])).rows;
             const settlementShips = (await client.query<{ ship_type: keyof typeof SHIPS; quantity: number; status: ShipStatus }>("SELECT ship_type,quantity,status FROM naval_units WHERE settlement_id=$1", [settlement.id])).rows;
-            upkeep += settlementUnits.reduce((sum, unit) => sum + calculateUnitUpkeep(unit.unit_type, unit.quantity, unit.status, country.mobilization, effectiveResources), 0);
-            upkeep += settlementShips.reduce((sum, ship) => sum + calculateShipUpkeep(ship.ship_type, ship.quantity, ship.status, country.mobilization), 0);
+            const settlementUpkeep = economy.buildingUpkeep
+              + settlementUnits.reduce((sum, unit) => sum + calculateUnitUpkeep(unit.unit_type, unit.quantity, unit.status, country.mobilization, effectiveResources), 0)
+              + settlementShips.reduce((sum, ship) => sum + calculateShipUpkeep(ship.ship_type, ship.quantity, ship.status, country.mobilization), 0);
+            const settlementNet = incomeTotal(adjustedSettlementIncome) - settlementUpkeep;
+            incomeBreakdown = addIncomeBreakdowns(incomeBreakdown, adjustedSettlementIncome);
+            upkeep += settlementUpkeep;
             const nextPopulation = settlement.population + popGain;
-            await client.query("UPDATE settlements SET population=$1,ruin_stage=$2 WHERE id=$3", [nextPopulation, nextRuinStage(settlement.ruin_stage), settlement.id]);
+            await client.query("UPDATE settlements SET population=$1,ruin_stage=$2,local_treasury=local_treasury+$3 WHERE id=$4", [nextPopulation, nextRuinStage(settlement.ruin_stage), settlementNet, settlement.id]);
             if (await ensureStandardGarrison(client, settlement.id, nextPopulation, settlement.garrison_level)) {
               garrisonUpgrades += 1;
               garrisonUpgradeDetails.push(settlement.name);
             }
           }
-          const adjustedBreakdown = scaleIncome(incomeBreakdown, MOBILIZATION_RULES[country.mobilization].incomeMultiplier);
-          const adjustedIncome = incomeTotal(adjustedBreakdown);
+          const adjustedIncome = incomeTotal(incomeBreakdown);
           const net = adjustedIncome - upkeep;
-          await client.query("UPDATE countries SET treasury=treasury+$1 WHERE id=$2", [net, country.id]);
+          await syncCountryTreasury(client, country.id);
           await client.query(
             "INSERT INTO transactions(country_id,turn,kind,amount,description) VALUES($1,$2,'ACQUISITION_TURN',$3,$4)",
-            [country.id, newTurn, net, `Binalar ${adjustedBreakdown.building}; halk vergisi ${adjustedBreakdown.tax}; kara ticareti ${adjustedBreakdown.landTrade}; deniz ticareti ${adjustedBreakdown.seaTrade}; bakım ${upkeep}`]
+            [country.id, newTurn, net, `Binalar ${incomeBreakdown.building}; halk vergisi ${incomeBreakdown.tax}; kara ticareti ${incomeBreakdown.landTrade}; deniz ticareti ${incomeBreakdown.seaTrade}; bakım ${upkeep}`]
           );
         }
       }

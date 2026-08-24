@@ -10,7 +10,6 @@ import { TEMPLE_BANNER_URL } from "./assets.js";
 
 const ruinLabels = ["Normal", "Harap • sonraki Alım Turu %0", "Toparlanıyor • sonraki Alım Turu %50"];
 const phaseLabels: Record<string, string> = { OPEN: "Hareketler Açık", CLOSED: "Hareketler Kapalı", RESOLVING: "Olaylar Çözülüyor" };
-const armyStatusLabels = { GARRISON: "Yerleşkede", FIELD_FRIENDLY: "Dost Bölgede", FIELD_HOSTILE: "Düşman Bölgesinde" } as const;
 const shipStatusLabels = { RESERVE: "Limanda / Rezerv", ACTIVE: "Aktif Donanma", HOSTILE: "Düşman Sularında" } as const;
 
 type SettlementDocument = CountryDocument["settlements"][number];
@@ -27,10 +26,7 @@ function renderLandForces(
   const units = settlement.units.filter((unit) => unit.force_type === forceType);
   if (!units.length) return null;
   const upkeep = units.reduce((sum, unit) => sum + calculateUnitUpkeep(unit.unit_type, unit.quantity, unit.status, mobilization, settlement.effectiveResources), 0);
-  const rows = units.map((unit) => {
-    const status = forceType === "ARMY" ? ` • ${armyStatusLabels[unit.status]}` : "";
-    return `• **${number(unit.quantity)}** ${UNITS[unit.unit_type]?.name ?? unit.unit_type}${status}`;
-  });
+  const rows = units.map((unit) => `• **${number(unit.quantity)}** ${UNITS[unit.unit_type]?.name ?? unit.unit_type}`);
   return [...rows, `**Toplam:** ${number(units.reduce((sum, unit) => sum + unit.quantity, 0))} • Bakım ${gold(upkeep)}`].join("\n");
 }
 
@@ -102,7 +98,7 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
       incomeLine("🐎 Kara Ticareti", settlement.incomeBreakdown.landTrade)
     ];
     if (hasActivePort) incomeLines.push(incomeLine("⚓ Deniz Ticareti", settlement.incomeBreakdown.seaTrade));
-    const incomes = [...incomeLines, `**Tahsil edilecek toplam: ${gold(settlement.payableIncome)}**`].join("\n");
+    const incomes = [...incomeLines, `**Toplam: ${gold(settlement.payableIncome)}**`].join("\n");
 
     const embed = new EmbedBuilder()
       .setColor(settlement.ruin_stage ? 0x9a5a2e : settlement.is_conquered ? 0x8c6d46 : 0x3f7f5f)
@@ -115,15 +111,15 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
         { name: "🏺 Kültür", value: `**${culture}**`, inline: true },
         { name: "📦 Yerel Hammadde", value: `**${producedResource}**`, inline: true },
         { name: "🏦 Yerel Hazine", value: `**${gold(settlement.local_treasury)}**`, inline: true },
-        { name: "👥 Nüfus", value: `Özgür: **${number(settlement.population)}**\nKöle: ${number(settlement.slave_population)}\nSonraki Alım: **+${number(settlement.populationGain)}**`, inline: true },
+        { name: "👥 Nüfus", value: `Özgür: **${number(settlement.population)}**\nKöle: ${number(settlement.slave_population)}`, inline: true },
         { name: "💰 Gelir Kalemleri", value: incomes.slice(0, 1024), inline: true },
         { name: "🧾 Yerleşke Giderleri", value: `Bina: ${gold(settlement.buildingUpkeep)}\nOrdu: ${gold(settlement.unitUpkeep)}\nDonanma: ${gold(settlement.shipUpkeep)}\n**Toplam: ${gold(settlement.totalSettlementUpkeep)}**`, inline: true },
-        { name: "🎖️ Asker Alım Payı", value: `Mevcut ve bekleyen: **${number(settlement.militaryUsed)}**\nŞehir payı: **${number(settlement.militaryLimit)}**\nAlınabilir: **${number(Math.max(0, settlement.militaryLimit - settlement.militaryUsed))}**`, inline: true },
+        { name: "🎖️ Ordu Limiti", value: `Mevcut: **${number(settlement.militaryUsed)}**\nKapasite: **${number(settlement.militaryLimit)}**`, inline: true },
         { name: "🌐 Etkin Kaynaklar ve Etkileri", value: resourceDetails.slice(0, 1024) },
         { name: "🏗️ Binalar ve İnşaatlar", value: buildings.slice(0, 1024) }
       );
 
-    if (fixedGarrison) embed.addFields({ name: "🛡️ Sabit Garnizon", value: `${fixedGarrison}\n_Şehre bağlıdır; oyuncu tarafından terhis edilemez._`.slice(0, 1024), inline: true });
+    if (fixedGarrison) embed.addFields({ name: "🛡️ Garnizon", value: fixedGarrison.slice(0, 1024), inline: true });
     if (army) embed.addFields({ name: "⚔️ Ordu", value: army.slice(0, 1024), inline: true });
 
     if (settlement.ships.length) {

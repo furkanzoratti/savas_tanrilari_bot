@@ -451,4 +451,26 @@ export const migrations = [
          SET base_land_trade_income=GREATEST(0,base_income+tax_income+land_trade_income+sea_trade_income-FLOOR(population*0.03)::BIGINT)
        WHERE base_land_trade_income=0;
     `
+  },
+  {
+    version: 12,
+    name: "local_treasury_is_country_treasury_source",
+    sql: `
+      ALTER TABLE settlements DROP CONSTRAINT IF EXISTS settlements_local_treasury_check;
+
+      WITH first_settlement AS (
+        SELECT DISTINCT ON (country_id) id,country_id
+          FROM settlements
+         ORDER BY country_id,name,id
+      )
+      UPDATE settlements s
+         SET local_treasury=s.local_treasury+c.treasury
+        FROM first_settlement f
+        JOIN countries c ON c.id=f.country_id
+       WHERE s.id=f.id;
+
+      UPDATE countries c
+         SET treasury=(SELECT COALESCE(SUM(s.local_treasury),0)::bigint FROM settlements s WHERE s.country_id=c.id)
+       WHERE EXISTS (SELECT 1 FROM settlements s WHERE s.country_id=c.id);
+    `
   }] as const;
