@@ -17,6 +17,10 @@ function incomeLine(label: string, amount: number): string {
   return `${label}: **${gold(amount)}**`;
 }
 
+function spacedSection(value: string): string {
+  return `${value.slice(0, 1022)}\n\u200B`;
+}
+
 function renderLandForces(
   settlement: SettlementDocument,
   forceType: "GARRISON" | "ARMY",
@@ -110,29 +114,42 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
         `Bina: **${occupiedSlots}/${settlement.slotLimit} slot** • İnşaat: **${activeConstruction}/2**`
       ].join("\n"))
       .addFields(
-        { name: "🏺 Kültür", value: `**${culture}**`, inline: true },
-        { name: "📦 Yerel Hammadde", value: `**${producedResource}**`, inline: true },
-        { name: "🏦 Yerel Hazine", value: `**${gold(settlement.local_treasury)}**`, inline: true },
-        { name: "👥 Nüfus", value: `Özgür: **${number(settlement.population)}**\nKöle: ${number(settlement.slave_population)}`, inline: true },
-        { name: "💰 Gelir Kalemleri", value: incomes.slice(0, 1024), inline: true },
-        { name: "🧾 Yerleşke Giderleri", value: `Bina: ${gold(settlement.buildingUpkeep)}\nOrdu: ${gold(settlement.unitUpkeep)}\nDonanma: ${gold(settlement.shipUpkeep)}\n**Toplam: ${gold(settlement.totalSettlementUpkeep)}**`, inline: true },
-        { name: "🎖️ Ordu Limiti", value: `Mevcut: **${number(settlement.militaryUsed)}**\nKapasite: **${number(settlement.militaryLimit)}**`, inline: true },
-        { name: "🏋️ Eğitim Kapasitesi", value: `Bu Alım Turu: **${number(settlement.trainingUsed ?? 0)}/${number(settlement.trainingCapacity ?? 0)}**\nKalan: **${number(settlement.trainingRemaining ?? 0)}**`, inline: true },
-        { name: "🌐 Etkin Kaynaklar ve Etkileri", value: resourceDetails.slice(0, 1024) },
-        { name: "🏗️ Binalar ve İnşaatlar", value: buildings.slice(0, 1024) }
+        { name: "🏺 Kültür", value: spacedSection(`**${culture}**`), inline: true },
+        { name: "📦 Yerel Hammadde", value: spacedSection(`**${producedResource}**`), inline: true },
+        { name: "🏦 Yerel Hazine", value: spacedSection(`**${gold(settlement.local_treasury)}**`), inline: true },
+        {
+          name: "👥 Nüfus",
+          value: spacedSection([
+            `Özgür: **${number(settlement.population)}**`,
+            `Köle: ${number(settlement.slave_population)}`,
+            "",
+            "🎖️ **Ordu Limiti**",
+            `Mevcut: **${number(settlement.militaryUsed)}**`,
+            `Kapasite: **${number(settlement.militaryLimit)}**`,
+            "",
+            "🏋️ **Eğitim Kapasitesi**",
+            `Bu Alım Turu: **${number(settlement.trainingUsed ?? 0)}/${number(settlement.trainingCapacity ?? 0)}**`,
+            `Kalan: **${number(settlement.trainingRemaining ?? 0)}**`
+          ].join("\n")),
+          inline: true
+        },
+        { name: "💰 Gelir Kalemleri", value: spacedSection(incomes), inline: true },
+        { name: "🧾 Yerleşke Giderleri", value: spacedSection(`Bina: ${gold(settlement.buildingUpkeep)}\nOrdu: ${gold(settlement.unitUpkeep)}\nDonanma: ${gold(settlement.shipUpkeep)}\n**Toplam: ${gold(settlement.totalSettlementUpkeep)}**`), inline: true },
+        { name: "🌐 Etkin Kaynaklar ve Etkileri", value: spacedSection(resourceDetails) },
+        { name: "🏗️ Binalar ve İnşaatlar", value: spacedSection(buildings) }
       );
 
-    if (fixedGarrison) embed.addFields({ name: "🛡️ Garnizon", value: fixedGarrison.slice(0, 1024), inline: true });
-    if (army) embed.addFields({ name: "⚔️ Ordu", value: army.slice(0, 1024), inline: true });
+    if (fixedGarrison) embed.addFields({ name: "🛡️ Garnizon", value: spacedSection(fixedGarrison), inline: true });
+    if (army) embed.addFields({ name: "⚔️ Ordu", value: spacedSection(army), inline: true });
 
     if (settlement.ships.length) {
       const ships = settlement.ships.map((ship) => `• **${ship.quantity}** ${SHIPS[ship.ship_type]?.name ?? ship.ship_type}`).join("\n");
       const crew = settlement.ships.reduce((sum, ship) => sum + SHIPS[ship.ship_type].manpower * ship.quantity, 0);
-      embed.addFields({ name: "🚢 Donanma", value: `${ships}\n**Mürettebat: ${number(crew)}**`.slice(0, 1024), inline: true });
+      embed.addFields({ name: "🚢 Donanma", value: spacedSection(`${ships}\n**Mürettebat: ${number(crew)}**`), inline: true });
     }
     if (settlement.siegeAssets.length) {
       const assets = settlement.siegeAssets.map((asset) => `• **${asset.quantity}** ${SIEGE_ASSETS[asset.asset_type as keyof typeof SIEGE_ASSETS]?.name ?? asset.asset_type}`).join("\n");
-      embed.addFields({ name: "🛠️ Kuşatma Aletleri", value: assets.slice(0, 1024), inline: true });
+      embed.addFields({ name: "🛠️ Kuşatma Aletleri", value: spacedSection(assets), inline: true });
     }
     const pending = [
       ...settlement.pendingRecruitment.map((wave) => wave.unit_type === "observer"
@@ -141,7 +158,7 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
       ...settlement.pendingShips.map((ship) => `🚢 Tur ${ship.completion_turn}: **${ship.quantity}** ${SHIPS[ship.ship_type]?.name ?? ship.ship_type}`),
       ...(settlement.pendingSiege ?? []).map((order) => `🛠️ Tur ${order.completion_turn}: **${order.quantity}** ${SIEGE_ASSETS[order.asset_type]?.name ?? order.asset_type}`)
     ];
-    if (pending.length) embed.addFields({ name: "⚙️ Üretim", value: pending.join("\n").slice(0, 1024) });
+    if (pending.length) embed.addFields({ name: "⚙️ Üretim", value: spacedSection(pending.join("\n")) });
 
     return embed;
   });
