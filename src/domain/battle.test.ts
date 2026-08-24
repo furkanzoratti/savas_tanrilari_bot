@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_BOMBARDMENTS_PER_GAME_TURN, advantageTier, remainingBombardments, baseRetreatRate, battleEnds, compositionTotal, engagedComposition, orderState, resolveRound, rollBattlePool, rollNavalPool, rollSiegeSupport, siegeDefenderCaptured, siegeDefenseModifiers } from "./battle.js";
+import { MAX_BOMBARDMENTS_PER_GAME_TURN, activeSiegeAssaultAssets, advantageTier, remainingBombardments, baseRetreatRate, battleEnds, compositionTotal, engagedComposition, orderState, resolveRound, rollBattlePool, rollNavalPool, rollSiegeSupport, siegeAssaultAccess, siegeAssaultComposition, siegeDefenderCaptured, siegeDefenseModifiers } from "./battle.js";
 
 describe("savaş motoru", () => {
   it("cephe kapasitesini aşan orduyu gizli olarak ölçekler", () => {
@@ -63,12 +63,45 @@ describe("savaş motoru", () => {
     expect(support.wallDamage * 2).toBeLessThan(30_000);
   });
 
+  it("Mühendislik Atölyesi Sv3 bonusunu her topçu hasar zarına +1 uygular", () => {
+    const normal = rollSiegeSupport({ catapult: 2, ballista: 2 }, { catapult: "WALL", ballista: "WALL" }, () => 0);
+    const improved = rollSiegeSupport({ catapult: 2, ballista: 2 }, { catapult: "WALL", ballista: "WALL" }, () => 0, 1);
+    expect(improved.wallDamage - normal.wallDamage).toBe(90);
+  });
+
   it("şehir, gedik açılmadan veya savunma kırılmadan düşmez", () => {
     expect(siegeDefenderCaptured(12_000, 8_000, 6, 0, 1_000)).toBe(false);
     expect(siegeDefenderCaptured(12_000, 8_000, 8, 0, 1_000)).toBe(true);
     expect(siegeDefenderCaptured(12_000, 3_600, 4, 30_000, 0)).toBe(true);
     expect(siegeDefenderCaptured(12_000, 0, 8, 30_000, 1_000)).toBe(false);
-    expect(siegeDefenderCaptured(12_000, 0, 8, 30_000, 1_000, true)).toBe(true);
+    expect(siegeDefenderCaptured(12_000, 0, 8, 30_000, 1_000, 1_000)).toBe(true);
+  });
+
+  it("merdiven ve kuleleri 12.000 kişilik hücum kapasitesine dönüştürür", () => {
+    expect(siegeAssaultAccess({ ladder_group: 2, siege_tower: 1 })).toEqual({
+      capacity: 5_000, activeLadderGroups: 2, activeSiegeTowers: 1
+    });
+    expect(siegeAssaultAccess({ ladder_group: 10, siege_tower: 4 })).toEqual({
+      capacity: 12_000, activeLadderGroups: 0, activeSiegeTowers: 4
+    });
+    expect(activeSiegeAssaultAssets({ ladder_group: 10, siege_tower: 4, catapult: 2 })).toEqual({
+      siege_tower: 4, catapult: 2
+    });
+  });
+
+  it("gedik öncesinde yakın dövüş piyadesini erişimle sınırlar, menzillileri kalan cepheye alır ve süvariyi dışarıda tutar", () => {
+    const engaged = siegeAssaultComposition({
+      light_infantry: 4_000, spear: 4_000, heavy_infantry: 4_000, archer: 6_000, slinger: 6_000, heavy_cavalry: 5_000
+    }, { ladder_group: 2, siege_tower: 1 }, 30_000, 1_000);
+    expect((engaged.light_infantry ?? 0) + (engaged.spear ?? 0) + (engaged.heavy_infantry ?? 0)).toBe(5_000);
+    expect((engaged.archer ?? 0) + (engaged.slinger ?? 0)).toBe(7_000);
+    expect(engaged.heavy_cavalry ?? 0).toBe(0);
+    expect(compositionTotal(engaged)).toBe(12_000);
+  });
+
+  it("sur veya kapı açıldığında erişim kısıtını kaldırır", () => {
+    const army = { heavy_infantry: 6_000, heavy_cavalry: 6_000 };
+    expect(siegeAssaultComposition(army, {}, 0, 1_000)).toEqual(army);
   });
 
   it("sağlam tahkimat savunana belirgin üstünlük verir", () => {

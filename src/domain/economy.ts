@@ -43,38 +43,31 @@ export function calculateSettlementEconomy(input: {
   return { grossIncome, payableIncome, buildingUpkeep, percentBonus, flatBonus };
 }
 
-const statusMultiplier: Record<UnitStatus, number> = {
-  GARRISON: 0.5,
-  FIELD_FRIENDLY: 1,
-  FIELD_HOSTILE: 1.25
-};
-
-const shipStatusMultiplier: Record<ShipStatus, number> = {
-  RESERVE: 0.5,
-  ACTIVE: 1,
-  HOSTILE: 1.25
-};
-
 export function calculateUnitUpkeep(
   unitType: keyof typeof UNITS,
   quantity: number,
   status: UnitStatus,
   mobilization: Mobilization,
-  resources: readonly ResourceType[] = []
+  resources: readonly ResourceType[] = [],
+  overLimitPenalty = false
 ): number {
+  void status; // Konum bazlı bakım çarpanları şimdilik pasiftir.
   const unit = UNITS[unitType];
-  const multiplier = statusMultiplier[status] + MOBILIZATION_RULES[mobilization].upkeepExtra;
-  return Math.ceil((quantity / 1_000) * unit.upkeep * multiplier * armyUpkeepMultiplier(resources));
+  const multiplier = (1 + MOBILIZATION_RULES[mobilization].upkeepExtra) * (overLimitPenalty ? 1.25 : 1);
+  const detachments = unitType === "observer" ? quantity / 200 : quantity / 1_000;
+  return Math.ceil(detachments * unit.upkeep * multiplier * armyUpkeepMultiplier(resources));
 }
 
 export function calculateShipUpkeep(
   shipType: keyof typeof SHIPS,
   quantity: number,
   status: ShipStatus,
-  mobilization: Mobilization
+  mobilization: Mobilization,
+  overLimitPenalty = false
 ): number {
+  void status; // Konum bazlı bakım çarpanları şimdilik pasiftir.
   const ship = SHIPS[shipType];
-  const multiplier = shipStatusMultiplier[status] + MOBILIZATION_RULES[mobilization].upkeepExtra;
+  const multiplier = (1 + MOBILIZATION_RULES[mobilization].upkeepExtra) * (overLimitPenalty ? 1.25 : 1);
   return Math.ceil(quantity * ship.upkeep * multiplier);
 }
 

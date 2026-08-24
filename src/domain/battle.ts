@@ -28,6 +28,9 @@ export type BattleOrder = "ORDERED" | "WORN" | "SHAKEN" | "BROKEN";
 
 export const MAX_BOMBARDMENTS_PER_GAME_TURN = 3;
 export const remainingBombardments = (used: number): number => Math.max(0, MAX_BOMBARDMENTS_PER_GAME_TURN - Math.max(0, Math.floor(used)));
+export const SIEGE_ASSAULT_FRONTAGE = 12_000;
+export const LADDER_GROUP_ASSAULT_CAPACITY = 1_000;
+export const SIEGE_TOWER_ASSAULT_CAPACITY = 3_000;
 
 export const BATTLE_UNIT_STATS: Record<BattleUnitType, {
   label: string; clashDice: number; clashSides: number; damageDice: number; damageSides: number; durability: 1 | 2 | 3;
@@ -110,6 +113,56 @@ function rollPool(quantity: number, dice: number, sides: number, randomInt: (max
   return total;
 }
 
+export interface SiegeAssaultAccess {
+  capacity: number;
+  activeLadderGroups: number;
+  activeSiegeTowers: number;
+}
+
+export function siegeAssaultAccess(composition: SiegeComposition, frontage = SIEGE_ASSAULT_FRONTAGE): SiegeAssaultAccess {
+  const safeFrontage = Math.max(0, Math.floor(frontage));
+  const towers = Math.max(0, Math.floor(composition.siege_tower ?? 0));
+  const ladders = Math.max(0, Math.floor(composition.ladder_group ?? 0));
+  const activeSiegeTowers = Math.min(towers, Math.floor(safeFrontage / SIEGE_TOWER_ASSAULT_CAPACITY));
+  const afterTowers = safeFrontage - activeSiegeTowers * SIEGE_TOWER_ASSAULT_CAPACITY;
+  const activeLadderGroups = Math.min(ladders, Math.floor(afterTowers / LADDER_GROUP_ASSAULT_CAPACITY));
+  return {
+    capacity: activeSiegeTowers * SIEGE_TOWER_ASSAULT_CAPACITY + activeLadderGroups * LADDER_GROUP_ASSAULT_CAPACITY,
+    activeLadderGroups, activeSiegeTowers
+  };
+}
+
+export function activeSiegeAssaultAssets(composition: SiegeComposition, frontage = SIEGE_ASSAULT_FRONTAGE): SiegeComposition {
+  const active = siegeAssaultAccess(composition, frontage);
+  const result: SiegeComposition = { ...composition };
+  if (active.activeLadderGroups > 0) result.ladder_group = active.activeLadderGroups;
+  else delete result.ladder_group;
+  if (active.activeSiegeTowers > 0) result.siege_tower = active.activeSiegeTowers;
+  else delete result.siege_tower;
+  return result;
+}
+
+export function siegeAssaultComposition(
+  composition: BattleComposition, support: SiegeComposition, wallHp: number, gateHp: number, frontage = SIEGE_ASSAULT_FRONTAGE
+): BattleComposition {
+  if (wallHp <= 0 || gateHp <= 0) return engagedComposition(composition, frontage);
+  const access = siegeAssaultAccess(support, frontage);
+  const meleeSource: BattleComposition = {};
+  for (const key of ["light_infantry", "spear", "heavy_infantry"] as BattleUnitType[]) {
+    const quantity = composition[key] ?? 0;
+    if (quantity > 0) meleeSource[key] = quantity;
+  }
+  const melee = engagedComposition(meleeSource, access.capacity);
+  const rangedCapacity = Math.max(0, frontage - compositionTotal(melee));
+  const rangedSource: BattleComposition = {};
+  for (const key of ["slinger", "archer"] as BattleUnitType[]) {
+    const quantity = composition[key] ?? 0;
+    if (quantity > 0) rangedSource[key] = quantity;
+  }
+  const ranged = engagedComposition(rangedSource, rangedCapacity);
+  return { ...melee, ...ranged };
+}
+
 export function rollBattlePool(composition: BattleComposition, frontage: number, randomInt = (max: number) => Math.floor(Math.random() * max)): BattleRoll {
   const engaged = engagedComposition(composition, frontage);
   const detail: BattleRoll["detail"] = {};
@@ -147,16 +200,24 @@ export function rollNavalPool(composition: BattleComposition, frontage: number, 
 }
 
 export function rollSiegeSupport(
-  composition: SiegeComposition, targets: SiegeTargets = {}, randomInt = (max: number) => Math.floor(Math.random() * max)
+  composition: SiegeComposition,
+  targets: SiegeTargets = {},
+  randomInt = (max: number) => Math.floor(Math.random() * max),
+  artilleryDamageDieBonus = 0
 ): { clash: number; damage: number; wallDamage: number; gateDamage: number; defense: number; detail: Record<string, number | string> } {
   const roll = (count: number, dice: number, sides: number) => rollPool(Math.min(count, 25), dice, sides, randomInt, 1);
+  const bonus = Math.max(0, Math.floor(artilleryDamageDieBonus));
+  const diceBonus = (count: number, dice: number) => Math.min(count, 25) * dice * bonus;
   const ladder = composition.ladder_group ?? 0, ram = composition.ram ?? 0, mantlet = composition.mantlet ?? 0;
   const ballista = composition.ballista ?? 0, wallBallista = composition.wall_ballista ?? 0, catapult = composition.catapult ?? 0, tower = composition.siege_tower ?? 0;
   const ladderClash = roll(ladder, 1, 4), towerClash = roll(tower, 1, 10), mantletClash = roll(mantlet, 1, 4);
-  const ballistaRoll = roll(ballista, 1, 8), wallBallistaDamage = roll(wallBallista, 2, 8), catapultRoll = roll(catapult, 1, 10), towerDamage = roll(tower, 1, 6);
+  const ballistaRoll = roll(ballista, 1, 8) + diceBonus(ballista, 1);
+  const wallBallistaDamage = roll(wallBallista, 2, 8) + diceBonus(wallBallista, 2);
+  const catapultRoll = roll(catapult, 1, 10) + diceBonus(catapult, 1);
+  const towerDamage = roll(tower, 1, 6);
   const ramGate = roll(ram, 1, 8) * 35;
-  const ballistaWall = targets.ballista === "WALL" ? roll(ballista, 1, 6) * 5 : 0;
-  const catapultWall = targets.catapult === "WALL" ? roll(catapult, 2, 10) * 20 : 0;
+  const ballistaWall = targets.ballista === "WALL" ? (roll(ballista, 1, 6) + diceBonus(ballista, 1)) * 5 : 0;
+  const catapultWall = targets.catapult === "WALL" ? (roll(catapult, 2, 10) + diceBonus(catapult, 2)) * 20 : 0;
   const ballistaArmy = targets.ballista === "ARMY" ? ballistaRoll : 0;
   const catapultArmy = targets.catapult === "ARMY" ? catapultRoll : 0;
   return {
@@ -167,7 +228,8 @@ export function rollSiegeSupport(
     defense: Math.min(0.50, mantlet * 0.05),
     detail: {
       ladderClash, towerClash, mantletClash, ballistaArmy, wallBallistaDamage, catapultArmy, towerDamage,
-      ramGate, ballistaWall, catapultWall, ballistaTarget: targets.ballista ?? "WALL", catapultTarget: targets.catapult ?? "WALL"
+      ramGate, ballistaWall, catapultWall, artilleryDamageDieBonus: bonus,
+      ballistaTarget: targets.ballista ?? "WALL", catapultTarget: targets.catapult ?? "WALL"
     }
   };
 }
@@ -237,8 +299,8 @@ export function siegeDefenseModifiers(wallHp: number, gateHp: number): { defende
   return { defenderClash: 1.10, defenderDamage: 1.00, attackerDamage: 1.00 };
 }
 
-export function siegeDefenderCaptured(initial: number, remaining: number, pressure: number, wallHp: number, gateHp: number, assaultAccess = false): boolean {
-  const access = wallHp <= 0 || gateHp <= 0 || assaultAccess;
+export function siegeDefenderCaptured(initial: number, remaining: number, pressure: number, wallHp: number, gateHp: number, assaultCapacity = 0): boolean {
+  const access = wallHp <= 0 || gateHp <= 0 || assaultCapacity > 0;
   return access && (remaining <= Math.floor(initial * 0.30) || pressure >= 8 || remaining <= 0);
 }
 

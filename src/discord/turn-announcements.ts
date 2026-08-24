@@ -10,10 +10,12 @@ export interface TurnAnnouncementInput {
   completedBuildings?: number;
   recruitmentArrivals?: number;
   completedShips?: number;
+  completedSiegeAssets?: number;
   garrisonUpgrades?: number;
   completedBuildingDetails?: Array<{ settlementName: string; buildingName: string; level: number }>;
   recruitmentArrivalDetails?: Array<{ settlementName: string; unitName: string; quantity: number }>;
   completedShipDetails?: Array<{ settlementName: string; shipName: string; quantity: number }>;
+  completedSiegeDetails?: Array<{ settlementName: string; assetName: string; quantity: number }>;
   garrisonUpgradeDetails?: string[];
 }
 
@@ -39,7 +41,7 @@ export function turnAnnouncement(input: TurnAnnouncementInput): EmbedBuilder {
       "Yeni rol turu açılmıştır. Askerî hareketler, diplomatik girişimler ve devlet hamleleri işleme alınabilir.",
       input.acquisition ? "🪙 **Bu tur bir Alım Turudur.** Gelir, nüfus ve bakım sonuçları işlenmiştir." : "Bu tur standart rol turudur.",
       `🏗️ Tamamlanan bina: **${input.completedBuildings ?? 0}** • ⚔️ Katılan asker: **${(input.recruitmentArrivals ?? 0).toLocaleString("tr-TR")}**`,
-      `🛡️ Garnizon yükselişi: **${input.garrisonUpgrades ?? 0}** • 🚢 Tamamlanan gemi: **${input.completedShips ?? 0}**`
+      `🛡️ Garnizon yükselişi: **${input.garrisonUpgrades ?? 0}** • 🚢 Tamamlanan gemi: **${input.completedShips ?? 0}** • 🛠️ Kuşatma aleti: **${input.completedSiegeAssets ?? 0}**`
     ].join("\n"))
     .setImage(BRAND_BANNER_URL)
     .setFooter({ text: "Savaş Tanrıları Role Play • Resmî Tur Duyurusu" })
@@ -56,6 +58,10 @@ export function turnAnnouncement(input: TurnAnnouncementInput): EmbedBuilder {
   if (input.completedShipDetails?.length) embed.addFields({
     name: "🚢 Tamamlanan Gemiler",
     value: fieldValue(input.completedShipDetails.map((item) => `• **${item.settlementName}** — ${item.quantity.toLocaleString("tr-TR")} ${item.shipName}`))
+  });
+  if (input.completedSiegeDetails?.length) embed.addFields({
+    name: "🛠️ Tamamlanan Kuşatma Aletleri",
+    value: fieldValue(input.completedSiegeDetails.map((item) => `• **${item.settlementName}** — ${item.quantity.toLocaleString("tr-TR")} ${item.assetName}`))
   });
   if (input.garrisonUpgradeDetails?.length) embed.addFields({
     name: "🛡️ Garnizon Kademesi Yükselen Yerleşkeler",

@@ -4,6 +4,7 @@ import {
   calculateShipUpkeep, calculateUnitUpkeep, nextRuinStage
 } from "./economy.js";
 import { createRecruitmentWaves, isAcquisitionTurn, militaryLimit } from "./mobilization.js";
+import { SHIPS, shipCrewRequirement } from "./catalog.js";
 
 describe("yerleşke ekonomisi", () => {
   it("bina gelirlerini her hesapta sıfırdan türetir", () => {
@@ -70,9 +71,18 @@ describe("seferberlik ve bakım", () => {
     expect(isAcquisitionTurn(7, 3)).toBe(false);
   });
 
-  it("konum ve seferberlik bakım çarpanlarını uygular", () => {
-    expect(calculateUnitUpkeep("heavy_infantry", 2_000, "GARRISON", "PEACE")).toBe(300);
-    expect(calculateUnitUpkeep("heavy_infantry", 2_000, "FIELD_HOSTILE", "GENERAL")).toBe(900);
-    expect(calculateShipUpkeep("trireme", 3, "ACTIVE", "PARTIAL")).toBe(1_200);
+  it("konum bakımını pasif tutup seferberlik bakım çarpanını uygular", () => {
+    expect(calculateUnitUpkeep("heavy_infantry", 2_000, "GARRISON", "PEACE")).toBe(800);
+    expect(calculateUnitUpkeep("heavy_infantry", 2_000, "FIELD_HOSTILE", "GENERAL")).toBe(1_000);
+    expect(calculateShipUpkeep("trireme", 3, "ACTIVE", "PARTIAL")).toBe(600);
+  });
+
+  it("gemi fiyatlarını, bakımlarını ve mürettebatlarını nihai denizcilik kurallarından alır", () => {
+    expect(SHIPS.kerkouros).toMatchObject({ price: 1_000, upkeep: 100, manpower: 50 });
+    expect(SHIPS.trireme).toMatchObject({ price: 2_000, upkeep: 200, manpower: 100 });
+    expect(SHIPS.quinquereme).toMatchObject({ price: 4_000, upkeep: 400, manpower: 150 });
+    expect(shipCrewRequirement("kerkouros", 3)).toBe(150);
+    expect(shipCrewRequirement("trireme", 3)).toBe(300);
+    expect(shipCrewRequirement("quinquereme", 3)).toBe(450);
   });
 });

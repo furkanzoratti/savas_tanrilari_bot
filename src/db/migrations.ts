@@ -473,4 +473,32 @@ export const migrations = [
          SET treasury=(SELECT COALESCE(SUM(s.local_treasury),0)::bigint FROM settlements s WHERE s.country_id=c.id)
        WHERE EXISTS (SELECT 1 FROM settlements s WHERE s.country_id=c.id);
     `
+  },
+  {
+    version: 13,
+    name: "mobilization_market_and_siege_production",
+    sql: `
+      ALTER TABLE countries ADD COLUMN IF NOT EXISTS manpower_over_limit_since_turn INTEGER;
+      ALTER TABLE countries ADD COLUMN IF NOT EXISTS manpower_penalty_active BOOLEAN NOT NULL DEFAULT FALSE;
+
+      CREATE TABLE IF NOT EXISTS siege_orders (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        settlement_id UUID NOT NULL REFERENCES settlements(id) ON DELETE CASCADE,
+        asset_type TEXT NOT NULL CHECK (asset_type IN ('mantlet','ballista','wall_ballista','catapult','siege_tower')),
+        quantity INTEGER NOT NULL CHECK (quantity > 0),
+        paid_amount BIGINT NOT NULL CHECK (paid_amount >= 0),
+        workshop_slots INTEGER NOT NULL CHECK (workshop_slots > 0),
+        ordered_turn INTEGER NOT NULL,
+        completion_turn INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'BUILDING' CHECK (status IN ('BUILDING','COMPLETED','CANCELLED')),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS siege_orders_due_idx ON siege_orders(status,completion_turn);
+      CREATE INDEX IF NOT EXISTS siege_orders_settlement_turn_idx ON siege_orders(settlement_id,ordered_turn);
+
+      ALTER TABLE battles ADD COLUMN IF NOT EXISTS defender_settlement_id UUID REFERENCES settlements(id) ON DELETE SET NULL;
+      CREATE INDEX IF NOT EXISTS active_siege_settlement_idx
+        ON battles(defender_settlement_id) WHERE terrain='SIEGE' AND status NOT IN ('FINISHED','CANCELLED');
+    `
   }] as const;

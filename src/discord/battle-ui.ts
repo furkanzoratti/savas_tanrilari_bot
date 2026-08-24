@@ -1,5 +1,5 @@
 import { ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, type ButtonInteraction, type ChatInputCommandInteraction, type Client } from "discord.js";
-import { BATTLE_TERRAINS, BATTLE_UNIT_STATS, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, SIEGE_ASSET_BATTLE_STATS, orderState, remainingBombardments, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain, type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeTarget } from "../domain/battle.js";
+import { BATTLE_TERRAINS, BATTLE_UNIT_STATS, LADDER_GROUP_ASSAULT_CAPACITY, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, SIEGE_ASSET_BATTLE_STATS, SIEGE_ASSAULT_FRONTAGE, SIEGE_TOWER_ASSAULT_CAPACITY, orderState, remainingBombardments, siegeAssaultAccess, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain, type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeTarget } from "../domain/battle.js";
 import { number } from "../domain/format.js";
 import { battleService, type BattleView, type SiegePhase } from "../services/battle-service.js";
 import { GameError } from "../services/game-service.js";
@@ -53,7 +53,20 @@ export function battleEmbed(view: BattleView, roundResult?: { tier: string; winn
   if (view.battle.terrain === "AMBUSH") embed.addFields({ name: "🌲 Pusu Düzeni", value: "A tarafı pusuyu kuran taraftır. İlk turda çarpışma +%25 ve hasar +%10 uygulanır." });
   if (view.battle.terrain === "SIEGE") {
     const wallOpen = (view.battle.wall_current_hp ?? 0) === 0, gateOpen = (view.battle.gate_current_hp ?? 0) === 0;
-    embed.addFields({ name: "🏰 Tahkimatlar", value: `**Sur:** ${number(view.battle.wall_current_hp ?? 0)} / ${number(view.battle.wall_max_hp ?? 0)} HP${wallOpen ? " — Yıkıldı" : ""}\n**Kapı:** ${number(view.battle.gate_current_hp ?? 0)} / ${number(view.battle.gate_max_hp ?? 0)} HP${gateOpen ? " — Kırıldı" : ""}` });
+    const access = siegeAssaultAccess(view.sides.A.support_assets, SIEGE_ASSAULT_FRONTAGE);
+    const ladders = Math.max(0, Math.floor(view.sides.A.support_assets.ladder_group ?? 0));
+    const towers = Math.max(0, Math.floor(view.sides.A.support_assets.siege_tower ?? 0));
+    const breached = wallOpen || gateOpen;
+    const accessNote = breached
+      ? "**Gedik veya kapı açık:** Erişim sınırı kalktı; normal kuşatma cephesi uygulanır."
+      : view.battle.siege_phase === "BOMBARDMENT"
+        ? `**Hücum başlatılırsa doğrudan sur hücumuna katılabilecek azami piyade:** ${number(access.capacity)}`
+        : `**Bu tur doğrudan sur hücumuna katılabilecek azami piyade:** ${number(access.capacity)}`;
+    embed.addFields(
+      { name: "🏰 Tahkimatlar", value: `**Sur:** ${number(view.battle.wall_current_hp ?? 0)} / ${number(view.battle.wall_max_hp ?? 0)} HP${wallOpen ? " — Yıkıldı" : ""}\n**Kapı:** ${number(view.battle.gate_current_hp ?? 0)} / ${number(view.battle.gate_max_hp ?? 0)} HP${gateOpen ? " — Kırıldı" : ""}` },
+      { name: "🪜 Hücum Erişimi", value: `**Merdiven Grupları:** ${number(access.activeLadderGroups)} / ${number(ladders)} aktif → ${number(access.activeLadderGroups * LADDER_GROUP_ASSAULT_CAPACITY)}\n**Kuşatma Kuleleri:** ${number(access.activeSiegeTowers)} / ${number(towers)} aktif → ${number(access.activeSiegeTowers * SIEGE_TOWER_ASSAULT_CAPACITY)}\n**Toplam Hücum Kapasitesi:** ${number(access.capacity)} / ${number(SIEGE_ASSAULT_FRONTAGE)}
+${accessNote}` }
+    );
   }
   embed.setImage(`attachment://${terrain.preset}`).setFooter({ text: "Tam birlik kompozisyonu yalnızca oyun yöneticisine görünür." }).setTimestamp();
   const rolls = view.rolls.map((roll) => `**${view.sides[roll.side_key].country_name}:** Çarpışma **${roll.clash_total}** • Hasar **${roll.damage_total}**${roll.wall_damage ? ` • Sur Hasarı **${roll.wall_damage}**` : ""}${roll.gate_damage ? ` • Kapı Hasarı **${roll.gate_damage}**` : ""} • <@${roll.roller_user_id}>${roll.is_proxy ? " (DM vekili)" : ""}`).join("\n");
@@ -109,8 +122,10 @@ function publicPayload(view: BattleView, result?: Parameters<typeof battleEmbed>
 
 function casualtyReportEmbed(view: BattleView, rows: Array<{ side_key: BattleSideKey; force_type: string; calculated_loss: number; applied_loss: number; shortfall: number; population_loss_applied: number; population_shortfall: number }>): EmbedBuilder {
   const lineFor = (row: typeof rows[number]) => {
+    const naval = row.force_type in NAVAL_UNIT_STATS;
     const label = BATTLE_UNIT_STATS[row.force_type as BattleUnitType]?.label ?? NAVAL_UNIT_STATS[row.force_type as NavalUnitType]?.label ?? row.force_type;
-    return `• ${label}: hesaplanan **${number(row.calculated_loss)}** • birlikten düşülen **${number(row.applied_loss)}**${row.shortfall ? ` • ⚠️ birlik açığı **${number(row.shortfall)}**` : ""}${row.population_loss_applied ? ` • nüfus **-${number(row.population_loss_applied)}**` : ""}${row.population_shortfall ? ` • ⚠️ nüfus açığı **${number(row.population_shortfall)}**` : ""}`;
+    const personnelLabel = naval ? "mürettebat/nüfus" : "nüfus";
+    return `• ${label}: hesaplanan **${number(row.calculated_loss)}** • birlikten düşülen **${number(row.applied_loss)}**${row.shortfall ? ` • ⚠️ birlik açığı **${number(row.shortfall)}**` : ""}${row.population_loss_applied ? ` • ${personnelLabel} **-${number(row.population_loss_applied)}**` : ""}${row.population_shortfall ? ` • ⚠️ ${personnelLabel} açığı **${number(row.population_shortfall)}**` : ""}`;
   };
   const text = (["A", "B"] as BattleSideKey[]).map((side) => {
     const sideRows = rows.filter((row) => row.side_key === side);
@@ -129,7 +144,8 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
     const view = await battleService.create({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id,
       countryAName: interaction.options.getString("taraf-a", true), countryBName: interaction.options.getString("taraf-b", true),
       terrain: interaction.options.getString("arazi", true) as BattleTerrain, narrative: interaction.options.getString("anlatim") ?? "",
-      controllerA: interaction.options.getString("kontrol-a", true) as BattleController, controllerB: interaction.options.getString("kontrol-b", true) as BattleController });
+      controllerA: interaction.options.getString("kontrol-a", true) as BattleController, controllerB: interaction.options.getString("kontrol-b", true) as BattleController,
+      defenderSettlementName: interaction.options.getString("savunulan-yerleske") });
     const rosterCommand = view.battle.terrain === "NAVAL" ? "/savas filo-ayarla" : "/savas kadro-ayarla";
     const supportNote = view.battle.terrain === "SIEGE" ? " Kuşatma aletlerini `/savas kusatma-aleti-ayarla` ile girin." : "";
     await interaction.reply({ content: `✅ Savaş taslağı oluşturuldu. Gizli kadroları \`${rosterCommand}\` ile girin.${supportNote}\nA tarafı ilk turda ${view.battle.first_side === "A" ? "önce" : "sonra"} zar atacak.`, ephemeral: true });
@@ -169,6 +185,16 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
     const view = await battleService.setSupport({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id,
       side, assetType: interaction.options.getString("alet", true) as SiegeAssetType, target: interaction.options.getString("hedef", true) as SiegeTarget, quantity: interaction.options.getInteger("miktar", true) });
     await interaction.reply({ content: `✅ ${side} tarafının gizli kuşatma desteği güncellendi. Hedef: **${interaction.options.getString("hedef", true)}**`, ephemeral: true });
+  } else if (sub === "saha-aleti-al") {
+    const assetType = interaction.options.getString("alet", true) as "ladder_group" | "ram";
+    const quantity = interaction.options.getInteger("miktar", true);
+    const result = await battleService.purchaseFieldSiegeAsset({
+      guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id,
+      isGameMaster: isGameMaster(interaction), settlementName: interaction.options.getString("yerleske", true),
+      assetType, quantity
+    });
+    const assetName = SIEGE_ASSET_BATTLE_STATS[assetType].label;
+    await interaction.reply({ content: `🛠️ **${result.view.sides.A.country_name}**, **${result.settlementName}** hazinesinden **${number(result.cost)} Altın** ödeyerek ${quantity} **${assetName}** hazırladı. Alet kuşatma düzenine anında eklendi.`, ...publicPayload(result.view) });
   } else if (sub === "kusatma-asamasi") {
     requireGameMaster(interaction);
     const view = await battleService.setSiegePhase({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id, phase: interaction.options.getString("asama", true) as SiegePhase });

@@ -67,21 +67,25 @@ export const UNITS = {
   slinger: { name: "Sapancı", price: 1_500, upkeep: 150 },
   spear: { name: "Mızraklı Piyade", price: 2_000, upkeep: 200 },
   archer: { name: "Okçu", price: 2_500, upkeep: 250 },
-  heavy_infantry: { name: "Ağır Piyade", price: 3_000, upkeep: 300 },
+  heavy_infantry: { name: "Ağır Piyade", price: 4_000, upkeep: 400 },
   light_cavalry: { name: "Hafif Süvari", price: 3_500, upkeep: 350 },
   heavy_cavalry: { name: "Ağır Süvari", price: 5_000, upkeep: 500 },
-  observer: { name: "Gözcü Birliği", price: 750, upkeep: 100 }
+  observer: { name: "Gözcü Birliği", price: 500, upkeep: 100 }
 } as const;
 
 export const SHIPS = {
-  kerkouros: { name: "Kerkouros", price: 2_000, upkeep: 200, manpower: 100, buildTurns: 2 },
-  trireme: { name: "Trireme", price: 4_000, upkeep: 400, manpower: 200, buildTurns: 3 },
-  quinquereme: { name: "Quinquereme", price: 8_000, upkeep: 800, manpower: 400, buildTurns: 4 }
+  kerkouros: { name: "Kerkouros", price: 1_000, upkeep: 100, manpower: 50, buildTurns: 2 },
+  trireme: { name: "Trireme", price: 2_000, upkeep: 200, manpower: 100, buildTurns: 3 },
+  quinquereme: { name: "Quinquereme", price: 4_000, upkeep: 400, manpower: 150, buildTurns: 4 }
 } as const;
 
+export function shipCrewRequirement(shipType: keyof typeof SHIPS, quantity: number): number {
+  return Math.max(0, Math.floor(quantity)) * SHIPS[shipType].manpower;
+}
+
 export const SIEGE_ASSETS = {
-  ladder_group: { name: "Merdiven Grubu", price: 500, workshop: 0, buildTurns: 1 },
-  ram: { name: "Koçbaşı", price: 2_000, workshop: 1, buildTurns: 2 },
+  ladder_group: { name: "Merdiven Grubu", price: 500, workshop: 0, buildTurns: 0 },
+  ram: { name: "Koçbaşı", price: 2_000, workshop: 1, buildTurns: 0 },
   mantlet: { name: "Mantlet Grubu", price: 1_000, workshop: 2, buildTurns: 1 },
   ballista: { name: "Balista", price: 3_000, workshop: 1, buildTurns: 2 },
   wall_ballista: { name: "Hafif Sur Balistası", price: 2_500, workshop: 2, buildTurns: 2 },
@@ -92,24 +96,24 @@ export const SIEGE_ASSETS = {
 export const MOBILIZATION_RULES: Record<Mobilization, {
   label: string;
   manpowerRate: number;
-  capacityMultiplier: number;
+  trainingRate: number;
   incomeMultiplier: number;
   populationMultiplier: number;
   upkeepExtra: number;
   waves: Array<{ afterTurns: number; ratio: number }>;
 }> = {
   PEACE: {
-    label: "Barış Düzeni", manpowerRate: 0.075, capacityMultiplier: 1,
+    label: "Barış Düzeni", manpowerRate: 0.075, trainingRate: 0.05,
     incomeMultiplier: 1, populationMultiplier: 1, upkeepExtra: 0,
     waves: [{ afterTurns: 2, ratio: 1 }]
   },
   PARTIAL: {
-    label: "Kısmi Seferberlik", manpowerRate: 0.125, capacityMultiplier: 1.5,
+    label: "Kısmi Seferberlik", manpowerRate: 0.125, trainingRate: 0.10,
     incomeMultiplier: 0.90, populationMultiplier: 0.75, upkeepExtra: 0,
     waves: [{ afterTurns: 1, ratio: 0.50 }, { afterTurns: 2, ratio: 0.50 }]
   },
   GENERAL: {
-    label: "Genel Seferberlik", manpowerRate: 0.175, capacityMultiplier: 2,
+    label: "Genel Seferberlik", manpowerRate: 0.175, trainingRate: 0.15,
     incomeMultiplier: 0.75, populationMultiplier: 0.25, upkeepExtra: 0.25,
     waves: [{ afterTurns: 1, ratio: 0.40 }, { afterTurns: 2, ratio: 0.35 }, { afterTurns: 3, ratio: 0.25 }]
   }

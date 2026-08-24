@@ -4,7 +4,7 @@ import {
   type AutocompleteInteraction, type ButtonInteraction, type ChatInputCommandInteraction, type Client,
   type Interaction, type ModalSubmitInteraction, type StringSelectMenuInteraction
 } from "discord.js";
-import { BUILD_COSTS, BUILDINGS, MOBILIZATION_RULES, SHIPS, UNITS } from "../domain/catalog.js";
+import { BUILD_COSTS, BUILDINGS, MOBILIZATION_RULES, SHIPS, SIEGE_ASSETS, UNITS } from "../domain/catalog.js";
 import { gold, number } from "../domain/format.js";
 import { CULTURE_GROUPS, type CultureGroup } from "../domain/cultures.js";
 import { garrisonComposition } from "../domain/garrison.js";
@@ -147,10 +147,11 @@ async function handleTurn(interaction: ChatInputCommandInteraction): Promise<voi
     embed = turnAnnouncement({
       kind: "ADVANCE", turn: result.turn, acquisition: result.acquisition,
       completedBuildings: result.completedBuildings, recruitmentArrivals: result.recruitmentArrivals,
-      completedShips: result.completedShips, garrisonUpgrades: result.garrisonUpgrades,
+      completedShips: result.completedShips, completedSiegeAssets: result.completedSiegeAssets, garrisonUpgrades: result.garrisonUpgrades,
       completedBuildingDetails: result.completedBuildingDetails,
       recruitmentArrivalDetails: result.recruitmentArrivalDetails,
       completedShipDetails: result.completedShipDetails,
+      completedSiegeDetails: result.completedSiegeDetails,
       garrisonUpgradeDetails: result.garrisonUpgradeDetails
     });
   } else {
@@ -266,6 +267,12 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
     if (!CULTURE_GROUPS[cultureGroup] || cultureGroup === "UNASSIGNED") throw new GameError("Geçerli bir kültür grubu seçmelisiniz.");
     await gameService.setSettlementCulture({ guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id, settlementId: settlement.id, cultureGroup });
     await interaction.editReply(`✅ **${settlement.name}** kültürü **${CULTURE_GROUPS[cultureGroup].label}** olarak değiştirildi.`);
+  } else if (sub === "asimilasyon-tamamla") {
+    const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
+    if (!country) throw new GameError("Ülke bulunamadı.");
+    const settlement = await findSettlement(country.id, interaction.options.getString("yerleske", true));
+    await gameService.assimilateSettlement({ guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id, settlementId: settlement.id });
+    await interaction.editReply(`✅ **${settlement.name}** asimile edildi. Nüfusu artık askerî personel ve eğitim kapasitesi hesaplarına katılır; asker ve gemi üretimi açıldı.`);
   } else if (sub === "hammadde-ayarla") {
     const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
     if (!country) throw new GameError("Ülke bulunamadı.");
@@ -279,10 +286,11 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
     await interaction.editReply({ embeds: [turnAnnouncement({
       kind: "ADVANCE", turn: result.turn, acquisition: result.acquisition,
       completedBuildings: result.completedBuildings, recruitmentArrivals: result.recruitmentArrivals,
-      completedShips: result.completedShips, garrisonUpgrades: result.garrisonUpgrades,
+      completedShips: result.completedShips, completedSiegeAssets: result.completedSiegeAssets, garrisonUpgrades: result.garrisonUpgrades,
       completedBuildingDetails: result.completedBuildingDetails,
       recruitmentArrivalDetails: result.recruitmentArrivalDetails,
       completedShipDetails: result.completedShipDetails,
+      completedSiegeDetails: result.completedSiegeDetails,
       garrisonUpgradeDetails: result.garrisonUpgradeDetails
     })], files: [new AttachmentBuilder(BRAND_BANNER_PATH, { name: BRAND_BANNER_NAME })] });
   } else if (sub === "tur-durumu") {
@@ -367,6 +375,18 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     await interaction.reply({ content: `✅ ${number(quantity)} **${UNITS[unitType].name}** terhis edildi. Birlikte kalan: **${number(result.remaining)}**. Terhis kalıcıdır ve ücret iadesi sağlamaz.`, ephemeral: true });
   } else if (interaction.commandName === "gemi-alimi") {
     await startPurchase(interaction, "ship");
+  } else if (interaction.commandName === "gozcu-alimi") {
+    const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
+    const settlement = await findSettlement(country.id, interaction.options.getString("yerleske", true));
+    const result = await gameService.purchaseObserver({ guildId: interaction.guildId!, actorId: interaction.user.id, countryId: country.id, settlementId: settlement.id });
+    await interaction.reply({ content: `✅ **${settlement.name}** için Gözcü Birliği alındı. **${gold(result.cost)}** ödendi; **Tur ${result.dueTurn}** hazır olacak.`, ephemeral: true });
+  } else if (interaction.commandName === "kusatma-uretimi") {
+    const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
+    const settlement = await findSettlement(country.id, interaction.options.getString("yerleske", true));
+    const assetType = interaction.options.getString("alet", true) as keyof typeof SIEGE_ASSETS;
+    const quantity = interaction.options.getInteger("miktar", true);
+    const result = await gameService.purchaseSiegeAsset({ guildId: interaction.guildId!, actorId: interaction.user.id, countryId: country.id, settlementId: settlement.id, assetType, quantity });
+    await interaction.reply({ content: `✅ ${quantity} **${SIEGE_ASSETS[assetType].name}** üretime alındı. **${gold(result.cost)}** ödendi; ${result.slots} atölye slotu kullanıldı ve **Tur ${result.completionTurn}** tamamlanacak.`, ephemeral: true });
   } else if (interaction.commandName === "seferberlik") {
     const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
     await gameService.setMobilization({ guildId: interaction.guildId!, actorId: interaction.user.id, countryId: country.id, mobilization: interaction.options.getString("seviye", true) as Mobilization });
@@ -423,17 +443,18 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
     const settlementId = interaction.values[0]!;
     const settlement = (await gameService.document(countryId)).settlements.find((item) => item.id === settlementId);
     if (!settlement) throw new GameError("Yerleşke bulunamadı.");
-    await interaction.update({ content: "Alınacak birim türünü seç:", components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder().setCustomId(`uc|${countryId}|${settlementId}`).setPlaceholder("Birim seç").addOptions(unitChoices.map(([key, unit]) => ({ label: unit.name, description: `${gold(Math.ceil(unit.price * unitCostMultiplier(key, settlement.effectiveResources)))} / 1.000`, value: key }))))] });
+    await interaction.update({ content: `Alınacak birim türünü seç:\n🎖️ Ordu Limiti: **${number(settlement.militaryUsed)}/${number(settlement.militaryLimit)}**\n🏋️ Bu Alım Turu Eğitim Kapasitesi: **${number(settlement.trainingUsed)}/${number(settlement.trainingCapacity)}** • Kalan: **${number(settlement.trainingRemaining)}**`, components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder().setCustomId(`uc|${countryId}|${settlementId}`).setPlaceholder("Birim seç").addOptions(unitChoices.map(([key, unit]) => ({ label: unit.name, description: `${gold(Math.ceil(unit.price * unitCostMultiplier(key, settlement.effectiveResources)))} / 1.000`, value: key }))))] });
   } else if (kind === "uc" && settlementIdFromId) {
     const unitType = interaction.values[0]!;
     const modal = new ModalBuilder().setCustomId(`um|${countryId}|${settlementIdFromId}|${unitType}`).setTitle("Asker Alımı");
-    modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("quantity").setLabel("Asker sayısı — 500'ün katı").setPlaceholder("Örn. 2000").setStyle(TextInputStyle.Short).setRequired(true)));
+    modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("quantity").setLabel("Asker sayısı — 1.000'in katı").setPlaceholder("Örn. 2000").setStyle(TextInputStyle.Short).setRequired(true)));
     await interaction.showModal(modal);
   } else if (kind === "ss") {
     const settlementId = interaction.values[0]!;
     const settlement = (await gameService.document(countryId)).settlements.find((item) => item.id === settlementId);
     if (!settlement) throw new GameError("Yerleşke bulunamadı.");
-    await interaction.update({ content: "Üretilecek gemi türünü seç:", components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder().setCustomId(`sc|${countryId}|${settlementId}`).setPlaceholder("Gemi seç").addOptions(shipChoices.map(([key, ship]) => ({ label: ship.name, description: `${gold(Math.ceil(ship.price * shipCostMultiplier(settlement.effectiveResources)))} / gemi`, value: key }))))] });
+    const productionPoints: Record<keyof typeof SHIPS, number> = { kerkouros: 1, trireme: 2, quinquereme: 4 };
+    await interaction.update({ content: "Üretilecek gemi türünü seç:", components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder().setCustomId(`sc|${countryId}|${settlementId}`).setPlaceholder("Gemi seç").addOptions(shipChoices.map(([key, ship]) => ({ label: ship.name, description: `${gold(Math.ceil(ship.price * shipCostMultiplier(settlement.effectiveResources)))} • ${ship.manpower} mürettebat • ${productionPoints[key as keyof typeof SHIPS]} puan`, value: key }))))] });
   } else if (kind === "sc" && settlementIdFromId) {
     const shipType = interaction.values[0]!;
     const modal = new ModalBuilder().setCustomId(`sm|${countryId}|${settlementIdFromId}|${shipType}`).setTitle("Gemi Alımı");

@@ -1,5 +1,5 @@
 import { ChannelType, SlashCommandBuilder } from "discord.js";
-import { BUILDINGS, MOBILIZATION_RULES, SHIPS, UNITS } from "../domain/catalog.js";
+import { BUILDINGS, MOBILIZATION_RULES, SHIPS, SIEGE_ASSETS, UNITS } from "../domain/catalog.js";
 import { RESOURCE_CHOICES } from "../domain/resources.js";
 import { BATTLE_TERRAINS, BATTLE_UNIT_STATS, NAVAL_UNIT_STATS, SIEGE_ASSET_BATTLE_STATS } from "../domain/battle.js";
 
@@ -26,6 +26,17 @@ export const commandBuilders = [
     .addStringOption(countryOption),
   new SlashCommandBuilder()
     .setName("gemi-alimi").setDescription("Etkileşimli gemi alımı başlatır")
+    .addStringOption(countryOption),
+  new SlashCommandBuilder()
+    .setName("gozcu-alimi").setDescription("Yerleşkeye bir Gözcü Birliği alır")
+    .addStringOption((option) => option.setName("yerleske").setDescription("Gözcünün bağlı olacağı yerleşke").setRequired(true))
+    .addStringOption(countryOption),
+  new SlashCommandBuilder()
+    .setName("kusatma-uretimi").setDescription("Mühendislik Atölyesinde kuşatma aleti üretir")
+    .addStringOption((option) => option.setName("yerleske").setDescription("Üretim yapacak yerleşke").setRequired(true))
+    .addStringOption((option) => option.setName("alet").setDescription("Üretilecek kuşatma aleti").setRequired(true)
+      .addChoices(...Object.entries(SIEGE_ASSETS).filter(([key]) => !["ladder_group","ram"].includes(key)).map(([value, asset]) => ({ name: asset.name, value }))))
+    .addIntegerOption((option) => option.setName("miktar").setDescription("Üretilecek adet").setMinValue(1).setRequired(true))
     .addStringOption(countryOption),
   new SlashCommandBuilder()
     .setName("seferberlik").setDescription("Ülkenin seferberlik seviyesini değiştirir")
@@ -68,6 +79,7 @@ export const commandBuilders = [
       .addStringOption((o) => o.setName("arazi").setDescription("Savaş alanı hazır ayarı").setRequired(true).addChoices(...Object.entries(BATTLE_TERRAINS).map(([value, terrain]) => ({ name: terrain.label, value }))))
       .addStringOption((o) => o.setName("kontrol-a").setDescription("A tarafının zar yetkisi").setRequired(true).addChoices({ name: "Ülke Oyuncuları", value: "PLAYERS" }, { name: "Oyun Yöneticisi / NPC", value: "GM" }))
       .addStringOption((o) => o.setName("kontrol-b").setDescription("B tarafının zar yetkisi").setRequired(true).addChoices({ name: "Ülke Oyuncuları", value: "PLAYERS" }, { name: "Oyun Yöneticisi / NPC", value: "GM" }))
+      .addStringOption((o) => o.setName("savunulan-yerleske").setDescription("Yalnız kuşatmada: B tarafının savunduğu yerleşke"))
       .addStringOption((o) => o.setName("anlatim").setDescription("Herkese açık savaş açılış metni").setMaxLength(1000)))
     .addSubcommand((sub) => sub.setName("birlik-ayarla").setDescription("Taslağın gizli birlik kadrosuna bir birlik yazar")
       .addStringOption((o) => o.setName("taraf").setDescription("Savaş tarafı").setRequired(true).addChoices({ name: "A Tarafı", value: "A" }, { name: "B Tarafı", value: "B" }))
@@ -96,6 +108,13 @@ export const commandBuilders = [
       .addStringOption((o) => o.setName("alet").setDescription("Kuşatma aleti").setRequired(true).addChoices(...Object.entries(SIEGE_ASSET_BATTLE_STATS).map(([value, asset]) => ({ name: asset.label, value }))))
       .addStringOption((o) => o.setName("hedef").setDescription("Aletin bu savaşta vuracağı hedef").setRequired(true).addChoices({ name: "Sur", value: "WALL" }, { name: "Kapı", value: "GATE" }, { name: "Düşman Ordusu", value: "ARMY" }, { name: "Hücum Desteği", value: "ASSAULT" }))
       .addIntegerOption((o) => o.setName("miktar").setDescription("Alet sayısı; silmek için 0").setMinValue(0).setRequired(true)))
+    .addSubcommand((sub) => sub.setName("saha-aleti-al").setDescription("Aktif kuşatmada anlık Merdiven Grubu veya Koçbaşı alır")
+      .addStringOption((o) => o.setName("yerleske").setDescription("Ödemenin yapılacağı saldırgan yerleşkesi").setRequired(true))
+      .addStringOption((o) => o.setName("alet").setDescription("Sahada hazırlanacak alet").setRequired(true).addChoices(
+        { name: "Merdiven Grubu — 10 Merdiven", value: "ladder_group" },
+        { name: "Koçbaşı", value: "ram" }
+      ))
+      .addIntegerOption((o) => o.setName("miktar").setDescription("Alınacak grup/adet").setMinValue(1).setRequired(true)))
     .addSubcommand((sub) => sub.setName("kusatma-asamasi").setDescription("Kuşatmayı bombardıman veya hücum durumuna geçirir")
       .addStringOption((o) => o.setName("asama").setDescription("Yeni kuşatma durumu").setRequired(true).addChoices(
         { name: "Bombardıman — yalnız Katapultlar sura ateş eder", value: "BOMBARDMENT" },
@@ -152,6 +171,9 @@ export const commandBuilders = [
       .addStringOption((o) => o.setName("ulke").setDescription("Ülke adı").setRequired(true))
       .addStringOption((o) => o.setName("yerleske").setDescription("Yerleşke adı").setRequired(true))
       .addStringOption((o) => o.setName("kultur").setDescription("Yeni kültür grubu; yazmaya başlayarak arayın").setRequired(true).setAutocomplete(true)))
+    .addSubcommand((sub) => sub.setName("asimilasyon-tamamla").setDescription("Fethedilmiş yerleşkenin asimilasyonunu tamamlar")
+      .addStringOption((o) => o.setName("ulke").setDescription("Yerleşkenin bağlı olduğu ülke").setRequired(true))
+      .addStringOption((o) => o.setName("yerleske").setDescription("Asimile edilen yerleşke").setRequired(true)))
     .addSubcommand((sub) => sub.setName("hammadde-ayarla").setDescription("Mevcut yerleşkenin hammaddesini değiştirir")
       .addStringOption((o) => o.setName("ulke").setDescription("Ülke adı").setRequired(true))
       .addStringOption((o) => o.setName("yerleske").setDescription("Yerleşke adı").setRequired(true))

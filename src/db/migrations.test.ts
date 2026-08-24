@@ -14,3 +14,17 @@ describe("dokuzuncu migration", () => {
     expect(migration?.sql).toContain("conquered_turn INTEGER");
   });
 });
+
+describe("on üçüncü migration", () => {
+  const migration = migrations.find((item) => item.version === 13);
+
+  it("kuşatma üretimleri ile personel sınırı durumunu saklar", () => {
+    expect(migration?.sql).toContain("CREATE TABLE IF NOT EXISTS siege_orders");
+    expect(migration?.sql).toContain("manpower_penalty_active");
+  });
+
+  it("kuşatmayı savunulan yerleşkeye bağlar", () => {
+    expect(migration?.sql).toContain("defender_settlement_id");
+    expect(migration?.sql).toContain("active_siege_settlement_idx");
+  });
+});

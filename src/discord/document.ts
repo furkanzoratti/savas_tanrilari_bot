@@ -10,7 +10,6 @@ import { TEMPLE_BANNER_URL } from "./assets.js";
 
 const ruinLabels = ["Normal", "Harap • sonraki Alım Turu %0", "Toparlanıyor • sonraki Alım Turu %50"];
 const phaseLabels: Record<string, string> = { OPEN: "Hareketler Açık", CLOSED: "Hareketler Kapalı", RESOLVING: "Olaylar Çözülüyor" };
-const shipStatusLabels = { RESERVE: "Limanda / Rezerv", ACTIVE: "Aktif Donanma", HOSTILE: "Düşman Sularında" } as const;
 
 type SettlementDocument = CountryDocument["settlements"][number];
 
@@ -21,12 +20,15 @@ function incomeLine(label: string, amount: number): string {
 function renderLandForces(
   settlement: SettlementDocument,
   forceType: "GARRISON" | "ARMY",
-  mobilization: CountryDocument["country"]["mobilization"]
+  mobilization: CountryDocument["country"]["mobilization"],
+  overLimitPenalty: boolean
 ): string | null {
   const units = settlement.units.filter((unit) => unit.force_type === forceType);
   if (!units.length) return null;
-  const upkeep = units.reduce((sum, unit) => sum + calculateUnitUpkeep(unit.unit_type, unit.quantity, unit.status, mobilization, settlement.effectiveResources), 0);
-  const rows = units.map((unit) => `• **${number(unit.quantity)}** ${UNITS[unit.unit_type]?.name ?? unit.unit_type}`);
+  const upkeep = units.reduce((sum, unit) => sum + calculateUnitUpkeep(unit.unit_type, unit.quantity, unit.status, mobilization, settlement.effectiveResources, overLimitPenalty), 0);
+  const rows = units.map((unit) => unit.unit_type === "observer"
+    ? `• **${number(Math.ceil(unit.quantity / 200))}** Gözcü Birliği (${number(unit.quantity)} personel)`
+    : `• **${number(unit.quantity)}** ${UNITS[unit.unit_type]?.name ?? unit.unit_type}`);
   return [...rows, `**Toplam:** ${number(units.reduce((sum, unit) => sum + unit.quantity, 0))} • Bakım ${gold(upkeep)}`].join("\n");
 }
 
@@ -49,7 +51,7 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
       { name: "👑 Yönetim", value: document.playerIds.length ? document.playerIds.map((id) => `<@${id}>`).join(" • ") : "Oyuncu atanmamış." },
       { name: "🏦 Hazine", value: `**${gold(document.country.treasury)}**`, inline: true },
       { name: "👥 Özgür Nüfus", value: `**${number(document.freePopulation)}**`, inline: true },
-      { name: "⚔️ Askerî Kapasite", value: `Mevcut: **${number(document.militaryUsed)}**\nSınır: ${number(document.militaryLimit)}\nKalan: ${number(remainingCapacity)}`, inline: true },
+      { name: "⚔️ Askerî Kapasite", value: `Mevcut: **${number(document.militaryUsed)}**\nSınır: ${number(document.militaryLimit)}\nKalan: ${number(remainingCapacity)}${document.manpowerPenaltyActive ? "\n⚠️ Sınır aşımı: bakım +%25" : document.militaryUsed > document.militaryLimit ? "\n⏳ Sınır aşımı: düzeltme süresi" : ""}`, inline: true },
       {
         name: "📥 Gelir Dağılımı",
         value: [
@@ -74,8 +76,8 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
     const activeConstruction = settlement.buildings.filter((building) => building.status === "BUILDING").length;
     const culture = CULTURE_GROUPS[settlement.culture_group]?.label ?? settlement.culture_group;
     const producedResource = RESOURCES[settlement.resource_type].label;
-    const fixedGarrison = renderLandForces(settlement, "GARRISON", document.country.mobilization);
-    const army = renderLandForces(settlement, "ARMY", document.country.mobilization);
+    const fixedGarrison = renderLandForces(settlement, "GARRISON", document.country.mobilization, document.manpowerPenaltyActive);
+    const army = renderLandForces(settlement, "ARMY", document.country.mobilization, document.manpowerPenaltyActive);
 
     const buildings = settlement.buildings.length
       ? settlement.buildings.map((building) => {
@@ -115,6 +117,7 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
         { name: "💰 Gelir Kalemleri", value: incomes.slice(0, 1024), inline: true },
         { name: "🧾 Yerleşke Giderleri", value: `Bina: ${gold(settlement.buildingUpkeep)}\nOrdu: ${gold(settlement.unitUpkeep)}\nDonanma: ${gold(settlement.shipUpkeep)}\n**Toplam: ${gold(settlement.totalSettlementUpkeep)}**`, inline: true },
         { name: "🎖️ Ordu Limiti", value: `Mevcut: **${number(settlement.militaryUsed)}**\nKapasite: **${number(settlement.militaryLimit)}**`, inline: true },
+        { name: "🏋️ Eğitim Kapasitesi", value: `Bu Alım Turu: **${number(settlement.trainingUsed ?? 0)}/${number(settlement.trainingCapacity ?? 0)}**\nKalan: **${number(settlement.trainingRemaining ?? 0)}**`, inline: true },
         { name: "🌐 Etkin Kaynaklar ve Etkileri", value: resourceDetails.slice(0, 1024) },
         { name: "🏗️ Binalar ve İnşaatlar", value: buildings.slice(0, 1024) }
       );
@@ -123,20 +126,24 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
     if (army) embed.addFields({ name: "⚔️ Ordu", value: army.slice(0, 1024), inline: true });
 
     if (settlement.ships.length) {
-      const ships = settlement.ships.map((ship) => `• **${ship.quantity}** ${SHIPS[ship.ship_type]?.name ?? ship.ship_type} • ${shipStatusLabels[ship.status]}`).join("\n");
-      embed.addFields({ name: "🚢 Donanma", value: ships.slice(0, 1024), inline: true });
+      const ships = settlement.ships.map((ship) => `• **${ship.quantity}** ${SHIPS[ship.ship_type]?.name ?? ship.ship_type}`).join("\n");
+      const crew = settlement.ships.reduce((sum, ship) => sum + SHIPS[ship.ship_type].manpower * ship.quantity, 0);
+      embed.addFields({ name: "🚢 Donanma", value: `${ships}\n**Mürettebat: ${number(crew)}**`.slice(0, 1024), inline: true });
     }
     if (settlement.siegeAssets.length) {
       const assets = settlement.siegeAssets.map((asset) => `• **${asset.quantity}** ${SIEGE_ASSETS[asset.asset_type as keyof typeof SIEGE_ASSETS]?.name ?? asset.asset_type}`).join("\n");
       embed.addFields({ name: "🛠️ Kuşatma Aletleri", value: assets.slice(0, 1024), inline: true });
     }
     const pending = [
-      ...settlement.pendingRecruitment.map((wave) => `⚔️ Tur ${wave.due_turn}: **${number(wave.quantity)}** ${UNITS[wave.unit_type]?.name ?? wave.unit_type}`),
-      ...settlement.pendingShips.map((ship) => `🚢 Tur ${ship.completion_turn}: **${ship.quantity}** ${SHIPS[ship.ship_type]?.name ?? ship.ship_type}`)
+      ...settlement.pendingRecruitment.map((wave) => wave.unit_type === "observer"
+        ? `👁️ Tur ${wave.due_turn}: **1 Gözcü Birliği** (${number(wave.quantity)} personel)`
+        : `⚔️ Tur ${wave.due_turn}: **${number(wave.quantity)}** ${UNITS[wave.unit_type]?.name ?? wave.unit_type}`),
+      ...settlement.pendingShips.map((ship) => `🚢 Tur ${ship.completion_turn}: **${ship.quantity}** ${SHIPS[ship.ship_type]?.name ?? ship.ship_type}`),
+      ...(settlement.pendingSiege ?? []).map((order) => `🛠️ Tur ${order.completion_turn}: **${order.quantity}** ${SIEGE_ASSETS[order.asset_type]?.name ?? order.asset_type}`)
     ];
-    if (pending.length) embed.addFields({ name: "⏳ Bekleyen Teslimatlar", value: pending.join("\n").slice(0, 1024) });
+    if (pending.length) embed.addFields({ name: "⚙️ Üretim", value: pending.join("\n").slice(0, 1024) });
 
-    return embed.setFooter({ text: `Garnizon kademesi: ${settlement.garrison_level} • Yerleşke verileri güncel tahmindir.` });
+    return embed;
   });
 
   return [summary, ...settlementEmbeds];

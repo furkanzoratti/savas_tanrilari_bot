@@ -21,4 +21,13 @@ describe("yönetim komutları", () => {
       expect(admin?.options?.find((option) => option.name === destructive)?.options?.find((option) => option.name === "onay")).toMatchObject({ required: true });
     }
   });
+
+  it("gözcü, atölye, saha aleti ve asimilasyon komutlarını kaydeder", () => {
+    expect(commandBuilders.some((command) => command.name === "gozcu-alimi")).toBe(true);
+    expect(commandBuilders.some((command) => command.name === "kusatma-uretimi")).toBe(true);
+    const battle = commandBuilders.find((command) => command.name === "savas");
+    expect(battle?.options?.some((option) => option.name === "saha-aleti-al")).toBe(true);
+    const admin = commandBuilders.find((command) => command.name === "yonetim");
+    expect(admin?.options?.some((option) => option.name === "asimilasyon-tamamla")).toBe(true);
+  });
 });

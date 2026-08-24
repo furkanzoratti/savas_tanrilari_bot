@@ -22,7 +22,7 @@ function siegeView(): BattleView {
         battle_id: "battle", side_key: "A", country_id: "rome", country_name: "Roma", controller: "PLAYERS",
         initial_total: 12_000, current_total: 10_000, total_losses: 2_000, pressure: 1,
         composition: { heavy_infantry: 10_000 }, initial_composition: { heavy_infantry: 12_000 },
-        support_assets: {}, support_targets: {}, seal: "ATTACKER"
+        support_assets: { ladder_group: 2, siege_tower: 1 }, support_targets: { ladder_group: "ASSAULT", siege_tower: "ASSAULT" }, seal: "ATTACKER"
       },
       B: {
         battle_id: "battle", side_key: "B", country_id: "city", country_name: "Savunucu", controller: "GM",
@@ -46,6 +46,9 @@ describe("kuşatma bilgi gizliliği", () => {
     expect(json).toContain("Oyun Turu 12");
     expect(json).toContain("2/3 kullanıldı");
     expect(json).toContain("1 hak kaldı");
+    expect(json).toContain("Hücum Erişimi");
+    expect(json).toContain("5.000 / 12.000");
+    expect(json).toContain("azami piyade");
     expect(json).not.toContain("ATTACKER");
     expect(json).not.toContain("DEFENDER");
     expect(json).not.toContain("Savunma Kademesi");

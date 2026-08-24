@@ -9,6 +9,10 @@ export function settlementMobilizationLimit(population: number, mobilization: Mo
   return militaryLimit(population, mobilization);
 }
 
+export function settlementTrainingCapacity(population: number, mobilization: Mobilization): number {
+  return Math.floor(population * MOBILIZATION_RULES[mobilization].trainingRate);
+}
+
 export function createRecruitmentWaves(
   quantity: number,
   mobilization: Mobilization,

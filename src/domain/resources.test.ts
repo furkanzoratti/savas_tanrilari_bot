@@ -15,7 +15,7 @@ describe("hammadde etkileri", () => {
   });
 
   it("Tahıl bakım ve nüfus etkisini uygular", () => {
-    expect(calculateUnitUpkeep("heavy_infantry", 1_000, "FIELD_FRIENDLY", "PEACE", ["GRAIN"])).toBe(270);
+    expect(calculateUnitUpkeep("heavy_infantry", 1_000, "FIELD_FRIENDLY", "PEACE", ["GRAIN"])).toBe(360);
     expect(calculatePopulationGain({
       basePopulationGrowth: 1_000, buildings: [], ruinStage: 0, mobilization: "PEACE", resources: ["GRAIN"]
     })).toBe(1_100);
