@@ -5,10 +5,8 @@ export function militaryLimit(freePopulation: number, mobilization: Mobilization
   return Math.floor(freePopulation * MOBILIZATION_RULES[mobilization].manpowerRate);
 }
 
-export function settlementRecruitmentCapacity(population: number, mobilization: Mobilization): number {
-  const base = Math.min(population * 0.05, 5_000);
-  const modified = base * MOBILIZATION_RULES[mobilization].capacityMultiplier;
-  return Math.floor(modified / 500) * 500;
+export function settlementMobilizationLimit(population: number, mobilization: Mobilization): number {
+  return militaryLimit(population, mobilization);
 }
 
 export function createRecruitmentWaves(

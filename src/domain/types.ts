@@ -1,5 +1,6 @@
 export type Mobilization = "PEACE" | "PARTIAL" | "GENERAL";
 export type UnitStatus = "GARRISON" | "FIELD_FRIENDLY" | "FIELD_HOSTILE";
+export type ForceType = "GARRISON" | "ARMY";
 export type ShipStatus = "RESERVE" | "ACTIVE" | "HOSTILE";
 export type RuinStage = 0 | 1 | 2;
 

@@ -1,11 +1,13 @@
 import {
   ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ModalBuilder,
   StringSelectMenuBuilder, TextInputBuilder, TextInputStyle,
-  type ButtonInteraction, type ChatInputCommandInteraction, type Client,
+  type AutocompleteInteraction, type ButtonInteraction, type ChatInputCommandInteraction, type Client,
   type Interaction, type ModalSubmitInteraction, type StringSelectMenuInteraction
 } from "discord.js";
 import { BUILD_COSTS, BUILDINGS, MOBILIZATION_RULES, SHIPS, UNITS } from "../domain/catalog.js";
 import { gold, number } from "../domain/format.js";
+import { CULTURE_GROUPS, type CultureGroup } from "../domain/cultures.js";
+import { garrisonComposition } from "../domain/garrison.js";
 import type { Mobilization, UnitStatus } from "../domain/types.js";
 import { TRADE_ROUTE_LABELS, type TradeRoute } from "../domain/trade.js";
 import { RESOURCES, buildingCostMultiplier, buildingDurationReduction, shipCostMultiplier, unitCostMultiplier, type ResourceType } from "../domain/resources.js";
@@ -145,7 +147,11 @@ async function handleTurn(interaction: ChatInputCommandInteraction): Promise<voi
     embed = turnAnnouncement({
       kind: "ADVANCE", turn: result.turn, acquisition: result.acquisition,
       completedBuildings: result.completedBuildings, recruitmentArrivals: result.recruitmentArrivals,
-      completedShips: result.completedShips
+      completedShips: result.completedShips, garrisonUpgrades: result.garrisonUpgrades,
+      completedBuildingDetails: result.completedBuildingDetails,
+      recruitmentArrivalDetails: result.recruitmentArrivalDetails,
+      completedShipDetails: result.completedShipDetails,
+      garrisonUpgradeDetails: result.garrisonUpgradeDetails
     });
   } else {
     const phase = sub === "ac" ? "OPEN" : sub === "durdur" ? "RESOLVING" : "CLOSED";
@@ -236,18 +242,30 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
   } else if (sub === "yerleske-ekle") {
     const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
     if (!country) throw new GameError("Ülke bulunamadı.");
+    const cultureGroup = interaction.options.getString("kultur", true) as CultureGroup;
+    if (!CULTURE_GROUPS[cultureGroup] || cultureGroup === "UNASSIGNED") throw new GameError("Geçerli bir kültür grubu seçmelisiniz.");
     const settlement = await gameService.createSettlement({
       guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id,
       name: interaction.options.getString("ad", true), population: interaction.options.getInteger("nufus", true),
       slaves: interaction.options.getInteger("kole", true),
-      baseIncome: interaction.options.getInteger("gelir", true),
-      taxIncome: interaction.options.getInteger("vergi-geliri", true),
-      landTradeIncome: interaction.options.getInteger("kara-ticareti", true),
-      seaTradeIncome: interaction.options.getInteger("deniz-ticareti", true),
+      totalIncome: interaction.options.getInteger("gelir", true),
       basePopulationGrowth: interaction.options.getInteger("nufus-artisi", true),
-      resourceType: interaction.options.getString("hammadde", true) as ResourceType
+      resourceType: interaction.options.getString("hammadde", true) as ResourceType,
+      cultureGroup
     });
-    await interaction.editReply(`✅ **${settlement.name}**, ${country.name} ülkesine **${RESOURCES[settlement.resource_type].label}** hammaddesiyle eklendi.`);
+    const garrison = garrisonComposition(settlement.population);
+    await interaction.editReply(`✅ **${settlement.name}**, **${country.name}** ülkesine eklendi.
+🏺 Kültür: **${CULTURE_GROUPS[settlement.culture_group].label}** • 📦 Hammadde: **${RESOURCES[settlement.resource_type].label}**
+💰 Başlangıç geliri: **${gold(settlement.base_land_trade_income + Math.floor(settlement.population * 0.03))}** • Halk Vergisi: **${gold(Math.floor(settlement.population * 0.03))}** • Kara Ticareti: **${gold(settlement.base_land_trade_income)}**
+🛡️ Sabit garnizon: **${number(garrison.lightInfantry)} Hafif Piyade, ${number(garrison.spears)} Mızraklı, ${number(garrison.archers)} Okçu**`);
+  } else if (sub === "kultur-ayarla") {
+    const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
+    if (!country) throw new GameError("Ülke bulunamadı.");
+    const settlement = await findSettlement(country.id, interaction.options.getString("yerleske", true));
+    const cultureGroup = interaction.options.getString("kultur", true) as CultureGroup;
+    if (!CULTURE_GROUPS[cultureGroup] || cultureGroup === "UNASSIGNED") throw new GameError("Geçerli bir kültür grubu seçmelisiniz.");
+    await gameService.setSettlementCulture({ guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id, settlementId: settlement.id, cultureGroup });
+    await interaction.editReply(`✅ **${settlement.name}** kültürü **${CULTURE_GROUPS[cultureGroup].label}** olarak değiştirildi.`);
   } else if (sub === "hammadde-ayarla") {
     const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
     if (!country) throw new GameError("Ülke bulunamadı.");
@@ -258,11 +276,26 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
   } else if (sub === "tur-ilerlet") {
     const result = await gameService.advanceTurn(interaction.guildId, interaction.user.id);
     await refreshActiveBattleCards(interaction.client, interaction.guildId);
-    await interaction.editReply(`✅ **Tur ${result.turn}** açıldı.${result.acquisition ? " Bu bir **Alım Turudur**." : ""}\n🏗️ ${result.completedBuildings} bina tamamlandı.\n⚔️ ${number(result.recruitmentArrivals)} asker katıldı.\n🚢 ${result.completedShips} gemi tamamlandı.`);
+    await interaction.editReply({ embeds: [turnAnnouncement({
+      kind: "ADVANCE", turn: result.turn, acquisition: result.acquisition,
+      completedBuildings: result.completedBuildings, recruitmentArrivals: result.recruitmentArrivals,
+      completedShips: result.completedShips, garrisonUpgrades: result.garrisonUpgrades,
+      completedBuildingDetails: result.completedBuildingDetails,
+      recruitmentArrivalDetails: result.recruitmentArrivalDetails,
+      completedShipDetails: result.completedShipDetails,
+      garrisonUpgradeDetails: result.garrisonUpgradeDetails
+    })], files: [new AttachmentBuilder(BRAND_BANNER_PATH, { name: BRAND_BANNER_NAME })] });
   } else if (sub === "tur-durumu") {
     const phase = interaction.options.getString("durum", true) as "OPEN" | "CLOSED" | "RESOLVING";
     await gameService.setTurnPhase(interaction.guildId, interaction.user.id, phase);
     await interaction.editReply(`✅ Tur durumu **${phase}** olarak değiştirildi.`);
+  } else if (sub === "yerleske-hazinesi") {
+    const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
+    if (!country) throw new GameError("Ülke bulunamadı.");
+    const settlement = await findSettlement(country.id, interaction.options.getString("yerleske", true));
+    const amount = interaction.options.getInteger("miktar", true);
+    const result = await gameService.adjustSettlementTreasury({ guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id, settlementId: settlement.id, amount, reason: interaction.options.getString("neden", true) });
+    await interaction.editReply(`✅ **${settlement.name}** yerel hazinesi ${amount >= 0 ? "+" : ""}${gold(amount)} değiştirildi. Yeni bakiye: **${gold(result.balance)}**.`);
   } else if (sub === "hazine") {
     const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
     if (!country) throw new GameError("Ülke bulunamadı.");
@@ -455,6 +488,19 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
   }
 }
 
+async function handleAutocomplete(interaction: AutocompleteInteraction): Promise<void> {
+  if (interaction.commandName !== "yonetim" || interaction.options.getFocused(true).name !== "kultur") {
+    await interaction.respond([]);
+    return;
+  }
+  const query = String(interaction.options.getFocused()).toLocaleLowerCase("tr-TR").trim();
+  const choices = Object.entries(CULTURE_GROUPS)
+    .filter(([key, value]) => key !== "UNASSIGNED" && (!query || key.toLocaleLowerCase("tr-TR").includes(query) || value.label.toLocaleLowerCase("tr-TR").includes(query)))
+    .slice(0, 25)
+    .map(([value, culture]) => ({ name: culture.label, value }));
+  await interaction.respond(choices);
+}
+
 async function reportError(interaction: Interaction, error: unknown): Promise<void> {
   const message = error instanceof GameError ? error.message : "Beklenmeyen bir hata oluştu. İşlem kaydedilmedi.";
   const payload = { content: `❌ ${message}`, components: [] as ActionRowBuilder<any>[], ephemeral: true };
@@ -467,7 +513,8 @@ async function reportError(interaction: Interaction, error: unknown): Promise<vo
 export function attachInteractionHandler(client: Client): void {
   client.on("interactionCreate", async (interaction) => {
     try {
-      if (interaction.isChatInputCommand()) {
+      if (interaction.isAutocomplete()) await handleAutocomplete(interaction);
+      else if (interaction.isChatInputCommand()) {
         let playerLog: { id: string; channelId: string | null } | null = null;
         if (interaction.guildId && !isGameMaster(interaction)) {
           try {

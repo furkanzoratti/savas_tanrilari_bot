@@ -402,4 +402,53 @@ export const migrations = [
       ALTER TABLE settlements ADD COLUMN IF NOT EXISTS is_conquered BOOLEAN NOT NULL DEFAULT FALSE;
       ALTER TABLE settlements ADD COLUMN IF NOT EXISTS conquered_turn INTEGER;
     `
+  },
+  {
+    version: 10,
+    name: "settlement_culture_and_standard_garrisons",
+    sql: `
+      ALTER TABLE settlements ADD COLUMN IF NOT EXISTS culture_group TEXT NOT NULL DEFAULT 'UNASSIGNED';
+      ALTER TABLE settlements DROP CONSTRAINT IF EXISTS settlements_culture_group_check;
+      ALTER TABLE settlements ADD CONSTRAINT settlements_culture_group_check CHECK (culture_group IN (
+        'UNASSIGNED','BRITTONIC','CELTIC','GERMANIC','BALTIC','IBERIAN','ITALIC','ILLYRO_PANNONIAN','DACO_GETIC','THRACIAN',
+        'HELLENIC','PUNIC','BERBER','LIBYAN','EGYPTIAN','KUSHITIC','HABESHA','ARABIAN','LEVANTINE','MESOPOTAMIAN',
+        'ANATOLIAN','ARMENIAN','CAUCASIAN','SARMATIAN','SCYTHIAN','WEST_IRANIAN','EAST_IRANIAN'
+      ));
+      ALTER TABLE settlements ADD COLUMN IF NOT EXISTS garrison_level INTEGER NOT NULL DEFAULT 0 CHECK (garrison_level >= 0);
+      ALTER TABLE unit_stacks ADD COLUMN IF NOT EXISTS force_type TEXT NOT NULL DEFAULT 'ARMY';
+      ALTER TABLE unit_stacks DROP CONSTRAINT IF EXISTS unit_stacks_force_type_check;
+      ALTER TABLE unit_stacks ADD CONSTRAINT unit_stacks_force_type_check CHECK (force_type IN ('GARRISON','ARMY'));
+      ALTER TABLE unit_stacks DROP CONSTRAINT IF EXISTS unit_stacks_settlement_id_unit_type_status_key;
+      ALTER TABLE unit_stacks ADD CONSTRAINT unit_stacks_settlement_unit_status_force_key UNIQUE (settlement_id,unit_type,status,force_type);
+
+      WITH standard AS (
+        SELECT id,
+          CASE WHEN population < 50000 THEN FLOOR(FLOOR(population * 0.01) * 0.40)::INTEGER ELSE FLOOR(population / 25000.0)::INTEGER * 100 END AS light_quantity,
+          CASE WHEN population < 50000 THEN FLOOR(FLOOR(population * 0.01) * 0.40)::INTEGER ELSE FLOOR(population / 25000.0)::INTEGER * 100 END AS spear_quantity,
+          CASE WHEN population < 50000 THEN (FLOOR(population * 0.01)::INTEGER - 2 * FLOOR(FLOOR(population * 0.01) * 0.40)::INTEGER) ELSE FLOOR(population / 25000.0)::INTEGER * 50 END AS archer_quantity
+        FROM settlements
+      ), stacks AS (
+        SELECT id, 'light_infantry'::TEXT AS unit_type, light_quantity AS quantity FROM standard
+        UNION ALL SELECT id, 'spear', spear_quantity FROM standard
+        UNION ALL SELECT id, 'archer', archer_quantity FROM standard
+      )
+      INSERT INTO unit_stacks(settlement_id,unit_type,quantity,status,force_type)
+      SELECT id,unit_type,quantity,'GARRISON','GARRISON' FROM stacks WHERE quantity > 0
+      ON CONFLICT(settlement_id,unit_type,status,force_type)
+      DO UPDATE SET quantity=GREATEST(unit_stacks.quantity,EXCLUDED.quantity);
+
+      UPDATE settlements SET garrison_level=CASE WHEN population < 50000 THEN 0 ELSE FLOOR(population / 25000.0)::INTEGER - 1 END;
+    `
+  },
+  {
+    version: 11,
+    name: "settlement_treasury_and_income_model_v2",
+    sql: `
+      ALTER TABLE settlements ADD COLUMN IF NOT EXISTS local_treasury BIGINT NOT NULL DEFAULT 0 CHECK (local_treasury >= 0);
+      ALTER TABLE settlements ADD COLUMN IF NOT EXISTS base_land_trade_income BIGINT NOT NULL DEFAULT 0 CHECK (base_land_trade_income >= 0);
+
+      UPDATE settlements
+         SET base_land_trade_income=GREATEST(0,base_income+tax_income+land_trade_income+sea_trade_income-FLOOR(population*0.03)::BIGINT)
+       WHERE base_land_trade_income=0;
+    `
   }] as const;

@@ -21,9 +21,9 @@ describe("gelir kalemleri", () => {
       ruinStage: 0
     });
 
-    expect(result.gross).toEqual({ settlement: 1_350, tax: 2_300, landTrade: 825, seaTrade: 800 });
-    expect(result.buildingBonuses).toEqual({ settlement: 250, tax: 300, landTrade: 75, seaTrade: 250 });
-    expect(incomeTotal(result.payable)).toBe(5_275);
+    expect(result.gross).toEqual({ building: 1_575, tax: 2_000, landTrade: 1_750, seaTrade: 800 });
+    expect(result.buildingBonuses).toEqual({ building: 1_575, tax: 0, landTrade: 0, seaTrade: 0 });
+    expect(incomeTotal(result.payable)).toBe(6_125);
   });
 
   it("harap toparlanmasının yüzde 50 aşamasını bütün gelir kalemlerine uygular", () => {
@@ -37,6 +37,6 @@ describe("gelir kalemleri", () => {
       buildings: [],
       ruinStage: 2
     });
-    expect(result.payable).toEqual({ settlement: 500, tax: 500, landTrade: 500, seaTrade: 500 });
+    expect(result.payable).toEqual({ building: 0, tax: 500, landTrade: 1_000, seaTrade: 500 });
   });
 });

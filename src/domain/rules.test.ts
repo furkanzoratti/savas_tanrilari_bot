@@ -3,7 +3,7 @@ import {
   buildingSlotLimit, calculatePopulationGain, calculateSettlementEconomy,
   calculateShipUpkeep, calculateUnitUpkeep, nextRuinStage
 } from "./economy.js";
-import { createRecruitmentWaves, isAcquisitionTurn, militaryLimit, settlementRecruitmentCapacity } from "./mobilization.js";
+import { createRecruitmentWaves, isAcquisitionTurn, militaryLimit } from "./mobilization.js";
 
 describe("yerleşke ekonomisi", () => {
   it("bina gelirlerini her hesapta sıfırdan türetir", () => {
@@ -55,11 +55,6 @@ describe("seferberlik ve bakım", () => {
     expect(militaryLimit(100_000, "PEACE")).toBe(7_500);
     expect(militaryLimit(100_000, "PARTIAL")).toBe(12_500);
     expect(militaryLimit(100_000, "GENERAL")).toBe(17_500);
-  });
-
-  it("yerleşke eğitim kapasitesini kademeye ve 500'lük bloklara göre sınırlar", () => {
-    expect(settlementRecruitmentCapacity(60_000, "PEACE")).toBe(3_000);
-    expect(settlementRecruitmentCapacity(200_000, "GENERAL")).toBe(10_000);
   });
 
   it("genel seferberlik alımını üç tura eksiksiz böler", () => {

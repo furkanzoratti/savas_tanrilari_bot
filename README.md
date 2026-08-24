@@ -6,11 +6,11 @@ Railway üzerinde sürekli çalışan, Discord komutlarıyla yönetilen ve Postg
 
 - Oyuncunun yalnızca kendi ülkesine ait güncel belgeyi gösterir; ülkeye atanmış oyuncuları Discord etiketi olarak listeler ve şehir kartlarını antik tapınak görseliyle sunar.
 - Yerleşke, nüfus, köle nüfusu, hazine, bina, asker, gemi, kuşatma aleti ve bakım giderlerini açıklamalı bir devlet belgesinde toplar.
-- Geliri yerleşke, vergi, kara ticareti ve deniz ticareti olarak ayırır; şehir bazında ve ülke toplamında gösterir.
+- Geliri Binalar, Halk Vergisi, Kara Ticareti ve Deniz Ticareti olarak ayırır. Halk vergisi nüfusun `%3`üdür; deniz ticareti aktif Liman ile açılır.
 - Bina alımını yerleşke ve bina seçmeli bir akışla yürütür; seviye ön şartını, slotu, maliyeti ve tamamlanma turunu denetler. Her yerleşkede aynı anda en fazla iki inşaat sürer.
 - Her turda tamamlanan binaları etkinleştirir. Gelir etkileri veritabanına üst üste eklenmez; aktif binalardan yeniden hesaplandığı için aynı bonusun iki kez uygulanması engellenir.
-- Seferberlik seviyesine göre toplam asker sınırını ve yerleşke eğitim kapasitesini hesaplar.
-- Askere alınan birlikleri seferberlik kademesinin dalgalarına böler; gelecekte katılacak askerleri belgede gösterir ve zamanı gelince garnizona ekler.
+- Seferberlik yüzdesini ülkenin toplam nüfusuna uygular; aynı sınırı şehir nüfuslarına oranlayarak her yerleşkenin asker alım payını hesaplar.
+- Askere alınan birlikleri seferberlik kademesinin dalgalarına böler; gelecekte katılacak askerleri belgede gösterir ve zamanı gelince **Ordu** olarak ekler. Nüfusa bağlı sabit şehir garnizonu ayrı tutulur.
 - Birlik ve donanma bakımını konumlarına ve seferberlik durumuna göre hesaplar; mevcut birlikleri iadesiz ve kalıcı olarak terhis eder.
 - Tersane seviyesi, maliyet ve yapım süresi denetimli gemi siparişi alır; tamamlanan gemileri rezerv filoya ekler.
 - Harap yerleşkeyi ilk alım turunda `%0`, ikinci alım turunda `%50`, üçüncü alım turunda `%100` gelir ve nüfus üretimine geçirir.
@@ -27,7 +27,7 @@ Railway üzerinde sürekli çalışan, Discord komutlarıyla yönetilen ve Postg
 - Oyuncu komutları varsayılan olarak komutu kullanan kişinin ülkesini bulur.
 - Başka bir ülke adı vermek yalnızca oyun yöneticilerine açıktır.
 - Discord `Administrator` yetkisi olanlar ve `ADMIN_ROLE_IDS` içinde tanımlanan roller oyun yöneticisidir.
-- Oyun yöneticisi oyuncu atayabilir, ülke ve yerleşke oluşturabilir, her ülke adına alım/seferberlik işlemi yapabilir, hazine ve haraplık durumunu değiştirebilir ve turu yönetebilir.
+- Oyun yöneticisi oyuncu atayabilir, ülke ve kültürlü yerleşke oluşturabilir, her ülke adına alım/seferberlik işlemi yapabilir, devlet ve yerleşke hazinelerini değiştirebilir ve turu yönetebilir.
 
 ## Komutlar
 
@@ -65,10 +65,12 @@ Bu komutların sonuçları gizli değildir; markalı resmî tur duyurusu olarak 
 - `/yonetim yerleske-devret kaynak-ulke yerleske hedef-ulke`
 - `/yonetim oyuncu-ata`
 - `/yonetim oyuncu-cikar ulke oyuncu`
-- `/yonetim yerleske-ekle` (hammadde seçimi dâhil)
+- `/yonetim yerleske-ekle` (toplam başlangıç geliri, hammadde ve kültür seçimi dâhil)
+- `/yonetim kultur-ayarla`
 - `/yonetim hammadde-ayarla`
 - `/yonetim tur-ilerlet`
 - `/yonetim tur-durumu`
+- `/yonetim yerleske-hazinesi`
 - `/yonetim hazine`
 - `/yonetim harap`
 - `/yonetim oyunu-sifirla onay:SIFIRLA`
@@ -81,7 +83,7 @@ Bu komutların sonuçları gizli değildir; markalı resmî tur duyurusu olarak 
 
 `oyunu-sifirla` yalnızca yetkili GM tarafından ve tam `SIFIRLA` onayıyla çalışır. Komut, o Discord sunucusundaki ülkeleri ve bunlara bağlı bütün oyun kayıtlarını siler; turu 0/Kapalı durumuna döndürür. Rol kanalları ile kelime istatistikleri korunur.
 
-Tur ilerletme otomatik saate bağlanmamıştır. Savaş veya olay çözümü iki güne uzayabildiği için GM önce durumu `Kapalı`/`Olaylar çözülüyor` yapar, bütün olaylar bittikten sonra bir kez `tur-ilerlet` kullanır.
+Tur ilerletme otomatik saate bağlanmamıştır. Savaş veya olay çözümü iki güne uzayabildiği için GM önce durumu `Kapalı`/`Olaylar çözülüyor` yapar, bütün olaylar bittikten sonra bir kez `tur-ilerlet` kullanır. Sonuç kartı tamamlanan binaları, katılan birlikleri ve gemileri yerleşke bazında listeler.
 
 ## Discord kurulumu
 
