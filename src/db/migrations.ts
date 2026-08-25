@@ -659,4 +659,101 @@ export const migrations = [
       CREATE INDEX IF NOT EXISTS settlement_events_triggered_history_idx
         ON settlement_events(settlement_id,event_type,turn DESC) WHERE triggered=TRUE;
     `
+  },
+  {
+    version: 16,
+    name: "curia_heavy_infantry_garrison_guards",
+    sql: `
+      UPDATE unit_stacks army
+         SET quantity=GREATEST(0,army.quantity-500)
+        FROM settlements settlement
+       WHERE settlement.id=army.settlement_id
+         AND settlement.curia_guard_granted=TRUE
+         AND army.unit_type='light_infantry'
+         AND army.status='GARRISON'
+         AND army.force_type='ARMY';
+
+      DELETE FROM unit_stacks army
+       USING settlements settlement
+       WHERE settlement.id=army.settlement_id
+         AND settlement.curia_guard_granted=TRUE
+         AND army.unit_type='light_infantry'
+         AND army.status='GARRISON'
+         AND army.force_type='ARMY'
+         AND army.quantity=0;
+
+      INSERT INTO unit_stacks(settlement_id,unit_type,quantity,status,force_type)
+      SELECT id,'heavy_infantry',200,'GARRISON','GARRISON'
+        FROM settlements WHERE curia_guard_granted=TRUE
+      ON CONFLICT(settlement_id,unit_type,status,force_type)
+      DO UPDATE SET quantity=unit_stacks.quantity+EXCLUDED.quantity;
+    `
+  },
+  {
+    version: 17,
+    name: "alliances_pacts_and_diplomacy_channel",
+    sql: `
+      ALTER TABLE guilds ADD COLUMN IF NOT EXISTS diplomacy_channel_id TEXT;
+
+      CREATE TABLE IF NOT EXISTS country_alliances (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        guild_id TEXT NOT NULL REFERENCES guilds(discord_id) ON DELETE CASCADE,
+        proposer_country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        receiver_country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING','ACTIVE','REJECTED','ENDED','CANCELLED')),
+        offered_by TEXT NOT NULL,
+        responded_by TEXT,
+        channel_id TEXT,
+        message_id TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        responded_at TIMESTAMPTZ,
+        ended_at TIMESTAMPTZ,
+        CHECK (proposer_country_id <> receiver_country_id)
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS country_alliances_open_pair_idx
+        ON country_alliances(guild_id,LEAST(proposer_country_id,receiver_country_id),GREATEST(proposer_country_id,receiver_country_id))
+        WHERE status IN ('PENDING','ACTIVE');
+      CREATE INDEX IF NOT EXISTS country_alliances_receiver_idx ON country_alliances(receiver_country_id,status);
+      CREATE INDEX IF NOT EXISTS country_alliances_proposer_idx ON country_alliances(proposer_country_id,status);
+
+      CREATE TABLE IF NOT EXISTS diplomatic_pacts (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        guild_id TEXT NOT NULL REFERENCES guilds(discord_id) ON DELETE CASCADE,
+        founder_country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        name TEXT NOT NULL CHECK (char_length(name) BETWEEN 2 AND 80),
+        purpose TEXT NOT NULL CHECK (char_length(purpose) BETWEEN 2 AND 200),
+        description TEXT NOT NULL CHECK (char_length(description) BETWEEN 2 AND 1000),
+        created_by TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS diplomatic_pacts_guild_name_idx
+        ON diplomatic_pacts(guild_id,LOWER(name));
+
+      CREATE TABLE IF NOT EXISTS pact_memberships (
+        pact_id UUID NOT NULL REFERENCES diplomatic_pacts(id) ON DELETE CASCADE,
+        country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY(pact_id,country_id)
+      );
+      CREATE INDEX IF NOT EXISTS pact_memberships_country_idx ON pact_memberships(country_id);
+
+      CREATE TABLE IF NOT EXISTS pact_invitations (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        guild_id TEXT NOT NULL REFERENCES guilds(discord_id) ON DELETE CASCADE,
+        pact_id UUID NOT NULL REFERENCES diplomatic_pacts(id) ON DELETE CASCADE,
+        inviter_country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        receiver_country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING','ACCEPTED','REJECTED','CANCELLED')),
+        invited_by TEXT NOT NULL,
+        responded_by TEXT,
+        channel_id TEXT,
+        message_id TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        responded_at TIMESTAMPTZ,
+        CHECK (inviter_country_id <> receiver_country_id)
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS pact_pending_invitation_idx
+        ON pact_invitations(pact_id,receiver_country_id) WHERE status='PENDING';
+      CREATE INDEX IF NOT EXISTS pact_invitations_receiver_idx ON pact_invitations(receiver_country_id,status);
+    `
   }] as const;

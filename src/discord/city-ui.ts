@@ -103,7 +103,7 @@ export async function handleCityCommand(interaction: ChatInputCommandInteraction
       const document = await gameService.document(country.id);
       const rows = document.characters.map((character) => {
         const role = CHARACTER_ROLES[character.role];
-        const duty = character.assignment === "NONE" ? "Görev bekliyor" : `${character.assigned_settlement_name} • ${character.assignment === "AGORA" ? "Agora / Forum" : "Curia"}`;
+        const duty = character.assignment === "NONE" ? "Görev bekliyor" : character.assignment === "AGORA" ? "Agora / Forum" : "Curia";
         return `${role.emoji} **${character.name}** — ${role.label} (+${character.skill_bonus})\n↳ ${duty}`;
       });
       await interaction.reply({ embeds: [new EmbedBuilder().setColor(0xc59b45).setTitle(`🎓 ${country.name} • Devlet Karakterleri`).setDescription((rows.join("\n\n") || "Henüz yetiştirilmiş karakter bulunmuyor.").slice(0, 4_000))], ephemeral: true });
@@ -121,7 +121,7 @@ export async function handleCityCommand(interaction: ChatInputCommandInteraction
         characterName: interaction.options.getString("karakter", true), settlementId: settlement.id,
         assignment: interaction.options.getString("gorev-yeri", true) as "CURIA" | "AGORA"
       });
-      await interaction.reply({ content: `✅ **${result.character.name}**, **${settlement.name}** yerleşkesindeki **${result.character.assignment === "AGORA" ? "Agora / Forum" : "Curia"}** görevine atandı.${result.guardCreated ? "\n🛡️ Curia muhafız birliği olarak 500 Hafif Piyade oluşturuldu." : ""}`, ephemeral: true });
+      await interaction.reply({ content: `✅ **${result.character.name}**, **${settlement.name}** yerleşkesindeki **${result.character.assignment === "AGORA" ? "Agora / Forum" : "Curia"}** görevine atandı.${result.guardCreated ? "\n🛡️ Garnizona Curia muhafızı olarak 200 Ağır Piyade eklendi." : ""}`, ephemeral: true });
       return true;
     }
     const session = await cityService.beginTraining({

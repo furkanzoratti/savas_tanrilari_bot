@@ -1,5 +1,5 @@
 import { EmbedBuilder } from "discord.js";
-import { BUILDING_CATEGORIES, BUILDINGS, CHARACTER_ROLES, CITY_POLICIES, MOBILIZATION_RULES, SHIPS, SIEGE_ASSETS, UNITS } from "../domain/catalog.js";
+import { BUILDINGS, CHARACTER_ROLES, CITY_POLICIES, MOBILIZATION_RULES, SHIPS, SIEGE_ASSETS, UNITS } from "../domain/catalog.js";
 import { CULTURE_GROUPS } from "../domain/cultures.js";
 import { calculateShipUpkeep, calculateUnitUpkeep } from "../domain/economy.js";
 import { SETTLEMENT_EVENT_TYPES, type SettlementEventType } from "../domain/events.js";
@@ -45,7 +45,7 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
   const characterSummary = (document.characters ?? []).length
     ? (document.characters ?? []).map((character) => {
         const role = CHARACTER_ROLES[character.role];
-        const assignment = character.assignment === "NONE" ? "Görev bekliyor" : `${character.assigned_settlement_name} • ${character.assignment === "AGORA" ? "Agora / Forum" : "Curia"}`;
+        const assignment = character.assignment === "NONE" ? "Görev bekliyor" : character.assignment === "AGORA" ? "Agora / Forum" : "Curia";
         return `${role.emoji} **${character.name}** — ${role.label} (+${character.skill_bonus})\n↳ ${assignment}`;
       }).join("\n\n")
     : "Henüz yetiştirilmiş devlet görevlisi yok.";
@@ -80,6 +80,12 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
         inline: true
       },
       { name: "🎓 Devlet Görevlileri", value: spacedSection(characterSummary) },
+      { name: "🛡️ Müttefikler", value: spacedSection((document.allies ?? []).length
+        ? (document.allies ?? []).map((ally) => `• **${ally.name}**`).join("\n")
+        : "Aktif müttefik bulunmuyor.") },
+      { name: "🏛️ Üye Olunan Paktlar", value: spacedSection((document.pacts ?? []).length
+        ? (document.pacts ?? []).map((pact) => `• **${pact.name}** — ${pact.purpose}`).join("\n")
+        : "Herhangi bir pakta üye değil.") },
       { name: "🤝 Ticaret Antlaşmaları", value: spacedSection(tradeSummary) }
     )
     .setFooter({ text: "Tüm değerler mevcut bina, kaynak, ticaret, haraplık ve seferberlik etkileriyle hesaplanır." });
@@ -96,10 +102,9 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
       ? settlement.buildings.map((building) => {
           const definition = BUILDINGS[building.building_type];
           const name = definition?.name ?? building.building_type;
-          const category = definition ? ` • ${BUILDING_CATEGORIES[definition.category].label}` : "";
           return building.status === "BUILDING"
-            ? `🏗️ **${name} Sv${building.target_level}**${category} • Tur ${building.completion_turn} • ${Math.max(0, (building.completion_turn ?? 0) - document.guild.current_turn)} tur kaldı`
-            : `• ${name} Sv${building.level}${category}`;
+            ? `🏗️ **${name} Sv${building.target_level}** • Tur ${building.completion_turn} • ${Math.max(0, (building.completion_turn ?? 0) - document.guild.current_turn)} tur kaldı`
+            : `• ${name} Sv${building.level}`;
         }).join("\n")
       : "Henüz bina bulunmuyor.";
 

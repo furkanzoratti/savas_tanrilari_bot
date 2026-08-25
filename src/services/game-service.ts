@@ -89,6 +89,8 @@ export interface CountryDocument {
   country: CountryRow;
   playerIds: string[];
   characters: CountryCharacter[];
+  allies: Array<{ id: string; name: string }>;
+  pacts: Array<{ id: string; name: string; purpose: string; founder_name: string }>;
   freePopulation: number;
   militaryUsed: number;
   militaryLimit: number;
@@ -577,6 +579,21 @@ export const gameService = {
          WHERE (ta.proposer_country_id=$1 OR ta.receiver_country_id=$1) AND ta.status IN ('PENDING','ACTIVE')
          ORDER BY ta.status,partner_name`, [countryId]
       )).rows;
+      const allies = (await client.query<CountryDocument["allies"][number]>(
+        `SELECT partner.id,partner.name FROM country_alliances alliance
+          JOIN countries partner ON partner.id=CASE WHEN alliance.proposer_country_id=$1
+            THEN alliance.receiver_country_id ELSE alliance.proposer_country_id END
+         WHERE alliance.status='ACTIVE'
+           AND (alliance.proposer_country_id=$1 OR alliance.receiver_country_id=$1)
+         ORDER BY partner.name`, [countryId]
+      )).rows;
+      const pacts = (await client.query<CountryDocument["pacts"][number]>(
+        `SELECT pact.id,pact.name,pact.purpose,founder.name AS founder_name
+           FROM pact_memberships membership
+           JOIN diplomatic_pacts pact ON pact.id=membership.pact_id
+           JOIN countries founder ON founder.id=pact.founder_country_id
+          WHERE membership.country_id=$1 ORDER BY pact.name`, [countryId]
+      )).rows;
       const tradeBonuses = await activeTradeBonuses(client, countryId);
       const resourceAccess = await settlementResourceAccess(client, countryId);
       const manpower = await countryManpower(client, countryId);
@@ -671,6 +688,8 @@ export const gameService = {
         country: displayedCountry,
         playerIds,
         characters,
+        allies,
+        pacts,
         freePopulation: manpower.population,
         militaryUsed: manpower.used,
         militaryLimit: militaryLimit(manpower.population, country.mobilization),

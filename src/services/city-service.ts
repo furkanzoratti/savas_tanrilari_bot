@@ -208,8 +208,8 @@ export const cityService = {
       let guardCreated = false;
       if (input.assignment === "CURIA" && !settlement.curia_guard_granted) {
         await client.query(`INSERT INTO unit_stacks(settlement_id,unit_type,quantity,status,force_type)
-          VALUES($1,'light_infantry',500,'GARRISON','ARMY')
-          ON CONFLICT(settlement_id,unit_type,status,force_type) DO UPDATE SET quantity=unit_stacks.quantity+500`, [settlement.id]);
+          VALUES($1,'heavy_infantry',200,'GARRISON','GARRISON')
+          ON CONFLICT(settlement_id,unit_type,status,force_type) DO UPDATE SET quantity=unit_stacks.quantity+200`, [settlement.id]);
         await client.query("UPDATE settlements SET curia_guard_granted=TRUE WHERE id=$1", [settlement.id]);
         guardCreated = true;
       }

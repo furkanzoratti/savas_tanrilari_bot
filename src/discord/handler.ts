@@ -23,6 +23,7 @@ import { BRAND_BANNER_PATH, BRAND_BANNER_NAME, TEMPLE_BANNER_PATH, TEMPLE_BANNER
 import { turnAnnouncement } from "./turn-announcements.js";
 import { handleBattleButton, handleBattleCommand, refreshActiveBattleCards } from "./battle-ui.js";
 import { handleCityButton, handleCityCommand, handleCityModal } from "./city-ui.js";
+import { handleDiplomacyButton, handleDiplomacyCommand } from "./diplomacy-ui.js";
 
 function settlementSelect(customId: string, settlements: Array<{ id: string; name: string; population: number }>, placeholder: string) {
   if (!settlements.length) throw new GameError("Bu ülkeye ait yerleşke bulunmuyor.");
@@ -379,6 +380,7 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
 }
 
 async function handleCommand(interaction: ChatInputCommandInteraction): Promise<void> {
+  if (await handleDiplomacyCommand(interaction)) return;
   if (await handleCityCommand(interaction)) return;
   if (interaction.commandName === "belge") {
     const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
@@ -502,6 +504,7 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
 }
 
 async function handleButton(interaction: ButtonInteraction): Promise<void> {
+  if (await handleDiplomacyButton(interaction)) return;
   if (await handleBattleButton(interaction)) return;
   if (await handleCityButton(interaction)) return;
   if (interaction.customId.startsWith("trade_accept|") || interaction.customId.startsWith("trade_reject|")) {

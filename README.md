@@ -9,7 +9,7 @@ Railway üzerinde sürekli çalışan, Discord komutlarıyla yönetilen ve Postg
 - Geliri Binalar, Halk Vergisi, Kara Ticareti ve Deniz Ticareti olarak ayırır. Halk vergisi nüfusun `%3`üdür; deniz ticareti aktif Liman ile açılır.
 - Bina alımını kategoriye özel fiyatlarla yürütür; nüfusa bağlı en fazla 6 bina slotunu, kıyı/Liman koşullarını ve seviye ön şartlarını denetler. Aynı anda 2 inşaat sürer; Usta Mimarlık Programı bu sınırı 3'e çıkarır.
 - Curia şehir politikalarını bir tur gecikmeyle etkinleştirir; inşaat, asker alımı, huzursuzluk, vergi, şehir geliri, kuşatma erzağı ve kalıcı/geçici milis etkilerini otomatik uygular.
-- Akademi karakterlerini etkileşimli zar ve isimlendirme ile Casus, Tüccar veya Komutan olarak yetiştirir; devlet belgesine ekler ve Curia/Agora görevlerine atar.
+- Akademi karakterlerini etkileşimli zar ve isimlendirme ile Casus, Tüccar veya Komutan olarak yetiştirir; devlet belgesine ekler ve Curia/Agora görevlerine atar. Curia'ya yapılan ilk atama yerleşke garnizonuna bir defaya mahsus 200 Ağır Piyade kazandırır.
 - Panteon savaş kredisi ile karaborsa, salgın, huzursuzluk ve isyan olaylarını yönetir; bütün sunucudaki yerleşkeler için binalar, tüccarlar, kaynak ticareti, kuşatma ve fetih durumuna göre ağırlıklı seçim yapar.
 - Her turda tamamlanan binaları etkinleştirir. Gelir etkileri veritabanına üst üste eklenmez; aktif binalardan yeniden hesaplandığı için aynı bonusun iki kez uygulanması engellenir.
 - Seferberlik yüzdesini ülkenin toplam nüfusuna uygular; aynı sınırı şehir nüfuslarına oranlayarak her yerleşkenin asker alım payını hesaplar.
@@ -20,6 +20,8 @@ Railway üzerinde sürekli çalışan, Discord komutlarıyla yönetilen ve Postg
 - Yalnızca yönetimin seçtiği rol kanallarında kelime sayar; son 24 saat/7 gün sıralaması ve seçilen rapor kanalında otomatik günlük rapor üretir.
 - Yerleşkelere 15 hammaddeden birini atar; üretim ve ticaret kaynaklarının gelir, nüfus, bakım, inşa ve alım etkilerini otomatik hesaplar.
 - Yerleşkeden yerleşkeye kaynak ticareti kurar; hedef oyuncuları etiketleyen teklif kartı tek tıklamalı kabul/red düğmeleri sunar. Ticaret doğrudan altın üretmez.
+- Yönetimin seçtiği özel diplomasi kanalında iki taraflı ittifak ve çok üyeli pakt davetleri oluşturur; hedef ülkenin bütün oyuncularını etiketleyen kabul/red kartları gönderirken komut yanıtlarını kişiye özel tutar. Özel mesaj kullanılmaz.
+- Müttefikleri ve üye olunan paktları özel devlet belgesine ekler; herkesin görüntüleyebildiği ayrı devlet profilinde yalnızca yerleşkeleri, hammaddeleri, müttefikleri ve paktları gösterir.
 - Genel zar komutu sağlar.
 - Bütün kritik işlemleri denetim kaydına yazar ve aynı turun yanlışlıkla iki kez işlenmesini engeller.
 - Yönetici olmayan oyuncuların slash komutlarını başarı/başarısızlık durumuyla saklar; yönetici geçmişi görebilir veya canlı log kanalı ayarlayabilir.
@@ -37,6 +39,19 @@ Railway üzerinde sürekli çalışan, Discord komutlarıyla yönetilen ve Postg
 ### Oyuncu ve yönetici
 
 - `/belge [ulke]`
+- `/devlet-bilgisi ulke` — herkese açık, ekonomik/askerî bilgi içermeyen devlet profili
+- `/ittifak teklif hedef-ulke [ulke]`
+- `/ittifak liste [ulke]`
+- `/ittifak feshet hedef-ulke [ulke]`
+- `/pakt olustur ad amac aciklama [ulke]`
+- `/pakt davet pakt hedef-ulke [ulke]`
+- `/pakt davetlerim [ulke]`
+- `/pakt bilgi pakt` — herkese açık pakt bilgisi
+- `/pakt liste` — herkese açık pakt listesi
+- `/pakt ayril pakt [ulke]`
+- `/pakt uye-cikar pakt hedef-ulke [ulke]`
+- `/pakt lider-devret pakt hedef-ulke [ulke]`
+- `/pakt dagit pakt onay:DAGIT [ulke]`
 - `/alim [ulke]`
 - `/asker-alimi [ulke]`
 - `/asker-terhis yerleske birim durum miktar [ulke]`
@@ -57,6 +72,10 @@ Railway üzerinde sürekli çalışan, Discord komutlarıyla yönetilen ve Postg
 
 Köşeli parantezli `ulke` alanı yalnızca oyun yöneticisinin başka bir ülke adına işlem yapması içindir.
 
+İttifak ve pakt yönetim komutları yalnızca `/diplomasi-kanali` ile seçilen metin kanalında çalışır; işlem sonuçları yalnızca komutu kullanan oyuncuya görünür. Davetler aynı kanalda hedef devletin bütün oyuncularını etiketleyen herkese açık kartlar olarak yayımlanır; yeşil kabul ve kırmızı red düğmesini yalnızca hedef devletin oyuncuları veya oyun yöneticisi kullanabilir. Bot hiçbir oyuncuya özel mesaj göndermez.
+
+`/devlet-bilgisi`, `/pakt bilgi` ve `/pakt liste` diğer kanallarda herkese açıktır; diplomasi kanalında kullanılırlarsa yalnızca komutu kullanan kişiye gösterilir. Devletin açık profili hazine, nüfus, ordu, bina ve gelir verilerini asla içermez. Pakt üyeliği tek başına ikili müttefiklik oluşturmaz. Bir devlet birden fazla pakta katılabilir; pakt lideri üye davet edebilir, üye çıkarabilir, liderliği devredebilir veya `DAGIT` onayıyla paktı dağıtabilir.
+
 ### Herkesin görebildiği, yalnızca yöneticinin çalıştırabildiği
 
 - `/tur atla`
@@ -68,6 +87,8 @@ Bu komutların sonuçları gizli değildir; markalı resmî tur duyurusu olarak 
 
 ### Yalnızca yönetici
 
+- `/diplomasi-kanali islem:Ayarla kanal:#pakt-ittifak`
+- `/diplomasi-kanali islem:Kapat`
 - `/yonetim ulke-olustur`
 - `/yonetim ulkeleri-listele`
 - `/yonetim devlet-belgeleri`

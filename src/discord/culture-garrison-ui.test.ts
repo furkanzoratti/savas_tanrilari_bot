@@ -18,8 +18,14 @@ describe("kültür ve yerleşke kartı", () => {
       guild: { current_turn: 3, turn_phase: "OPEN" },
       country: { name: "Roma", treasury: 10_000, mobilization: "PEACE" },
       playerIds: ["123"], freePopulation: 100_000, militaryUsed: 2_000, militaryLimit: 7_500,
+      characters: [
+        { name: "Aurelius", role: "COMMANDER", skill_bonus: 0, assignment: "CURIA", assigned_settlement_name: "Ordusal" },
+        { name: "Lycinia", role: "MERCHANT", skill_bonus: 1, assignment: "AGORA", assigned_settlement_name: "Ordusal" }
+      ],
       totalGrossIncome: 1_000, totalPayableIncome: 1_000, totalIncomeBreakdown: emptyIncome,
       totalUpkeep: 100, netIncome: 900, tradeAgreements: [],
+      allies: [{ id: "kartaca", name: "Kartaca" }],
+      pacts: [{ id: "pakt", name: "Akdeniz Birliği", purpose: "Ticaret güvenliği", founder_name: "Roma" }],
       settlements: [{
         id: "city", country_id: "country", name: "Roma", population: 100_000, slave_population: 0,
         base_income: 1_000, tax_income: 0, land_trade_income: 0, sea_trade_income: 0,
@@ -29,10 +35,15 @@ describe("kültür ve yerleşke kartı", () => {
         unrest_active: false, rebellion_active: false, grossIncome: 1_000, payableIncome: 1_000,
         incomeBreakdown: emptyIncome, buildingIncomeBonus: emptyIncome, buildingUpkeep: 0,
         unitUpkeep: 100, shipUpkeep: 0, totalSettlementUpkeep: 100, populationGain: 100,
-        militaryUsed: 1_400, militaryLimit: 7_500, slotLimit: 10, effectiveResources: ["GRAIN"], buildings: [], ships: [], siegeAssets: [],
+        militaryUsed: 1_400, militaryLimit: 7_500, slotLimit: 10, effectiveResources: ["GRAIN"],
+        buildings: [
+          { building_type: "academy", level: 1, status: "ACTIVE" },
+          { building_type: "trade_guild", level: 1, status: "ACTIVE" }
+        ], ships: [], siegeAssets: [],
         pendingRecruitment: [], pendingShips: [],
         units: [
           { unit_type: "light_infantry", quantity: 400, status: "GARRISON", force_type: "GARRISON" },
+          { unit_type: "heavy_infantry", quantity: 200, status: "GARRISON", force_type: "GARRISON" },
           { unit_type: "heavy_infantry", quantity: 1_000, status: "GARRISON", force_type: "ARMY" }
         ]
       }]
@@ -41,11 +52,22 @@ describe("kültür ve yerleşke kartı", () => {
     const embeds = renderDocument(document);
     expect(embeds).toHaveLength(2);
     const fields = embeds[1]!.data.fields ?? [];
+    const countryFields = embeds[0]!.data.fields ?? [];
     expect(fields.map((field) => field.name)).toEqual(expect.arrayContaining(["🏺 Kültür", "🚨 Aktif Yerleşke Olayları", "🛡️ Garnizon", "⚔️ Ordu"]));
     expect(fields.find((field) => field.name === "🚨 Aktif Yerleşke Olayları")?.value).toContain("Karaborsa");
     expect(fields.find((field) => field.name === "🚨 Aktif Yerleşke Olayları")?.value).toContain("Salgın");
     expect(fields.find((field) => field.name === "🏺 Kültür")?.value).toContain("İtalik");
     expect(fields.find((field) => field.name === "⚔️ Ordu")?.value).not.toContain("Yerleşkede");
+    expect(fields.find((field) => field.name === "🛡️ Garnizon")?.value).toContain("**200** Ağır Piyade");
+    expect(fields.find((field) => field.name === "🏗️ Binalar ve İnşaatlar")?.value).toContain("Akademi Sv1");
+    expect(fields.find((field) => field.name === "🏗️ Binalar ve İnşaatlar")?.value).not.toContain("Kamu ve Altyapı");
+    expect(fields.find((field) => field.name === "🏗️ Binalar ve İnşaatlar")?.value).not.toContain("Yüzdesel Ekonomi");
+    expect(countryFields.find((field) => field.name === "🛡️ Müttefikler")?.value).toContain("Kartaca");
+    expect(countryFields.find((field) => field.name === "🏛️ Üye Olunan Paktlar")?.value).toContain("Akdeniz Birliği");
+    const officials = countryFields.find((field) => field.name === "🎓 Devlet Görevlileri")?.value;
+    expect(officials).toContain("↳ Curia");
+    expect(officials).toContain("↳ Agora / Forum");
+    expect(officials).not.toContain("Ordusal");
     expect(fields.find((field) => field.name === "👥 Nüfus")?.value).not.toContain("Sonraki Alım");
     expect(fields.find((field) => field.name === "💰 Gelir Kalemleri")?.value).toContain("Toplam:");
     expect(fields.find((field) => field.name === "💰 Gelir Kalemleri")?.value).not.toContain("Tahsil edilecek");
