@@ -32,7 +32,7 @@ describe("ikinci sürüm yerleşke ekonomisi", () => {
       manualFlatIncome: 0, manualIncomePercent: 0, buildings: [{ buildingType: "port", level: 1 }], ruinStage: 0
     });
     expect(withoutPort.gross.seaTrade).toBe(0);
-    expect(withPort.gross.seaTrade).toBe(250);
+    expect(withPort.gross.seaTrade).toBe(500);
   });
 });
 

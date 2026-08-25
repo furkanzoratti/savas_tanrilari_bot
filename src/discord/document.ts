@@ -1,5 +1,5 @@
 import { EmbedBuilder } from "discord.js";
-import { BUILDINGS, MOBILIZATION_RULES, SHIPS, SIEGE_ASSETS, UNITS } from "../domain/catalog.js";
+import { BUILDING_CATEGORIES, BUILDINGS, CHARACTER_ROLES, CITY_POLICIES, MOBILIZATION_RULES, SHIPS, SIEGE_ASSETS, UNITS } from "../domain/catalog.js";
 import { CULTURE_GROUPS } from "../domain/cultures.js";
 import { calculateShipUpkeep, calculateUnitUpkeep } from "../domain/economy.js";
 import { gold, number } from "../domain/format.js";
@@ -41,6 +41,13 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
     ? document.tradeAgreements.map((agreement) => `${agreement.status === "ACTIVE" ? "✅" : "⏳"} **${agreement.partner_name}** • ${TRADE_ROUTE_LABELS[agreement.route]}\n${agreement.proposer_settlement_name} (${RESOURCES[agreement.proposer_resource].label}) ⇄ ${agreement.receiver_settlement_name} (${RESOURCES[agreement.receiver_resource].label})`).join("\n\n")
     : "Aktif veya bekleyen ticaret antlaşması yok.";
   const remainingCapacity = Math.max(0, document.militaryLimit - document.militaryUsed);
+  const characterSummary = (document.characters ?? []).length
+    ? (document.characters ?? []).map((character) => {
+        const role = CHARACTER_ROLES[character.role];
+        const assignment = character.assignment === "NONE" ? "Görev bekliyor" : `${character.assigned_settlement_name} • ${character.assignment === "AGORA" ? "Agora / Forum" : "Curia"}`;
+        return `${role.emoji} **${character.name}** — ${role.label} (+${character.skill_bonus})\n↳ ${assignment}`;
+      }).join("\n\n")
+    : "Henüz yetiştirilmiş devlet görevlisi yok.";
 
   const summary = new EmbedBuilder()
     .setColor(0xc59b45)
@@ -52,26 +59,27 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
     ].join("\n"))
     .setImage(TEMPLE_BANNER_URL)
     .addFields(
-      { name: "👑 Yönetim", value: document.playerIds.length ? document.playerIds.map((id) => `<@${id}>`).join(" • ") : "Oyuncu atanmamış." },
-      { name: "🏦 Hazine", value: `**${gold(document.country.treasury)}**`, inline: true },
-      { name: "👥 Özgür Nüfus", value: `**${number(document.freePopulation)}**`, inline: true },
-      { name: "⚔️ Askerî Kapasite", value: `Mevcut: **${number(document.militaryUsed)}**\nSınır: ${number(document.militaryLimit)}\nKalan: ${number(remainingCapacity)}${document.manpowerPenaltyActive ? "\n⚠️ Sınır aşımı: bakım +%25" : document.militaryUsed > document.militaryLimit ? "\n⏳ Sınır aşımı: düzeltme süresi" : ""}`, inline: true },
+      { name: "👑 Yönetim", value: spacedSection(document.playerIds.length ? document.playerIds.map((id) => `<@${id}>`).join(" • ") : "Oyuncu atanmamış.") },
+      { name: "🏦 Hazine", value: spacedSection(`**${gold(document.country.treasury)}**`), inline: true },
+      { name: "👥 Özgür Nüfus", value: spacedSection(`**${number(document.freePopulation)}**`), inline: true },
+      { name: "⚔️ Askerî Kapasite", value: spacedSection(`Mevcut: **${number(document.militaryUsed)}**\nSınır: ${number(document.militaryLimit)}\nKalan: ${number(remainingCapacity)}${document.manpowerPenaltyActive ? "\n⚠️ Sınır aşımı: bakım +%25" : document.militaryUsed > document.militaryLimit ? "\n⏳ Sınır aşımı: düzeltme süresi" : ""}`), inline: true },
       {
         name: "📥 Gelir Dağılımı",
-        value: [
+        value: spacedSection([
           `🏗️ Binalar: ${gold(document.totalIncomeBreakdown.building)}`,
           `👥 Halk Vergisi: ${gold(document.totalIncomeBreakdown.tax)}`,
           `🐎 Kara Ticareti: ${gold(document.totalIncomeBreakdown.landTrade)}`,
           `⚓ Deniz Ticareti: ${gold(document.totalIncomeBreakdown.seaTrade)}`
-        ].join("\n"),
+        ].join("\n")),
         inline: true
       },
       {
         name: "📈 Dönem Bilançosu",
-        value: `Dönem geliri: **${gold(document.totalPayableIncome)}**\nToplam bakım: **−${gold(document.totalUpkeep)}**\nNet değişim: **${document.netIncome >= 0 ? "+" : ""}${gold(document.netIncome)}**`,
+        value: spacedSection(`Dönem geliri: **${gold(document.totalPayableIncome)}**\nToplam bakım: **−${gold(document.totalUpkeep)}**\nNet değişim: **${document.netIncome >= 0 ? "+" : ""}${gold(document.netIncome)}**`),
         inline: true
       },
-      { name: "🤝 Ticaret Antlaşmaları", value: tradeSummary.slice(0, 1024) }
+      { name: "🎓 Devlet Görevlileri", value: spacedSection(characterSummary) },
+      { name: "🤝 Ticaret Antlaşmaları", value: spacedSection(tradeSummary) }
     )
     .setFooter({ text: "Tüm değerler mevcut bina, kaynak, ticaret, haraplık ve seferberlik etkileriyle hesaplanır." });
 
@@ -85,10 +93,12 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
 
     const buildings = settlement.buildings.length
       ? settlement.buildings.map((building) => {
-          const name = BUILDINGS[building.building_type]?.name ?? building.building_type;
+          const definition = BUILDINGS[building.building_type];
+          const name = definition?.name ?? building.building_type;
+          const category = definition ? ` • ${BUILDING_CATEGORIES[definition.category].label}` : "";
           return building.status === "BUILDING"
-            ? `🏗️ **${name} Sv${building.target_level}** • Tur ${building.completion_turn} • ${Math.max(0, (building.completion_turn ?? 0) - document.guild.current_turn)} tur kaldı`
-            : `• ${name} Sv${building.level}`;
+            ? `🏗️ **${name} Sv${building.target_level}**${category} • Tur ${building.completion_turn} • ${Math.max(0, (building.completion_turn ?? 0) - document.guild.current_turn)} tur kaldı`
+            : `• ${name} Sv${building.level}${category}`;
         }).join("\n")
       : "Henüz bina bulunmuyor.";
 
@@ -111,7 +121,7 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
       .setTitle(`🏛️ ${settlement.name} • Yerleşke Belgesi`)
       .setDescription([
         `**${ruinLabels[settlement.ruin_stage]}** • ${settlement.is_conquered ? `Fethedilmiş${settlement.conquered_turn !== null ? ` (Tur ${settlement.conquered_turn})` : ""}` : "Yerleşik Toprak"}`,
-        `Bina: **${occupiedSlots}/${settlement.slotLimit} slot** • İnşaat: **${activeConstruction}/2**`
+        `Bina: **${occupiedSlots}/${settlement.slotLimit} slot** • İnşaat: **${activeConstruction}/${settlement.constructionLimit ?? 2}**${settlement.is_coastal ? " • ⚓ Kıyı" : ""}`
       ].join("\n"))
       .addFields(
         { name: "🏺 Kültür", value: spacedSection(`**${culture}**`), inline: true },
@@ -139,7 +149,20 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
         { name: "🏗️ Binalar ve İnşaatlar", value: spacedSection(buildings) }
       );
 
-    if (fixedGarrison) embed.addFields({ name: "🛡️ Garnizon", value: spacedSection(fixedGarrison), inline: true });
+    const policies = settlement.policies ?? [];
+    const hasCuria = settlement.buildings.some((building) => building.building_type === "curia" && building.status === "ACTIVE" && building.level > 0);
+    if (hasCuria || policies.length || (settlement.unrestRisk ?? 0) > 0 || (settlement.starvationBonus ?? 0) > 0) {
+      const policyLines = policies.length
+        ? policies.map((policy) => `${policy.status === "ACTIVE" ? "✅" : "⏳"} ${policy.slot}. **${CITY_POLICIES[policy.policy_key]?.label ?? policy.policy_key}**${policy.status === "PENDING" ? ` • Tur ${policy.activation_turn}` : ""}`)
+        : ["Aktif politika bulunmuyor."];
+      if ((settlement.unrestRisk ?? 0) > 0) policyLines.push(`⚠️ Huzursuzluk riski: **%${settlement.unrestRisk}**`);
+      if ((settlement.starvationBonus ?? 0) > 0) policyLines.push(`🏰 Açlığa dayanıklılık: **+${settlement.starvationBonus} tur**`);
+      embed.addFields({ name: "⚖️ Şehir Politikaları ve Etkileri", value: spacedSection(policyLines.join("\n")) });
+    }
+    if (fixedGarrison) {
+      const garrisonText = `${fixedGarrison}${settlement.temporaryMilitia ? `\n• **${number(settlement.temporaryMilitia)}** Geçici Savunma Milisi` : ""}`;
+      embed.addFields({ name: "🛡️ Garnizon", value: spacedSection(garrisonText), inline: true });
+    }
     if (army) embed.addFields({ name: "⚔️ Ordu", value: spacedSection(army), inline: true });
 
     if (settlement.ships.length) {

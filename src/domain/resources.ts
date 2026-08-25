@@ -36,7 +36,7 @@ export function buildingCostMultiplier(buildingType: string, resources: readonly
   let discounts = has(resources, "TIMBER") ? 1 : 0;
   if (has(resources, "MARBLE") && ["curia", "pantheon", "agora", "academy"].includes(buildingType)) discounts++;
   if (has(resources, "GLASS") && ["healer", "aqueduct"].includes(buildingType)) discounts++;
-  return cappedDiscount(discounts);
+  return Math.max(0.70, 1 - discounts * 0.10);
 }
 
 export function buildingDurationReduction(buildingType: string, resources: readonly ResourceType[]): number {

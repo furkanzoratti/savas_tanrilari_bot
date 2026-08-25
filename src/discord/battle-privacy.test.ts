@@ -15,20 +15,22 @@ function siegeView(): BattleView {
       terrain: "SIEGE", narrative: "Roma surlara yaklaşıyor.", status: "WAITING_FIRST_ROLL",
       round_number: 2, first_side: "A", winner_side: null, finish_reason: null,
       wall_max_hp: 30_000, wall_current_hp: 25_000, gate_max_hp: 1_000, gate_current_hp: 800,
-      siege_phase: "BOMBARDMENT", bombardment_round: 5, game_turn: 12, bombardments_this_turn: 2, losses_applied_at: null, created_by: "gm", created_at: new Date(), updated_at: new Date()
+      siege_phase: "BOMBARDMENT", bombardment_round: 5, game_turn: 12, bombardments_this_turn: 2,
+      defender_settlement_id: "city-settlement", starvation_capacity: 6, starvation_remaining: 4, last_starvation_turn: 12,
+      defender_pantheon_pressure_used: false, losses_applied_at: null, created_by: "gm", created_at: new Date(), updated_at: new Date()
     },
     sides: {
       A: {
         battle_id: "battle", side_key: "A", country_id: "rome", country_name: "Roma", controller: "PLAYERS",
         initial_total: 12_000, current_total: 10_000, total_losses: 2_000, pressure: 1,
         composition: { heavy_infantry: 10_000 }, initial_composition: { heavy_infantry: 12_000 },
-        support_assets: { ladder_group: 2, siege_tower: 1 }, support_targets: { ladder_group: "ASSAULT", siege_tower: "ASSAULT" }, seal: "ATTACKER"
+        support_assets: { ladder_group: 2, siege_tower: 1 }, support_enhanced: {}, support_targets: { ladder_group: "ASSAULT", siege_tower: "ASSAULT" }, temporary_militia: 0, seal: "ATTACKER"
       },
       B: {
         battle_id: "battle", side_key: "B", country_id: "city", country_name: "Savunucu", controller: "GM",
         initial_total: 12_345, current_total: 8_765, total_losses: 3_580, pressure: 4,
         composition: { spear: 8_765 }, initial_composition: { spear: 12_345 },
-        support_assets: {}, support_targets: {}, seal: "DEFENDER"
+        support_assets: {}, support_enhanced: {}, support_targets: {}, temporary_militia: 500, seal: "DEFENDER"
       }
     },
     rolls: []
@@ -48,6 +50,8 @@ describe("kuşatma bilgi gizliliği", () => {
     expect(json).toContain("1 hak kaldı");
     expect(json).toContain("Hücum Erişimi");
     expect(json).toContain("5.000 / 12.000");
+    expect(json).toContain("Erzak Dayanıklılığı");
+    expect(json).toContain("4 / 6 oyun turu");
     expect(json).toContain("azami piyade");
     expect(json).not.toContain("ATTACKER");
     expect(json).not.toContain("DEFENDER");

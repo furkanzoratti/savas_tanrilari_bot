@@ -38,6 +38,7 @@ export function calculateSettlementEconomy(input: {
     buildingUpkeep += effect.upkeep ?? 0;
   }
 
+  percentBonus = Math.min(0.75, Math.max(0, percentBonus));
   const grossIncome = Math.max(0, Math.floor((input.baseIncome + flatBonus) * (1 + percentBonus)));
   const payableIncome = Math.floor(grossIncome * ruinIncomeMultiplier(input.ruinStage));
   return { grossIncome, payableIncome, buildingUpkeep, percentBonus, flatBonus };
@@ -72,7 +73,7 @@ export function calculateShipUpkeep(
 }
 
 export function buildingSlotLimit(population: number): number {
-  return 2 + Math.floor(Math.max(0, population - 20_000) / 10_000);
+  return Math.min(6, 2 + Math.floor(Math.max(0, population - 20_000) / 10_000));
 }
 
 export function calculatePopulationGain(input: {

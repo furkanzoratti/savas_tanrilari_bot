@@ -7,7 +7,10 @@ Railway üzerinde sürekli çalışan, Discord komutlarıyla yönetilen ve Postg
 - Oyuncunun yalnızca kendi ülkesine ait güncel belgeyi gösterir; ülkeye atanmış oyuncuları Discord etiketi olarak listeler ve şehir kartlarını antik tapınak görseliyle sunar.
 - Yerleşke, nüfus, köle nüfusu, hazine, bina, asker, gemi, kuşatma aleti ve bakım giderlerini açıklamalı bir devlet belgesinde toplar.
 - Geliri Binalar, Halk Vergisi, Kara Ticareti ve Deniz Ticareti olarak ayırır. Halk vergisi nüfusun `%3`üdür; deniz ticareti aktif Liman ile açılır.
-- Bina alımını yerleşke ve bina seçmeli bir akışla yürütür; seviye ön şartını, slotu, maliyeti ve tamamlanma turunu denetler. Her yerleşkede aynı anda en fazla iki inşaat sürer.
+- Bina alımını kategoriye özel fiyatlarla yürütür; nüfusa bağlı en fazla 6 bina slotunu, kıyı/Liman koşullarını ve seviye ön şartlarını denetler. Aynı anda 2 inşaat sürer; Usta Mimarlık Programı bu sınırı 3'e çıkarır.
+- Curia şehir politikalarını bir tur gecikmeyle etkinleştirir; inşaat, asker alımı, huzursuzluk, vergi, şehir geliri, kuşatma erzağı ve kalıcı/geçici milis etkilerini otomatik uygular.
+- Akademi karakterlerini etkileşimli zar ve isimlendirme ile Casus, Tüccar veya Komutan olarak yetiştirir; devlet belgesine ekler ve Curia/Agora görevlerine atar.
+- Panteon savaş kredisi ile Panteon, Zeytin, Su Kemeri ve Agora'ya bağlı salgın/iyileşme/karaborsa olaylarını yönetir.
 - Her turda tamamlanan binaları etkinleştirir. Gelir etkileri veritabanına üst üste eklenmez; aktif binalardan yeniden hesaplandığı için aynı bonusun iki kez uygulanması engellenir.
 - Seferberlik yüzdesini ülkenin toplam nüfusuna uygular; aynı sınırı şehir nüfuslarına oranlayarak her yerleşkenin asker alım payını hesaplar.
 - Askere alınan birlikleri seferberlik kademesinin dalgalarına böler; gelecekte katılacak askerleri belgede gösterir ve zamanı gelince **Ordu** olarak ekler. Nüfusa bağlı sabit şehir garnizonu ayrı tutulur.
@@ -40,6 +43,15 @@ Railway üzerinde sürekli çalışan, Discord komutlarıyla yönetilen ve Postg
 - `/gemi-alimi [ulke]`
 - `/seferberlik seviye [ulke]`
 - `/ticaret teklif|liste|feshet`
+- `/politika uygula yerleske politika yuva [ulke]`
+- `/politika kaldir yerleske yuva [ulke]`
+- `/politika liste [ulke]`
+- `/akademi egit yerleske [elenen-gorev] [secilen-gorev] [ulke]`
+- `/akademi karakterler [ulke]`
+- `/akademi ata karakter yerleske gorev-yeri [ulke]`
+- `/akademi gorevden-al karakter [ulke]`
+- `/panteon kredi-al yerleske miktar [ulke]`
+- `/panteon kredi-ode miktar [ulke]`
 - `/zar adet yuz [bonus] [gizli]`
 - `/rol-siralama donem`
 
@@ -65,7 +77,8 @@ Bu komutların sonuçları gizli değildir; markalı resmî tur duyurusu olarak 
 - `/yonetim yerleske-devret kaynak-ulke yerleske hedef-ulke`
 - `/yonetim oyuncu-ata`
 - `/yonetim oyuncu-cikar ulke oyuncu`
-- `/yonetim yerleske-ekle` (toplam başlangıç geliri, hammadde ve kültür seçimi dâhil)
+- `/yonetim yerleske-ekle` (toplam başlangıç geliri, hammadde, kültür ve isteğe bağlı kıyı seçimi dâhil)
+- `/yonetim kiyi-ayarla ulke yerleske kiyi`
 - `/yonetim kultur-ayarla`
 - `/yonetim hammadde-ayarla`
 - `/yonetim tur-ilerlet`
@@ -76,14 +89,23 @@ Bu komutların sonuçları gizli değildir; markalı resmî tur duyurusu olarak 
 - `/yonetim oyunu-sifirla onay:SIFIRLA`
 - `/yonetim komut-log-kanali islem [kanal]`
 - `/yonetim komut-gecmisi [adet]`
+- `/yonetim mesaj-sil miktar`
 - `/yonetim rol-kanali islem kanal`
 - `/yonetim rol-rapor-kanali islem [kanal]`
 
-`yerleske-devret`, yerleşkeyi hedef devlete geçirip Fethedilmiş olarak işaretler; aktif asker alım emirlerini iptal eder, kullanılmamış dalgaları kaldırır ve yerleşkeye bağlı bekleyen/aktif ticaretleri sona erdirir. Mevcut bina, birlik ve filolar yerleşkeyle birlikte yeni devlete geçer. Ordu ve filolara eşzamanlı savaş kullanım kilidi uygulanmaz.
+- `/olay salgin ulke yerleske baz-risk`
+- `/olay salgin-iyilesme ulke yerleske`
+- `/olay karaborsa ulke yerleske`
+
+`yerleske-devret`, yerleşkeyi hedef devlete geçirip Fethedilmiş olarak işaretler; aktif asker/gemi/kuşatma üretim emirlerini, şehir politikalarını, Akademi eğitimlerini ve yerleşkeye bağlı bekleyen/aktif ticaretleri sona erdirir. Eski devletin karakter görevlendirmeleri kaldırılır; mevcut bina, birlik ve filolar yerleşkeyle birlikte yeni devlete geçer. Ordu ve filolara eşzamanlı savaş kullanım kilidi uygulanmaz.
+
+Akademi eğitimi Alım Turunda başlatılır. Sv1 görev türünü `1d30` ile belirler; Sv2 bir görev türünü eleyip `1d20` atar; Sv3 görev türünü oyuncuya seçtirir. Zar düğmesinden sonra açılan formda karaktere isim verilir ve karakter otomatik olarak devlet belgesine eklenir. Tüccarlar Agora/Forum Sv2+ görevine atanabilir; Agora Sv3 görevlisi karaborsa olayını engeller.
+
+`/olay` komutları yalnızca oyun yöneticisi tarafından kullanılabilir. Salgın zarı Zeytin ile riski 10 puan azaltır, Panteon Sv2+ kalan riski yarıya düşürür. Su Kemeri iyileşme zarına +1 ekler.
 
 `oyunu-sifirla` yalnızca yetkili GM tarafından ve tam `SIFIRLA` onayıyla çalışır. Komut, o Discord sunucusundaki ülkeleri ve bunlara bağlı bütün oyun kayıtlarını siler; turu 0/Kapalı durumuna döndürür. Rol kanalları ile kelime istatistikleri korunur.
 
-Tur ilerletme otomatik saate bağlanmamıştır. Savaş veya olay çözümü iki güne uzayabildiği için GM önce durumu `Kapalı`/`Olaylar çözülüyor` yapar, bütün olaylar bittikten sonra bir kez `tur-ilerlet` kullanır. Sonuç kartı tamamlanan binaları, katılan birlikleri ve gemileri yerleşke bazında listeler.
+Tur ilerletme otomatik saate bağlanmamıştır. Savaş veya olay çözümü iki güne uzayabildiği için GM önce durumu `Kapalı`/`Olaylar çözülüyor` yapar, bütün olaylar bittikten sonra bir kez `tur-ilerlet` kullanır. Sonuç kartı tamamlanan binaları, katılan birlikleri, gemileri, kuşatma aletlerini, etkinleşen şehir politikalarını, huzursuzluk olaylarını, kuşatma erzaklarını ve Panteon kredi ödemelerini yerleşke bazında listeler.
 
 ## Discord kurulumu
 

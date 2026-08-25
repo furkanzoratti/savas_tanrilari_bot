@@ -17,6 +17,10 @@ export interface TurnAnnouncementInput {
   completedShipDetails?: Array<{ settlementName: string; shipName: string; quantity: number }>;
   completedSiegeDetails?: Array<{ settlementName: string; assetName: string; quantity: number }>;
   garrisonUpgradeDetails?: string[];
+  activatedPolicyDetails?: Array<{ settlementName: string; policyName: string }>;
+  unrestDetails?: Array<{ settlementName: string; chance: number; roll: number }>;
+  starvationDetails?: Array<{ settlementName: string; remaining: number; capacity: number }>;
+  pantheonLoanDetails?: Array<{ settlementName: string; amount: number; remaining: number }>;
 }
 
 function fieldValue(lines: string[]): string {
@@ -66,6 +70,22 @@ export function turnAnnouncement(input: TurnAnnouncementInput): EmbedBuilder {
   if (input.garrisonUpgradeDetails?.length) embed.addFields({
     name: "🛡️ Garnizon Kademesi Yükselen Yerleşkeler",
     value: fieldValue(input.garrisonUpgradeDetails.map((name) => `• **${name}**`))
+  });
+  if (input.activatedPolicyDetails?.length) embed.addFields({
+    name: "⚖️ Etkinleşen Şehir Politikaları",
+    value: fieldValue(input.activatedPolicyDetails.map((item) => `• **${item.settlementName}** — ${item.policyName}`))
+  });
+  if (input.unrestDetails?.length) embed.addFields({
+    name: "⚠️ Huzursuzluk Olayları",
+    value: fieldValue(input.unrestDetails.map((item) => `• **${item.settlementName}** — Risk %${item.chance} • Zar ${item.roll}`))
+  });
+  if (input.starvationDetails?.length) embed.addFields({
+    name: "🏰 Kuşatma Erzak Durumu",
+    value: fieldValue(input.starvationDetails.map((item) => `• **${item.settlementName}** — ${item.remaining}/${item.capacity} tur${item.remaining === 0 ? " • Erzak tükendi" : ""}`))
+  });
+  if (input.pantheonLoanDetails?.length) embed.addFields({
+    name: "🏛️ Panteon Kredisi Ödemeleri",
+    value: fieldValue(input.pantheonLoanDetails.map((item) => `• **${item.settlementName}** — ${item.amount.toLocaleString("tr-TR")} Altın ödendi • Kalan: ${item.remaining.toLocaleString("tr-TR")}`))
   });
   return embed;
 }

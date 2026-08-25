@@ -36,6 +36,7 @@ export const BATTLE_UNIT_STATS: Record<BattleUnitType, {
   label: string; clashDice: number; clashSides: number; damageDice: number; damageSides: number; durability: 1 | 2 | 3;
 }> = {
   light_infantry: { label: "Hafif Piyade / Ciritçi", clashDice: 1, clashSides: 6, damageDice: 1, damageSides: 6, durability: 1 },
+  militia: { label: "Milis", clashDice: 1, clashSides: 4, damageDice: 1, damageSides: 4, durability: 1 },
   slinger: { label: "Sapancı", clashDice: 1, clashSides: 6, damageDice: 1, damageSides: 8, durability: 1 },
   spear: { label: "Mızraklı Piyade", clashDice: 1, clashSides: 8, damageDice: 1, damageSides: 6, durability: 2 },
   archer: { label: "Okçu", clashDice: 1, clashSides: 8, damageDice: 1, damageSides: 10, durability: 1 },
@@ -148,7 +149,7 @@ export function siegeAssaultComposition(
   if (wallHp <= 0 || gateHp <= 0) return engagedComposition(composition, frontage);
   const access = siegeAssaultAccess(support, frontage);
   const meleeSource: BattleComposition = {};
-  for (const key of ["light_infantry", "spear", "heavy_infantry"] as BattleUnitType[]) {
+  for (const key of ["light_infantry", "militia", "spear", "heavy_infantry"] as BattleUnitType[]) {
     const quantity = composition[key] ?? 0;
     if (quantity > 0) meleeSource[key] = quantity;
   }
@@ -203,21 +204,25 @@ export function rollSiegeSupport(
   composition: SiegeComposition,
   targets: SiegeTargets = {},
   randomInt = (max: number) => Math.floor(Math.random() * max),
-  artilleryDamageDieBonus = 0
+  artilleryDamageDieBonus: number | SiegeComposition = 0
 ): { clash: number; damage: number; wallDamage: number; gateDamage: number; defense: number; detail: Record<string, number | string> } {
   const roll = (count: number, dice: number, sides: number) => rollPool(Math.min(count, 25), dice, sides, randomInt, 1);
-  const bonus = Math.max(0, Math.floor(artilleryDamageDieBonus));
-  const diceBonus = (count: number, dice: number) => Math.min(count, 25) * dice * bonus;
+  const uniformBonus = typeof artilleryDamageDieBonus === "number" ? Math.max(0, Math.floor(artilleryDamageDieBonus)) : 0;
+  const enhancedAssets = typeof artilleryDamageDieBonus === "number" ? null : artilleryDamageDieBonus;
+  const diceBonus = (asset: SiegeAssetType, count: number, dice: number) => enhancedAssets
+    ? Math.min(count, 25, Math.max(0, Math.floor(enhancedAssets[asset] ?? 0))) * dice
+    : Math.min(count, 25) * dice * uniformBonus;
+  const bonus = enhancedAssets ? Object.values(enhancedAssets).some((count) => (count ?? 0) > 0) ? 1 : 0 : uniformBonus;
   const ladder = composition.ladder_group ?? 0, ram = composition.ram ?? 0, mantlet = composition.mantlet ?? 0;
   const ballista = composition.ballista ?? 0, wallBallista = composition.wall_ballista ?? 0, catapult = composition.catapult ?? 0, tower = composition.siege_tower ?? 0;
   const ladderClash = roll(ladder, 1, 4), towerClash = roll(tower, 1, 10), mantletClash = roll(mantlet, 1, 4);
-  const ballistaRoll = roll(ballista, 1, 8) + diceBonus(ballista, 1);
-  const wallBallistaDamage = roll(wallBallista, 2, 8) + diceBonus(wallBallista, 2);
-  const catapultRoll = roll(catapult, 1, 10) + diceBonus(catapult, 1);
+  const ballistaRoll = roll(ballista, 1, 8) + diceBonus("ballista", ballista, 1);
+  const wallBallistaDamage = roll(wallBallista, 2, 8) + diceBonus("wall_ballista", wallBallista, 2);
+  const catapultRoll = roll(catapult, 1, 10) + diceBonus("catapult", catapult, 1);
   const towerDamage = roll(tower, 1, 6);
   const ramGate = roll(ram, 1, 8) * 35;
-  const ballistaWall = targets.ballista === "WALL" ? (roll(ballista, 1, 6) + diceBonus(ballista, 1)) * 5 : 0;
-  const catapultWall = targets.catapult === "WALL" ? (roll(catapult, 2, 10) + diceBonus(catapult, 2)) * 20 : 0;
+  const ballistaWall = targets.ballista === "WALL" ? (roll(ballista, 1, 6) + diceBonus("ballista", ballista, 1)) * 5 : 0;
+  const catapultWall = targets.catapult === "WALL" ? (roll(catapult, 2, 10) + diceBonus("catapult", catapult, 2)) * 20 : 0;
   const ballistaArmy = targets.ballista === "ARMY" ? ballistaRoll : 0;
   const catapultArmy = targets.catapult === "ARMY" ? catapultRoll : 0;
   return {

@@ -501,4 +501,122 @@ export const migrations = [
       CREATE INDEX IF NOT EXISTS active_siege_settlement_idx
         ON battles(defender_settlement_id) WHERE terrain='SIEGE' AND status NOT IN ('FINISHED','CANCELLED');
     `
+  },
+  {
+    version: 14,
+    name: "city_policies_academy_characters_and_building_balance",
+    sql: `
+      ALTER TABLE settlements ADD COLUMN IF NOT EXISTS is_coastal BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE settlements ADD COLUMN IF NOT EXISTS last_acquisition_income BIGINT NOT NULL DEFAULT 0;
+      ALTER TABLE settlements ADD COLUMN IF NOT EXISTS curia_guard_granted BOOLEAN NOT NULL DEFAULT FALSE;
+      UPDATE settlements s SET is_coastal=TRUE
+       WHERE EXISTS (SELECT 1 FROM buildings b WHERE b.settlement_id=s.id AND b.building_type IN ('port','shipyard'));
+
+      CREATE TABLE IF NOT EXISTS settlement_policies (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        settlement_id UUID NOT NULL REFERENCES settlements(id) ON DELETE CASCADE,
+        policy_key TEXT NOT NULL CHECK (policy_key IN (
+          'WAR_PREPARATION','GARRISON_REINFORCEMENT','CONSCRIPTION','MARKET_FAIRS',
+          'STRICT_TAXATION','MERCHANT_LICENSE','ACCELERATED_CONSTRUCTION',
+          'INFRASTRUCTURE_ROADS','MASTER_ARCHITECTURE'
+        )),
+        slot SMALLINT NOT NULL CHECK (slot IN (1,2)),
+        status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING','ACTIVE')),
+        activation_turn INTEGER NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (settlement_id,slot),
+        UNIQUE (settlement_id,policy_key)
+      );
+
+      CREATE TABLE IF NOT EXISTS country_characters (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        trained_settlement_id UUID REFERENCES settlements(id) ON DELETE SET NULL,
+        assigned_settlement_id UUID REFERENCES settlements(id) ON DELETE SET NULL,
+        name TEXT NOT NULL,
+        role TEXT NOT NULL CHECK (role IN ('SPY','MERCHANT','COMMANDER')),
+        skill_bonus INTEGER NOT NULL DEFAULT 0 CHECK (skill_bonus >= 0),
+        assignment TEXT NOT NULL DEFAULT 'NONE' CHECK (assignment IN ('NONE','CURIA','AGORA')),
+        trained_turn INTEGER NOT NULL,
+        trained_by TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS country_characters_unique_name ON country_characters(country_id,lower(name));
+      CREATE INDEX IF NOT EXISTS country_characters_assignment_idx ON country_characters(assigned_settlement_id,assignment);
+
+      CREATE TABLE IF NOT EXISTS academy_training_sessions (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        settlement_id UUID NOT NULL REFERENCES settlements(id) ON DELETE CASCADE,
+        academy_level SMALLINT NOT NULL CHECK (academy_level BETWEEN 1 AND 3),
+        acquisition_turn INTEGER NOT NULL,
+        roll_sides SMALLINT NOT NULL CHECK (roll_sides IN (20,30)),
+        roll_value SMALLINT,
+        excluded_role TEXT CHECK (excluded_role IN ('SPY','MERCHANT','COMMANDER')),
+        selected_role TEXT CHECK (selected_role IN ('SPY','MERCHANT','COMMANDER')),
+        result_role TEXT CHECK (result_role IN ('SPY','MERCHANT','COMMANDER')),
+        skill_bonus INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'PENDING_ROLL' CHECK (status IN ('PENDING_ROLL','AWAITING_NAME','COMPLETED','CANCELLED')),
+        initiated_by TEXT NOT NULL,
+        character_id UUID REFERENCES country_characters(id) ON DELETE SET NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (settlement_id,acquisition_turn)
+      );
+
+      CREATE TABLE IF NOT EXISTS settlement_conscriptions (
+        settlement_id UUID NOT NULL REFERENCES settlements(id) ON DELETE CASCADE,
+        battle_id UUID NOT NULL REFERENCES battles(id) ON DELETE CASCADE,
+        created_turn INTEGER NOT NULL,
+        PRIMARY KEY(settlement_id,battle_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS settlement_events (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        settlement_id UUID NOT NULL REFERENCES settlements(id) ON DELETE CASCADE,
+        turn INTEGER NOT NULL,
+        event_type TEXT NOT NULL,
+        chance INTEGER NOT NULL,
+        roll INTEGER NOT NULL,
+        triggered BOOLEAN NOT NULL,
+        details JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS pantheon_loans (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        settlement_id UUID NOT NULL REFERENCES settlements(id) ON DELETE CASCADE,
+        principal BIGINT NOT NULL CHECK (principal > 0),
+        remaining_amount BIGINT NOT NULL CHECK (remaining_amount >= 0),
+        issued_turn INTEGER NOT NULL,
+        due_turn INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','REPAID'))
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS one_active_pantheon_loan_per_country ON pantheon_loans(country_id) WHERE status='ACTIVE';
+
+      ALTER TABLE siege_orders ADD COLUMN IF NOT EXISTS engineering_enhanced BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE siege_assets ADD COLUMN IF NOT EXISTS enhanced_quantity INTEGER NOT NULL DEFAULT 0 CHECK (enhanced_quantity >= 0);
+      ALTER TABLE battle_sides ADD COLUMN IF NOT EXISTS support_enhanced JSONB NOT NULL DEFAULT '{}'::jsonb;
+      ALTER TABLE battle_sides ADD COLUMN IF NOT EXISTS temporary_militia INTEGER NOT NULL DEFAULT 0 CHECK (temporary_militia >= 0);
+      ALTER TABLE battles ADD COLUMN IF NOT EXISTS starvation_capacity INTEGER;
+      ALTER TABLE battles ADD COLUMN IF NOT EXISTS starvation_remaining INTEGER;
+      ALTER TABLE battles ADD COLUMN IF NOT EXISTS last_starvation_turn INTEGER;
+      ALTER TABLE battles ADD COLUMN IF NOT EXISTS defender_pantheon_pressure_used BOOLEAN NOT NULL DEFAULT FALSE;
+
+      UPDATE battles b
+         SET starvation_capacity=3+LEAST(5,
+               COALESCE((SELECT CASE WHEN MAX(level)>=3 THEN 3 WHEN MAX(level)>=2 THEN 1 ELSE 0 END
+                           FROM buildings WHERE settlement_id=b.defender_settlement_id AND building_type='farm' AND status='ACTIVE'),0)
+             + COALESCE((SELECT CASE WHEN MAX(level)>=2 THEN 2 ELSE 0 END
+                           FROM buildings WHERE settlement_id=b.defender_settlement_id AND building_type='aqueduct' AND status='ACTIVE'),0)),
+             starvation_remaining=3+LEAST(5,
+               COALESCE((SELECT CASE WHEN MAX(level)>=3 THEN 3 WHEN MAX(level)>=2 THEN 1 ELSE 0 END
+                           FROM buildings WHERE settlement_id=b.defender_settlement_id AND building_type='farm' AND status='ACTIVE'),0)
+             + COALESCE((SELECT CASE WHEN MAX(level)>=2 THEN 2 ELSE 0 END
+                           FROM buildings WHERE settlement_id=b.defender_settlement_id AND building_type='aqueduct' AND status='ACTIVE'),0)),
+             last_starvation_turn=g.current_turn
+        FROM guilds g
+       WHERE g.discord_id=b.guild_id AND b.terrain='SIEGE' AND b.defender_settlement_id IS NOT NULL
+         AND b.status NOT IN ('FINISHED','CANCELLED') AND b.starvation_capacity IS NULL;
+    `
   }] as const;

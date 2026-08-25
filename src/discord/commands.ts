@@ -1,9 +1,10 @@
 import { ChannelType, SlashCommandBuilder } from "discord.js";
-import { BUILDINGS, MOBILIZATION_RULES, SHIPS, SIEGE_ASSETS, UNITS } from "../domain/catalog.js";
+import { BUILDINGS, CHARACTER_ROLES, CITY_POLICIES, MOBILIZATION_RULES, SHIPS, SIEGE_ASSETS, UNITS } from "../domain/catalog.js";
 import { RESOURCE_CHOICES } from "../domain/resources.js";
 import { BATTLE_TERRAINS, BATTLE_UNIT_STATS, NAVAL_UNIT_STATS, SIEGE_ASSET_BATTLE_STATS } from "../domain/battle.js";
 
 const countryOption = (option: any) => option.setName("ulke").setDescription("Yalnızca DM: işlem yapılacak ülke").setRequired(false);
+const CHARACTER_ROLE_CHOICES = Object.entries(CHARACTER_ROLES).map(([value, role]) => ({ name: role.label, value }));
 
 export const commandBuilders = [
   new SlashCommandBuilder()
@@ -62,6 +63,58 @@ export const commandBuilders = [
     .addSubcommand((sub) => sub.setName("durdur").setDescription("Oyuncu hareketlerini durdurup olay çözümüne geçer"))
     .addSubcommand((sub) => sub.setName("kapat").setDescription("Mevcut turu tamamen kapatır")),
   new SlashCommandBuilder()
+    .setName("politika").setDescription("Yerleşkenin Curia şehir politikalarını yönetir")
+    .addSubcommand((sub) => sub.setName("uygula").setDescription("Bir politika değişimini başlatır; bir sonraki tur etkinleşir")
+      .addStringOption((o) => o.setName("yerleske").setDescription("Politikanın uygulanacağı yerleşke").setRequired(true))
+      .addStringOption((o) => o.setName("politika").setDescription("Uygulanacak şehir politikası").setRequired(true)
+        .addChoices(...Object.entries(CITY_POLICIES).map(([value, policy]) => ({ name: policy.label, value }))))
+      .addIntegerOption((o) => o.setName("yuva").setDescription("Politika yuvası").setRequired(true).addChoices({ name: "1. Politika", value: 1 }, { name: "2. Politika", value: 2 }))
+      .addStringOption(countryOption))
+    .addSubcommand((sub) => sub.setName("kaldir").setDescription("Seçilen politika yuvasını boşaltır")
+      .addStringOption((o) => o.setName("yerleske").setDescription("Politikanın bağlı olduğu yerleşke").setRequired(true))
+      .addIntegerOption((o) => o.setName("yuva").setDescription("Boşaltılacak politika yuvası").setRequired(true).addChoices({ name: "1. Politika", value: 1 }, { name: "2. Politika", value: 2 }))
+      .addStringOption(countryOption))
+    .addSubcommand((sub) => sub.setName("liste").setDescription("Ülkenin yerleşke politikalarını gösterir")
+      .addStringOption(countryOption)),
+  new SlashCommandBuilder()
+    .setName("akademi").setDescription("Akademi karakter eğitimini ve görev atamalarını yönetir")
+    .addSubcommand((sub) => sub.setName("egit").setDescription("Akademinin bu Alım Turundaki karakter eğitimini başlatır")
+      .addStringOption((o) => o.setName("yerleske").setDescription("Karakteri yetiştirecek Akademi").setRequired(true))
+      .addStringOption((o) => o.setName("elenen-gorev").setDescription("Yalnız Akademi Sv2: zar havuzundan çıkarılacak görev").addChoices(...CHARACTER_ROLE_CHOICES))
+      .addStringOption((o) => o.setName("secilen-gorev").setDescription("Yalnız Akademi Sv3: doğrudan yetiştirilecek görev").addChoices(...CHARACTER_ROLE_CHOICES))
+      .addStringOption(countryOption))
+    .addSubcommand((sub) => sub.setName("karakterler").setDescription("Ülkenin yetişmiş karakterlerini listeler")
+      .addStringOption(countryOption))
+    .addSubcommand((sub) => sub.setName("ata").setDescription("Yetişmiş karakteri uygun bir yerleşke binasına atar")
+      .addStringOption((o) => o.setName("karakter").setDescription("Karakterin tam adı").setRequired(true))
+      .addStringOption((o) => o.setName("yerleske").setDescription("Atanacağı yerleşke").setRequired(true))
+      .addStringOption((o) => o.setName("gorev-yeri").setDescription("Atanacağı bina").setRequired(true).addChoices({ name: "Curia", value: "CURIA" }, { name: "Agora / Forum", value: "AGORA" }))
+      .addStringOption(countryOption))
+    .addSubcommand((sub) => sub.setName("gorevden-al").setDescription("Karakterin bina atamasını kaldırır")
+      .addStringOption((o) => o.setName("karakter").setDescription("Karakterin tam adı").setRequired(true))
+      .addStringOption(countryOption)),
+  new SlashCommandBuilder()
+    .setName("panteon").setDescription("Panteon Sv3 savaş dönemi kredisini yönetir")
+    .addSubcommand((sub) => sub.setName("kredi-al").setDescription("Son Alım Turu geliri sınırında faizsiz kredi alır")
+      .addStringOption((o) => o.setName("yerleske").setDescription("Panteon Sv3 bulunan yerleşke").setRequired(true))
+      .addIntegerOption((o) => o.setName("miktar").setDescription("Kredi miktarı").setMinValue(1).setRequired(true))
+      .addStringOption(countryOption))
+    .addSubcommand((sub) => sub.setName("kredi-ode").setDescription("Aktif Panteon kredisine geri ödeme yapar")
+      .addIntegerOption((o) => o.setName("miktar").setDescription("Geri ödeme miktarı").setMinValue(1).setRequired(true))
+      .addStringOption(countryOption)),
+  new SlashCommandBuilder()
+    .setName("olay").setDescription("Yalnızca oyun yöneticisi: yerleşke olaylarını ve koruma etkilerini çözer")
+    .addSubcommand((sub) => sub.setName("salgin").setDescription("Panteon ve Zeytin etkilerini uygulayarak salgın zarı atar")
+      .addStringOption((o) => o.setName("ulke").setDescription("Yerleşkenin bağlı olduğu ülke").setRequired(true))
+      .addStringOption((o) => o.setName("yerleske").setDescription("Olayın yaşanacağı yerleşke").setRequired(true))
+      .addIntegerOption((o) => o.setName("baz-risk").setDescription("Temel salgın riski yüzdesi").setMinValue(0).setMaxValue(100).setRequired(true)))
+    .addSubcommand((sub) => sub.setName("salgin-iyilesme").setDescription("Su Kemeri bonusuyla 1d20 salgın iyileşme zarı atar")
+      .addStringOption((o) => o.setName("ulke").setDescription("Yerleşkenin bağlı olduğu ülke").setRequired(true))
+      .addStringOption((o) => o.setName("yerleske").setDescription("İyileşme zarı atacak yerleşke").setRequired(true)))
+    .addSubcommand((sub) => sub.setName("karaborsa").setDescription("Agora Sv3 tüccarının karaborsa olayını engelleyip engellemediğini denetler")
+      .addStringOption((o) => o.setName("ulke").setDescription("Yerleşkenin bağlı olduğu ülke").setRequired(true))
+      .addStringOption((o) => o.setName("yerleske").setDescription("Olayın yaşanacağı yerleşke").setRequired(true))),
+  new SlashCommandBuilder()
     .setName("zar").setDescription("Zar atar")
     .addIntegerOption((option) => option.setName("adet").setDescription("Zar adedi").setMinValue(1).setMaxValue(20).setRequired(true))
     .addIntegerOption((option) => option.setName("yuz").setDescription("Zarın yüz sayısı").setMinValue(2).setMaxValue(10_000).setRequired(true))
@@ -93,7 +146,8 @@ export const commandBuilders = [
       .addIntegerOption((o) => o.setName("okcu").setDescription("Okçu").setMinValue(0).setRequired(true))
       .addIntegerOption((o) => o.setName("agir-piyade").setDescription("Ağır Piyade").setMinValue(0).setRequired(true))
       .addIntegerOption((o) => o.setName("hafif-suvari").setDescription("Hafif Süvari").setMinValue(0).setRequired(true))
-      .addIntegerOption((o) => o.setName("agir-suvari").setDescription("Ağır Süvari").setMinValue(0).setRequired(true)))
+      .addIntegerOption((o) => o.setName("agir-suvari").setDescription("Ağır Süvari").setMinValue(0).setRequired(true))
+      .addIntegerOption((o) => o.setName("milis").setDescription("Kalıcı Milis").setMinValue(0)))
     .addSubcommand((sub) => sub.setName("gemi-ayarla").setDescription("Deniz savaşı taslağının gizli gemi kadrosunu düzenler")
       .addStringOption((o) => o.setName("taraf").setDescription("Savaş tarafı").setRequired(true).addChoices({ name: "A Tarafı", value: "A" }, { name: "B Tarafı", value: "B" }))
       .addStringOption((o) => o.setName("gemi").setDescription("Gemi türü").setRequired(true).addChoices(...Object.entries(NAVAL_UNIT_STATS).map(([value, unit]) => ({ name: unit.label, value }))))
@@ -166,7 +220,12 @@ export const commandBuilders = [
       .addIntegerOption((o) => o.setName("gelir").setDescription("Başlangıç toplam geliri; halk vergisi otomatik ayrılır").setMinValue(0).setRequired(true))
       .addIntegerOption((o) => o.setName("nufus-artisi").setDescription("Alım Turu temel nüfus artışı").setMinValue(0).setRequired(true))
       .addStringOption((o) => o.setName("hammadde").setDescription("Yerleşkenin ürettiği hammadde").setRequired(true).addChoices(...RESOURCE_CHOICES))
-      .addStringOption((o) => o.setName("kultur").setDescription("Yerleşkenin kültür grubu; yazmaya başlayarak arayın").setRequired(true).setAutocomplete(true)))
+      .addStringOption((o) => o.setName("kultur").setDescription("Yerleşkenin kültür grubu; yazmaya başlayarak arayın").setRequired(true).setAutocomplete(true))
+      .addBooleanOption((o) => o.setName("kiyi").setDescription("Yerleşke kıyıda mı? Liman inşası için gereklidir")))
+    .addSubcommand((sub) => sub.setName("kiyi-ayarla").setDescription("Yerleşkenin kıyı durumunu değiştirir")
+      .addStringOption((o) => o.setName("ulke").setDescription("Yerleşkenin bağlı olduğu ülke").setRequired(true))
+      .addStringOption((o) => o.setName("yerleske").setDescription("Yerleşke adı").setRequired(true))
+      .addBooleanOption((o) => o.setName("kiyi").setDescription("Kıyı yerleşkesi mi?").setRequired(true)))
     .addSubcommand((sub) => sub.setName("kultur-ayarla").setDescription("Mevcut yerleşkenin kültür grubunu değiştirir")
       .addStringOption((o) => o.setName("ulke").setDescription("Ülke adı").setRequired(true))
       .addStringOption((o) => o.setName("yerleske").setDescription("Yerleşke adı").setRequired(true))
@@ -202,6 +261,8 @@ export const commandBuilders = [
       .addChannelOption((o) => o.setName("kanal").setDescription("Komut kayıt kanalı").addChannelTypes(ChannelType.GuildText)))
     .addSubcommand((sub) => sub.setName("komut-gecmisi").setDescription("Son oyuncu bot komutlarını gösterir")
       .addIntegerOption((o) => o.setName("adet").setDescription("Gösterilecek kayıt sayısı").setMinValue(1).setMaxValue(25)))
+    .addSubcommand((sub) => sub.setName("mesaj-sil").setDescription("Komutun kullanıldığı kanaldaki son mesajları siler")
+      .addIntegerOption((o) => o.setName("miktar").setDescription("Silinecek son mesaj sayısı").setMinValue(1).setMaxValue(100).setRequired(true)))
     .addSubcommand((sub) => sub.setName("rol-rapor-kanali").setDescription("Günlük rol sıralamasının gönderileceği kanalı ayarlar")
       .addStringOption((o) => o.setName("islem").setDescription("İşlem").setRequired(true).addChoices({ name: "Ayarla", value: "set" }, { name: "Kapat", value: "clear" }))
       .addChannelOption((o) => o.setName("kanal").setDescription("Günlük rapor kanalı").addChannelTypes(ChannelType.GuildText)))
@@ -211,5 +272,5 @@ export const commandBuilders = [
 ].map((builder) => builder.toJSON());
 
 export const buildingChoices = Object.values(BUILDINGS);
-export const unitChoices = Object.entries(UNITS).filter(([key]) => key !== "observer");
+export const unitChoices = Object.entries(UNITS).filter(([key]) => !["observer", "militia"].includes(key));
 export const shipChoices = Object.entries(SHIPS);

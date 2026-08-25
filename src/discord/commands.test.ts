@@ -29,5 +29,7 @@ describe("yönetim komutları", () => {
     expect(battle?.options?.some((option) => option.name === "saha-aleti-al")).toBe(true);
     const admin = commandBuilders.find((command) => command.name === "yonetim");
     expect(admin?.options?.some((option) => option.name === "asimilasyon-tamamla")).toBe(true);
+    const purge = admin?.options?.find((option) => option.name === "mesaj-sil");
+    expect(purge?.options?.find((option) => option.name === "miktar")).toMatchObject({ required: true, min_value: 1, max_value: 100 });
   });
 });

@@ -18,7 +18,7 @@ export type SiegePhase = "BOMBARDMENT" | "ASSAULT";
 export interface BattleSideRow {
   battle_id: string; side_key: BattleSideKey; country_id: string; country_name: string; controller: BattleController;
   initial_total: number; current_total: number; total_losses: number; pressure: number;
-  composition: BattleComposition; initial_composition: BattleComposition; support_assets: SiegeComposition; support_targets: SiegeTargets; seal: string;
+  composition: BattleComposition; initial_composition: BattleComposition; support_assets: SiegeComposition; support_enhanced: SiegeComposition; support_targets: SiegeTargets; temporary_militia: number; seal: string;
 }
 
 export interface BattleRow {
@@ -26,6 +26,7 @@ export interface BattleRow {
   status: BattleStatus; round_number: number; first_side: BattleSideKey; winner_side: BattleSideKey | null; finish_reason: string | null;
   wall_max_hp: number | null; wall_current_hp: number | null; gate_max_hp: number | null; gate_current_hp: number | null;
   siege_phase: SiegePhase | null; bombardment_round: number; defender_settlement_id: string | null;
+  starvation_capacity: number | null; starvation_remaining: number | null; last_starvation_turn: number | null; defender_pantheon_pressure_used: boolean;
   game_turn?: number; bombardments_this_turn?: number;
   losses_applied_at: Date | null; created_by: string; created_at: Date; updated_at: Date;
 }
@@ -77,16 +78,7 @@ async function latestInChannel(client: DbClient, guildId: string, channelId: str
   return (await client.query<BattleRow>("SELECT * FROM battles WHERE guild_id=$1 AND channel_id=$2 ORDER BY created_at DESC LIMIT 1", [guildId, channelId])).rows[0] ?? null;
 }
 
-async function artilleryDamageDieBonus(client: DbClient, countryId: string): Promise<number> {
-  const result = await client.query<{ level: number }>(
-    `SELECT COALESCE(MAX(b.level),0)::integer AS level
-       FROM buildings b
-       JOIN settlements s ON s.id=b.settlement_id
-      WHERE s.country_id=$1 AND b.building_type='engineering' AND b.status='ACTIVE'`,
-    [countryId]
-  );
-  return (result.rows[0]?.level ?? 0) >= 3 ? 1 : 0;
-}
+// Atölye Sv3 bonusu yalnızca o atölyede üretilen kayıtlı topçulara uygulanır.
 
 function expectedSide(view: BattleView): BattleSideKey {
   return !view.rolls.length ? view.battle.first_side : view.battle.first_side === "A" ? "B" : "A";
@@ -158,6 +150,16 @@ async function applyLossesToDocuments(client: DbClient, battleId: string, guildI
         : (await client.query<{ id: string; quantity: number; settlement_id: string }>(`SELECT u.id,u.quantity,u.settlement_id FROM unit_stacks u JOIN settlements s ON s.id=u.settlement_id WHERE s.country_id=$1 AND u.unit_type=$2 ORDER BY CASE u.status WHEN 'FIELD_HOSTILE' THEN 0 WHEN 'FIELD_FRIENDLY' THEN 1 ELSE 2 END,u.id FOR UPDATE OF u`, [side.country_id, forceType])).rows;
       let remaining = calculated;
       let populationApplied = 0;
+      if (!naval && forceType === "militia" && side.side_key === "B" && battle.defender_settlement_id && side.temporary_militia > 0) {
+        const temporaryLoss = Math.min(remaining, side.temporary_militia);
+        if (temporaryLoss > 0) {
+          const population = Number((await client.query<{ population: number }>("SELECT population FROM settlements WHERE id=$1 FOR UPDATE", [battle.defender_settlement_id])).rows[0]?.population ?? 0);
+          const populationLoss = Math.min(population, temporaryLoss);
+          if (populationLoss > 0) await client.query("UPDATE settlements SET population=population-$1 WHERE id=$2", [populationLoss, battle.defender_settlement_id]);
+          populationApplied += populationLoss;
+          remaining -= temporaryLoss;
+        }
+      }
       for (const row of rows) {
         if (remaining <= 0) break;
         const deducted = Math.min(row.quantity, remaining);
@@ -231,8 +233,23 @@ export const battleService = {
       const wallHp = input.terrain === "SIEGE" ? 30_000 : null;
       const gateHp = input.terrain === "SIEGE" ? 1_000 : null;
       const siegePhase: SiegePhase | null = input.terrain === "SIEGE" ? "BOMBARDMENT" : null;
-      await client.query(`INSERT INTO battles(id,guild_id,channel_id,terrain,narrative,status,round_number,first_side,created_by,wall_max_hp,wall_current_hp,gate_max_hp,gate_current_hp,siege_phase,defender_settlement_id)
-        VALUES($1,$2,$3,$4,$5,'DRAFT',1,$6,$7,$8,$8,$9,$9,$10,$11)`, [id, input.guildId, input.channelId, input.terrain, input.narrative, firstSide, input.actorId, wallHp, gateHp, siegePhase, defenderSettlementId]);
+      let starvationCapacity: number | null = null;
+      let currentTurn: number | null = null;
+      if (defenderSettlementId) {
+        const structures = (await client.query<{ building_type: string; level: number }>(
+          "SELECT building_type,level FROM buildings WHERE settlement_id=$1 AND status='ACTIVE' AND building_type IN ('farm','aqueduct')", [defenderSettlementId]
+        )).rows;
+        const farmLevel = structures.find((item) => item.building_type === "farm")?.level ?? 0;
+        const aqueductLevel = structures.find((item) => item.building_type === "aqueduct")?.level ?? 0;
+        const reinforced = Boolean((await client.query(
+          "SELECT 1 FROM settlement_policies WHERE settlement_id=$1 AND policy_key='GARRISON_REINFORCEMENT' AND status='ACTIVE'", [defenderSettlementId]
+        )).rowCount);
+        const bonus = Math.min(5, (farmLevel >= 3 ? 3 : farmLevel >= 2 ? 1 : 0) + (aqueductLevel >= 2 ? 2 : 0) + (reinforced ? 1 : 0));
+        starvationCapacity = 3 + bonus;
+        currentTurn = (await client.query<{ current_turn: number }>("SELECT current_turn FROM guilds WHERE discord_id=$1", [input.guildId])).rows[0]?.current_turn ?? 0;
+      }
+      await client.query(`INSERT INTO battles(id,guild_id,channel_id,terrain,narrative,status,round_number,first_side,created_by,wall_max_hp,wall_current_hp,gate_max_hp,gate_current_hp,siege_phase,defender_settlement_id,starvation_capacity,starvation_remaining,last_starvation_turn)
+        VALUES($1,$2,$3,$4,$5,'DRAFT',1,$6,$7,$8,$8,$9,$9,$10,$11,$12,$12,$13)`, [id, input.guildId, input.channelId, input.terrain, input.narrative, firstSide, input.actorId, wallHp, gateHp, siegePhase, defenderSettlementId, starvationCapacity, currentTurn]);
       await client.query("INSERT INTO battle_sides(battle_id,side_key,country_id,controller,composition,initial_composition,seal) VALUES($1,'A',$2,$3,'{}'::jsonb,'{}'::jsonb,$4),($1,'B',$5,$6,'{}'::jsonb,'{}'::jsonb,$4)", [id, a.id, input.controllerA, sealFor({}), b.id, input.controllerB]);
       await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'battle.create','battle',$3,$4::jsonb)", [input.guildId, input.actorId, id, JSON.stringify({ terrain: input.terrain, a: a.name, b: b.name })]);
       return loadView(client, id);
@@ -287,18 +304,23 @@ export const battleService = {
       if (input.quantity > 0 && (input.assetType === "ladder_group" || input.assetType === "ram")) {
         throw new GameError("Merdiven ve Koçbaşı miktarı yalnızca /savas saha-aleti-al ile satın alınarak artırılabilir.");
       }
+      let enhancedAvailable = 0;
       if (input.quantity > 0) {
-        const available = (await client.query<{ total: number }>(
-          "SELECT COALESCE(SUM(quantity),0)::integer AS total FROM siege_assets WHERE country_id=$1 AND asset_type=$2",
+        const stock = (await client.query<{ total: number; enhanced: number }>(
+          "SELECT COALESCE(SUM(quantity),0)::integer AS total,COALESCE(SUM(enhanced_quantity),0)::integer AS enhanced FROM siege_assets WHERE country_id=$1 AND asset_type=$2",
           [view.sides[input.side].country_id, input.assetType]
-        )).rows[0]?.total ?? 0;
+        )).rows[0];
+        const available = stock?.total ?? 0;
+        enhancedAvailable = stock?.enhanced ?? 0;
         if (input.quantity > available) throw new GameError(`Ülke stoklarında yalnızca ${available} ${SIEGE_ASSETS[input.assetType].name} bulunuyor.`);
       }
       const support = { ...view.sides[input.side].support_assets, [input.assetType]: input.quantity };
       const targets = { ...view.sides[input.side].support_targets, [input.assetType]: input.target };
-      if (input.quantity === 0) { delete support[input.assetType]; delete targets[input.assetType]; }
+      const enhanced = { ...view.sides[input.side].support_enhanced };
+      if (["ballista", "catapult"].includes(input.assetType) && input.quantity > 0) enhanced[input.assetType] = Math.min(input.quantity, enhancedAvailable);
+      if (input.quantity === 0) { delete support[input.assetType]; delete targets[input.assetType]; delete enhanced[input.assetType]; }
       const seal = sealFor({ ...view.sides[input.side].composition, ...support });
-      await client.query("UPDATE battle_sides SET support_assets=$1::jsonb,support_targets=$2::jsonb,seal=$3 WHERE battle_id=$4 AND side_key=$5", [JSON.stringify(support), JSON.stringify(targets), seal, battle.id, input.side]);
+      await client.query("UPDATE battle_sides SET support_assets=$1::jsonb,support_targets=$2::jsonb,support_enhanced=$3::jsonb,seal=$4 WHERE battle_id=$5 AND side_key=$6", [JSON.stringify(support), JSON.stringify(targets), JSON.stringify(enhanced), seal, battle.id, input.side]);
       return loadView(client, battle.id);
     });
   },
@@ -382,8 +404,8 @@ export const battleService = {
       if (configured <= 0) throw new GameError("Kuşatan tarafta Katapult bulunmuyor.");
       if (view.sides.A.support_targets.catapult !== "WALL") throw new GameError("Bombardıman için Katapult hedefi Sur olarak ayarlanmalıdır.");
       const catapultCount = Math.min(configured, 25);
-      const artilleryBonus = await artilleryDamageDieBonus(client, attacker.country_id);
-      const support = rollSiegeSupport({ catapult: catapultCount }, { catapult: "WALL" }, undefined, artilleryBonus);
+      const enhancedCatapults = Math.min(catapultCount, attacker.support_enhanced?.catapult ?? 0);
+      const support = rollSiegeSupport({ catapult: catapultCount }, { catapult: "WALL" }, undefined, { catapult: enhancedCatapults });
       const wallDamage = Math.min(view.battle.wall_current_hp ?? 0, support.wallDamage);
       const wallAfter = Math.max(0, (view.battle.wall_current_hp ?? 0) - wallDamage);
       const bombardmentNumber = view.battle.bombardment_round + 1;
@@ -398,6 +420,17 @@ export const battleService = {
       if (!battle || battle.status !== "DRAFT") throw new GameError("Yayımlanabilir savaş taslağı bulunamadı.");
       const view = await loadView(client, battle.id, true);
       if (!view.sides.A.initial_total || !view.sides.B.initial_total) throw new GameError("İki taraf için de gizli ordu veya filo bileşimi girilmelidir.");
+      if (battle.terrain === "SIEGE" && battle.defender_settlement_id) {
+        const prepared = Boolean((await client.query(
+          "SELECT 1 FROM settlement_policies WHERE settlement_id=$1 AND policy_key='WAR_PREPARATION' AND status='ACTIVE'", [battle.defender_settlement_id]
+        )).rowCount);
+        if (prepared) {
+          const composition: BattleComposition = { ...view.sides.B.composition, militia: (view.sides.B.composition.militia ?? 0) + 500 };
+          const total = compositionTotal(composition);
+          const seal = sealFor({ ...composition, ...view.sides.B.support_assets });
+          await client.query("UPDATE battle_sides SET composition=$1::jsonb,initial_total=$2,current_total=$2,temporary_militia=500,seal=$3 WHERE battle_id=$4 AND side_key='B'", [JSON.stringify(composition), total, seal, battle.id]);
+        }
+      }
       await client.query("UPDATE battle_sides SET initial_composition=composition WHERE battle_id=$1", [battle.id]);
       await client.query("UPDATE battles SET status='WAITING_FIRST_ROLL',updated_at=NOW() WHERE id=$1", [battle.id]);
       return loadView(client, battle.id);
@@ -436,8 +469,7 @@ export const battleService = {
         roll = rollNavalPool(target.composition, frontage);
       } else if (view.battle.terrain === "SIEGE") {
         const activeAssets = side === "A" ? activeSiegeAssaultAssets(target.support_assets, terrain.frontageA) : target.support_assets;
-        const artilleryBonus = await artilleryDamageDieBonus(client, target.country_id);
-        const support = rollSiegeSupport(activeAssets, target.support_targets, undefined, artilleryBonus);
+        const support = rollSiegeSupport(activeAssets, target.support_targets, undefined, target.support_enhanced ?? {});
         wallDamage = side === "A" ? support.wallDamage : 0;
         gateDamage = side === "A" ? support.gateDamage : 0;
         const wallAfterSupport = Math.max(0, (view.battle.wall_current_hp ?? 0) - wallDamage);
@@ -479,11 +511,21 @@ export const battleService = {
         { clash: rollA.clash_total, damage: rollA.damage_total, detail: {} },
         { clash: Math.ceil(rollB.clash_total * defense.defenderClash), damage: Math.ceil(rollB.damage_total * defense.defenderDamage), detail: {} },
         { mode: naval ? "NAVAL" : "LAND", damageFactorA: defense.attackerDamage, damageFactorB: siege ? 1 - mantletDefense : 1 });
-      const pressureA = Math.max(0, view.sides.A.pressure + resolution.pressureDeltaA), pressureB = Math.max(0, view.sides.B.pressure + resolution.pressureDeltaB);
+      let defenderPressureDelta = resolution.pressureDeltaB;
+      if (siege && defenderPressureDelta > 0 && !view.battle.defender_pantheon_pressure_used && view.battle.defender_settlement_id) {
+        const protectedByPantheon = Boolean((await client.query(
+          "SELECT 1 FROM buildings WHERE settlement_id=$1 AND building_type='pantheon' AND status='ACTIVE' AND level>=3", [view.battle.defender_settlement_id]
+        )).rowCount);
+        if (protectedByPantheon) {
+          defenderPressureDelta = Math.max(0, defenderPressureDelta - 1);
+          await client.query("UPDATE battles SET defender_pantheon_pressure_used=TRUE WHERE id=$1", [active.id]);
+        }
+      }
+      const pressureA = Math.max(0, view.sides.A.pressure + resolution.pressureDeltaA), pressureB = Math.max(0, view.sides.B.pressure + defenderPressureDelta);
       const totalA = compositionTotal(resolution.remainingA), totalB = compositionTotal(resolution.remainingB);
       let orderA = orderState(pressureA, view.sides.A.initial_total, totalA), orderB = orderState(pressureB, view.sides.B.initial_total, totalB);
       const attackerBroken = battleEnds(pressureA, view.sides.A.initial_total, totalA);
-      const assaultInfantry = (resolution.remainingA.light_infantry ?? 0) + (resolution.remainingA.spear ?? 0) + (resolution.remainingA.heavy_infantry ?? 0);
+      const assaultInfantry = (resolution.remainingA.light_infantry ?? 0) + (resolution.remainingA.spear ?? 0) + (resolution.remainingA.heavy_infantry ?? 0) + (resolution.remainingA.militia ?? 0);
       const assaultCapacity = siege ? Math.min(assaultInfantry, siegeAssaultAccess(view.sides.A.support_assets, BATTLE_TERRAINS.SIEGE.frontageA).capacity) : 0;
       const defenderCaptured = siege && siegeDefenderCaptured(view.sides.B.initial_total, totalB, pressureB, wallAfter ?? 0, gateAfter ?? 0, assaultCapacity);
       if (siege && orderB === "BROKEN" && !defenderCaptured) orderB = "SHAKEN";

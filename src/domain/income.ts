@@ -1,4 +1,4 @@
-import { BUILDINGS } from "./catalog.js";
+import { BUILDINGS, MAX_SETTLEMENT_PERCENT_BONUS, type CityPolicyKey } from "./catalog.js";
 import { ruinIncomeMultiplier, type ActiveBuilding } from "./economy.js";
 import type { ResourceType } from "./resources.js";
 
@@ -51,16 +51,23 @@ export function calculateCategorizedIncome(input: {
   buildings: ActiveBuilding[];
   ruinStage: 0 | 1 | 2;
   resources?: readonly ResourceType[];
+  slavePopulation?: number;
+  activePolicies?: readonly CityPolicyKey[];
+  assignedMerchant?: boolean;
 }): { gross: IncomeBreakdown; payable: IncomeBreakdown; buildingUpkeep: number; buildingBonuses: IncomeBreakdown } {
   const resources = input.resources ?? [];
+  const policies = new Set(input.activePolicies ?? []);
   const gross: IncomeBreakdown = {
     building: Math.max(0, input.manualFlatIncome),
-    tax: Math.max(0, input.taxIncome),
+    tax: Math.max(0, Math.floor(input.taxIncome * (policies.has("STRICT_TAXATION") ? 1.20 : 1))),
     landTrade: Math.max(0, input.settlementIncome + input.landTradeIncome + (input.agreementLandIncome ?? 0)),
     seaTrade: Math.max(0, input.seaTradeIncome + (input.agreementSeaIncome ?? 0))
   };
   let globalIncomePercent = input.manualIncomePercent;
+  let seaIncomePercent = 0;
   let buildingUpkeep = 0;
+  if (policies.has("MARKET_FAIRS")) gross.building += 250;
+  if (policies.has("INFRASTRUCTURE_ROADS")) gross.building += Math.min(600, input.buildings.length * 100);
 
   for (const building of input.buildings) {
     const effect = BUILDINGS[building.buildingType]?.levels[building.level];
@@ -70,17 +77,23 @@ export function calculateCategorizedIncome(input: {
     const flatIncome = Math.floor((effect.flatIncome ?? 0) * silkMultiplier);
     if (building.buildingType === "port") gross.seaTrade += flatIncome;
     else gross.building += flatIncome;
-    globalIncomePercent += (effect.incomePercent ?? 0) * silkMultiplier;
-    if (resources.includes("WINE") && building.buildingType === "lupanar") globalIncomePercent += 0.05;
+    let buildingIncomePercent = (effect.incomePercent ?? 0) * silkMultiplier;
+    if (building.buildingType === "trade_guild" && policies.has("MARKET_FAIRS")) buildingIncomePercent += 0.02;
+    if (["trade_guild", "lupanar"].includes(building.buildingType) && policies.has("MERCHANT_LICENSE")) buildingIncomePercent += 0.05;
+    if (resources.includes("WINE") && building.buildingType === "lupanar") buildingIncomePercent += 0.05;
+    globalIncomePercent += buildingIncomePercent;
+    seaIncomePercent += effect.seaIncomePercent ?? 0;
+    if (building.buildingType === "slave_camp") gross.building += Math.floor(Math.max(0, input.slavePopulation ?? 0) * ({ 1: 0.15, 2: 0.30, 3: 0.50 }[building.level] ?? 0));
+    if (building.buildingType === "agora" && building.level >= 2 && input.assignedMerchant) globalIncomePercent += 0.10;
     if (resources.includes("GLASS") && ["healer", "aqueduct"].includes(building.buildingType)) gross.building += 100;
     if (resources.includes("AMBER") && building.buildingType === "pantheon") gross.building += 300;
   }
 
-  const incomeBeforePercentages = incomeTotal(gross);
-  gross.building += Math.max(0, Math.floor(incomeBeforePercentages * globalIncomePercent));
-
+  if (seaIncomePercent > 0) gross.seaTrade += Math.floor(gross.seaTrade * seaIncomePercent);
   const resourceMultiplier = (resources.includes("GOLD") ? 1.10 : 1) * (resources.includes("SPICES") ? 1.20 : 1);
-  if (resourceMultiplier > 1) gross.building += Math.floor(incomeTotal(gross) * (resourceMultiplier - 1));
+  const totalPercent = Math.max(0, Math.min(MAX_SETTLEMENT_PERCENT_BONUS, globalIncomePercent + resourceMultiplier - 1));
+  const incomeBeforePercentages = incomeTotal(gross);
+  gross.building += Math.floor(incomeBeforePercentages * totalPercent + 1e-9);
 
   const buildingBonuses = zeroBreakdown();
   buildingBonuses.building = gross.building;

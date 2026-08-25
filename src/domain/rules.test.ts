@@ -19,7 +19,7 @@ describe("yerleşke ekonomisi", () => {
       ],
       ruinStage: 0
     });
-    expect(result).toMatchObject({ grossIncome: 4_200, payableIncome: 4_200, buildingUpkeep: 500 });
+    expect(result).toMatchObject({ grossIncome: 5_400, payableIncome: 5_400, buildingUpkeep: 500 });
   });
 
   it("harap iyileşmesini ilk alımda 0, ikincide yüzde 50, üçüncüde tam uygular", () => {
@@ -35,6 +35,8 @@ describe("yerleşke ekonomisi", () => {
     expect(buildingSlotLimit(29_999)).toBe(2);
     expect(buildingSlotLimit(30_000)).toBe(3);
     expect(buildingSlotLimit(50_000)).toBe(5);
+    expect(buildingSlotLimit(60_000)).toBe(6);
+    expect(buildingSlotLimit(175_000)).toBe(6);
   });
 
   it("lupanar, şifacı, su kemeri, haraplık ve seferberliği birlikte uygular", () => {

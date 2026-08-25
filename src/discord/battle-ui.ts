@@ -63,7 +63,7 @@ export function battleEmbed(view: BattleView, roundResult?: { tier: string; winn
         ? `**Hücum başlatılırsa doğrudan sur hücumuna katılabilecek azami piyade:** ${number(access.capacity)}`
         : `**Bu tur doğrudan sur hücumuna katılabilecek azami piyade:** ${number(access.capacity)}`;
     embed.addFields(
-      { name: "🏰 Tahkimatlar", value: `**Sur:** ${number(view.battle.wall_current_hp ?? 0)} / ${number(view.battle.wall_max_hp ?? 0)} HP${wallOpen ? " — Yıkıldı" : ""}\n**Kapı:** ${number(view.battle.gate_current_hp ?? 0)} / ${number(view.battle.gate_max_hp ?? 0)} HP${gateOpen ? " — Kırıldı" : ""}` },
+      { name: "🏰 Tahkimatlar", value: `**Sur:** ${number(view.battle.wall_current_hp ?? 0)} / ${number(view.battle.wall_max_hp ?? 0)} HP${wallOpen ? " — Yıkıldı" : ""}\n**Kapı:** ${number(view.battle.gate_current_hp ?? 0)} / ${number(view.battle.gate_max_hp ?? 0)} HP${gateOpen ? " — Kırıldı" : ""}\n**Erzak Dayanıklılığı:** ${number(view.battle.starvation_remaining ?? 0)} / ${number(view.battle.starvation_capacity ?? 0)} oyun turu${view.battle.starvation_capacity !== null && view.battle.starvation_remaining === 0 ? " — Erzak tükendi; yönetici sonucu belirler." : ""}` },
       { name: "🪜 Hücum Erişimi", value: `**Merdiven Grupları:** ${number(access.activeLadderGroups)} / ${number(ladders)} aktif → ${number(access.activeLadderGroups * LADDER_GROUP_ASSAULT_CAPACITY)}\n**Kuşatma Kuleleri:** ${number(access.activeSiegeTowers)} / ${number(towers)} aktif → ${number(access.activeSiegeTowers * SIEGE_TOWER_ASSAULT_CAPACITY)}\n**Toplam Hücum Kapasitesi:** ${number(access.capacity)} / ${number(SIEGE_ASSAULT_FRONTAGE)}
 ${accessNote}` }
     );
@@ -164,7 +164,7 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
         light_infantry: interaction.options.getInteger("hafif-piyade", true), slinger: interaction.options.getInteger("sapanci", true),
         spear: interaction.options.getInteger("mizrakli", true), archer: interaction.options.getInteger("okcu", true),
         heavy_infantry: interaction.options.getInteger("agir-piyade", true), light_cavalry: interaction.options.getInteger("hafif-suvari", true),
-        heavy_cavalry: interaction.options.getInteger("agir-suvari", true)
+        heavy_cavalry: interaction.options.getInteger("agir-suvari", true), militia: interaction.options.getInteger("milis") ?? 0
       } });
     await interaction.reply({ content: `✅ ${side} tarafının bütün kara kadrosu tek işlemde kaydedildi. Açık toplam: **${number(view.sides[side].initial_total)}**`, ephemeral: true });
   } else if (sub === "gemi-ayarla") {
