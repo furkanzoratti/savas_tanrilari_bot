@@ -10,7 +10,7 @@ Railway üzerinde sürekli çalışan, Discord komutlarıyla yönetilen ve Postg
 - Bina alımını kategoriye özel fiyatlarla yürütür; nüfusa bağlı en fazla 6 bina slotunu, kıyı/Liman koşullarını ve seviye ön şartlarını denetler. Aynı anda 2 inşaat sürer; Usta Mimarlık Programı bu sınırı 3'e çıkarır.
 - Curia şehir politikalarını bir tur gecikmeyle etkinleştirir; inşaat, asker alımı, huzursuzluk, vergi, şehir geliri, kuşatma erzağı ve kalıcı/geçici milis etkilerini otomatik uygular.
 - Akademi karakterlerini etkileşimli zar ve isimlendirme ile Casus, Tüccar veya Komutan olarak yetiştirir; devlet belgesine ekler ve Curia/Agora görevlerine atar.
-- Panteon savaş kredisi ile Panteon, Zeytin, Su Kemeri ve Agora'ya bağlı salgın/iyileşme/karaborsa olaylarını yönetir.
+- Panteon savaş kredisi ile karaborsa, salgın, huzursuzluk ve isyan olaylarını yönetir; bütün sunucudaki yerleşkeler için binalar, tüccarlar, kaynak ticareti, kuşatma ve fetih durumuna göre ağırlıklı seçim yapar.
 - Her turda tamamlanan binaları etkinleştirir. Gelir etkileri veritabanına üst üste eklenmez; aktif binalardan yeniden hesaplandığı için aynı bonusun iki kez uygulanması engellenir.
 - Seferberlik yüzdesini ülkenin toplam nüfusuna uygular; aynı sınırı şehir nüfuslarına oranlayarak her yerleşkenin asker alım payını hesaplar.
 - Askere alınan birlikleri seferberlik kademesinin dalgalarına böler; gelecekte katılacak askerleri belgede gösterir ve zamanı gelince **Ordu** olarak ekler. Nüfusa bağlı sabit şehir garnizonu ayrı tutulur.
@@ -93,6 +93,10 @@ Bu komutların sonuçları gizli değildir; markalı resmî tur duyurusu olarak 
 - `/yonetim rol-kanali islem kanal`
 - `/yonetim rol-rapor-kanali islem [kanal]`
 
+- `/olay riskler tur [ulke]`
+- `/olay sec tur [ulke]`
+- `/olay uygula tur [ulke] [yerleske]`
+- `/olay sonlandir tur ulke yerleske`
 - `/olay salgin ulke yerleske baz-risk`
 - `/olay salgin-iyilesme ulke yerleske`
 - `/olay karaborsa ulke yerleske`
@@ -101,11 +105,13 @@ Bu komutların sonuçları gizli değildir; markalı resmî tur duyurusu olarak 
 
 Akademi eğitimi Alım Turunda başlatılır. Sv1 görev türünü `1d30` ile belirler; Sv2 bir görev türünü eleyip `1d20` atar; Sv3 görev türünü oyuncuya seçtirir. Zar düğmesinden sonra açılan formda karaktere isim verilir ve karakter otomatik olarak devlet belgesine eklenir. Tüccarlar Agora/Forum Sv2+ görevine atanabilir; Agora Sv3 görevlisi karaborsa olayını engeller.
 
-`/olay` komutları yalnızca oyun yöneticisi tarafından kullanılabilir. Salgın zarı Zeytin ile riski 10 puan azaltır, Panteon Sv2+ kalan riski yarıya düşürür. Su Kemeri iyileşme zarına +1 ekler.
+`/olay` komutları yalnızca oyun yöneticisi tarafından kullanılabilir. `/olay riskler` ve `/olay sec` varsayılan olarak Discord sunucusundaki bütün devletlerin yerleşkelerini tarar; isteğe bağlı `ulke` seçeneği kapsamı daraltır. Bot; karaborsa, salgın, huzursuzluk veya isyan için aktif binaları, Agora tüccarını, yerel/ticaret kaynaklarını, kuşatmayı, fetih durumunu ve önceki olayları değerlendirir. Agora Sv3 tüccarı karaborsayı tamamen engeller; Zeytin salgın riskini 10 puan azaltır, Panteon Sv2+ kalan salgın riskini yarıya düşürür. Aynı yerleşkede aynı olay 3 oyun turu içinde yeniden seçilmez; aktif olaylar yeni seçimden çıkarılır.
+
+Ağırlıklı seçim yalnızca yöneticiye gösterilir ve olayı kendiliğinden başlatmaz. Yönetici sonucu yeşil onay düğmesiyle veya `/olay uygula tur` komutuyla herkese açık biçimde uygular; `ulke` ile `yerleske` birlikte belirtilirse belirli bir şehre doğrudan uygulayabilir. Aktif olay yerleşke belgesinde görünür ve `/olay sonlandir` ile kaldırılır. Tur ilerletme hiçbir olayı kendiliğinden tetiklemez. Eski doğrudan salgın, iyileşme ve karaborsa komutları kullanılmaya devam eder; Su Kemeri iyileşme zarına +1 ekler.
 
 `oyunu-sifirla` yalnızca yetkili GM tarafından ve tam `SIFIRLA` onayıyla çalışır. Komut, o Discord sunucusundaki ülkeleri ve bunlara bağlı bütün oyun kayıtlarını siler; turu 0/Kapalı durumuna döndürür. Rol kanalları ile kelime istatistikleri korunur.
 
-Tur ilerletme otomatik saate bağlanmamıştır. Savaş veya olay çözümü iki güne uzayabildiği için GM önce durumu `Kapalı`/`Olaylar çözülüyor` yapar, bütün olaylar bittikten sonra bir kez `tur-ilerlet` kullanır. Sonuç kartı tamamlanan binaları, katılan birlikleri, gemileri, kuşatma aletlerini, etkinleşen şehir politikalarını, huzursuzluk olaylarını, kuşatma erzaklarını ve Panteon kredi ödemelerini yerleşke bazında listeler.
+Tur ilerletme otomatik saate bağlanmamıştır. Savaş veya olay çözümü iki güne uzayabildiği için GM önce durumu `Kapalı`/`Olaylar çözülüyor` yapar, bütün olaylar bittikten sonra bir kez `tur-ilerlet` kullanır. Sonuç kartı tamamlanan binaları, katılan birlikleri, gemileri, kuşatma aletlerini, etkinleşen şehir politikalarını, kuşatma erzaklarını ve Panteon kredi ödemelerini yerleşke bazında listeler. Karaborsa, salgın, huzursuzluk ve isyan yalnızca oyun yöneticisinin olay komutlarıyla başlar.
 
 ## Discord kurulumu
 

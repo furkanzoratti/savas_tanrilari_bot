@@ -25,7 +25,8 @@ describe("kültür ve yerleşke kartı", () => {
         base_income: 1_000, tax_income: 0, land_trade_income: 0, sea_trade_income: 0,
         base_population_growth: 100, manual_flat_income: 0, manual_income_percent: 0,
         ruin_stage: 0, resource_type: "GRAIN", culture_group: "ITALIC", garrison_level: 3, local_treasury: 500, base_land_trade_income: 2_000,
-        is_conquered: false, conquered_turn: null, grossIncome: 1_000, payableIncome: 1_000,
+        is_conquered: false, conquered_turn: null, black_market_active: true, epidemic_active: true,
+        unrest_active: false, rebellion_active: false, grossIncome: 1_000, payableIncome: 1_000,
         incomeBreakdown: emptyIncome, buildingIncomeBonus: emptyIncome, buildingUpkeep: 0,
         unitUpkeep: 100, shipUpkeep: 0, totalSettlementUpkeep: 100, populationGain: 100,
         militaryUsed: 1_400, militaryLimit: 7_500, slotLimit: 10, effectiveResources: ["GRAIN"], buildings: [], ships: [], siegeAssets: [],
@@ -40,7 +41,9 @@ describe("kültür ve yerleşke kartı", () => {
     const embeds = renderDocument(document);
     expect(embeds).toHaveLength(2);
     const fields = embeds[1]!.data.fields ?? [];
-    expect(fields.map((field) => field.name)).toEqual(expect.arrayContaining(["🏺 Kültür", "🛡️ Garnizon", "⚔️ Ordu"]));
+    expect(fields.map((field) => field.name)).toEqual(expect.arrayContaining(["🏺 Kültür", "🚨 Aktif Yerleşke Olayları", "🛡️ Garnizon", "⚔️ Ordu"]));
+    expect(fields.find((field) => field.name === "🚨 Aktif Yerleşke Olayları")?.value).toContain("Karaborsa");
+    expect(fields.find((field) => field.name === "🚨 Aktif Yerleşke Olayları")?.value).toContain("Salgın");
     expect(fields.find((field) => field.name === "🏺 Kültür")?.value).toContain("İtalik");
     expect(fields.find((field) => field.name === "⚔️ Ordu")?.value).not.toContain("Yerleşkede");
     expect(fields.find((field) => field.name === "👥 Nüfus")?.value).not.toContain("Sonraki Alım");

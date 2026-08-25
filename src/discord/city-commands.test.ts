@@ -25,10 +25,20 @@ describe("şehir geliştirme ve Akademi komutları", () => {
   it("yöneticiye salgın, iyileşme ve karaborsa olaylarını ayrı komut olarak sunar", () => {
     const events = commandBuilders.find((command) => command.name === "olay");
     expect(events?.options?.map((option) => option.name)).toEqual([
-      "salgin", "salgin-iyilesme", "karaborsa"
+      "sec", "riskler", "uygula", "sonlandir", "salgin", "salgin-iyilesme", "karaborsa"
     ]);
     expect(events?.options?.find((option) => option.name === "salgin")?.options?.find((option) => option.name === "baz-risk"))
       .toMatchObject({ required: true, min_value: 0, max_value: 100 });
+    const select = events?.options?.find((option) => option.name === "sec");
+    expect(select?.options?.find((option) => option.name === "tur")).toMatchObject({ required: true });
+    expect(select?.options?.find((option) => option.name === "ulke")).not.toMatchObject({ required: true });
+    expect(select?.options?.find((option) => option.name === "tur")?.choices?.length).toBe(4);
+    const apply = events?.options?.find((option) => option.name === "uygula");
+    expect(apply?.options?.find((option) => option.name === "ulke")).not.toMatchObject({ required: true });
+    expect(apply?.options?.find((option) => option.name === "yerleske")).not.toMatchObject({ required: true });
+    const resolve = events?.options?.find((option) => option.name === "sonlandir");
+    expect(resolve?.options?.find((option) => option.name === "ulke")).toMatchObject({ required: true });
+    expect(resolve?.options?.find((option) => option.name === "yerleske")).toMatchObject({ required: true });
   });
 
   it("Akademi eğitiminde görev eleme ve görev seçme alanlarını sunar", () => {

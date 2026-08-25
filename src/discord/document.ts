@@ -2,6 +2,7 @@ import { EmbedBuilder } from "discord.js";
 import { BUILDING_CATEGORIES, BUILDINGS, CHARACTER_ROLES, CITY_POLICIES, MOBILIZATION_RULES, SHIPS, SIEGE_ASSETS, UNITS } from "../domain/catalog.js";
 import { CULTURE_GROUPS } from "../domain/cultures.js";
 import { calculateShipUpkeep, calculateUnitUpkeep } from "../domain/economy.js";
+import { SETTLEMENT_EVENT_TYPES, type SettlementEventType } from "../domain/events.js";
 import { gold, number } from "../domain/format.js";
 import { RESOURCES } from "../domain/resources.js";
 import { TRADE_ROUTE_LABELS } from "../domain/trade.js";
@@ -148,6 +149,11 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
         { name: "🌐 Etkin Kaynaklar ve Etkileri", value: spacedSection(resourceDetails) },
         { name: "🏗️ Binalar ve İnşaatlar", value: spacedSection(buildings) }
       );
+
+    const activeEvents = (Object.keys(SETTLEMENT_EVENT_TYPES) as SettlementEventType[])
+      .filter((type) => settlement[SETTLEMENT_EVENT_TYPES[type].stateColumn])
+      .map((type) => `${SETTLEMENT_EVENT_TYPES[type].emoji} **${SETTLEMENT_EVENT_TYPES[type].label}**`);
+    if (activeEvents.length) embed.addFields({ name: "🚨 Aktif Yerleşke Olayları", value: spacedSection(activeEvents.join("\n")) });
 
     const policies = settlement.policies ?? [];
     const hasCuria = settlement.buildings.some((building) => building.building_type === "curia" && building.status === "ACTIVE" && building.level > 0);

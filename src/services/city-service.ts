@@ -242,6 +242,7 @@ export const cityService = {
       const guild = await guildState(client, input.guildId);
       await client.query("INSERT INTO settlement_events(settlement_id,turn,event_type,chance,roll,triggered,details) VALUES($1,$2,'EPIDEMIC',$3,$4,$5,$6::jsonb)",
         [settlement.id, guild.current_turn, chance, roll, triggered, JSON.stringify({ baseChance: input.baseChance, oliveProtected, pantheonProtected })]);
+      if (triggered) await client.query("UPDATE settlements SET epidemic_active=TRUE WHERE id=$1", [settlement.id]);
       await audit(client, input.guildId, input.actorId, "SETTLEMENT_EPIDEMIC_ROLL", "settlement", settlement.id, { baseChance: input.baseChance, chance, roll, triggered });
       return { baseChance: input.baseChance, chance, roll, triggered, oliveProtected, pantheonProtected };
     });
@@ -271,6 +272,7 @@ export const cityService = {
       const guild = await guildState(client, input.guildId);
       await client.query("INSERT INTO settlement_events(settlement_id,turn,event_type,chance,roll,triggered,details) VALUES($1,$2,'BLACK_MARKET',100,1,$3,$4::jsonb)",
         [settlement.id, guild.current_turn, !blocked, JSON.stringify({ blocked, agoraLevel, merchantName: merchant?.name ?? null })]);
+      if (!blocked) await client.query("UPDATE settlements SET black_market_active=TRUE WHERE id=$1", [settlement.id]);
       await audit(client, input.guildId, input.actorId, "SETTLEMENT_BLACK_MARKET", "settlement", settlement.id, { blocked, merchantName: merchant?.name ?? null });
       return { blocked, merchantName: merchant?.name ?? null };
     });

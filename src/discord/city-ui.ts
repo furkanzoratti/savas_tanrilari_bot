@@ -8,6 +8,7 @@ import { gold } from "../domain/format.js";
 import { cityService } from "../services/city-service.js";
 import { gameService, GameError, type AcademyTrainingSession } from "../services/game-service.js";
 import { assertCountryAccess, requireGameMaster, resolveCountry } from "./auth.js";
+import { handleSettlementEventButton, handleSettlementEventCommand } from "./event-ui.js";
 
 async function findSettlement(countryId: string, name: string) {
   const settlements = await gameService.listSettlements(countryId);
@@ -49,7 +50,10 @@ function trainingButtons(countryId: string, session: AcademyTrainingSession): Ac
 export async function handleCityCommand(interaction: ChatInputCommandInteraction): Promise<boolean> {
   if (!["politika", "akademi", "panteon", "olay"].includes(interaction.commandName)) return false;
   if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
-  if (interaction.commandName === "olay") requireGameMaster(interaction);
+  if (interaction.commandName === "olay") {
+    requireGameMaster(interaction);
+    if (await handleSettlementEventCommand(interaction)) return true;
+  }
   const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
   const sub = interaction.options.getSubcommand();
 
@@ -141,6 +145,7 @@ export async function handleCityCommand(interaction: ChatInputCommandInteraction
 }
 
 export async function handleCityButton(interaction: ButtonInteraction): Promise<boolean> {
+  if (await handleSettlementEventButton(interaction)) return true;
   if (!interaction.customId.startsWith("academy_roll|") && !interaction.customId.startsWith("academy_name|")) return false;
   const [action, countryId, sessionId] = interaction.customId.split("|");
   if (!countryId || !sessionId || !interaction.guildId) throw new GameError("Akademi etkileşimi geçersiz.");

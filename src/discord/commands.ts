@@ -1,10 +1,12 @@
 import { ChannelType, SlashCommandBuilder } from "discord.js";
 import { BUILDINGS, CHARACTER_ROLES, CITY_POLICIES, MOBILIZATION_RULES, SHIPS, SIEGE_ASSETS, UNITS } from "../domain/catalog.js";
 import { RESOURCE_CHOICES } from "../domain/resources.js";
+import { SETTLEMENT_EVENT_TYPES } from "../domain/events.js";
 import { BATTLE_TERRAINS, BATTLE_UNIT_STATS, NAVAL_UNIT_STATS, SIEGE_ASSET_BATTLE_STATS } from "../domain/battle.js";
 
 const countryOption = (option: any) => option.setName("ulke").setDescription("Yalnızca DM: işlem yapılacak ülke").setRequired(false);
 const CHARACTER_ROLE_CHOICES = Object.entries(CHARACTER_ROLES).map(([value, role]) => ({ name: role.label, value }));
+const SETTLEMENT_EVENT_CHOICES = Object.entries(SETTLEMENT_EVENT_TYPES).map(([value, event]) => ({ name: event.label, value }));
 
 export const commandBuilders = [
   new SlashCommandBuilder()
@@ -103,7 +105,21 @@ export const commandBuilders = [
       .addIntegerOption((o) => o.setName("miktar").setDescription("Geri ödeme miktarı").setMinValue(1).setRequired(true))
       .addStringOption(countryOption)),
   new SlashCommandBuilder()
-    .setName("olay").setDescription("Yalnızca oyun yöneticisi: yerleşke olaylarını ve koruma etkilerini çözer")
+    .setName("olay").setDescription("Yalnızca oyun yöneticisi: ağırlıklı yerleşke olaylarını seçer ve uygular")
+    .addSubcommand((sub) => sub.setName("sec").setDescription("Tüm sunucudaki uygun yerleşkeler arasından ağırlıklı olay seçer")
+      .addStringOption((o) => o.setName("tur").setDescription("Seçilecek olay türü").setRequired(true).addChoices(...SETTLEMENT_EVENT_CHOICES))
+      .addStringOption((o) => o.setName("ulke").setDescription("İsteğe bağlı: yalnızca bu ülkenin yerleşkelerini tarar")))
+    .addSubcommand((sub) => sub.setName("riskler").setDescription("Tüm yerleşkelerin olay ağırlıklarını ve koruma nedenlerini listeler")
+      .addStringOption((o) => o.setName("tur").setDescription("Listelenecek olay türü").setRequired(true).addChoices(...SETTLEMENT_EVENT_CHOICES))
+      .addStringOption((o) => o.setName("ulke").setDescription("İsteğe bağlı: yalnızca bu ülkenin yerleşkelerini gösterir")))
+    .addSubcommand((sub) => sub.setName("uygula").setDescription("Bekleyen olay seçimini veya belirttiğiniz yerleşkeye olayı uygular")
+      .addStringOption((o) => o.setName("tur").setDescription("Uygulanacak olay türü").setRequired(true).addChoices(...SETTLEMENT_EVENT_CHOICES))
+      .addStringOption((o) => o.setName("ulke").setDescription("İsteğe bağlı: elle olay uygulanacak ülke"))
+      .addStringOption((o) => o.setName("yerleske").setDescription("İsteğe bağlı: elle olay uygulanacak yerleşke")))
+    .addSubcommand((sub) => sub.setName("sonlandir").setDescription("Yerleşkede aktif olan bir olayı sonlandırır")
+      .addStringOption((o) => o.setName("tur").setDescription("Sonlandırılacak olay türü").setRequired(true).addChoices(...SETTLEMENT_EVENT_CHOICES))
+      .addStringOption((o) => o.setName("ulke").setDescription("Yerleşkenin bağlı olduğu ülke").setRequired(true))
+      .addStringOption((o) => o.setName("yerleske").setDescription("Olayın sonlanacağı yerleşke").setRequired(true)))
     .addSubcommand((sub) => sub.setName("salgin").setDescription("Panteon ve Zeytin etkilerini uygulayarak salgın zarı atar")
       .addStringOption((o) => o.setName("ulke").setDescription("Yerleşkenin bağlı olduğu ülke").setRequired(true))
       .addStringOption((o) => o.setName("yerleske").setDescription("Olayın yaşanacağı yerleşke").setRequired(true))

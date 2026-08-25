@@ -21,6 +21,7 @@ interface SettlementRow {
   manual_income_percent: number; ruin_stage: RuinStage; resource_type: ResourceType; culture_group: CultureGroup;
   garrison_level: number; local_treasury: number; base_land_trade_income: number; is_conquered: boolean; conquered_turn: number | null;
   is_coastal: boolean; last_acquisition_income: number; curia_guard_granted: boolean;
+  black_market_active: boolean; epidemic_active: boolean; unrest_active: boolean; rebellion_active: boolean;
 }
 interface BuildingRow { settlement_id: string; building_type: string; level: number; target_level: number | null; status: "ACTIVE" | "BUILDING"; completion_turn: number | null }
 
@@ -1178,12 +1179,7 @@ export const gameService = {
             upkeep += settlementUpkeep;
             const nextPopulation = settlement.population + popGain;
             await client.query("UPDATE settlements SET population=$1,ruin_stage=$2,local_treasury=local_treasury+$3,last_acquisition_income=$4 WHERE id=$5", [nextPopulation, nextRuinStage(settlement.ruin_stage), settlementNet, settlementGross, settlement.id]);
-            const unrestChance = settlementUnrestChance(active, effectiveResources, activePolicies);
-            if (unrestChance > 0) {
-              const unrestRoll = Math.floor(Math.random() * 100) + 1;
-              await client.query("INSERT INTO settlement_events(settlement_id,turn,event_type,chance,roll,triggered,details) VALUES($1,$2,'UNREST',$3,$4,$4<=$3,$5::jsonb)", [settlement.id, newTurn, unrestChance, unrestRoll, JSON.stringify({ source: "ACQUISITION_TURN" })]);
-              if (unrestRoll <= unrestChance) unrestDetails.push({ settlementName: settlement.name, chance: unrestChance, roll: unrestRoll });
-            }
+            // Yerleşke olayları yalnızca yöneticinin ağırlıklı olay seçiminden sonra uygulanır.
             if (await ensureStandardGarrison(client, settlement.id, nextPopulation, settlement.garrison_level)) {
               garrisonUpgrades += 1;
               garrisonUpgradeDetails.push(settlement.name);
@@ -1245,6 +1241,7 @@ export const gameService = {
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`turn:${guildId}`]);
       await ensureGuild(client, guildId);
       await client.query("DELETE FROM battles WHERE guild_id=$1", [guildId]);
+      await client.query("DELETE FROM settlement_event_draws WHERE guild_id=$1", [guildId]);
       const deleted = await client.query("DELETE FROM countries WHERE guild_id=$1 RETURNING id", [guildId]);
       await client.query("DELETE FROM processed_events WHERE guild_id=$1", [guildId]);
       await client.query("UPDATE guilds SET current_turn=0,turn_phase='CLOSED',updated_at=NOW() WHERE discord_id=$1", [guildId]);

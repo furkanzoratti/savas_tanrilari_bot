@@ -619,4 +619,44 @@ export const migrations = [
        WHERE g.discord_id=b.guild_id AND b.terrain='SIEGE' AND b.defender_settlement_id IS NOT NULL
          AND b.status NOT IN ('FINISHED','CANCELLED') AND b.starvation_capacity IS NULL;
     `
+  },
+  {
+    version: 15,
+    name: "game_master_weighted_settlement_events",
+    sql: `
+      ALTER TABLE settlements ADD COLUMN IF NOT EXISTS black_market_active BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE settlements ADD COLUMN IF NOT EXISTS epidemic_active BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE settlements ADD COLUMN IF NOT EXISTS unrest_active BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE settlements ADD COLUMN IF NOT EXISTS rebellion_active BOOLEAN NOT NULL DEFAULT FALSE;
+
+      CREATE TABLE IF NOT EXISTS settlement_event_draws (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        guild_id TEXT NOT NULL REFERENCES guilds(discord_id) ON DELETE CASCADE,
+        event_type TEXT NOT NULL CHECK (event_type IN ('BLACK_MARKET','EPIDEMIC','UNREST','REBELLION')),
+        selected_settlement_id UUID REFERENCES settlements(id) ON DELETE SET NULL,
+        selected_country_id UUID REFERENCES countries(id) ON DELETE SET NULL,
+        selected_settlement_name TEXT NOT NULL,
+        selected_country_name TEXT NOT NULL,
+        scope_country_id UUID REFERENCES countries(id) ON DELETE SET NULL,
+        candidate_count INTEGER NOT NULL CHECK (candidate_count >= 0),
+        eligible_count INTEGER NOT NULL CHECK (eligible_count >= 0),
+        excluded_count INTEGER NOT NULL CHECK (excluded_count >= 0),
+        total_weight INTEGER NOT NULL CHECK (total_weight > 0),
+        roll INTEGER NOT NULL CHECK (roll > 0),
+        selected_weight INTEGER NOT NULL CHECK (selected_weight > 0),
+        range_start INTEGER NOT NULL CHECK (range_start > 0),
+        range_end INTEGER NOT NULL CHECK (range_end >= range_start),
+        current_turn INTEGER NOT NULL,
+        actor_user_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING','APPLIED','CANCELLED')),
+        details JSONB NOT NULL DEFAULT '{}'::jsonb,
+        applied_event_id UUID REFERENCES settlement_events(id) ON DELETE SET NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        applied_at TIMESTAMPTZ
+      );
+      CREATE INDEX IF NOT EXISTS settlement_event_draws_pending_idx
+        ON settlement_event_draws(guild_id,event_type,created_at DESC) WHERE status='PENDING';
+      CREATE INDEX IF NOT EXISTS settlement_events_triggered_history_idx
+        ON settlement_events(settlement_id,event_type,turn DESC) WHERE triggered=TRUE;
+    `
   }] as const;
