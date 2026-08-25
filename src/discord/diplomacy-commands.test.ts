@@ -6,8 +6,10 @@ vi.hoisted(() => {
   process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
 });
 
+import { existsSync } from "node:fs";
 import { commandBuilders } from "./commands.js";
-import { renderPublicCountryProfile, renderPublicPactProfile } from "./diplomacy-ui.js";
+import { PACT_BANNER_PATH, PACT_BANNER_URL, STATE_PROFILE_BANNER_PATH, STATE_PROFILE_BANNER_URL } from "./assets.js";
+import { diplomacyReplyIsPublic, renderPublicCountryProfile, renderPublicPactProfile } from "./diplomacy-ui.js";
 
 describe("ittifak, pakt ve herkese açık devlet profili", () => {
   it("diplomasi kanalını yönetim alt komut sınırını aşmadan ayrı komut olarak kaydeder", () => {
@@ -46,6 +48,8 @@ describe("ittifak, pakt ve herkese açık devlet profili", () => {
     expect(combined).toContain("Kartaca");
     expect(combined).toContain("Akdeniz Birliği");
     expect(combined).not.toMatch(/Hazine|Nüfus|Ordu|Gelir|Bakım|Asker/i);
+    expect(embed.image?.url).toBe(STATE_PROFILE_BANNER_URL);
+    expect(existsSync(STATE_PROFILE_BANNER_PATH)).toBe(true);
   });
 
   it("paktın amaç, açıklama, lider ve üye devletlerini kamuya açık kartta gösterir", () => {
@@ -60,5 +64,17 @@ describe("ittifak, pakt ve herkese açık devlet profili", () => {
     expect(combined).toContain("Roma");
     expect(combined).toContain("Kartaca");
     expect(embed.fields?.some((field) => field.name === "👑 Pakt Lideri")).toBe(true);
+    expect(embed.image?.url).toBe(PACT_BANNER_URL);
+    expect(existsSync(PACT_BANNER_PATH)).toBe(true);
+  });
+
+  it("pakt bilgisi, davet, ittifak teklifi ve devlet profilini her kanalda herkese açar", () => {
+    expect(diplomacyReplyIsPublic("pakt", "bilgi")).toBe(true);
+    expect(diplomacyReplyIsPublic("pakt", "liste")).toBe(true);
+    expect(diplomacyReplyIsPublic("pakt", "davet")).toBe(true);
+    expect(diplomacyReplyIsPublic("ittifak", "teklif")).toBe(true);
+    expect(diplomacyReplyIsPublic("devlet-bilgisi")).toBe(true);
+    expect(diplomacyReplyIsPublic("pakt", "davetlerim")).toBe(false);
+    expect(diplomacyReplyIsPublic("ittifak", "liste")).toBe(false);
   });
 });

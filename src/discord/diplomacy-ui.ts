@@ -1,5 +1,5 @@
 import {
-  ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, EmbedBuilder,
+  ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, ChannelType, EmbedBuilder,
   type ButtonInteraction, type ChatInputCommandInteraction, type TextChannel
 } from "discord.js";
 import { RESOURCES } from "../domain/resources.js";
@@ -9,9 +9,19 @@ import {
 } from "../services/diplomacy-service.js";
 import { gameService, GameError } from "../services/game-service.js";
 import { isGameMaster, requireGameMaster, resolveCountry } from "./auth.js";
+import {
+  PACT_BANNER_NAME, PACT_BANNER_PATH, PACT_BANNER_URL,
+  STATE_PROFILE_BANNER_NAME, STATE_PROFILE_BANNER_PATH, STATE_PROFILE_BANNER_URL
+} from "./assets.js";
 
 function embedValue(text: string): string {
   return `${text.slice(0, 1022)}\n\u200B`;
+}
+
+export function diplomacyReplyIsPublic(command: "ittifak" | "pakt" | "devlet-bilgisi", action = ""): boolean {
+  return command === "devlet-bilgisi"
+    || (command === "ittifak" && action === "teklif")
+    || (command === "pakt" && ["bilgi", "liste", "davet"].includes(action));
 }
 
 export function renderPublicCountryProfile(profile: PublicCountryProfile): EmbedBuilder {
@@ -28,6 +38,7 @@ export function renderPublicCountryProfile(profile: PublicCountryProfile): Embed
   return new EmbedBuilder()
     .setColor(0xc59b45)
     .setTitle(`🏛️ ${profile.name} • Herkese Açık Devlet Bilgisi`)
+    .setImage(STATE_PROFILE_BANNER_URL)
     .addFields(
       { name: "🗺️ Yerleşkeler ve Hammaddeler", value: embedValue(settlements) },
       { name: "🤝 Müttefikler", value: embedValue(allies) },
@@ -40,6 +51,7 @@ export function renderPublicPactProfile(pact: PactDetails): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(0x5865f2)
     .setTitle(`🏛️ ${pact.name} • Pakt Bilgisi`)
+    .setImage(PACT_BANNER_URL)
     .addFields(
       { name: "🎯 Amaç", value: embedValue(pact.purpose) },
       { name: "📜 Açıklama", value: embedValue(pact.description) },
@@ -64,6 +76,7 @@ function pactInviteEmbed(invitation: PactInvitationView): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(0x5865f2)
     .setTitle(`🏛️ ${invitation.pact_name} • Pakt Daveti`)
+    .setImage(PACT_BANNER_URL)
     .setDescription(`**${invitation.inviter_country_name}**, **${invitation.receiver_country_name}** devletini pakta davet ediyor.`)
     .addFields(
       { name: "🎯 Paktın Amacı", value: embedValue(invitation.pact_purpose) },
@@ -106,7 +119,7 @@ async function handleAlliance(interaction: ChatInputCommandInteraction): Promise
   const channel = await requireDiplomacyChannel(interaction);
   const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
   const action = interaction.options.getSubcommand();
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ ephemeral: !diplomacyReplyIsPublic("ittifak", action) });
 
   if (action === "liste") {
     const alliances = await diplomacyService.allianceList(country.id);
@@ -136,7 +149,7 @@ async function handleAlliance(interaction: ChatInputCommandInteraction): Promise
   try {
     const players = await gameService.playerIds(target.id);
     const mention = players.length ? players.map((id) => `<@${id}>`).join(" ") : `**${target.name}** • Oyuncu atanmamış; oyun yöneticisi yanıtlayabilir.`;
-    const message = await channel.send({
+    const message = await interaction.editReply({
       content: mention, embeds: [allianceInviteEmbed(alliance)], components: [responseButtons("alliance", alliance.id)],
       allowedMentions: { users: players }
     });
@@ -145,7 +158,7 @@ async function handleAlliance(interaction: ChatInputCommandInteraction): Promise
     await diplomacyService.cancelAllianceOffer(interaction.guildId!, alliance.id).catch(() => undefined);
     throw error;
   }
-  await interaction.editReply(`✅ **${target.name}** devletine ittifak daveti gönderildi. Hedef oyuncular bu kanalda etiketlendi.`);
+  return;
 }
 
 async function handlePact(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -153,25 +166,27 @@ async function handlePact(interaction: ChatInputCommandInteraction): Promise<voi
   const action = interaction.options.getSubcommand();
   if (action === "bilgi") {
     const pact = await diplomacyService.pactDetails(interaction.guildId, interaction.options.getString("pakt", true));
-    const privateHere = (await diplomacyService.channel(interaction.guildId)) === interaction.channelId;
-    await interaction.reply({ embeds: [renderPublicPactProfile(pact)], ephemeral: privateHere });
+    await interaction.reply({
+      embeds: [renderPublicPactProfile(pact)],
+      files: [new AttachmentBuilder(PACT_BANNER_PATH, { name: PACT_BANNER_NAME })],
+      ephemeral: !diplomacyReplyIsPublic("pakt", action)
+    });
     return;
   }
   if (action === "liste") {
     const pacts = await diplomacyService.pactList(interaction.guildId);
     const lines = pacts.map((pact) => `🏛️ **${pact.name}** • ${pact.member_count} devlet\n🎯 ${pact.purpose}\n👑 ${pact.founder_country_name}`);
-    const privateHere = (await diplomacyService.channel(interaction.guildId)) === interaction.channelId;
     await interaction.reply({
       embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle("🏛️ Aktif Diplomatik Paktlar")
         .setDescription((lines.length ? lines.join("\n\n") : "Henüz kurulmuş bir pakt bulunmuyor.").slice(0, 4096))],
-      ephemeral: privateHere
+      ephemeral: !diplomacyReplyIsPublic("pakt", action)
     });
     return;
   }
 
   const channel = await requireDiplomacyChannel(interaction);
   const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ ephemeral: !diplomacyReplyIsPublic("pakt", action) });
 
   if (action === "olustur") {
     const pact = await diplomacyService.createPact({
@@ -205,8 +220,9 @@ async function handlePact(interaction: ChatInputCommandInteraction): Promise<voi
     try {
       const players = await gameService.playerIds(target.id);
       const mention = players.length ? players.map((id) => `<@${id}>`).join(" ") : `**${target.name}** • Oyuncu atanmamış; oyun yöneticisi yanıtlayabilir.`;
-      const message = await channel.send({
+      const message = await interaction.editReply({
         content: mention, embeds: [pactInviteEmbed(invitation)], components: [responseButtons("pact", invitation.id)],
+        files: [new AttachmentBuilder(PACT_BANNER_PATH, { name: PACT_BANNER_NAME })],
         allowedMentions: { users: players }
       });
       await diplomacyService.attachPactMessage(invitation.id, channel.id, message.id);
@@ -214,7 +230,6 @@ async function handlePact(interaction: ChatInputCommandInteraction): Promise<voi
       await diplomacyService.cancelPactInvitation(interaction.guildId, invitation.id).catch(() => undefined);
       throw error;
     }
-    await interaction.editReply(`✅ **${target.name}** devleti **${pact.name}** paktına davet edildi. Hedef oyuncular bu kanalda etiketlendi.`);
     return;
   }
 
@@ -264,15 +279,18 @@ export async function handleDiplomacyCommand(interaction: ChatInputCommandIntera
     await interaction.deferReply({ ephemeral: true });
     await diplomacyService.setChannel({ guildId: interaction.guildId, actorId: interaction.user.id, channelId: action === "set" ? channel!.id : null });
     await interaction.editReply(action === "set"
-      ? `✅ İttifak ve pakt davetleri artık ${channel} kanalında yürütülecek. Komut sonuçları yalnızca komutu kullanan oyuncuya görünür.`
+      ? `✅ İttifak ve pakt davetleri artık ${channel} kanalında yürütülecek. Davetler, katılımlar ve bilgi kartları herkese açık yayımlanır.`
       : "✅ Diplomasi kanalı kapatıldı. Yeniden kanal seçilinceye kadar ittifak ve pakt işlemleri durduruldu.");
     return true;
   }
 
   if (interaction.commandName === "devlet-bilgisi") {
     const profile = await diplomacyService.publicCountry(interaction.guildId, interaction.options.getString("ulke", true));
-    const privateHere = (await diplomacyService.channel(interaction.guildId)) === interaction.channelId;
-    await interaction.reply({ embeds: [renderPublicCountryProfile(profile)], ephemeral: privateHere });
+    await interaction.reply({
+      embeds: [renderPublicCountryProfile(profile)],
+      files: [new AttachmentBuilder(STATE_PROFILE_BANNER_PATH, { name: STATE_PROFILE_BANNER_NAME })],
+      ephemeral: !diplomacyReplyIsPublic("devlet-bilgisi")
+    });
     return true;
   }
 
@@ -311,6 +329,12 @@ export async function handleDiplomacyButton(interaction: ButtonInteraction): Pro
         : `❌ **${result.receiver_country_name}**, **${result.proposer_country_name}** devletinin ittifak davetini reddetti.`,
       embeds: [embed], components: [], allowedMentions: { parse: [] }
     });
+    if (accepted) {
+      await interaction.followUp({
+        content: `📣 **${result.proposer_country_name}** ile **${result.receiver_country_name}** arasındaki ittifak resmen yürürlüğe girdi.`,
+        ephemeral: false, allowedMentions: { parse: [] }
+      });
+    }
     return true;
   }
 
@@ -335,5 +359,11 @@ export async function handleDiplomacyButton(interaction: ButtonInteraction): Pro
       : `❌ **${result.receiver_country_name}**, **${result.pact_name}** paktının davetini reddetti.`,
     embeds: [embed], components: [], allowedMentions: { parse: [] }
   });
+  if (accepted) {
+    await interaction.followUp({
+      content: `📣 **${result.receiver_country_name}**, **${result.pact_name}** paktına resmen katıldı.`,
+      ephemeral: false, allowedMentions: { parse: [] }
+    });
+  }
   return true;
 }

@@ -2,12 +2,18 @@ import { resolve } from "node:path";
 
 export const TEMPLE_BANNER_NAME = "ancient-temple-city-banner.png";
 export const BRAND_BANNER_NAME = "savas-tanrilari-role-play-banner.png";
+export const PACT_BANNER_NAME = "ancient-diplomatic-pact-banner.png";
+export const STATE_PROFILE_BANNER_NAME = "ancient-state-profile-banner.png";
 
 export const TEMPLE_BANNER_PATH = resolve(process.cwd(), "assets", TEMPLE_BANNER_NAME);
 export const BRAND_BANNER_PATH = resolve(process.cwd(), "assets", BRAND_BANNER_NAME);
+export const PACT_BANNER_PATH = resolve(process.cwd(), "assets", PACT_BANNER_NAME);
+export const STATE_PROFILE_BANNER_PATH = resolve(process.cwd(), "assets", STATE_PROFILE_BANNER_NAME);
 
 export const TEMPLE_BANNER_URL = `attachment://${TEMPLE_BANNER_NAME}`;
 export const BRAND_BANNER_URL = `attachment://${BRAND_BANNER_NAME}`;
+export const PACT_BANNER_URL = `attachment://${PACT_BANNER_NAME}`;
+export const STATE_PROFILE_BANNER_URL = `attachment://${STATE_PROFILE_BANNER_NAME}`;
 
 export function battlefieldAsset(terrain: string): { name: string; path: string } {
   const names: Record<string, string> = {
