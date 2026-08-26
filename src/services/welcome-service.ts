@@ -1,6 +1,7 @@
 import { pool } from "../db/pool.js";
 
-export const DEFAULT_WELCOME_MESSAGE = "🏛️ Hoş geldin {uye}!\n**{sunucu}** topluluğuna katıldın. Kuralları ve bilgilendirme kanallarını inceleyerek aramıza katılabilirsin.";
+export const WELCOME_BRAND_NAME = "Savaş Tanrıları: Role Play";
+export const DEFAULT_WELCOME_MESSAGE = `🏛️ Hoş geldin {uye}!\n**${WELCOME_BRAND_NAME}** topluluğuna katıldın. Kuralları ve bilgilendirme kanallarını inceleyerek aramıza katılabilirsin.`;
 
 export interface WelcomeConfig {
   channelId: string;
@@ -8,7 +9,11 @@ export interface WelcomeConfig {
 }
 
 export function renderWelcomeMessage(template: string, userMention: string, guildName: string): string {
-  const rendered = template.replaceAll("{uye}", userMention).replaceAll("{sunucu}", guildName).trim();
+  const rendered = template
+    .replaceAll("{uye}", userMention)
+    .replaceAll("{sunucu}", guildName)
+    .replace(/tunç\s*rp/giu, WELCOME_BRAND_NAME)
+    .trim();
   return rendered.includes(userMention) ? rendered : `${userMention}\n${rendered}`;
 }
 
