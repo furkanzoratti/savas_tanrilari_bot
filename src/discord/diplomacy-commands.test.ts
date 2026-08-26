@@ -36,17 +36,19 @@ describe("ittifak, pakt ve herkese açık devlet profili", () => {
       id: "roma", name: "Roma",
       settlements: [{ name: "Roma", resource_type: "IRON" }, { name: "Neapolis", resource_type: "GRAIN" }],
       allies: [{ id: "kartaca", name: "Kartaca" }],
-      pacts: [{ id: "pakt", name: "Akdeniz Birliği", purpose: "Deniz güvenliği", founder_name: "Roma" }]
+      pacts: [{ id: "pakt", name: "Akdeniz Birliği", purpose: "Deniz güvenliği", founder_name: "Roma" }],
+      wars: [{ id: "makedonya", name: "Makedonya" }]
     }).toJSON();
     const fields = embed.fields ?? [];
     const combined = JSON.stringify(embed);
     expect(fields.map((field) => field.name)).toEqual([
-      "🗺️ Yerleşkeler ve Hammaddeler", "🤝 Müttefikler", "🏛️ Üye Olunan Paktlar"
+      "🗺️ Yerleşkeler ve Hammaddeler", "🤝 Müttefikler", "🏛️ Üye Olunan Paktlar", "⚔️ Savaşta Olduğu Devletler"
     ]);
     expect(combined).toContain("Demir");
     expect(combined).toContain("Tahıl");
     expect(combined).toContain("Kartaca");
     expect(combined).toContain("Akdeniz Birliği");
+    expect(combined).toContain("Makedonya");
     expect(combined).not.toMatch(/Hazine|Nüfus|Ordu|Gelir|Bakım|Asker/i);
     expect(embed.image?.url).toBe(STATE_PROFILE_BANNER_URL);
     expect(existsSync(STATE_PROFILE_BANNER_PATH)).toBe(true);

@@ -756,4 +756,72 @@ export const migrations = [
         ON pact_invitations(pact_id,receiver_country_id) WHERE status='PENDING';
       CREATE INDEX IF NOT EXISTS pact_invitations_receiver_idx ON pact_invitations(receiver_country_id,status);
     `
+  },
+  {
+    version: 18,
+    name: "state_war_declarations_and_peace_treaties",
+    sql: `
+      ALTER TABLE guilds ADD COLUMN IF NOT EXISTS war_announcement_channel_id TEXT;
+
+      CREATE TABLE IF NOT EXISTS state_wars (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        guild_id TEXT NOT NULL REFERENCES guilds(discord_id) ON DELETE CASCADE,
+        attacker_country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        defender_country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        reason TEXT NOT NULL CHECK (char_length(reason) BETWEEN 2 AND 1000),
+        declaration TEXT NOT NULL CHECK (char_length(declaration) BETWEEN 2 AND 2000),
+        status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','ENDED')),
+        started_turn INTEGER NOT NULL CHECK (started_turn >= 0),
+        ended_turn INTEGER,
+        declared_by TEXT NOT NULL,
+        ended_by TEXT,
+        channel_id TEXT,
+        message_id TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        ended_at TIMESTAMPTZ,
+        CHECK (attacker_country_id <> defender_country_id)
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS state_wars_active_pair_idx
+        ON state_wars(guild_id,LEAST(attacker_country_id,defender_country_id),GREATEST(attacker_country_id,defender_country_id))
+        WHERE status='ACTIVE';
+      CREATE INDEX IF NOT EXISTS state_wars_attacker_idx ON state_wars(attacker_country_id,status);
+      CREATE INDEX IF NOT EXISTS state_wars_defender_idx ON state_wars(defender_country_id,status);
+
+      CREATE TABLE IF NOT EXISTS peace_offers (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        guild_id TEXT NOT NULL REFERENCES guilds(discord_id) ON DELETE CASCADE,
+        war_id UUID NOT NULL REFERENCES state_wars(id) ON DELETE CASCADE,
+        proposer_country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        receiver_country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        terms TEXT NOT NULL CHECK (char_length(terms) BETWEEN 2 AND 2000),
+        indemnity_amount BIGINT NOT NULL DEFAULT 0 CHECK (indemnity_amount >= 0),
+        payer_country_id UUID REFERENCES countries(id) ON DELETE CASCADE,
+        recipient_country_id UUID REFERENCES countries(id) ON DELETE CASCADE,
+        status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING','ACCEPTED','REJECTED','CANCELLED')),
+        offered_turn INTEGER NOT NULL CHECK (offered_turn >= 0),
+        resolved_turn INTEGER,
+        offered_by TEXT NOT NULL,
+        resolved_by TEXT,
+        channel_id TEXT,
+        message_id TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        resolved_at TIMESTAMPTZ,
+        CHECK (proposer_country_id <> receiver_country_id),
+        CHECK (
+          (indemnity_amount=0 AND payer_country_id IS NULL AND recipient_country_id IS NULL)
+          OR
+          (indemnity_amount>0 AND payer_country_id IS NOT NULL AND recipient_country_id IS NOT NULL AND payer_country_id<>recipient_country_id)
+        )
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS peace_offers_pending_war_idx ON peace_offers(war_id) WHERE status='PENDING';
+      CREATE INDEX IF NOT EXISTS peace_offers_receiver_idx ON peace_offers(receiver_country_id,status);
+    `
+  },
+  {
+    version: 19,
+    name: "welcome_messages",
+    sql: `
+      ALTER TABLE guilds ADD COLUMN IF NOT EXISTS welcome_channel_id TEXT;
+      ALTER TABLE guilds ADD COLUMN IF NOT EXISTS welcome_message TEXT;
+    `
   }] as const;

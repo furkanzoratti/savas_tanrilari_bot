@@ -11,6 +11,7 @@ describe("ticaret ve rol raporu komutları", () => {
     const admin = commandBuilders.find((command) => command.name === "yonetim");
     expect(admin?.options?.some((option) => option.name === "rol-kanali")).toBe(true);
     expect(admin?.options?.some((option) => option.name === "rol-rapor-kanali")).toBe(true);
+    expect(commandBuilders.some((command) => command.name === "hos-geldin")).toBe(true);
   });
 
   it("yerleşke oluştururken tek başlangıç geliri ister ve dağılımı otomasyona bırakır", () => {

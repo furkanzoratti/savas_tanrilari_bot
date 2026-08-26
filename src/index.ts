@@ -7,6 +7,7 @@ import { config } from "./config.js";
 import { logger } from "./logger.js";
 import { gameService } from "./services/game-service.js";
 import { roleReportService } from "./services/role-report-service.js";
+import { renderWelcomeMessage, welcomeService } from "./services/welcome-service.js";
 
 function countWords(content: string): number {
   const cleaned = content
@@ -19,12 +20,27 @@ function countWords(content: string): number {
 await migrate();
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
 
 attachInteractionHandler(client);
 
 client.on("guildCreate", (guild) => gameService.ensureGuild(guild.id).catch((error) => logger.error(error, "Sunucu kaydı oluşturulamadı")));
+client.on("guildMemberAdd", async (member) => {
+  if (member.user.bot) return;
+  try {
+    const welcome = await welcomeService.getConfig(member.guild.id);
+    if (!welcome) return;
+    const channel = await member.guild.channels.fetch(welcome.channelId);
+    if (!channel?.isTextBased()) throw new Error("Hoş geldin kanalı bulunamadı veya metin kanalı değil");
+    await channel.send({
+      content: renderWelcomeMessage(welcome.message, member.toString(), member.guild.name),
+      allowedMentions: { users: [member.id], roles: [], parse: [] }
+    });
+  } catch (error) {
+    logger.error({ error, guildId: member.guild.id, userId: member.id }, "Hoş geldin mesajı gönderilemedi");
+  }
+});
 client.on("messageCreate", async (message) => {
   if (!message.guildId || message.author.bot) return;
   const wordCount = countWords(message.content);

@@ -1,0 +1,74 @@
+import { existsSync } from "node:fs";
+import { describe, expect, it, vi } from "vitest";
+
+vi.hoisted(() => {
+  process.env.DISCORD_TOKEN = "test-token";
+  process.env.DISCORD_CLIENT_ID = "test-client";
+  process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
+});
+
+import { commandBuilders } from "./commands.js";
+import {
+  WAR_DECLARATION_BANNER_PATH, WAR_DECLARATION_BANNER_URL,
+  PEACE_TREATY_BANNER_PATH, PEACE_TREATY_BANNER_URL
+} from "./assets.js";
+import { parsePeaceIndemnity, renderPeaceAnnouncement, renderPeaceOffer, renderWarDeclaration } from "./war-declaration-ui.js";
+
+describe("resmî savaş ilanları ve barış duyuruları", () => {
+  it("oyuncu ve yönetici savaş komutlarını ayrı ayrı kaydeder", () => {
+    const names = commandBuilders.map((command) => command.name);
+    expect(names).toEqual(expect.arrayContaining([
+      "savas-ilan-kanali", "savas-ilani", "baris-teklifi", "aktif-savaslar", "savas-sonlandir"
+    ]));
+    expect(commandBuilders.find((command) => command.name === "yonetim")?.options?.length).toBeLessThanOrEqual(25);
+  });
+
+  it("savaş ilanını gerekçe, metin ve özgün banner ile gösterir", () => {
+    const embed = renderWarDeclaration({
+      id: "war", guild_id: "guild", attacker_country_id: "roma", attacker_country_name: "Roma",
+      defender_country_id: "kartaca", defender_country_name: "Kartaca", reason: "Sınır anlaşmazlığı",
+      declaration: "Senatonun resmî kararı", status: "ACTIVE", started_turn: 12,
+      ended_turn: null, channel_id: null, message_id: null
+    }).toJSON();
+    expect(JSON.stringify(embed)).toContain("Sınır anlaşmazlığı");
+    expect(JSON.stringify(embed)).toContain("Senatonun resmî kararı");
+    expect(embed.image?.url).toBe(WAR_DECLARATION_BANNER_URL);
+    expect(existsSync(WAR_DECLARATION_BANNER_PATH)).toBe(true);
+  });
+
+  it("barış teklifinde tazminatı ve ödeyen tarafı açıklar", () => {
+    const embed = renderPeaceOffer({
+      id: "offer", guild_id: "guild", war_id: "war", proposer_country_id: "roma", proposer_country_name: "Roma",
+      receiver_country_id: "kartaca", receiver_country_name: "Kartaca", terms: "Sınırlar korunacak.",
+      indemnity_amount: 10_000, payer_country_id: "kartaca", payer_country_name: "Kartaca",
+      recipient_country_id: "roma", recipient_country_name: "Roma", status: "PENDING", offered_turn: 13,
+      resolved_turn: null, channel_id: null, message_id: null
+    }).toJSON();
+    expect(JSON.stringify(embed)).toContain("10.000 Altın");
+    expect(JSON.stringify(embed)).toContain("Sınırlar korunacak.");
+  });
+
+  it("kamuya açık barış kapanışını özgün banner ile gösterir", () => {
+    const embed = renderPeaceAnnouncement({
+      firstCountry: "Roma", secondCountry: "Kartaca", turn: 13, terms: "Saldırmazlık",
+      indemnityAmount: 10_000, payerCountry: "Kartaca", recipientCountry: "Roma"
+    }).toJSON();
+    expect(JSON.stringify(embed)).toContain("10.000 Altın");
+    expect(embed.image?.url).toBe(PEACE_TREATY_BANNER_URL);
+    expect(existsSync(PEACE_TREATY_BANNER_PATH)).toBe(true);
+  });
+
+  it("uzun barış şartlarını Discord alan sınırı nedeniyle kesmeden bölümlere ayırır", () => {
+    const terms = "A".repeat(1_100) + "ANTLAŞMANIN SONU";
+    const embed = renderPeaceAnnouncement({ firstCountry: "Roma", secondCountry: "Kartaca", turn: 13, terms }).toJSON();
+    expect(embed.fields?.some((field) => field.name.includes("Devamı"))).toBe(true);
+    expect(JSON.stringify(embed)).toContain("ANTLAŞMANIN SONU");
+  });
+
+  it("Türkçe ayrılmış tutarları okur ve negatif değerleri reddeder", () => {
+    expect(parsePeaceIndemnity("10.000")).toBe(10_000);
+    expect(parsePeaceIndemnity(" ")).toBe(0);
+    expect(() => parsePeaceIndemnity("-100")).toThrow();
+    expect(() => parsePeaceIndemnity("10 altın")).toThrow();
+  });
+});

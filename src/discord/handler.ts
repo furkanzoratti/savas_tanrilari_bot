@@ -15,6 +15,7 @@ import { buildingPurchaseTerms, gameService, GameError } from "../services/game-
 import { cityService } from "../services/city-service.js";
 import { commandLogService } from "../services/command-log-service.js";
 import { roleReportService } from "../services/role-report-service.js";
+import { DEFAULT_WELCOME_MESSAGE, renderWelcomeMessage, welcomeService } from "../services/welcome-service.js";
 import { tradeService } from "../services/trade-service.js";
 import { assertCountryAccess, isGameMaster, requireGameMaster, resolveCountry } from "./auth.js";
 import { buildingChoices, shipChoices, unitChoices } from "./commands.js";
@@ -24,6 +25,7 @@ import { turnAnnouncement } from "./turn-announcements.js";
 import { handleBattleButton, handleBattleCommand, refreshActiveBattleCards } from "./battle-ui.js";
 import { handleCityButton, handleCityCommand, handleCityModal } from "./city-ui.js";
 import { handleDiplomacyButton, handleDiplomacyCommand } from "./diplomacy-ui.js";
+import { handleWarDeclarationButton, handleWarDeclarationCommand, handleWarDeclarationModal } from "./war-declaration-ui.js";
 
 function settlementSelect(customId: string, settlements: Array<{ id: string; name: string; population: number }>, placeholder: string) {
   if (!settlements.length) throw new GameError("Bu ülkeye ait yerleşke bulunmuyor.");
@@ -168,6 +170,24 @@ async function handleTurn(interaction: ChatInputCommandInteraction): Promise<voi
     embed = turnAnnouncement({ kind: sub === "ac" ? "OPEN" : sub === "durdur" ? "PAUSE" : "CLOSE", turn: guild.current_turn });
   }
   await interaction.editReply({ embeds: [embed], files: [new AttachmentBuilder(BRAND_BANNER_PATH, { name: BRAND_BANNER_NAME })] });
+}
+
+async function handleWelcomeCommand(interaction: ChatInputCommandInteraction): Promise<void> {
+  requireGameMaster(interaction);
+  if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
+  await interaction.deferReply({ ephemeral: true });
+  const operation = interaction.options.getString("islem", true);
+  if (operation === "clear") {
+    await welcomeService.clearConfig(interaction.guildId);
+    await interaction.editReply("✅ Otomatik hoş geldin mesajları kapatıldı.");
+    return;
+  }
+  const channel = interaction.options.getChannel("kanal");
+  if (!channel) throw new GameError("Hoş geldin sistemini ayarlamak için bir metin kanalı seçmelisiniz.");
+  const message = interaction.options.getString("mesaj")?.trim() || DEFAULT_WELCOME_MESSAGE;
+  await welcomeService.setConfig(interaction.guildId, channel.id, message);
+  const preview = renderWelcomeMessage(message, interaction.user.toString(), interaction.guild?.name ?? "Sunucu");
+  await interaction.editReply(`✅ Yeni üyeler ${channel} kanalında karşılanacak.\n\n**Mesaj önizlemesi**\n${preview}`);
 }
 async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<void> {
   requireGameMaster(interaction);
@@ -380,6 +400,7 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
 }
 
 async function handleCommand(interaction: ChatInputCommandInteraction): Promise<void> {
+  if (await handleWarDeclarationCommand(interaction)) return;
   if (await handleDiplomacyCommand(interaction)) return;
   if (await handleCityCommand(interaction)) return;
   if (interaction.commandName === "belge") {
@@ -437,6 +458,8 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     await interaction.reply({ embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle(period === "daily" ? "📊 Günlük Rol Sıralaması" : "📊 Haftalık Rol Sıralaması").setDescription(text)] });
   } else if (interaction.commandName === "savas") {
     await handleBattleCommand(interaction);
+  } else if (interaction.commandName === "hos-geldin") {
+    await handleWelcomeCommand(interaction);
   } else if (interaction.commandName === "yonetim") {
     await handleAdmin(interaction);
   }
@@ -504,6 +527,7 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
 }
 
 async function handleButton(interaction: ButtonInteraction): Promise<void> {
+  if (await handleWarDeclarationButton(interaction)) return;
   if (await handleDiplomacyButton(interaction)) return;
   if (await handleBattleButton(interaction)) return;
   if (await handleCityButton(interaction)) return;
@@ -536,6 +560,7 @@ async function handleButton(interaction: ButtonInteraction): Promise<void> {
 }
 
 async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
+  if (await handleWarDeclarationModal(interaction)) return;
   if (await handleCityModal(interaction)) return;
   const [kind, countryId, settlementId, itemType] = interaction.customId.split("|");
   if (!countryId || !settlementId || !itemType || !interaction.guildId) throw new GameError("Form bilgisi bozuk.");

@@ -22,6 +22,33 @@ export const commandBuilders = [
     .addChannelOption((option) => option.setName("kanal").setDescription("İttifak ve pakt davetlerinin gönderileceği metin kanalı")
       .addChannelTypes(ChannelType.GuildText)),
   new SlashCommandBuilder()
+    .setName("savas-ilan-kanali").setDescription("Yalnızca yönetici: resmî savaş ve barış duyurularının kanalını ayarlar")
+    .addStringOption((option) => option.setName("islem").setDescription("Kanal işlemi").setRequired(true)
+      .addChoices({ name: "Ayarla", value: "set" }, { name: "Kapat", value: "clear" }))
+    .addChannelOption((option) => option.setName("kanal").setDescription("Savaş ilanları ve barış duyurularının gönderileceği metin kanalı")
+      .addChannelTypes(ChannelType.GuildText)),
+  new SlashCommandBuilder()
+    .setName("hos-geldin").setDescription("Yalnızca yönetici: yeni üye karşılama kanalını ve mesajını ayarlar")
+    .addStringOption((option) => option.setName("islem").setDescription("İşlem").setRequired(true)
+      .addChoices({ name: "Ayarla", value: "set" }, { name: "Kapat", value: "clear" }))
+    .addChannelOption((option) => option.setName("kanal").setDescription("Hoş geldin mesajlarının gönderileceği kanal").addChannelTypes(ChannelType.GuildText))
+    .addStringOption((option) => option.setName("mesaj").setDescription("İsteğe bağlı metin; {uye} ve {sunucu} kullanılabilir").setMaxLength(1500)),
+  new SlashCommandBuilder()
+    .setName("savas-ilani").setDescription("Bir devlete resmî savaş ilan eder ve savaşlar kanalında duyurur")
+    .addStringOption((option) => option.setName("hedef-ulke").setDescription("Savaş ilan edilecek devlet").setRequired(true))
+    .addStringOption(countryOption),
+  new SlashCommandBuilder()
+    .setName("baris-teklifi").setDescription("Savaşta olduğunuz devlete şartlı veya tazminatlı barış teklif eder")
+    .addStringOption((option) => option.setName("hedef-ulke").setDescription("Barış teklif edilecek savaş tarafı").setRequired(true))
+    .addStringOption(countryOption),
+  new SlashCommandBuilder()
+    .setName("aktif-savaslar").setDescription("Devam eden bütün resmî devlet savaşlarını herkese açık listeler"),
+  new SlashCommandBuilder()
+    .setName("savas-sonlandir").setDescription("Yalnızca yönetici: resmî devlet savaşını tazminatsız olarak sonlandırır")
+    .addStringOption((option) => option.setName("ulke-a").setDescription("Savaşın ilk tarafı").setRequired(true))
+    .addStringOption((option) => option.setName("ulke-b").setDescription("Savaşın diğer tarafı").setRequired(true))
+    .addStringOption((option) => option.setName("neden").setDescription("Savaşın sona erme gerekçesi").setRequired(true).setMinLength(2).setMaxLength(500)),
+  new SlashCommandBuilder()
     .setName("ittifak").setDescription("İki devlet arasındaki karşılıklı müttefikliği yönetir")
     .addSubcommand((sub) => sub.setName("teklif").setDescription("Başka bir devlete ittifak daveti gönderir")
       .addStringOption((option) => option.setName("hedef-ulke").setDescription("Davet edilecek devlet").setRequired(true))

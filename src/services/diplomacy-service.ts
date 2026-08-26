@@ -61,6 +61,7 @@ export interface PublicCountryProfile {
   settlements: Array<{ name: string; resource_type: ResourceType }>;
   allies: CountryDiplomacyEntry[];
   pacts: CountryPactEntry[];
+  wars: CountryDiplomacyEntry[];
 }
 
 const allianceViewSql = `SELECT alliance.id,alliance.guild_id,alliance.proposer_country_id,
@@ -138,8 +139,24 @@ async function countryPacts(client: DbClient, countryId: string): Promise<Countr
   )).rows;
 }
 
-export async function loadCountryDiplomacy(client: DbClient, countryId: string): Promise<{ allies: CountryDiplomacyEntry[]; pacts: CountryPactEntry[] }> {
-  return { allies: await countryAllies(client, countryId), pacts: await countryPacts(client, countryId) };
+async function countryWars(client: DbClient, countryId: string): Promise<CountryDiplomacyEntry[]> {
+  return (await client.query<CountryDiplomacyEntry>(
+    `SELECT opponent.id,opponent.name
+       FROM state_wars war
+       JOIN countries opponent ON opponent.id=CASE WHEN war.attacker_country_id=$1
+         THEN war.defender_country_id ELSE war.attacker_country_id END
+      WHERE war.status='ACTIVE'
+        AND (war.attacker_country_id=$1 OR war.defender_country_id=$1)
+      ORDER BY opponent.name`, [countryId]
+  )).rows;
+}
+
+export async function loadCountryDiplomacy(client: DbClient, countryId: string): Promise<{ allies: CountryDiplomacyEntry[]; pacts: CountryPactEntry[]; wars: CountryDiplomacyEntry[] }> {
+  return {
+    allies: await countryAllies(client, countryId),
+    pacts: await countryPacts(client, countryId),
+    wars: await countryWars(client, countryId)
+  };
 }
 
 export const diplomacyService = {

@@ -21,7 +21,9 @@ Railway üzerinde sürekli çalışan, Discord komutlarıyla yönetilen ve Postg
 - Yerleşkelere 15 hammaddeden birini atar; üretim ve ticaret kaynaklarının gelir, nüfus, bakım, inşa ve alım etkilerini otomatik hesaplar.
 - Yerleşkeden yerleşkeye kaynak ticareti kurar; hedef oyuncuları etiketleyen teklif kartı tek tıklamalı kabul/red düğmeleri sunar. Ticaret doğrudan altın üretmez.
 - Yönetimin seçtiği diplomasi kanalında iki taraflı ittifak ve çok üyeli pakt davetleri oluşturur; hedef ülkenin bütün oyuncularını etiketleyen teklif, kabul ve katılım kartlarını herkese açık paylaşır. Özel mesaj kullanılmaz.
-- Müttefikleri ve üye olunan paktları özel devlet belgesine ekler; herkesin görüntüleyebildiği ayrı devlet profilinde yalnızca yerleşkeleri, hammaddeleri, müttefikleri ve paktları gösterir. Pakt ve açık devlet kartları özgün antik çağ temalı yatay görseller içerir.
+- Müttefikleri ve üye olunan paktları özel devlet belgesine ekler; herkesin görüntüleyebildiği ayrı devlet profilinde yalnızca yerleşkeleri, hammaddeleri, müttefikleri, paktları ve devam eden savaşları gösterir. Pakt ve açık devlet kartları özgün antik çağ temalı yatay görseller içerir.
+- Resmî savaş ilanları ile barış tekliflerini yönetimin seçtiği savaşlar kanalında herkese açık yayımlar; teklif formu kişiseldir, hedef oyuncular etiketlenir ve kabul/red yalnızca hedef oyunculara veya yöneticiye açıktır. Savaş başlangıcı ve barış duyurusu özgün antik dönem görselleri içerir.
+- Barış tazminatını ödeyen devletin yerel hazinelerinden mevcut bakiyelerine orantılı keser, alıcı devletin yerel hazinelerine nüfuslarına orantılı yatırır; ödeme ile savaşın sona ermesi tek bir veritabanı işlemidir.
 - Genel zar komutu sağlar.
 - Bütün kritik işlemleri denetim kaydına yazar ve aynı turun yanlışlıkla iki kez işlenmesini engeller.
 - Yönetici olmayan oyuncuların slash komutlarını başarı/başarısızlık durumuyla saklar; yönetici geçmişi görebilir veya canlı log kanalı ayarlayabilir.
@@ -39,7 +41,10 @@ Railway üzerinde sürekli çalışan, Discord komutlarıyla yönetilen ve Postg
 ### Oyuncu ve yönetici
 
 - `/belge [ulke]`
-- `/devlet-bilgisi ulke` — herkese açık, ekonomik/askerî bilgi içermeyen devlet profili
+- `/devlet-bilgisi ulke` — herkese açık, ekonomik/askerî bilgi içermeyen devlet profili; aktif savaşları da gösterir
+- `/savas-ilani hedef-ulke [ulke]` — özel form doldurulur, savaş ilanı savaşlar kanalında herkese duyurulur
+- `/baris-teklifi hedef-ulke [ulke]` — barış şartlarını ve isteğe bağlı savaş tazminatını teklif eder
+- `/aktif-savaslar` — bütün devam eden devlet savaşlarını herkese açık listeler
 - `/ittifak teklif hedef-ulke [ulke]`
 - `/ittifak liste [ulke]`
 - `/ittifak feshet hedef-ulke [ulke]`
@@ -74,6 +79,8 @@ Köşeli parantezli `ulke` alanı yalnızca oyun yöneticisinin başka bir ülke
 
 İttifak ve pakt yönetim komutları yalnızca `/diplomasi-kanali` ile seçilen metin kanalında çalışır. İttifak teklifleri ve pakt davetleri hedef devletin bütün oyuncularını etiketleyen herkese açık kartlar olarak yayımlanır; kabul edildiklerinde ayrıca herkese açık ittifak veya pakt katılım duyurusu oluşturulur. Yeşil kabul ve kırmızı red düğmesini yalnızca hedef devletin oyuncuları veya oyun yöneticisi kullanabilir. Kişisel davet ve ittifak listeleri yalnızca komutu kullanan oyuncuya gösterilir. Bot hiçbir oyuncuya özel mesaj göndermez.
 
+Savaş ve barış komutlarının formu yalnızca işlemi başlatan oyuncuya görünür; resmî savaş ilanı, etiketli barış teklifi ve kabul sonrası barış duyurusu `/savas-ilan-kanali` ile seçilen savaşlar kanalında herkese açıktır. Barış teklifinde `Tazminat` boş bırakılabilir; tutar girilirse `BEN` veya `HEDEF` ödeme yapacak devleti belirler. Kabul sırasında ödeyen devletin yerel hazine bakiyesi yeniden doğrulanır; yetersizse savaş sürer ve hiçbir ödeme işlenmez. Yeterliyse tazminat gönderen şehirlerin mevcut hazinelerine orantılı kesilir, alıcı şehirlerin özgür nüfuslarına orantılı aktarılır ve resmî savaş kapanır. Yerleşke devirleri ve diğer barış şartları yalnızca oyun yöneticisi tarafından uygulanır. Resmî savaş kayıtları `/savas` taktik savaşlarından bağımsızdır.
+
 `/devlet-bilgisi`, `/pakt bilgi` ve `/pakt liste` diplomasi kanalı dahil her kanalda herkese açıktır. Pakt bilgi/davet kartında diplomasi bannerı, açık devlet profilinde ise devlet bannerı otomatik görünür. Devletin açık profili hazine, nüfus, ordu, bina ve gelir verilerini asla içermez. Pakt üyeliği tek başına ikili müttefiklik oluşturmaz. Bir devlet birden fazla pakta katılabilir; pakt lideri üye davet edebilir, üye çıkarabilir, liderliği devredebilir veya `DAGIT` onayıyla paktı dağıtabilir.
 
 ### Herkesin görebildiği, yalnızca yöneticinin çalıştırabildiği
@@ -89,6 +96,9 @@ Bu komutların sonuçları gizli değildir; markalı resmî tur duyurusu olarak 
 
 - `/diplomasi-kanali islem:Ayarla kanal:#pakt-ittifak`
 - `/diplomasi-kanali islem:Kapat`
+- `/savas-ilan-kanali islem:Ayarla kanal:#savaslar`
+- `/savas-ilan-kanali islem:Kapat`
+- `/savas-sonlandir ulke-a ulke-b neden` — resmî savaşı yönetici kararıyla tazminatsız kapatır
 - `/yonetim ulke-olustur`
 - `/yonetim ulkeleri-listele`
 - `/yonetim devlet-belgeleri`

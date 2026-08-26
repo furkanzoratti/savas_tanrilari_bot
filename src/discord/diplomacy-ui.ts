@@ -34,6 +34,9 @@ export function renderPublicCountryProfile(profile: PublicCountryProfile): Embed
   const pacts = profile.pacts.length
     ? profile.pacts.map((pact) => `• **${pact.name}** — ${pact.purpose}`).join("\n")
     : "Herhangi bir pakta üye değil.";
+  const wars = profile.wars.length
+    ? profile.wars.map((opponent) => `• **${opponent.name}**`).join("\n")
+    : "Devlet herhangi bir savaşta bulunmuyor.";
 
   return new EmbedBuilder()
     .setColor(0xc59b45)
@@ -42,7 +45,8 @@ export function renderPublicCountryProfile(profile: PublicCountryProfile): Embed
     .addFields(
       { name: "🗺️ Yerleşkeler ve Hammaddeler", value: embedValue(settlements) },
       { name: "🤝 Müttefikler", value: embedValue(allies) },
-      { name: "🏛️ Üye Olunan Paktlar", value: embedValue(pacts) }
+      { name: "🏛️ Üye Olunan Paktlar", value: embedValue(pacts) },
+      { name: "⚔️ Savaşta Olduğu Devletler", value: embedValue(wars) }
     );
 }
 
