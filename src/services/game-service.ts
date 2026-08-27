@@ -13,7 +13,7 @@ import { settlementResourceAccess } from "./resource-service.js";
 export class GameError extends Error {}
 
 interface GuildRow { discord_id: string; current_turn: number; turn_phase: string; acquisition_interval: number }
-interface CountryRow { id: string; guild_id: string; name: string; treasury: number; mobilization: Mobilization; mobilization_started_turn: number | null; manpower_over_limit_since_turn: number | null; manpower_penalty_active: boolean }
+interface CountryRow { id: string; guild_id: string; name: string; treasury: number; mobilization: Mobilization; mobilization_started_turn: number | null; manpower_over_limit_since_turn: number | null; manpower_penalty_active: boolean; discord_role_id: string | null }
 interface SettlementRow {
   id: string; country_id: string; name: string; population: number; slave_population: number;
   base_income: number; tax_income: number; land_trade_income: number; sea_trade_income: number;
@@ -347,6 +347,15 @@ export const gameService = {
     return result.rows;
   },
 
+  async setCountryDiscordRole(guildId: string, actorId: string, countryId: string, roleId: string | null): Promise<void> {
+    await withTransaction(async (client) => {
+      const country = await getCountry(client, countryId);
+      if (country.guild_id !== guildId) throw new GameError("Ülke bu sunucuya ait değil.");
+      await client.query("UPDATE countries SET discord_role_id=$1 WHERE id=$2", [roleId, countryId]);
+      await audit(client, guildId, actorId, "COUNTRY_ROLE_SET", "country", countryId, { roleId });
+    });
+  },
+
   async listSettlements(countryId: string): Promise<SettlementRow[]> {
     const result = await pool.query<SettlementRow>("SELECT * FROM settlements WHERE country_id = $1 ORDER BY name", [countryId]);
     return result.rows;
@@ -444,7 +453,7 @@ export const gameService = {
     });
   },
 
-  async deleteCountry(input: { guildId: string; actorId: string; countryId: string }): Promise<{ name: string; settlements: number; battles: number }> {
+  async deleteCountry(input: { guildId: string; actorId: string; countryId: string }): Promise<{ name: string; settlements: number; battles: number; discordRoleId: string | null }> {
     return withTransaction(async (client) => {
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`turn:${input.guildId}`]);
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`country:${input.countryId}`]);
@@ -455,7 +464,7 @@ export const gameService = {
       if (battles.rows.length) await client.query("DELETE FROM battles WHERE id=ANY($1::uuid[])", [battles.rows.map((row) => row.id)]);
       await client.query("DELETE FROM countries WHERE id=$1", [country.id]);
       await audit(client, input.guildId, input.actorId, "COUNTRY_DELETE", "country", country.id, { name: country.name, settlements, battles: battles.rows.length });
-      return { name: country.name, settlements, battles: battles.rows.length };
+      return { name: country.name, settlements, battles: battles.rows.length, discordRoleId: country.discord_role_id };
     });
   },
 

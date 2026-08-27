@@ -34,6 +34,8 @@ export const commandBuilders = [
     .addChannelOption((option) => option.setName("kanal").setDescription("Hoş geldin mesajlarının gönderileceği kanal").addChannelTypes(ChannelType.GuildText))
     .addStringOption((option) => option.setName("mesaj").setDescription("İsteğe bağlı metin; {uye} ve {sunucu} kullanılabilir").setMaxLength(1500)),
   new SlashCommandBuilder()
+    .setName("devlet-rolleri").setDescription("Yalnızca yönetici: eksik devlet rollerini oluşturur ve üyelikleri eşitler"),
+  new SlashCommandBuilder()
     .setName("savas-ilani").setDescription("Bir devlete resmî savaş ilan eder ve savaşlar kanalında duyurur")
     .addStringOption((option) => option.setName("hedef-ulke").setDescription("Savaş ilan edilecek devlet").setRequired(true))
     .addStringOption(countryOption),

@@ -32,4 +32,9 @@ describe("yönetim komutları", () => {
     const purge = admin?.options?.find((option) => option.name === "mesaj-sil");
     expect(purge?.options?.find((option) => option.name === "miktar")).toMatchObject({ required: true, min_value: 1, max_value: 100 });
   });
+
+  it("devlet rollerini ayrı bir yönetici komutuyla kurar", () => {
+    const command = commandBuilders.find((item) => item.name === "devlet-rolleri");
+    expect(command?.description).toContain("eksik devlet rollerini");
+  });
 });

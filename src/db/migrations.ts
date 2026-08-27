@@ -824,4 +824,13 @@ export const migrations = [
       ALTER TABLE guilds ADD COLUMN IF NOT EXISTS welcome_channel_id TEXT;
       ALTER TABLE guilds ADD COLUMN IF NOT EXISTS welcome_message TEXT;
     `
+  },
+  {
+    version: 20,
+    name: "discord_country_roles",
+    sql: `
+      ALTER TABLE countries ADD COLUMN IF NOT EXISTS discord_role_id TEXT;
+      CREATE UNIQUE INDEX IF NOT EXISTS countries_discord_role_id_unique
+        ON countries(discord_role_id) WHERE discord_role_id IS NOT NULL;
+    `
   }] as const;

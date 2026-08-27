@@ -24,6 +24,7 @@ import { BRAND_BANNER_PATH, BRAND_BANNER_NAME, TEMPLE_BANNER_PATH, TEMPLE_BANNER
 import { turnAnnouncement } from "./turn-announcements.js";
 import { handleBattleButton, handleBattleCommand, refreshActiveBattleCards } from "./battle-ui.js";
 import { handleCityButton, handleCityCommand, handleCityModal } from "./city-ui.js";
+import { addCountryRoleToMember, deleteCountryRole, ensureCountryRole, removeCountryRoleFromMember } from "./country-roles.js";
 import { handleDiplomacyButton, handleDiplomacyCommand } from "./diplomacy-ui.js";
 import { handleWarDeclarationButton, handleWarDeclarationCommand, handleWarDeclarationModal } from "./war-declaration-ui.js";
 
@@ -189,6 +190,59 @@ async function handleWelcomeCommand(interaction: ChatInputCommandInteraction): P
   const preview = renderWelcomeMessage(message, interaction.user.toString(), interaction.guild?.name ?? "Sunucu");
   await interaction.editReply(`✅ Yeni üyeler ${channel} kanalında karşılanacak.\n\n**Mesaj önizlemesi**\n${preview}`);
 }
+async function handleCountryRoles(interaction: ChatInputCommandInteraction): Promise<void> {
+  requireGameMaster(interaction);
+  if (!interaction.guildId || !interaction.guild) throw new GameError("Sunucu bulunamadı.");
+  await interaction.deferReply({ ephemeral: true });
+
+  const countries = await gameService.listCountries(interaction.guildId);
+  if (!countries.length) throw new GameError("Rolü oluşturulacak kayıtlı devlet bulunmuyor.");
+
+  await interaction.guild.roles.fetch();
+  let created = 0;
+  let linked = 0;
+  let assigned = 0;
+  let absentMembers = 0;
+  const failures: string[] = [];
+
+  for (let index = 0; index < countries.length; index += 1) {
+    const country = countries[index]!;
+    try {
+      const result = await ensureCountryRole(interaction.guild, country, interaction.user.id, true);
+      if (result.created) created += 1;
+      if (result.linked) linked += 1;
+
+      const playerIds = await gameService.playerIds(country.id);
+      for (const playerId of playerIds) {
+        try {
+          if (await addCountryRoleToMember(interaction.guild, playerId, result.role)) assigned += 1;
+        } catch {
+          absentMembers += 1;
+        }
+      }
+    } catch (error) {
+      failures.push(`${country.name}: ${error instanceof Error ? error.message : "Bilinmeyen hata"}`);
+    }
+
+    if ((index + 1) % 10 === 0 && index + 1 < countries.length) {
+      await interaction.editReply(`🏛️ Devlet rolleri hazırlanıyor: **${index + 1}/${countries.length}**`);
+    }
+  }
+
+  const summary = [
+    "✅ **Devlet rolü eşitlemesi tamamlandı.**",
+    `• İncelenen devlet: **${countries.length}**`,
+    `• Yeni oluşturulan rol: **${created}**`,
+    `• Veritabanına yeni bağlanan rol: **${linked}**`,
+    `• Oyunculara yeni verilen rol: **${assigned}**`,
+    `• Sunucuda bulunamadığı için atlanan oyuncu: **${absentMembers}**`,
+    "• Roller Discord hiyerarşisinde **Bot** rolünün altında oluşturuldu."
+  ];
+  if (failures.length) {
+    summary.push(`\n⚠️ **Tamamlanamayan ${failures.length} devlet**\n${failures.slice(0, 10).map((failure) => `• ${failure}`).join("\n")}`);
+  }
+  await interaction.editReply(summary.join("\n"));
+}
 async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<void> {
   requireGameMaster(interaction);
   if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
@@ -197,7 +251,13 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
 
   if (sub === "ulke-olustur") {
     const country = await gameService.createCountry(interaction.guildId, interaction.user.id, interaction.options.getString("ad", true), interaction.options.getInteger("hazine", true));
-    await interaction.editReply(`✅ **${country.name}** oluşturuldu.`);
+    try {
+      if (!interaction.guild) throw new GameError("Sunucu bulunamadı.");
+      const result = await ensureCountryRole(interaction.guild, country, interaction.user.id);
+      await interaction.editReply(`✅ **${country.name}** oluşturuldu ve ${result.role} devlet rolü hazırlandı.`);
+    } catch {
+      await interaction.editReply(`⚠️ **${country.name}** oluşturuldu; ancak Discord rolü hazırlanamadı. **/devlet-rolleri** komutunu çalıştırarak tekrar deneyin.`);
+    }
   } else if (sub === "ulkeleri-listele") {
     const countries = await gameService.listCountries(interaction.guildId);
     if (!countries.length) {
@@ -232,7 +292,15 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
     const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
     if (!country) throw new GameError("Ülke bulunamadı.");
     const result = await gameService.deleteCountry({ guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id });
-    await interaction.editReply(`🗑️ **${result.name}** kalıcı olarak silindi. ${result.settlements} yerleşke ve ${result.battles} bağlı savaş kaydı kaldırıldı.`);
+    let roleNote = "";
+    if (interaction.guild && result.discordRoleId) {
+      try {
+        if (await deleteCountryRole(interaction.guild, result.discordRoleId, `Devlet silindi • Yönetici: ${interaction.user.id}`)) roleNote = "\n🏛️ Bağlı Discord rolü de silindi.";
+      } catch {
+        roleNote = "\n⚠️ Bağlı Discord rolü silinemedi; sunucu rollerinden elle kaldırılmalıdır.";
+      }
+    }
+    await interaction.editReply(`🗑️ **${result.name}** kalıcı olarak silindi. ${result.settlements} yerleşke ve ${result.battles} bağlı savaş kaydı kaldırıldı.${roleNote}`);
   } else if (sub === "yerleske-sil") {
     if (interaction.options.getString("onay", true) !== "SIL") throw new GameError("Yerleşke silme iptal edildi. Onay alanına tam olarak **SIL** yazmalısınız.");
     const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
@@ -258,15 +326,35 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
   } else if (sub === "oyuncu-ata") {
     const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
     if (!country) throw new GameError("Ülke bulunamadı.");
+    if (!interaction.guild) throw new GameError("Sunucu bulunamadı.");
     const user = interaction.options.getUser("oyuncu", true);
-    await gameService.assignPlayer(interaction.guildId, interaction.user.id, country.id, user.id);
-    await interaction.editReply(`✅ ${user} → **${country.name}** ataması yapıldı.`);
+    const ensured = await ensureCountryRole(interaction.guild, country, interaction.user.id);
+    let roleAdded = false;
+    try {
+      roleAdded = await addCountryRoleToMember(interaction.guild, user.id, ensured.role);
+      await gameService.assignPlayer(interaction.guildId, interaction.user.id, country.id, user.id);
+    } catch (error) {
+      if (roleAdded) await removeCountryRoleFromMember(interaction.guild, user.id, ensured.role.id).catch(() => undefined);
+      throw error;
+    }
+    await interaction.editReply(`✅ ${user} → **${country.name}** ataması yapıldı ve ${ensured.role} rolü verildi.`);
   } else if (sub === "oyuncu-cikar") {
     const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
     if (!country) throw new GameError("Ülke bulunamadı.");
+    if (!interaction.guild) throw new GameError("Sunucu bulunamadı.");
     const user = interaction.options.getUser("oyuncu", true);
-    await gameService.removePlayer(interaction.guildId, interaction.user.id, country.id, user.id);
-    await interaction.editReply(`✅ ${user} oyuncusunun **${country.name}** ülke ataması kaldırıldı.`);
+    const linkedRole = country.discord_role_id ? await interaction.guild.roles.fetch(country.discord_role_id).catch(() => null) : null;
+    let roleRemoved = false;
+    if (linkedRole) roleRemoved = await removeCountryRoleFromMember(interaction.guild, user.id, linkedRole.id);
+    try {
+      await gameService.removePlayer(interaction.guildId, interaction.user.id, country.id, user.id);
+    } catch (error) {
+      if (roleRemoved && linkedRole) {
+        await addCountryRoleToMember(interaction.guild, user.id, linkedRole).catch(() => undefined);
+      }
+      throw error;
+    }
+    await interaction.editReply(`✅ ${user} oyuncusunun **${country.name}** ülke ataması ve Discord rolü kaldırıldı.`);
   } else if (sub === "yerleske-ekle") {
     const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
     if (!country) throw new GameError("Ülke bulunamadı.");
@@ -460,6 +548,8 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     await handleBattleCommand(interaction);
   } else if (interaction.commandName === "hos-geldin") {
     await handleWelcomeCommand(interaction);
+  } else if (interaction.commandName === "devlet-rolleri") {
+    await handleCountryRoles(interaction);
   } else if (interaction.commandName === "yonetim") {
     await handleAdmin(interaction);
   }
