@@ -19,7 +19,7 @@ import { DEFAULT_WELCOME_MESSAGE, renderWelcomeMessage, welcomeService } from ".
 import { tradeService } from "../services/trade-service.js";
 import { assertCountryAccess, isGameMaster, requireGameMaster, resolveCountry } from "./auth.js";
 import { buildingChoices, shipChoices, unitChoices } from "./commands.js";
-import { renderDocument } from "./document.js";
+import { batchDocumentEmbeds, renderDocument } from "./document.js";
 import { BRAND_BANNER_PATH, BRAND_BANNER_NAME, TEMPLE_BANNER_PATH, TEMPLE_BANNER_NAME } from "./assets.js";
 import { turnAnnouncement } from "./turn-announcements.js";
 import { handleBattleButton, handleBattleCommand, refreshActiveBattleCards } from "./battle-ui.js";
@@ -39,8 +39,7 @@ function settlementSelect(customId: string, settlements: Array<{ id: string; nam
 async function sendDocument(interaction: ChatInputCommandInteraction, countryId: string): Promise<void> {
   await interaction.deferReply({ ephemeral: true });
   const embeds = renderDocument(await gameService.document(countryId));
-  const batches: EmbedBuilder[][] = [];
-  for (let index = 0; index < embeds.length; index += 10) batches.push(embeds.slice(index, index + 10));
+  const batches = batchDocumentEmbeds(embeds);
   await interaction.editReply({ embeds: batches[0] ?? [], files: [new AttachmentBuilder(TEMPLE_BANNER_PATH, { name: TEMPLE_BANNER_NAME })] });
   for (const batch of batches.slice(1)) await interaction.followUp({ embeds: batch, files: [new AttachmentBuilder(TEMPLE_BANNER_PATH, { name: TEMPLE_BANNER_NAME })], ephemeral: true });
 }

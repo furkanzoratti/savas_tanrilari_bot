@@ -14,6 +14,43 @@ const phaseLabels: Record<string, string> = { OPEN: "Hareketler Açık", CLOSED:
 
 type SettlementDocument = CountryDocument["settlements"][number];
 
+const DISCORD_EMBEDS_PER_MESSAGE = 10;
+const DISCORD_EMBED_TEXT_PER_MESSAGE = 6_000;
+const DOCUMENT_BATCH_TEXT_LIMIT = 5_900;
+
+export function embedTextLength(embed: EmbedBuilder): number {
+  const data = embed.toJSON();
+  return (data.title?.length ?? 0)
+    + (data.description?.length ?? 0)
+    + (data.author?.name.length ?? 0)
+    + (data.footer?.text.length ?? 0)
+    + (data.fields ?? []).reduce((sum, field) => sum + field.name.length + field.value.length, 0);
+}
+
+export function batchDocumentEmbeds(embeds: EmbedBuilder[]): EmbedBuilder[][] {
+  const batches: EmbedBuilder[][] = [];
+  let current: EmbedBuilder[] = [];
+  let currentTextLength = 0;
+
+  for (const embed of embeds) {
+    const textLength = embedTextLength(embed);
+    const exceedsCount = current.length >= DISCORD_EMBEDS_PER_MESSAGE;
+    const exceedsText = current.length > 0 && currentTextLength + textLength > DOCUMENT_BATCH_TEXT_LIMIT;
+    if (exceedsCount || exceedsText) {
+      batches.push(current);
+      current = [];
+      currentTextLength = 0;
+    }
+    current.push(embed);
+    currentTextLength += textLength;
+  }
+
+  if (current.length) batches.push(current);
+  return batches;
+}
+
+export { DISCORD_EMBED_TEXT_PER_MESSAGE };
+
 function incomeLine(label: string, amount: number): string {
   return `${label}: **${gold(amount)}**`;
 }
