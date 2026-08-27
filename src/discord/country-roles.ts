@@ -1,4 +1,5 @@
 import { PermissionFlagsBits, type Guild, type Role } from "discord.js";
+import { countryRoleColor } from "../domain/country-colors.js";
 import { gameService, GameError } from "../services/game-service.js";
 
 const DISCORD_GUILD_ROLE_LIMIT = 250;
@@ -33,9 +34,10 @@ export async function ensureCountryRole(
   country: CountryRoleTarget,
   actorId: string,
   rolesAlreadyFetched = false
-): Promise<{ role: Role; created: boolean; linked: boolean }> {
+): Promise<{ role: Role; created: boolean; linked: boolean; colorApplied: boolean; colorAvailable: boolean }> {
   const botMember = requireRoleManager(guild);
   if (!rolesAlreadyFetched) await guild.roles.fetch();
+  const desiredColor = countryRoleColor(country.name);
 
   let role = country.discord_role_id ? guild.roles.cache.get(country.discord_role_id) : undefined;
   if (role) assertManageableRole(role, botMember.roles.highest.position);
@@ -58,6 +60,7 @@ export async function ensureCountryRole(
     }
     role = await guild.roles.create({
       name: countryRoleName(country.name),
+      color: desiredColor ?? 0,
       hoist: false,
       mentionable: false,
       reason: `Devlet rolü oluşturuldu • Yönetici: ${actorId}`
@@ -66,9 +69,14 @@ export async function ensureCountryRole(
   }
 
   assertManageableRole(role, botMember.roles.highest.position);
+  let colorApplied = created && desiredColor !== null;
+  if (!created && desiredColor !== null && role.color !== desiredColor) {
+    role = await role.edit({ color: desiredColor, reason: `Devlet rolü harita rengiyle eşitlendi • Yönetici: ${actorId}` });
+    colorApplied = true;
+  }
   const linked = country.discord_role_id !== role.id;
   if (linked) await gameService.setCountryDiscordRole(guild.id, actorId, country.id, role.id);
-  return { role, created, linked };
+  return { role, created, linked, colorApplied, colorAvailable: desiredColor !== null };
 }
 
 export async function addCountryRoleToMember(guild: Guild, userId: string, role: Role): Promise<boolean> {

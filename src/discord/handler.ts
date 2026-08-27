@@ -201,6 +201,8 @@ async function handleCountryRoles(interaction: ChatInputCommandInteraction): Pro
   await interaction.guild.roles.fetch();
   let created = 0;
   let linked = 0;
+  let colorApplied = 0;
+  let colorUnavailable = 0;
   let assigned = 0;
   let absentMembers = 0;
   const failures: string[] = [];
@@ -211,6 +213,8 @@ async function handleCountryRoles(interaction: ChatInputCommandInteraction): Pro
       const result = await ensureCountryRole(interaction.guild, country, interaction.user.id, true);
       if (result.created) created += 1;
       if (result.linked) linked += 1;
+      if (result.colorApplied) colorApplied += 1;
+      if (!result.colorAvailable) colorUnavailable += 1;
 
       const playerIds = await gameService.playerIds(country.id);
       for (const playerId of playerIds) {
@@ -233,6 +237,8 @@ async function handleCountryRoles(interaction: ChatInputCommandInteraction): Pro
     "✅ **Devlet rolü eşitlemesi tamamlandı.**",
     `• İncelenen devlet: **${countries.length}**`,
     `• Yeni oluşturulan rol: **${created}**`,
+    `• Harita rengi uygulanan rol: **${colorApplied}**`,
+    `• Renk eşleşmesi bulunamayan rol: **${colorUnavailable}**`,
     `• Veritabanına yeni bağlanan rol: **${linked}**`,
     `• Oyunculara yeni verilen rol: **${assigned}**`,
     `• Sunucuda bulunamadığı için atlanan oyuncu: **${absentMembers}**`,
