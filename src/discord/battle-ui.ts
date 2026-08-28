@@ -1,7 +1,7 @@
 import { ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, type ButtonInteraction, type ChatInputCommandInteraction, type Client } from "discord.js";
-import { BATTLE_TERRAINS, BATTLE_UNIT_STATS, LADDER_GROUP_ASSAULT_CAPACITY, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, SIEGE_ASSET_BATTLE_STATS, SIEGE_ASSAULT_FRONTAGE, SIEGE_TOWER_ASSAULT_CAPACITY, orderState, remainingBombardments, siegeAssaultAccess, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain, type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeTarget } from "../domain/battle.js";
+import { BATTLE_TERRAINS, BATTLE_UNIT_STATS, LADDER_GROUP_ASSAULT_CAPACITY, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, SIEGE_ASSET_BATTLE_STATS, SIEGE_ASSAULT_FRONTAGE, SIEGE_TOWER_ASSAULT_CAPACITY, orderState, remainingBombardments, siegeAssaultAccess, siegeDefenseModifiers, siegeOrderState, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain, type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeTarget } from "../domain/battle.js";
 import { number } from "../domain/format.js";
-import { battleService, type BattleView, type SiegePhase } from "../services/battle-service.js";
+import { battleService, type BattleRoundResult, type BattleView, type SiegePhase } from "../services/battle-service.js";
 import { GameError } from "../services/game-service.js";
 import { isGameMaster, requireGameMaster } from "./auth.js";
 import { battlefieldAsset } from "./assets.js";
@@ -10,7 +10,7 @@ const statusLabels: Record<string, string> = {
   DRAFT: "Taslak", WAITING_FIRST_ROLL: "İlk tarafın zarı bekleniyor", WAITING_SECOND_ROLL: "İkinci tarafın zarı bekleniyor",
   READY_TO_RESOLVE: "Yönetici tur çözümünü bekliyor", FINISHED: "Sona erdi", CANCELLED: "İptal edildi"
 };
-const orderLabels: Record<string, string> = { ORDERED: "Düzenli", WORN: "Yıpranmış", SHAKEN: "Sarsılmış", BROKEN: "Dağılmış" };
+const orderLabels: Record<string, string> = { ORDERED: "Düzenli", WORN: "Baskı Altında", SHAKEN: "Sarsılmış", CRITICAL: "Kritik Hat", BROKEN: "Dağılmış" };
 const tierLabels: Record<string, string> = { BALANCED: "Dengeli Çarpışma", MINOR: "Hafif Üstünlük", CLEAR: "Belirgin Üstünlük", CRUSHING: "Ezici Üstünlük" };
 
 function expectedSide(view: BattleView): BattleSideKey | null {
@@ -18,15 +18,13 @@ function expectedSide(view: BattleView): BattleSideKey | null {
   return view.rolls.length ? view.battle.first_side === "A" ? "B" : "A" : view.battle.first_side;
 }
 
-export function battleEmbed(view: BattleView, roundResult?: { tier: string; winner: BattleSideKey | null; lossA: number; lossB: number; orderA: string; orderB: string; wallDamage: number; gateDamage: number; ended: boolean }): EmbedBuilder {
+export function battleEmbed(view: BattleView, roundResult?: BattleRoundResult): EmbedBuilder {
   const terrain = BATTLE_TERRAINS[view.battle.terrain];
   const sideField = (key: BattleSideKey) => {
     const side = view.sides[key];
-    let order = orderState(side.pressure, side.initial_total, side.current_total);
-    // A siege defender can pass the generic "broken" threshold without the
-    // city being captured. Keep the public card consistent with the siege
-    // resolution until an access + capture condition actually ends the battle.
-    if (view.battle.terrain === "SIEGE" && key === "B" && !["FINISHED", "CANCELLED"].includes(view.battle.status) && order === "BROKEN") order = "SHAKEN";
+    const order = view.battle.terrain === "SIEGE"
+      ? siegeOrderState(side.pressure, side.current_total)
+      : orderState(side.pressure, side.initial_total, side.current_total);
     const control = side.controller === "GM" ? "Oyun Yöneticisi (NPC)" : "Ülke Oyuncuları";
     if (view.battle.terrain === "SIEGE" && key === "B") return `**Toplam Asker:** Gizli\n**Toplam Kayıp:** ${number(side.total_losses)}\n**Baskı:** ${number(side.pressure)} puan\n**Düzen:** ${orderLabels[order]}\n**Zar Yetkisi:** ${control}`;
     return `**Başlangıç:** ${number(side.initial_total)}\n**Mevcut:** ${number(side.current_total)}\n**Toplam Kayıp:** ${number(side.total_losses)}\n**Baskı:** ${number(side.pressure)} puan\n**Düzen:** ${orderLabels[order]}\n**Zar Yetkisi:** ${control}`;
@@ -69,11 +67,27 @@ ${accessNote}` }
     );
   }
   embed.setImage(`attachment://${terrain.preset}`).setFooter({ text: "Tam birlik kompozisyonu yalnızca oyun yöneticisine görünür." }).setTimestamp();
-  const rolls = view.rolls.map((roll) => `**${view.sides[roll.side_key].country_name}:** Çarpışma **${roll.clash_total}** • Hasar **${roll.damage_total}**${roll.wall_damage ? ` • Sur Hasarı **${roll.wall_damage}**` : ""}${roll.gate_damage ? ` • Kapı Hasarı **${roll.gate_damage}**` : ""} • <@${roll.roller_user_id}>${roll.is_proxy ? " (DM vekili)" : ""}`).join("\n");
+  const activeDefense = siegeDefenseModifiers(view.battle.wall_current_hp ?? 0, view.battle.gate_current_hp ?? 0);
+  const factor = (value: number) => value.toFixed(2).replace(".", ",");
+  const rolls = view.rolls.map((roll) => {
+    const actor = `<@${roll.roller_user_id}>${roll.is_proxy ? " (DM vekili)" : ""}`;
+    const structureDamage = `${roll.wall_damage ? ` • Sur Hasarı **${roll.wall_damage}**` : ""}${roll.gate_damage ? ` • Kapı Hasarı **${roll.gate_damage}**` : ""}`;
+    if (view.battle.terrain === "SIEGE" && roll.side_key === "B") {
+      return `**${view.sides.B.country_name} — Ham Zar:** Çarpışma **${roll.clash_total}** • Hasar **${roll.damage_total}** • ${actor}\n↳ **Tahkimat Sonrası:** Çarpışma **${Math.ceil(roll.clash_total * activeDefense.defenderClash)}** (×${factor(activeDefense.defenderClash)}) • Hasar **${Math.ceil(roll.damage_total * activeDefense.defenderDamage)}** (×${factor(activeDefense.defenderDamage)})`;
+    }
+    return `**${view.sides[roll.side_key].country_name}:** Çarpışma **${roll.clash_total}** • Hasar **${roll.damage_total}**${structureDamage} • ${actor}`;
+  }).join("\n");
   if (rolls) embed.addFields({ name: "🎲 Açık Zar Kayıtları", value: rolls });
   if (roundResult) {
     const winner = roundResult.winner ? view.sides[roundResult.winner].country_name : "Yok";
-    embed.addFields({ name: `⚔️ Tur Sonucu — ${tierLabels[roundResult.tier] ?? roundResult.tier}`, value: `Üstün taraf: **${winner}**\n${view.sides.A.country_name}: **-${number(roundResult.lossA)}** • ${orderLabels[roundResult.orderA]}\n${view.sides.B.country_name}: **-${number(roundResult.lossB)}** • ${orderLabels[roundResult.orderB]}${roundResult.wallDamage ? `\nSurlara verilen hasar: **${number(roundResult.wallDamage)}**` : ""}${roundResult.gateDamage ? `\nKapıya verilen hasar: **${number(roundResult.gateDamage)}**` : ""}` });
+    const pressureWinner = roundResult.pressureWinner ? view.sides[roundResult.pressureWinner].country_name : "Yok";
+    embed.addFields({ name: `⚔️ Tur Sonucu — ${tierLabels[roundResult.tier] ?? roundResult.tier}`, value: `Kayıp hesabındaki üstün taraf: **${winner}**\nBaskı üstünlüğü: **${pressureWinner}** (${tierLabels[roundResult.pressureTier] ?? roundResult.pressureTier})\n${view.sides.A.country_name}: **-${number(roundResult.lossA)}** • Baskı **${number(roundResult.pressureA)}/8** • ${orderLabels[roundResult.orderA]}\n${view.sides.B.country_name}: **-${number(roundResult.lossB)}** • Baskı **${number(roundResult.pressureB)}/8** • ${orderLabels[roundResult.orderB]}${roundResult.wallDamage ? `\nSurlara verilen hasar: **${number(roundResult.wallDamage)}**` : ""}${roundResult.gateDamage ? `\nKapıya verilen hasar: **${number(roundResult.gateDamage)}**` : ""}` });
+    if (view.battle.terrain === "SIEGE") {
+      embed.addFields({
+        name: "🛡️ Savunucu Zar Hesabı",
+        value: `**Ham Zar:** Çarpışma **${number(roundResult.defenderRawClash)}** • Hasar **${number(roundResult.defenderRawDamage)}**\n**Tahkimat Sonrası:** Çarpışma **${number(roundResult.defenderEffectiveClash)}** (×${factor(roundResult.defenderClashMultiplier)}) • Hasar **${number(roundResult.defenderEffectiveDamage)}** (×${factor(roundResult.defenderDamageMultiplier)})\n*Baskı ham Çarpışma zarından; kayıp hesabı tahkimat sonrası değerlerden yapılır.*`
+      });
+    }
   }
   if (view.battle.status === "FINISHED") embed.addFields({ name: "🏁 Savaş Sonu", value: `${view.battle.winner_side ? `Galip: **${view.sides[view.battle.winner_side].country_name}**` : "Sonuç: **Berabere / kararsız**"}\n${view.battle.finish_reason ?? ""}` });
   return embed;

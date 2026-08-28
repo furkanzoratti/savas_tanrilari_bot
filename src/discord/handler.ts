@@ -161,7 +161,8 @@ async function handleTurn(interaction: ChatInputCommandInteraction): Promise<voi
       activatedPolicyDetails: result.activatedPolicyDetails,
       unrestDetails: result.unrestDetails,
       starvationDetails: result.starvationDetails,
-      pantheonLoanDetails: result.pantheonLoanDetails
+      pantheonLoanDetails: result.pantheonLoanDetails,
+      incomePenaltyDetails: result.incomePenaltyDetails
     });
   } else {
     const phase = sub === "ac" ? "OPEN" : sub === "durdur" ? "RESOLVING" : "CLOSED";
@@ -423,7 +424,8 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
       activatedPolicyDetails: result.activatedPolicyDetails,
       unrestDetails: result.unrestDetails,
       starvationDetails: result.starvationDetails,
-      pantheonLoanDetails: result.pantheonLoanDetails
+      pantheonLoanDetails: result.pantheonLoanDetails,
+      incomePenaltyDetails: result.incomePenaltyDetails
     })], files: [new AttachmentBuilder(BRAND_BANNER_PATH, { name: BRAND_BANNER_NAME })] });
   } else if (sub === "tur-durumu") {
     const phase = interaction.options.getString("durum", true) as "OPEN" | "CLOSED" | "RESOLVING";
@@ -513,6 +515,41 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
       `💰 **${gold(result.refundableAmount)}** yerel hazineye iade edildi. Devlet hazinesi: **${gold(result.treasury)}**.\n` +
       `_${result.progressNote}_`
     );
+  } else if (interaction.commandName === "gelir-cezasi") {
+    requireGameMaster(interaction);
+    if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
+    const sub = interaction.options.getSubcommand();
+    const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
+    if (!country) throw new GameError("Ülke bulunamadı.");
+    const settlement = await findSettlement(country.id, interaction.options.getString("yerleske", true));
+    await interaction.deferReply({ ephemeral: true });
+    if (sub === "uygula") {
+      const percent = interaction.options.getInteger("yuzde", true);
+      const acquisitionTurns = interaction.options.getInteger("alim-turu", true);
+      const result = await gameService.setSettlementIncomePenalty({
+        guildId: interaction.guildId,
+        actorId: interaction.user.id,
+        countryId: country.id,
+        settlementId: settlement.id,
+        percent,
+        acquisitionTurns,
+        reason: interaction.options.getString("neden", true)
+      });
+      await interaction.editReply(
+        `✅ **${country.name} / ${settlement.name}** için **%${percent} gelir cezası**, **${acquisitionTurns} Alım Turu** süreyle ayarlandı.\n` +
+        `İlk kesinti **Tur ${result.nextAcquisitionTurn}** gelirinde uygulanacak. Süre dolunca gelir otomatik olarak normale dönecek.`
+      );
+    } else {
+      const removed = await gameService.clearSettlementIncomePenalty({
+        guildId: interaction.guildId,
+        actorId: interaction.user.id,
+        countryId: country.id,
+        settlementId: settlement.id
+      });
+      await interaction.editReply(
+        `✅ **${country.name} / ${settlement.name}** üzerindeki **%${removed.percent} gelir cezası** kaldırıldı. Kalan süre **${removed.remainingAcquisitionTurns} Alım Turu** idi.`
+      );
+    }
   } else if (interaction.commandName === "alim") {
     await startPurchase(interaction, "build");
   } else if (interaction.commandName === "asker-alimi") {

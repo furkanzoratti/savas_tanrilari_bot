@@ -35,6 +35,11 @@ export function scaleIncome(value: IncomeBreakdown, multiplier: number): IncomeB
   };
 }
 
+export function applyIncomePenalty(value: IncomeBreakdown, penaltyPercent: number): IncomeBreakdown {
+  const normalizedPercent = Math.max(0, Math.min(100, penaltyPercent));
+  return scaleIncome(value, (100 - normalizedPercent) / 100);
+}
+
 export function populationTaxIncome(population: number): number {
   return Math.max(0, Math.floor(population * 0.03));
 }

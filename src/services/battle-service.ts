@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { DbClient } from "../db/pool.js";
 import { pool, withTransaction } from "../db/pool.js";
 import {
-  BATTLE_TERRAINS, BATTLE_UNIT_STATS, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, activeSiegeAssaultAssets, baseRetreatRate, battleEnds, compositionTotal, orderState, resolveRound, siegeAssaultAccess, siegeAssaultComposition, siegeDefenderCaptured, siegeDefenseModifiers,
+  BATTLE_TERRAINS, BATTLE_UNIT_STATS, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, activeSiegeAssaultAssets, baseRetreatRate, battleEnds, compositionTotal, orderState, resolveRound, siegeAssaultAccess, siegeAssaultComposition, siegeDefenderCaptured, siegeDefenseModifiers, siegeLineBreaks, siegeOrderState, siegePressureAfterRound,
   rollBattlePool, rollNavalPool, rollSiegeSupport,
   type BattleComposition, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain,
   type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeComposition, type SiegeTarget, type SiegeTargets
@@ -42,6 +42,14 @@ export interface CasualtyApplication {
 }
 
 export interface BattleView { battle: BattleRow; sides: Record<BattleSideKey, BattleSideRow>; rolls: BattleRollRow[] }
+
+export interface BattleRoundResult {
+  tier: string; winner: BattleSideKey | null; lossA: number; lossB: number; orderA: string; orderB: string;
+  wallDamage: number; gateDamage: number; ended: boolean; pressureA: number; pressureB: number;
+  pressureTier: string; pressureWinner: BattleSideKey | null; reserveReliefA: number; reserveReliefB: number;
+  defenderRawClash: number; defenderEffectiveClash: number; defenderRawDamage: number; defenderEffectiveDamage: number;
+  defenderClashMultiplier: number; defenderDamageMultiplier: number;
+}
 
 const sealFor = (composition: Record<string, number | undefined>): string => createHash("sha256")
   .update(JSON.stringify(Object.keys(composition).sort().map((key) => [key, composition[key] ?? 0])))
@@ -336,6 +344,9 @@ export const battleService = {
       const attacker = view.sides.A;
       const member = Boolean((await client.query("SELECT 1 FROM country_members WHERE country_id=$1 AND discord_user_id=$2", [attacker.country_id, input.actorId])).rows[0]);
       if (!input.isGameMaster && !member) throw new GameError("Saha aletini yalnız kuşatan ülkenin oyuncuları veya oyun yöneticisi alabilir.");
+      if (input.assetType === "ram" && (input.quantity !== 1 || (attacker.support_assets.ram ?? 0) >= 1)) {
+        throw new GameError("Her kuşatma savaşında en fazla 1 Koçbaşı alınabilir; Koçbaşılar üst üste birikmez.");
+      }
 
       const settlement = (await client.query<{ id: string; name: string; local_treasury: number; resource_type: ResourceType; is_conquered: boolean }>(
         "SELECT id,name,local_treasury,resource_type,is_conquered FROM settlements WHERE country_id=$1 AND lower(name)=lower($2) FOR UPDATE",
@@ -492,7 +503,7 @@ export const battleService = {
     });
   },
 
-  async resolve(input: { guildId: string; channelId: string; actorId: string }): Promise<{ view: BattleView; report: CasualtyApplication[]; round: { tier: string; winner: BattleSideKey | null; lossA: number; lossB: number; orderA: string; orderB: string; wallDamage: number; gateDamage: number; ended: boolean } }> {
+  async resolve(input: { guildId: string; channelId: string; actorId: string }): Promise<{ view: BattleView; report: CasualtyApplication[]; round: BattleRoundResult }> {
     return withTransaction(async (client) => {
       const active = await activeInChannel(client, input.guildId, input.channelId);
       if (!active) throw new GameError("Bu kanalda etkin savaş yok.");
@@ -506,11 +517,16 @@ export const battleService = {
       const wallAfter = siege ? Math.max(0, (view.battle.wall_current_hp ?? 0) - wallDamage) : null;
       const gateAfter = siege ? Math.max(0, (view.battle.gate_current_hp ?? 0) - gateDamage) : null;
       const defense = siege ? siegeDefenseModifiers(view.battle.wall_current_hp ?? 0, view.battle.gate_current_hp ?? 0) : { defenderClash: 1, defenderDamage: 1, attackerDamage: 1 };
+      const defenderEffectiveClash = Math.ceil(rollB.clash_total * defense.defenderClash);
+      const defenderEffectiveDamage = Math.ceil(rollB.damage_total * defense.defenderDamage);
       const mantletDefense = siege ? Math.min(0.50, (view.sides.A.support_assets.mantlet ?? 0) * 0.05) : 0;
       const resolution = resolveRound(view.sides.A.composition, view.sides.B.composition,
         { clash: rollA.clash_total, damage: rollA.damage_total, detail: {} },
-        { clash: Math.ceil(rollB.clash_total * defense.defenderClash), damage: Math.ceil(rollB.damage_total * defense.defenderDamage), detail: {} },
-        { mode: naval ? "NAVAL" : "LAND", damageFactorA: defense.attackerDamage, damageFactorB: siege ? 1 - mantletDefense : 1 });
+        { clash: defenderEffectiveClash, damage: defenderEffectiveDamage, detail: {} },
+        {
+          mode: naval ? "NAVAL" : "LAND", damageFactorA: defense.attackerDamage, damageFactorB: siege ? 1 - mantletDefense : 1,
+          ...(siege ? { pressureClashA: rollA.clash_total, pressureClashB: rollB.clash_total } : {})
+        });
       let defenderPressureDelta = resolution.pressureDeltaB;
       if (siege && defenderPressureDelta > 0 && !view.battle.defender_pantheon_pressure_used && view.battle.defender_settlement_id) {
         const protectedByPantheon = Boolean((await client.query(
@@ -521,14 +537,29 @@ export const battleService = {
           await client.query("UPDATE battles SET defender_pantheon_pressure_used=TRUE WHERE id=$1", [active.id]);
         }
       }
-      const pressureA = Math.max(0, view.sides.A.pressure + resolution.pressureDeltaA), pressureB = Math.max(0, view.sides.B.pressure + defenderPressureDelta);
       const totalA = compositionTotal(resolution.remainingA), totalB = compositionTotal(resolution.remainingB);
-      let orderA = orderState(pressureA, view.sides.A.initial_total, totalA), orderB = orderState(pressureB, view.sides.B.initial_total, totalB);
-      const attackerBroken = battleEnds(pressureA, view.sides.A.initial_total, totalA);
+      const siegePressureA = siege
+        ? siegePressureAfterRound(view.sides.A.pressure, resolution.pressureDeltaA, totalA, BATTLE_TERRAINS.SIEGE.frontageA)
+        : null;
+      const siegePressureB = siege
+        ? siegePressureAfterRound(view.sides.B.pressure, defenderPressureDelta, totalB, BATTLE_TERRAINS.SIEGE.frontageB)
+        : null;
+      const pressureA = siegePressureA?.pressure ?? Math.max(0, view.sides.A.pressure + resolution.pressureDeltaA);
+      const pressureB = siegePressureB?.pressure ?? Math.max(0, view.sides.B.pressure + defenderPressureDelta);
+      let orderA = siege ? siegeOrderState(pressureA, totalA) : orderState(pressureA, view.sides.A.initial_total, totalA);
+      let orderB = siege ? siegeOrderState(pressureB, totalB) : orderState(pressureB, view.sides.B.initial_total, totalB);
+      const attackerBroken = siege
+        ? siegeLineBreaks(view.sides.A.pressure, pressureA, resolution.pressureWinner === "B", totalA, siegePressureA?.hasUsableReserve ?? false)
+        : battleEnds(pressureA, view.sides.A.initial_total, totalA);
       const assaultInfantry = (resolution.remainingA.light_infantry ?? 0) + (resolution.remainingA.spear ?? 0) + (resolution.remainingA.heavy_infantry ?? 0) + (resolution.remainingA.militia ?? 0);
       const assaultCapacity = siege ? Math.min(assaultInfantry, siegeAssaultAccess(view.sides.A.support_assets, BATTLE_TERRAINS.SIEGE.frontageA).capacity) : 0;
-      const defenderCaptured = siege && siegeDefenderCaptured(view.sides.B.initial_total, totalB, pressureB, wallAfter ?? 0, gateAfter ?? 0, assaultCapacity);
-      if (siege && orderB === "BROKEN" && !defenderCaptured) orderB = "SHAKEN";
+      const defenderCaptured = siege && siegeDefenderCaptured({
+        initial: view.sides.B.initial_total, remaining: totalB, previousPressure: view.sides.B.pressure,
+        currentPressure: pressureB, lostRound: resolution.pressureWinner === "A", wallHp: wallAfter ?? 0,
+        gateHp: gateAfter ?? 0, assaultCapacity, defenderFrontage: BATTLE_TERRAINS.SIEGE.frontageB
+      });
+      if (attackerBroken) orderA = "BROKEN";
+      if (defenderCaptured) orderB = "BROKEN";
       const ended = siege ? attackerBroken || defenderCaptured : attackerBroken || battleEnds(pressureB, view.sides.B.initial_total, totalB);
       let winner: BattleSideKey | null = null;
       if (ended) winner = siege ? defenderCaptured && !attackerBroken ? "A" : attackerBroken && !defenderCaptured ? "B" : null : orderA === "BROKEN" && orderB !== "BROKEN" ? "B" : orderB === "BROKEN" && orderA !== "BROKEN" ? "A" : totalA === totalB ? null : totalA > totalB ? "A" : "B";
@@ -537,12 +568,28 @@ export const battleService = {
       await client.query(`INSERT INTO battle_rounds(battle_id,round_number,tier,winner_side,loss_a,loss_b,pressure_a,pressure_b,order_a,order_b,wall_damage,gate_damage)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, [active.id, active.round_number, resolution.tier, resolution.winner, resolution.lossA, resolution.lossB, pressureA, pressureB, orderA, orderB, wallDamage, gateDamage]);
       const nextFirst: BattleSideKey = active.first_side === "A" ? "B" : "A";
-      const reason = ended ? siege && defenderCaptured ? "Savunma hattı aşıldı ve şehir ele geçirildi." : "Ordu savaş düzenini sürdüremedi." : null;
+      const reason = ended
+        ? siege && defenderCaptured
+          ? "Savunma hattı iki kritik yenilgi sonunda çöktü ve şehir ele geçirildi."
+          : siege && attackerBroken
+            ? "Kuşatan ordunun hattı ikinci kritik yenilgide kırıldı ve ordu geri çekildi."
+            : "Ordu savaş düzenini sürdüremedi."
+        : null;
       await client.query(`UPDATE battles SET status=$1,round_number=round_number+$2,first_side=$3,winner_side=$4,finish_reason=$5,
         wall_current_hp=COALESCE($6,wall_current_hp),gate_current_hp=COALESCE($7,gate_current_hp),updated_at=NOW() WHERE id=$8`,
       [ended ? "FINISHED" : "WAITING_FIRST_ROLL", ended ? 0 : 1, nextFirst, winner, reason, wallAfter, gateAfter, active.id]);
       const report = ended ? await applyLossesToDocuments(client, active.id, input.guildId, input.actorId) : [];
-      return { view: await loadView(client, active.id), report, round: { tier: resolution.tier, winner: resolution.winner, lossA: resolution.lossA, lossB: resolution.lossB, orderA, orderB, wallDamage, gateDamage, ended } };
+      return {
+        view: await loadView(client, active.id), report,
+        round: {
+          tier: resolution.tier, winner: resolution.winner, lossA: resolution.lossA, lossB: resolution.lossB,
+          orderA, orderB, wallDamage, gateDamage, ended, pressureA, pressureB,
+          pressureTier: resolution.pressureTier, pressureWinner: resolution.pressureWinner,
+          reserveReliefA: siegePressureA?.reserveRelief ?? 0, reserveReliefB: siegePressureB?.reserveRelief ?? 0,
+          defenderRawClash: rollB.clash_total, defenderEffectiveClash, defenderRawDamage: rollB.damage_total,
+          defenderEffectiveDamage, defenderClashMultiplier: defense.defenderClash, defenderDamageMultiplier: defense.defenderDamage
+        }
+      };
     });
   },
 

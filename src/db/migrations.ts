@@ -833,4 +833,20 @@ export const migrations = [
       CREATE UNIQUE INDEX IF NOT EXISTS countries_discord_role_id_unique
         ON countries(discord_role_id) WHERE discord_role_id IS NOT NULL;
     `
+  },
+  {
+    version: 21,
+    name: "temporary_settlement_income_penalties",
+    sql: `
+      CREATE TABLE IF NOT EXISTS settlement_income_penalties (
+        settlement_id UUID PRIMARY KEY REFERENCES settlements(id) ON DELETE CASCADE,
+        penalty_percent SMALLINT NOT NULL CHECK (penalty_percent BETWEEN 1 AND 100),
+        remaining_acquisition_turns INTEGER NOT NULL CHECK (remaining_acquisition_turns BETWEEN 1 AND 100),
+        reason TEXT NOT NULL,
+        created_turn INTEGER NOT NULL,
+        created_by TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `
   }] as const;

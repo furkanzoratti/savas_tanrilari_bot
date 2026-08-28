@@ -124,6 +124,17 @@ export const commandBuilders = [
     .setName("alim-iptal").setDescription("Yalnızca yönetici: hatalı bekleyen alımı iptal eder ve ücretini iade eder")
     .addStringOption((option) => option.setName("siparis").setDescription("İptal edilecek bekleyen alımı yazmaya başlayarak seçin").setRequired(true).setAutocomplete(true)),
   new SlashCommandBuilder()
+    .setName("gelir-cezasi").setDescription("Yalnızca yönetici: yerleşkeye süreli yüzdelik gelir cezası uygular")
+    .addSubcommand((sub) => sub.setName("uygula").setDescription("Sonraki Alım Turundan başlayacak gelir cezasını ayarlar")
+      .addStringOption((option) => option.setName("ulke").setDescription("Yerleşkenin bağlı olduğu ülke").setRequired(true))
+      .addStringOption((option) => option.setName("yerleske").setDescription("Geliri azaltılacak yerleşke").setRequired(true))
+      .addIntegerOption((option) => option.setName("yuzde").setDescription("Toplam gelirden eksiltilecek yüzde").setMinValue(1).setMaxValue(100).setRequired(true))
+      .addIntegerOption((option) => option.setName("alim-turu").setDescription("Cezanın uygulanacağı Alım Turu sayısı").setMinValue(1).setMaxValue(100).setRequired(true))
+      .addStringOption((option) => option.setName("neden").setDescription("Olay veya ceza açıklaması").setMinLength(1).setMaxLength(500).setRequired(true)))
+    .addSubcommand((sub) => sub.setName("kaldir").setDescription("Yerleşkedeki etkin gelir cezasını erken kaldırır")
+      .addStringOption((option) => option.setName("ulke").setDescription("Yerleşkenin bağlı olduğu ülke").setRequired(true))
+      .addStringOption((option) => option.setName("yerleske").setDescription("Cezası kaldırılacak yerleşke").setRequired(true))),
+  new SlashCommandBuilder()
     .setName("seferberlik").setDescription("Ülkenin seferberlik seviyesini değiştirir")
     .addStringOption((option) => option.setName("seviye").setDescription("Yeni seferberlik seviyesi").setRequired(true)
       .addChoices(...Object.entries(MOBILIZATION_RULES).map(([value, rule]) => ({ name: rule.label, value }))))

@@ -9,7 +9,7 @@ export const BATTLE_TERRAINS = {
   MOUNTAIN: { label: "Dağlık Arazi", frontageA: 12_000, frontageB: 12_000, preset: "mountain.png" },
   MOUNTAIN_PASS: { label: "Dağ Geçidi", frontageA: 6_000, frontageB: 6_000, preset: "mountain-pass.png" },
   RIVER_CROSSING: { label: "Nehir Geçişi", frontageA: 10_000, frontageB: 20_000, preset: "river-crossing.png" },
-  SIEGE: { label: "Kuşatma", frontageA: 12_000, frontageB: 18_000, preset: "siege.png" },
+  SIEGE: { label: "Kuşatma", frontageA: 15_000, frontageB: 18_000, preset: "siege.png" },
   NAVAL: { label: "Deniz Savaşı", frontageA: 30, frontageB: 30, preset: "naval.png" }
 } as const;
 
@@ -24,11 +24,11 @@ export type BattleComposition = Partial<Record<BattleForceType, number>>;
 export type SiegeComposition = Partial<Record<SiegeAssetType, number>>;
 export type SiegeTarget = "WALL" | "GATE" | "ARMY" | "ASSAULT";
 export type SiegeTargets = Partial<Record<SiegeAssetType, SiegeTarget>>;
-export type BattleOrder = "ORDERED" | "WORN" | "SHAKEN" | "BROKEN";
+export type BattleOrder = "ORDERED" | "WORN" | "SHAKEN" | "CRITICAL" | "BROKEN";
 
-export const MAX_BOMBARDMENTS_PER_GAME_TURN = 3;
+export const MAX_BOMBARDMENTS_PER_GAME_TURN = 4;
 export const remainingBombardments = (used: number): number => Math.max(0, MAX_BOMBARDMENTS_PER_GAME_TURN - Math.max(0, Math.floor(used)));
-export const SIEGE_ASSAULT_FRONTAGE = 12_000;
+export const SIEGE_ASSAULT_FRONTAGE = 15_000;
 export const LADDER_GROUP_ASSAULT_CAPACITY = 1_000;
 export const SIEGE_TOWER_ASSAULT_CAPACITY = 3_000;
 
@@ -72,6 +72,8 @@ export interface RoundResolution {
   remainingB: BattleComposition;
   pressureDeltaA: number;
   pressureDeltaB: number;
+  pressureTier: "BALANCED" | "MINOR" | "CLEAR" | "CRUSHING";
+  pressureWinner: BattleSideKey | null;
 }
 
 const unitKeys = Object.keys(BATTLE_UNIT_STATS) as BattleUnitType[];
@@ -213,16 +215,16 @@ export function rollSiegeSupport(
     ? Math.min(count, 25, Math.max(0, Math.floor(enhancedAssets[asset] ?? 0))) * dice
     : Math.min(count, 25) * dice * uniformBonus;
   const bonus = enhancedAssets ? Object.values(enhancedAssets).some((count) => (count ?? 0) > 0) ? 1 : 0 : uniformBonus;
-  const ladder = composition.ladder_group ?? 0, ram = composition.ram ?? 0, mantlet = composition.mantlet ?? 0;
+  const ladder = composition.ladder_group ?? 0, ram = Math.min(1, composition.ram ?? 0), mantlet = composition.mantlet ?? 0;
   const ballista = composition.ballista ?? 0, wallBallista = composition.wall_ballista ?? 0, catapult = composition.catapult ?? 0, tower = composition.siege_tower ?? 0;
-  const ladderClash = roll(ladder, 1, 4), towerClash = roll(tower, 1, 10), mantletClash = roll(mantlet, 1, 4);
-  const ballistaRoll = roll(ballista, 1, 8) + diceBonus("ballista", ballista, 1);
+  const ladderClash = roll(ladder, 1, 3), towerClash = roll(tower, 2, 20), mantletClash = roll(mantlet, 1, 4);
+  const ballistaRoll = roll(ballista, 1, 10) + diceBonus("ballista", ballista, 1);
   const wallBallistaDamage = roll(wallBallista, 2, 8) + diceBonus("wall_ballista", wallBallista, 2);
-  const catapultRoll = roll(catapult, 1, 10) + diceBonus("catapult", catapult, 1);
+  const catapultRoll = roll(catapult, 1, 20) + diceBonus("catapult", catapult, 1);
   const towerDamage = roll(tower, 1, 6);
   const ramGate = roll(ram, 1, 8) * 35;
-  const ballistaWall = targets.ballista === "WALL" ? (roll(ballista, 1, 6) + diceBonus("ballista", ballista, 1)) * 5 : 0;
-  const catapultWall = targets.catapult === "WALL" ? (roll(catapult, 2, 10) + diceBonus("catapult", catapult, 2)) * 20 : 0;
+  const ballistaWall = targets.ballista === "WALL" ? (roll(ballista, 1, 10) + diceBonus("ballista", ballista, 1)) * 5 : 0;
+  const catapultWall = targets.catapult === "WALL" ? (roll(catapult, 2, 20) + diceBonus("catapult", catapult, 2)) * 20 : 0;
   const ballistaArmy = targets.ballista === "ARMY" ? ballistaRoll : 0;
   const catapultArmy = targets.catapult === "ARMY" ? catapultRoll : 0;
   return {
@@ -279,23 +281,27 @@ function applyLoss(composition: BattleComposition, rawDamage: number, mode: "LAN
 
 export function resolveRound(
   compositionA: BattleComposition, compositionB: BattleComposition, rollA: BattleRoll, rollB: BattleRoll,
-  options: { mode?: "LAND" | "NAVAL"; damageFactorA?: number; damageFactorB?: number } = {}
+  options: { mode?: "LAND" | "NAVAL"; damageFactorA?: number; damageFactorB?: number; pressureClashA?: number; pressureClashB?: number } = {}
 ): RoundResolution {
   const mode = options.mode ?? "LAND";
   const outcome = advantageTier(rollA.clash, rollB.clash);
+  const pressureOutcome = options.pressureClashA === undefined || options.pressureClashB === undefined
+    ? outcome
+    : advantageTier(options.pressureClashA, options.pressureClashB);
   const multi = multipliers[outcome.tier];
   const factorA = (outcome.winner === "A" ? multi.winner : outcome.winner === "B" ? multi.loser : multi.winner) * (options.damageFactorA ?? 1);
   const factorB = (outcome.winner === "B" ? multi.winner : outcome.winner === "A" ? multi.loser : multi.winner) * (options.damageFactorB ?? 1);
   const scale = mode === "NAVAL" ? 0.012 : 20;
   const againstB = applyLoss(compositionB, rollA.damage * scale * factorA, mode);
   const againstA = applyLoss(compositionA, rollB.damage * scale * factorB, mode);
-  const pressure = outcome.tier === "MINOR" ? 1 : outcome.tier === "CLEAR" ? 2 : outcome.tier === "CRUSHING" ? 3 : 0;
+  const pressure = pressureOutcome.tier === "MINOR" ? 1 : pressureOutcome.tier === "CLEAR" ? 2 : pressureOutcome.tier === "CRUSHING" ? 3 : 0;
   return {
     tier: outcome.tier, winner: outcome.winner,
     lossA: againstA.loss, lossB: againstB.loss,
     remainingA: againstA.remaining, remainingB: againstB.remaining,
-    pressureDeltaA: outcome.winner === "B" ? pressure : outcome.winner === "A" ? -1 : 0,
-    pressureDeltaB: outcome.winner === "A" ? pressure : outcome.winner === "B" ? -1 : 0
+    pressureDeltaA: pressureOutcome.winner === "B" ? pressure : pressureOutcome.winner === "A" ? -1 : 0,
+    pressureDeltaB: pressureOutcome.winner === "A" ? pressure : pressureOutcome.winner === "B" ? -1 : 0,
+    pressureTier: pressureOutcome.tier, pressureWinner: pressureOutcome.winner
   };
 }
 export function siegeDefenseModifiers(wallHp: number, gateHp: number): { defenderClash: number; defenderDamage: number; attackerDamage: number } {
@@ -304,9 +310,47 @@ export function siegeDefenseModifiers(wallHp: number, gateHp: number): { defende
   return { defenderClash: 1.10, defenderDamage: 1.00, attackerDamage: 1.00 };
 }
 
-export function siegeDefenderCaptured(initial: number, remaining: number, pressure: number, wallHp: number, gateHp: number, assaultCapacity = 0): boolean {
-  const access = wallHp <= 0 || gateHp <= 0 || assaultCapacity > 0;
-  return access && (remaining <= Math.floor(initial * 0.30) || pressure >= 8 || remaining <= 0);
+export interface SiegePressureState {
+  pressure: number;
+  reserve: number;
+  reserveRelief: number;
+  hasUsableReserve: boolean;
+}
+
+export function siegePressureAfterRound(currentPressure: number, delta: number, remaining: number, frontage: number): SiegePressureState {
+  const safeFrontage = Math.max(1, Math.floor(frontage));
+  const reserve = Math.max(0, Math.floor(remaining) - safeFrontage);
+  const reserveRelief = reserve >= safeFrontage ? 2 : reserve >= Math.ceil(safeFrontage / 2) ? 1 : 0;
+  return {
+    pressure: Math.min(8, Math.max(0, Math.floor(currentPressure) + Math.floor(delta) - reserveRelief)),
+    reserve,
+    reserveRelief,
+    hasUsableReserve: reserve >= Math.ceil(safeFrontage / 2)
+  };
+}
+
+export function siegeOrderState(pressure: number, remaining: number): BattleOrder {
+  if (remaining <= 0) return "BROKEN";
+  if (pressure >= 7) return "CRITICAL";
+  if (pressure >= 5) return "SHAKEN";
+  if (pressure >= 3) return "WORN";
+  return "ORDERED";
+}
+
+export function siegeLineBreaks(previousPressure: number, currentPressure: number, lostRound: boolean, remaining: number, hasUsableReserve: boolean): boolean {
+  return remaining <= 0 || (previousPressure >= 8 && currentPressure >= 8 && lostRound && !hasUsableReserve);
+}
+
+export function siegeDefenderCaptured(input: {
+  initial: number; remaining: number; previousPressure: number; currentPressure: number; lostRound: boolean;
+  wallHp: number; gateHp: number; assaultCapacity?: number; defenderFrontage?: number;
+}): boolean {
+  const access = input.wallHp <= 0 || input.gateHp <= 0 || (input.assaultCapacity ?? 0) > 0;
+  if (!access) return false;
+  if (input.remaining <= 0) return true;
+  const frontage = input.defenderFrontage ?? BATTLE_TERRAINS.SIEGE.frontageB;
+  const depleted = input.remaining <= Math.floor(input.initial * 0.30) && input.remaining <= Math.floor(frontage * 0.50);
+  return input.previousPressure >= 8 && input.currentPressure >= 8 && input.lostRound && depleted;
 }
 
 export function baseRetreatRate(roundNumber: number): number {

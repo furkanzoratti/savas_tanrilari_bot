@@ -13,6 +13,15 @@ describe("şehir geliştirme ve Akademi komutları", () => {
     expect(pantheon?.options?.map((option) => option.name)).toEqual(["kredi-al", "kredi-ode"]);
   });
 
+  it("yöneticiye süreli yüzdelik gelir cezası ve erken kaldırma seçeneklerini sunar", () => {
+    const penalty = commandBuilders.find((command) => command.name === "gelir-cezasi");
+    const apply = penalty?.options?.find((option) => option.name === "uygula");
+
+    expect(penalty?.options?.map((option) => option.name)).toEqual(["uygula", "kaldir"]);
+    expect(apply?.options?.find((option) => option.name === "yuzde")).toMatchObject({ required: true, min_value: 1, max_value: 100 });
+    expect(apply?.options?.find((option) => option.name === "alim-turu")).toMatchObject({ required: true, min_value: 1, max_value: 100 });
+  });
+
   it("yönetici komut grubunu Discord üst sınırında tutar ve kıyı durumunu açar", () => {
     const admin = commandBuilders.find((command) => command.name === "yonetim");
     const create = admin?.options?.find((option) => option.name === "yerleske-ekle");
@@ -57,14 +66,16 @@ describe("şehir geliştirme ve Akademi komutları", () => {
       activatedPolicyDetails: [{ settlementName: "Roma", policyName: "Pazar Panayırları" }],
       unrestDetails: [{ settlementName: "Capua", chance: 20, roll: 9 }],
       starvationDetails: [{ settlementName: "Tarentum", remaining: 0, capacity: 5 }],
-      pantheonLoanDetails: [{ settlementName: "Roma", amount: 1_000, remaining: 500 }]
+      pantheonLoanDetails: [{ settlementName: "Roma", amount: 1_000, remaining: 500 }],
+      incomePenaltyDetails: [{ settlementName: "Roma", percent: 20, deductedAmount: 2_000, remainingAcquisitionTurns: 1, reason: "Salgın" }]
     }).toJSON();
 
     expect(announcement.fields?.map((field) => field.name)).toEqual(expect.arrayContaining([
       "⚖️ Etkinleşen Şehir Politikaları",
       "⚠️ Huzursuzluk Olayları",
       "🏰 Kuşatma Erzak Durumu",
-      "🏛️ Panteon Kredisi Ödemeleri"
+      "🏛️ Panteon Kredisi Ödemeleri",
+      "📉 Uygulanan Gelir Cezaları"
     ]));
     expect(announcement.fields?.find((field) => field.name.includes("Erzak"))?.value).toContain("Erzak tükendi");
   });

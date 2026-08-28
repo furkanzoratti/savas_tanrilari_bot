@@ -21,6 +21,7 @@ export interface TurnAnnouncementInput {
   unrestDetails?: Array<{ settlementName: string; chance: number; roll: number }>;
   starvationDetails?: Array<{ settlementName: string; remaining: number; capacity: number }>;
   pantheonLoanDetails?: Array<{ settlementName: string; amount: number; remaining: number }>;
+  incomePenaltyDetails?: Array<{ settlementName: string; percent: number; deductedAmount: number; remainingAcquisitionTurns: number; reason: string }>;
 }
 
 function fieldValue(lines: string[]): string {
@@ -86,6 +87,12 @@ export function turnAnnouncement(input: TurnAnnouncementInput): EmbedBuilder {
   if (input.pantheonLoanDetails?.length) embed.addFields({
     name: "🏛️ Panteon Kredisi Ödemeleri",
     value: fieldValue(input.pantheonLoanDetails.map((item) => `• **${item.settlementName}** — ${item.amount.toLocaleString("tr-TR")} Altın ödendi • Kalan: ${item.remaining.toLocaleString("tr-TR")}`))
+  });
+  if (input.incomePenaltyDetails?.length) embed.addFields({
+    name: "📉 Uygulanan Gelir Cezaları",
+    value: fieldValue(input.incomePenaltyDetails.map((item) =>
+      `• **${item.settlementName}** — %${item.percent} • ${item.deductedAmount.toLocaleString("tr-TR")} Altın kesildi • Kalan: ${item.remainingAcquisitionTurns} Alım Turu • ${item.reason}`
+    ))
   });
   return embed;
 }

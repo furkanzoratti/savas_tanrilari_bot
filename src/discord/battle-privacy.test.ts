@@ -44,12 +44,12 @@ describe("kuşatma bilgi gizliliği", () => {
     expect(json).not.toContain("8.765");
     expect(json).toContain("3.580");
     expect(json).toContain("Toplam Asker:** Gizli");
-    expect(json).toContain("Sarsılmış");
+    expect(json).toContain("Baskı Altında");
     expect(json).toContain("Oyun Turu 12");
-    expect(json).toContain("2/3 kullanıldı");
-    expect(json).toContain("1 hak kaldı");
+    expect(json).toContain("2/4 kullanıldı");
+    expect(json).toContain("2 hak kaldı");
     expect(json).toContain("Hücum Erişimi");
-    expect(json).toContain("5.000 / 12.000");
+    expect(json).toContain("5.000 / 15.000");
     expect(json).toContain("Erzak Dayanıklılığı");
     expect(json).toContain("4 / 6 oyun turu");
     expect(json).toContain("azami piyade");
@@ -60,6 +60,21 @@ describe("kuşatma bilgi gizliliği", () => {
     expect(json).not.toContain("B cephesi");
   });
 
+  it("savunucunun ham ve tahkimat sonrası zarlarını ayrı gösterir", () => {
+    const view = siegeView();
+    view.rolls = [{
+      side_key: "B", roller_user_id: "gm", clash_total: 100, damage_total: 80,
+      is_proxy: false, manual: false, wall_damage: 0, gate_damage: 0
+    }];
+    const json = JSON.stringify(battleEmbed(view).toJSON());
+    expect(json).toContain("Savunucu — Ham Zar");
+    expect(json).toContain("Çarpışma **100**");
+    expect(json).toContain("Hasar **80**");
+    expect(json).toContain("Tahkimat Sonrası");
+    expect(json).toContain("Çarpışma **150**");
+    expect(json).toContain("Hasar **108**");
+  });
+
   it("şehir ele geçirilmeden savunucuyu dağılmış göstermez ve baskıyı açıklar", () => {
     const view = siegeView();
     view.sides.B.pressure = 6;
@@ -67,16 +82,23 @@ describe("kuşatma bilgi gizliliği", () => {
     expect(json).toContain("Baskı:** 6 puan");
     expect(json).toContain("Sarsılmış");
     expect(json).toContain("Oyun Turu 12");
-    expect(json).toContain("2/3 kullanıldı");
-    expect(json).toContain("1 hak kaldı");
+    expect(json).toContain("2/4 kullanıldı");
+    expect(json).toContain("2 hak kaldı");
     expect(json).not.toContain("Dağılmış");
   });
   it("açık tur sonucunda savunucunun kaybını gösterir", () => {
     const json = JSON.stringify(battleEmbed(siegeView(), {
       tier: "CLEAR", winner: "A", lossA: 500, lossB: 1_234,
-      orderA: "ORDERED", orderB: "SHAKEN", wallDamage: 400, gateDamage: 200, ended: false
+      orderA: "ORDERED", orderB: "SHAKEN", wallDamage: 400, gateDamage: 200, ended: false,
+      pressureA: 1, pressureB: 6, pressureTier: "MINOR", pressureWinner: "A",
+      reserveReliefA: 0, reserveReliefB: 0,
+      defenderRawClash: 100, defenderEffectiveClash: 150,
+      defenderRawDamage: 80, defenderEffectiveDamage: 108,
+      defenderClashMultiplier: 1.50, defenderDamageMultiplier: 1.35
     }).toJSON());
     expect(json).toContain("1.234");
     expect(json).not.toContain("Kayıp gizli");
+    expect(json).toContain("Savunucu Zar Hesabı");
+    expect(json).toContain("Baskı ham Çarpışma zarından");
   });
 });

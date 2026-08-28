@@ -123,6 +123,8 @@ Bu komutların sonuçları gizli değildir; markalı resmî tur duyurusu olarak 
 - `/yonetim mesaj-sil miktar`
 - `/yonetim rol-kanali islem kanal`
 - `/yonetim rol-rapor-kanali islem [kanal]`
+- `/gelir-cezasi uygula ulke yerleske yuzde alim-turu neden`
+- `/gelir-cezasi kaldir ulke yerleske`
 
 - `/olay riskler tur [ulke]`
 - `/olay sec tur [ulke]`
@@ -139,6 +141,8 @@ Akademi eğitimi Alım Turunda başlatılır. Sv1 görev türünü `1d30` ile be
 `/olay` komutları yalnızca oyun yöneticisi tarafından kullanılabilir. `/olay riskler` ve `/olay sec` varsayılan olarak Discord sunucusundaki bütün devletlerin yerleşkelerini tarar; isteğe bağlı `ulke` seçeneği kapsamı daraltır. Bot; karaborsa, salgın, huzursuzluk veya isyan için aktif binaları, Agora tüccarını, yerel/ticaret kaynaklarını, kuşatmayı, fetih durumunu ve önceki olayları değerlendirir. Agora Sv3 tüccarı karaborsayı tamamen engeller; Zeytin salgın riskini 10 puan azaltır, Panteon Sv2+ kalan salgın riskini yarıya düşürür. Aynı yerleşkede aynı olay 3 oyun turu içinde yeniden seçilmez; aktif olaylar yeni seçimden çıkarılır.
 
 Ağırlıklı seçim yalnızca yöneticiye gösterilir ve olayı kendiliğinden başlatmaz. Yönetici sonucu yeşil onay düğmesiyle veya `/olay uygula tur` komutuyla herkese açık biçimde uygular; `ulke` ile `yerleske` birlikte belirtilirse belirli bir şehre doğrudan uygulayabilir. Aktif olay yerleşke belgesinde görünür ve `/olay sonlandir` ile kaldırılır. Tur ilerletme hiçbir olayı kendiliğinden tetiklemez. Eski doğrudan salgın, iyileşme ve karaborsa komutları kullanılmaya devam eder; Su Kemeri iyileşme zarına +1 ekler.
+
+DM, olayların Hafif/Orta/Ağır/Özel sonuçlarını [yerleşke olayı sonuç rehberine](docs/yerleske-olay-sonuclari.md) göre elle uygular. `/gelir-cezasi uygula` yerleşkenin ödenecek gelirini seçilen yüzde ve Alım Turu süresince azaltır; son kullanımın ardından ceza otomatik sona erer.
 
 `oyunu-sifirla` yalnızca yetkili GM tarafından ve tam `SIFIRLA` onayıyla çalışır. Komut, o Discord sunucusundaki ülkeleri ve bunlara bağlı bütün oyun kayıtlarını siler; turu 0/Kapalı durumuna döndürür. Rol kanalları ile kelime istatistikleri korunur.
 
@@ -213,7 +217,7 @@ Oyuncu geri çekilmesi kart düğmesiyle yapılır. İlk savaş turu kayıpsızd
 ### Pusu, kuşatma ve deniz savaşı
 
 - **Pusu:** `/savas baslat` sırasında `Pusu` seçilir. A tarafı pusuyu kurandır ve ilk zarı atar. İlk tur A tarafının çarpışma toplamı %25, hasar toplamı %10 artar. Dar cephe nedeniyle A en fazla 15.000, B en fazla 8.000 askerini aynı anda kullanır.
-- **Kuşatma:** A kuşatan, B savunandır. Sur 30.000, kapı 1.000 canla başlar. Kuşatma Bombardıman durumunda açılır; bu sırada yalnız Katapultlar sura ateş eder, ordular temas etmez ve asker kaybı/baskı oluşmaz. Her kuşatma oyun turu başına en fazla 3 kez bombalanabilir; yeni oyun turunda hak otomatik yenilenir ve aktif savaşın bütün durumu korunur. DM `/savas kusatma-asamasi` ile Hücuma geçer. Koçbaşı yalnız kapıyı; Katapult ve Balista seçilen hedefe göre suru veya savunan orduyu vurur. Merdiven, mantlet ve kuşatma kulesi hücumu destekler. Tahkimat sağlamken savunucu Çarpışma +%50 ve Hasar +%35 alır; saldıranın birlik Hasarı %50 etkinliktedir. Şehir için sur/kapı gediği veya merdiven/kule erişimi ve ayrıca savunucunun %30'a düşmesi, 8 baskıya ulaşması ya da tükenmesi gerekir. Her mantlet saldırana gelen Hasarı %5 azaltır; toplam sınır %50'dir. B yalnızca Hafif Sur Balistası kullanabilir.
+- **Kuşatma:** A kuşatan, B savunandır. Saldıran cephesi 15.000, savunan cephesi 18.000 askerdir. Sur 30.000, kapı 1.000 canla başlar. Kuşatma Bombardıman durumunda açılır; bu sırada yalnız Katapultlar sura ateş eder, ordular temas etmez ve asker kaybı/baskı oluşmaz. Her kuşatma oyun turu başına en fazla 4 kez bombalanabilir; yeni oyun turunda hak otomatik yenilenir ve aktif savaşın bütün durumu korunur. DM `/savas kusatma-asamasi` ile Hücuma geçer. Her kuşatmada en fazla bir Koçbaşı alınabilir ve yalnız kapıyı hedefler; Katapult ve Balista seçilen hedefe göre suru veya savunan orduyu vurur. Merdiven, mantlet ve kuşatma kulesi hücumu destekler. Tahkimat sağlamken savunucu Çarpışma +%50 ve Hasar +%35 alır; saldıranın birlik Hasarı %50 etkinliktedir. Tahkimat çarpanları kayıp hesabında kullanılır, baskı ise ham Çarpışma zarlarından hesaplanır. Yedek hatlar baskıyı azaltır; ilk 8 baskı savaşı bitirmez. Savunucu yalnız erişim sağlandıktan, ikinci kritik turu da kaybettikten ve kuvveti hem başlangıcın %30'una hem 9.000 askere düştükten sonra baskıyla şehri kaybedebilir. Her mantlet saldırana gelen Hasarı %5 azaltır; toplam sınır %50'dir. B yalnızca Hafif Sur Balistası kullanabilir.
 - **Deniz savaşı:** Kara birliği yerine `/savas gemi-ayarla` kullanılır. Kerkouros 1d6/1d6, Trireme 2d8/2d8, Quinquereme 3d10/3d10 çarpışma/hasar zarı üretir. Her gemi ayrı zar birimidir; filo cephesi taraf başına 30 gemidir. Kayıplar gemi adedi olarak hesaplanır ve ağır gemiler daha dayanıklıdır.
 
 Kuşatmada saldıran toplamı açık, savunan toplamı gizli; iki tarafın kayıpları açıktır. Tam kadro ile kuşatma aleti türleri `/savas ordu-detay` içinde kalır. Savaş sonunda kayıplar ülke belgelerine tek sefer otomatik işlenir; kara askeri kayıpları bağlı yerleşkelerin nüfusundan da düşülür ve yöneticiye hesaplanan/uygulanan/fark dökümü verilir. Oyunculara dağıtılacak eksiksiz metin `docs/discord-savas-sistemi.md` içindedir.

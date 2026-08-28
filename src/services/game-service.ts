@@ -2,7 +2,7 @@ import type { DbClient } from "../db/pool.js";
 import { pool, withTransaction } from "../db/pool.js";
 import { BUILD_DURATIONS, BUILDINGS, CITY_POLICIES, MAX_BUILDING_COST_DISCOUNT, MOBILIZATION_RULES, SHIPS, SIEGE_ASSETS, UNITS, buildingBaseCost, type CityPolicyKey } from "../domain/catalog.js";
 import { buildingSlotLimit, calculatePopulationGain, calculateShipUpkeep, calculateUnitUpkeep, nextRuinStage } from "../domain/economy.js";
-import { addIncomeBreakdowns, calculateCategorizedIncome, incomeTotal, populationTaxIncome, scaleIncome, type IncomeBreakdown } from "../domain/income.js";
+import { addIncomeBreakdowns, applyIncomePenalty, calculateCategorizedIncome, incomeTotal, populationTaxIncome, scaleIncome, type IncomeBreakdown } from "../domain/income.js";
 import { createRecruitmentWaves, isAcquisitionTurn, militaryLimit, settlementMobilizationLimit, settlementTrainingCapacity } from "../domain/mobilization.js";
 import { garrisonComposition, garrisonLevel } from "../domain/garrison.js";
 import type { CultureGroup } from "../domain/cultures.js";
@@ -24,6 +24,13 @@ interface SettlementRow {
   black_market_active: boolean; epidemic_active: boolean; unrest_active: boolean; rebellion_active: boolean;
 }
 interface BuildingRow { settlement_id: string; building_type: string; level: number; target_level: number | null; status: "ACTIVE" | "BUILDING"; started_turn: number | null; completion_turn: number | null }
+interface SettlementIncomePenaltyRow {
+  settlement_id: string;
+  penalty_percent: number;
+  remaining_acquisition_turns: number;
+  reason: string;
+  created_turn: number;
+}
 
 export type PendingPurchaseKind = "UNIT" | "SHIP" | "SIEGE" | "BUILDING";
 export interface PendingPurchase {
@@ -134,6 +141,7 @@ export interface CountryDocument {
     trainingRemaining: number;
     slotLimit: number;
     constructionLimit: number;
+    incomePenalty?: SettlementIncomePenaltyRow | null;
     unrestRisk: number;
     starvationBonus: number;
     temporaryMilitia: number;
@@ -167,6 +175,7 @@ export interface TurnAdvanceResult {
   unrestDetails: Array<{ settlementName: string; chance: number; roll: number }>;
   starvationDetails: Array<{ settlementName: string; remaining: number; capacity: number }>;
   pantheonLoanDetails: Array<{ settlementName: string; amount: number; remaining: number }>;
+  incomePenaltyDetails: Array<{ settlementName: string; percent: number; deductedAmount: number; remainingAcquisitionTurns: number; reason: string }>;
 }
 
 async function ensureGuild(client: DbClient, guildId: string): Promise<GuildRow> {
@@ -567,6 +576,10 @@ export const gameService = {
       const settlementIds = settlements.map((settlement) => settlement.id);
       const buildings = settlementIds.length ? (await client.query<BuildingRow>("SELECT * FROM buildings WHERE settlement_id = ANY($1::uuid[]) ORDER BY building_type", [settlementIds])).rows : [];
       const policies = settlementIds.length ? (await client.query<SettlementPolicyRow>("SELECT * FROM settlement_policies WHERE settlement_id=ANY($1::uuid[]) ORDER BY slot", [settlementIds])).rows : [];
+      const incomePenalties = settlementIds.length ? (await client.query<SettlementIncomePenaltyRow>(
+        "SELECT settlement_id,penalty_percent,remaining_acquisition_turns,reason,created_turn FROM settlement_income_penalties WHERE settlement_id=ANY($1::uuid[])",
+        [settlementIds]
+      )).rows : [];
       const characters = (await client.query<CountryCharacter>(
         `SELECT cc.*,assigned.name AS assigned_settlement_name,trained.name AS trained_settlement_name
            FROM country_characters cc
@@ -652,7 +665,9 @@ export const gameService = {
           activePolicies,
           assignedMerchant
         });
-        const incomeBreakdown = scaleIncome(economy.payable, MOBILIZATION_RULES[country.mobilization].incomeMultiplier);
+        const incomePenalty = incomePenalties.find((penalty) => penalty.settlement_id === settlement.id) ?? null;
+        const mobilizedIncome = scaleIncome(economy.payable, MOBILIZATION_RULES[country.mobilization].incomeMultiplier);
+        const incomeBreakdown = applyIncomePenalty(mobilizedIncome, Number(incomePenalty?.penalty_percent ?? 0));
         const populationGain = calculatePopulationGain({
           basePopulationGrowth: settlement.base_population_growth,
           buildings: activeBuildings,
@@ -692,6 +707,7 @@ export const gameService = {
           trainingRemaining: Math.max(0, trainingCapacity - trainingUsed),
           slotLimit: buildingSlotLimit(settlement.population),
           constructionLimit: activePolicies.includes("MASTER_ARCHITECTURE") ? 3 : 2,
+          incomePenalty,
           unrestRisk: settlementUnrestChance(activeBuildings, effectiveResources, activePolicies),
           starvationBonus: settlementStarvationBonus(activeBuildings, activePolicies),
           temporaryMilitia: activePolicies.includes("WAR_PREPARATION") ? 500 : 0,
@@ -1284,6 +1300,72 @@ export const gameService = {
     });
   },
 
+  async setSettlementIncomePenalty(input: {
+    guildId: string; actorId: string; countryId: string; settlementId: string;
+    percent: number; acquisitionTurns: number; reason: string;
+  }): Promise<{ nextAcquisitionTurn: number }> {
+    if (!Number.isSafeInteger(input.percent) || input.percent < 1 || input.percent > 100) {
+      throw new GameError("Gelir cezası yüzdesi 1 ile 100 arasında olmalıdır.");
+    }
+    if (!Number.isSafeInteger(input.acquisitionTurns) || input.acquisitionTurns < 1 || input.acquisitionTurns > 100) {
+      throw new GameError("Süre 1 ile 100 Alım Turu arasında olmalıdır.");
+    }
+    const reason = input.reason.trim();
+    if (!reason || reason.length > 500) throw new GameError("Neden 1 ile 500 karakter arasında olmalıdır.");
+    return withTransaction(async (client) => {
+      const guild = await getGuild(client, input.guildId);
+      const country = await getCountry(client, input.countryId);
+      if (country.guild_id !== input.guildId) throw new GameError("Ülke bu sunucuya ait değil.");
+      const settlement = (await client.query<SettlementRow>(
+        "SELECT * FROM settlements WHERE id=$1 AND country_id=$2 FOR UPDATE",
+        [input.settlementId, country.id]
+      )).rows[0];
+      if (!settlement) throw new GameError("Yerleşke bulunamadı.");
+      await client.query(
+        `INSERT INTO settlement_income_penalties(
+           settlement_id,penalty_percent,remaining_acquisition_turns,reason,created_turn,created_by
+         ) VALUES($1,$2,$3,$4,$5,$6)
+         ON CONFLICT(settlement_id) DO UPDATE SET
+           penalty_percent=EXCLUDED.penalty_percent,
+           remaining_acquisition_turns=EXCLUDED.remaining_acquisition_turns,
+           reason=EXCLUDED.reason,
+           created_turn=EXCLUDED.created_turn,
+           created_by=EXCLUDED.created_by,
+           updated_at=NOW()`,
+        [settlement.id, input.percent, input.acquisitionTurns, reason, guild.current_turn, input.actorId]
+      );
+      const remainder = guild.current_turn % guild.acquisition_interval;
+      const nextAcquisitionTurn = guild.current_turn + (remainder === 0 ? guild.acquisition_interval : guild.acquisition_interval - remainder);
+      await audit(client, input.guildId, input.actorId, "SETTLEMENT_INCOME_PENALTY_SET", "settlement", settlement.id, {
+        percent: input.percent, acquisitionTurns: input.acquisitionTurns, reason, nextAcquisitionTurn
+      });
+      return { nextAcquisitionTurn };
+    });
+  },
+
+  async clearSettlementIncomePenalty(input: {
+    guildId: string; actorId: string; countryId: string; settlementId: string;
+  }): Promise<{ percent: number; remainingAcquisitionTurns: number }> {
+    return withTransaction(async (client) => {
+      const country = await getCountry(client, input.countryId);
+      if (country.guild_id !== input.guildId) throw new GameError("Ülke bu sunucuya ait değil.");
+      const settlement = (await client.query<SettlementRow>(
+        "SELECT * FROM settlements WHERE id=$1 AND country_id=$2 FOR UPDATE",
+        [input.settlementId, country.id]
+      )).rows[0];
+      if (!settlement) throw new GameError("Yerleşke bulunamadı.");
+      const removed = (await client.query<SettlementIncomePenaltyRow>(
+        "DELETE FROM settlement_income_penalties WHERE settlement_id=$1 RETURNING settlement_id,penalty_percent,remaining_acquisition_turns,reason,created_turn",
+        [settlement.id]
+      )).rows[0];
+      if (!removed) throw new GameError("Bu yerleşkede etkin süreli gelir cezası bulunmuyor.");
+      await audit(client, input.guildId, input.actorId, "SETTLEMENT_INCOME_PENALTY_CLEAR", "settlement", settlement.id, {
+        percent: Number(removed.penalty_percent), remainingAcquisitionTurns: Number(removed.remaining_acquisition_turns)
+      });
+      return { percent: Number(removed.penalty_percent), remainingAcquisitionTurns: Number(removed.remaining_acquisition_turns) };
+    });
+  },
+
   async adjustSettlementTreasury(input: { guildId: string; actorId: string; countryId: string; settlementId: string; amount: number; reason: string }): Promise<{ balance: number }> {
     return withTransaction(async (client) => {
       const country = await getCountry(client, input.countryId);
@@ -1414,6 +1496,7 @@ export const gameService = {
       const starvationDetails = starvationUpdates.rows.map((item) => ({ settlementName: item.settlement_name, remaining: item.starvation_remaining, capacity: item.starvation_capacity }));
       const unrestDetails: Array<{ settlementName: string; chance: number; roll: number }> = [];
       const pantheonLoanDetails: Array<{ settlementName: string; amount: number; remaining: number }> = [];
+      const incomePenaltyDetails: Array<{ settlementName: string; percent: number; deductedAmount: number; remainingAcquisitionTurns: number; reason: string }> = [];
       const acquisition = isAcquisitionTurn(newTurn, guild.acquisition_interval);
       const manpowerCountries = (await client.query<CountryRow>("SELECT * FROM countries WHERE guild_id=$1 FOR UPDATE", [guildId])).rows;
       for (const country of manpowerCountries) {
@@ -1464,7 +1547,12 @@ export const gameService = {
               assignedMerchant
             });
             const popGain = calculatePopulationGain({ basePopulationGrowth: settlement.base_population_growth, buildings: active, ruinStage: settlement.ruin_stage, mobilization: country.mobilization, resources: effectiveResources });
-            const adjustedSettlementIncome = scaleIncome(economy.payable, MOBILIZATION_RULES[country.mobilization].incomeMultiplier);
+            const incomePenalty = (await client.query<SettlementIncomePenaltyRow>(
+              "SELECT settlement_id,penalty_percent,remaining_acquisition_turns,reason,created_turn FROM settlement_income_penalties WHERE settlement_id=$1 FOR UPDATE",
+              [settlement.id]
+            )).rows[0];
+            const mobilizedIncome = scaleIncome(economy.payable, MOBILIZATION_RULES[country.mobilization].incomeMultiplier);
+            const adjustedSettlementIncome = applyIncomePenalty(mobilizedIncome, Number(incomePenalty?.penalty_percent ?? 0));
             const settlementUnits = (await client.query<{ unit_type: keyof typeof UNITS; quantity: number; status: UnitStatus }>("SELECT unit_type,quantity,status FROM unit_stacks WHERE settlement_id=$1", [settlement.id])).rows;
             const settlementShips = (await client.query<{ ship_type: keyof typeof SHIPS; quantity: number; status: ShipStatus }>("SELECT ship_type,quantity,status FROM naval_units WHERE settlement_id=$1", [settlement.id])).rows;
             const settlementUpkeep = economy.buildingUpkeep
@@ -1476,6 +1564,24 @@ export const gameService = {
             upkeep += settlementUpkeep;
             const nextPopulation = settlement.population + popGain;
             await client.query("UPDATE settlements SET population=$1,ruin_stage=$2,local_treasury=local_treasury+$3,last_acquisition_income=$4 WHERE id=$5", [nextPopulation, nextRuinStage(settlement.ruin_stage), settlementNet, settlementGross, settlement.id]);
+            if (incomePenalty) {
+              const remainingAcquisitionTurns = Number(incomePenalty.remaining_acquisition_turns) - 1;
+              if (remainingAcquisitionTurns <= 0) {
+                await client.query("DELETE FROM settlement_income_penalties WHERE settlement_id=$1", [settlement.id]);
+              } else {
+                await client.query(
+                  "UPDATE settlement_income_penalties SET remaining_acquisition_turns=$1,updated_at=NOW() WHERE settlement_id=$2",
+                  [remainingAcquisitionTurns, settlement.id]
+                );
+              }
+              incomePenaltyDetails.push({
+                settlementName: settlement.name,
+                percent: Number(incomePenalty.penalty_percent),
+                deductedAmount: Math.max(0, incomeTotal(mobilizedIncome) - settlementGross),
+                remainingAcquisitionTurns,
+                reason: incomePenalty.reason
+              });
+            }
             // Yerleşke olayları yalnızca yöneticinin ağırlıklı olay seçiminden sonra uygulanır.
             if (await ensureStandardGarrison(client, settlement.id, nextPopulation, settlement.garrison_level)) {
               garrisonUpgrades += 1;
@@ -1504,7 +1610,9 @@ export const gameService = {
       }
 
       await client.query("UPDATE guilds SET current_turn=$1,turn_phase='OPEN',updated_at=NOW() WHERE discord_id=$2", [newTurn, guildId]);
-      await audit(client, guildId, actorId, "TURN_ADVANCE", "guild", guildId, { from: guild.current_turn, to: newTurn, acquisition, garrisonUpgrades });
+      await audit(client, guildId, actorId, "TURN_ADVANCE", "guild", guildId, {
+        from: guild.current_turn, to: newTurn, acquisition, garrisonUpgrades, incomePenaltyDetails
+      });
       return {
         turn: newTurn, acquisition,
         completedBuildings: completedBuildings.rowCount ?? 0,
@@ -1520,7 +1628,8 @@ export const gameService = {
         activatedPolicyDetails,
         unrestDetails,
         starvationDetails,
-        pantheonLoanDetails
+        pantheonLoanDetails,
+        incomePenaltyDetails
       };
     });
   },

@@ -17,4 +17,12 @@ describe("yönetici kontrollü yerleşke olayları migration'ı", () => {
     expect(migration?.sql).toContain("'PENDING','APPLIED','CANCELLED'");
     expect(migration?.sql).toContain("settlement_events_triggered_history_idx");
   });
+
+  it("süreli yüzdelik gelir cezalarını Alım Turu sayısıyla saklar", () => {
+    const incomePenaltyMigration = migrations.find((item) => item.version === 21);
+
+    expect(incomePenaltyMigration?.sql).toContain("CREATE TABLE IF NOT EXISTS settlement_income_penalties");
+    expect(incomePenaltyMigration?.sql).toContain("penalty_percent BETWEEN 1 AND 100");
+    expect(incomePenaltyMigration?.sql).toContain("remaining_acquisition_turns BETWEEN 1 AND 100");
+  });
 });

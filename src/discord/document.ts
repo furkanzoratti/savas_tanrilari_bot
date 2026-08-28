@@ -196,6 +196,15 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
       .filter((type) => settlement[SETTLEMENT_EVENT_TYPES[type].stateColumn])
       .map((type) => `${SETTLEMENT_EVENT_TYPES[type].emoji} **${SETTLEMENT_EVENT_TYPES[type].label}**`);
     if (activeEvents.length) embed.addFields({ name: "🚨 Aktif Yerleşke Olayları", value: spacedSection(activeEvents.join("\n")) });
+    if (settlement.incomePenalty) {
+      embed.addFields({
+        name: "📉 Süreli Gelir Cezası",
+        value: spacedSection(
+          `**%${settlement.incomePenalty.penalty_percent}** gelir kaybı • Kalan: **${settlement.incomePenalty.remaining_acquisition_turns} Alım Turu**\n` +
+          `Neden: ${settlement.incomePenalty.reason}`
+        )
+      });
+    }
 
     const policies = settlement.policies ?? [];
     const hasCuria = settlement.buildings.some((building) => building.building_type === "curia" && building.status === "ACTIVE" && building.level > 0);

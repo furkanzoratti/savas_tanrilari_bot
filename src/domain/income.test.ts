@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateCategorizedIncome, incomeTotal } from "./income.js";
+import { applyIncomePenalty, calculateCategorizedIncome, incomeTotal } from "./income.js";
 
 describe("gelir kalemleri", () => {
   it("temel gelirleri, antlaşmaları ve bina etkilerini doğru kaleme yazar", () => {
@@ -24,6 +24,12 @@ describe("gelir kalemleri", () => {
     expect(result.gross).toEqual({ building: 1_680, tax: 2_000, landTrade: 1_750, seaTrade: 1_050 });
     expect(result.buildingBonuses).toEqual({ building: 1_680, tax: 0, landTrade: 0, seaTrade: 0 });
     expect(incomeTotal(result.payable)).toBe(6_480);
+  });
+
+  it("süreli gelir cezasını bütün gelir kalemlerine aynı yüzdeyle uygular", () => {
+    expect(applyIncomePenalty({ building: 1_001, tax: 2_000, landTrade: 3_000, seaTrade: 999 }, 25))
+      .toEqual({ building: 750, tax: 1_500, landTrade: 2_250, seaTrade: 749 });
+    expect(incomeTotal(applyIncomePenalty({ building: 500, tax: 500, landTrade: 500, seaTrade: 500 }, 100))).toBe(0);
   });
 
   it("harap toparlanmasının yüzde 50 aşamasını bütün gelir kalemlerine uygular", () => {
