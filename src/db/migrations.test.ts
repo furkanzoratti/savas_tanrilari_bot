@@ -28,3 +28,14 @@ describe("on üçüncü migration", () => {
     expect(migration?.sql).toContain("active_siege_settlement_idx");
   });
 });
+
+describe("yirmi ikinci migration", () => {
+  const migration = migrations.find((item) => item.version === 22);
+
+  it("kusatma kritik duzenini iki taraf icin kabul eder", () => {
+    expect(migration?.name).toBe("siege_critical_battle_order");
+    expect(migration?.sql).toContain("DROP CONSTRAINT IF EXISTS battle_rounds_order_a_check");
+    expect(migration?.sql).toContain("DROP CONSTRAINT IF EXISTS battle_rounds_order_b_check");
+    expect(migration?.sql.match(/'CRITICAL'/g)).toHaveLength(2);
+  });
+});

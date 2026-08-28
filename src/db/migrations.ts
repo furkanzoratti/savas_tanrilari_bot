@@ -299,8 +299,8 @@ export const migrations = [
         battle_id UUID NOT NULL REFERENCES battles(id) ON DELETE CASCADE, round_number INTEGER NOT NULL,
         tier TEXT NOT NULL CHECK (tier IN ('BALANCED','MINOR','CLEAR','CRUSHING')), winner_side TEXT CHECK (winner_side IN ('A','B')),
         loss_a INTEGER NOT NULL, loss_b INTEGER NOT NULL, pressure_a INTEGER NOT NULL, pressure_b INTEGER NOT NULL,
-        order_a TEXT NOT NULL CHECK (order_a IN ('ORDERED','WORN','SHAKEN','BROKEN')),
-        order_b TEXT NOT NULL CHECK (order_b IN ('ORDERED','WORN','SHAKEN','BROKEN')),
+        order_a TEXT NOT NULL CHECK (order_a IN ('ORDERED','WORN','SHAKEN','CRITICAL','BROKEN')),
+        order_b TEXT NOT NULL CHECK (order_b IN ('ORDERED','WORN','SHAKEN','CRITICAL','BROKEN')),
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY (battle_id,round_number)
       );
     `
@@ -848,5 +848,17 @@ export const migrations = [
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+    `
+  },
+  {
+    version: 22,
+    name: "siege_critical_battle_order",
+    sql: `
+      ALTER TABLE battle_rounds DROP CONSTRAINT IF EXISTS battle_rounds_order_a_check;
+      ALTER TABLE battle_rounds DROP CONSTRAINT IF EXISTS battle_rounds_order_b_check;
+      ALTER TABLE battle_rounds ADD CONSTRAINT battle_rounds_order_a_check
+        CHECK (order_a IN ('ORDERED','WORN','SHAKEN','CRITICAL','BROKEN'));
+      ALTER TABLE battle_rounds ADD CONSTRAINT battle_rounds_order_b_check
+        CHECK (order_b IN ('ORDERED','WORN','SHAKEN','CRITICAL','BROKEN'));
     `
   }] as const;
