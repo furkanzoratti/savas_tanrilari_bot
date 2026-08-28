@@ -37,4 +37,12 @@ describe("yönetim komutları", () => {
     const command = commandBuilders.find((item) => item.name === "devlet-rolleri");
     expect(command?.description).toContain("eksik devlet rollerini");
   });
+
+  it("hatalı alımları otomatik tamamlanan ayrı bir yönetici komutuyla iptal eder", () => {
+    const command = commandBuilders.find((item) => item.name === "alim-iptal");
+    const purchase = command?.options?.find((option) => option.name === "siparis");
+
+    expect(command?.description).toContain("Yalnızca yönetici");
+    expect(purchase).toMatchObject({ required: true, autocomplete: true });
+  });
 });

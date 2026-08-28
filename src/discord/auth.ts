@@ -1,8 +1,8 @@
-import { PermissionFlagsBits, type ChatInputCommandInteraction, type GuildMember, type MessageComponentInteraction, type ModalSubmitInteraction } from "discord.js";
+import { PermissionFlagsBits, type AutocompleteInteraction, type ChatInputCommandInteraction, type GuildMember, type MessageComponentInteraction, type ModalSubmitInteraction } from "discord.js";
 import { config } from "../config.js";
 import { gameService, GameError } from "../services/game-service.js";
 
-type GuildInteraction = ChatInputCommandInteraction | MessageComponentInteraction | ModalSubmitInteraction;
+type GuildInteraction = AutocompleteInteraction | ChatInputCommandInteraction | MessageComponentInteraction | ModalSubmitInteraction;
 
 export function isGameMaster(interaction: GuildInteraction): boolean {
   if (interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) return true;

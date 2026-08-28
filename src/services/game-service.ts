@@ -23,7 +23,23 @@ interface SettlementRow {
   is_coastal: boolean; last_acquisition_income: number; curia_guard_granted: boolean;
   black_market_active: boolean; epidemic_active: boolean; unrest_active: boolean; rebellion_active: boolean;
 }
-interface BuildingRow { settlement_id: string; building_type: string; level: number; target_level: number | null; status: "ACTIVE" | "BUILDING"; completion_turn: number | null }
+interface BuildingRow { settlement_id: string; building_type: string; level: number; target_level: number | null; status: "ACTIVE" | "BUILDING"; started_turn: number | null; completion_turn: number | null }
+
+export type PendingPurchaseKind = "UNIT" | "SHIP" | "SIEGE" | "BUILDING";
+export interface PendingPurchase {
+  key: string;
+  kind: PendingPurchaseKind;
+  countryName: string;
+  settlementName: string;
+  itemName: string;
+  quantity: number;
+  refundableAmount: number;
+  progressNote: string;
+}
+
+export interface PurchaseCancellationResult extends PendingPurchase {
+  treasury: number;
+}
 
 export interface SettlementPolicyRow {
   id: string; settlement_id: string; policy_key: CityPolicyKey;
@@ -715,6 +731,259 @@ export const gameService = {
       client.release();
     }
   },
+  async listPendingPurchases(guildId: string, query = ""): Promise<PendingPurchase[]> {
+    const [unitOrders, shipOrders, siegeOrders, buildingOrders] = await Promise.all([
+      pool.query<{
+        id: string; country_name: string; settlement_name: string; unit_type: keyof typeof UNITS;
+        total_quantity: number; remaining_quantity: number; paid_amount: number; ordered_turn: number;
+      }>(`SELECT ro.id,c.name AS country_name,s.name AS settlement_name,ro.unit_type,
+                 ro.total_quantity,ro.remaining_quantity,ro.paid_amount,ro.ordered_turn
+            FROM recruitment_orders ro
+            JOIN countries c ON c.id=ro.country_id
+            JOIN settlements s ON s.id=ro.settlement_id
+           WHERE c.guild_id=$1 AND ro.status='TRAINING'
+           ORDER BY c.name,s.name,ro.created_at`, [guildId]),
+      pool.query<{
+        id: string; country_name: string; settlement_name: string; ship_type: keyof typeof SHIPS;
+        quantity: number; paid_amount: number; completion_turn: number;
+      }>(`SELECT no.id,c.name AS country_name,s.name AS settlement_name,no.ship_type,
+                 no.quantity,no.paid_amount,no.completion_turn
+            FROM naval_orders no
+            JOIN countries c ON c.id=no.country_id
+            JOIN settlements s ON s.id=no.settlement_id
+           WHERE c.guild_id=$1 AND no.status='BUILDING'
+           ORDER BY c.name,s.name,no.created_at`, [guildId]),
+      pool.query<{
+        id: string; country_name: string; settlement_name: string; asset_type: keyof typeof SIEGE_ASSETS;
+        quantity: number; paid_amount: number; completion_turn: number;
+      }>(`SELECT so.id,c.name AS country_name,s.name AS settlement_name,so.asset_type,
+                 so.quantity,so.paid_amount,so.completion_turn
+            FROM siege_orders so
+            JOIN countries c ON c.id=so.country_id
+            JOIN settlements s ON s.id=so.settlement_id
+           WHERE c.guild_id=$1 AND so.status='BUILDING'
+           ORDER BY c.name,s.name,so.created_at`, [guildId]),
+      pool.query<{
+        settlement_id: string; country_id: string; country_name: string; settlement_name: string;
+        building_type: string; level: number; target_level: number; started_turn: number; completion_turn: number;
+      }>(`SELECT b.settlement_id,c.id AS country_id,c.name AS country_name,s.name AS settlement_name,
+                 b.building_type,b.level,b.target_level,b.started_turn,b.completion_turn
+            FROM buildings b
+            JOIN settlements s ON s.id=b.settlement_id
+            JOIN countries c ON c.id=s.country_id
+           WHERE c.guild_id=$1 AND b.status='BUILDING'
+           ORDER BY c.name,s.name,b.started_turn,b.building_type`, [guildId])
+    ]);
+
+    const purchases: PendingPurchase[] = [];
+    for (const row of unitOrders.rows) {
+      const total = Number(row.total_quantity);
+      const remaining = Number(row.remaining_quantity);
+      const paid = Number(row.paid_amount);
+      const isObserver = row.unit_type === "observer";
+      purchases.push({
+        key: `UNIT|${row.id}`, kind: "UNIT", countryName: row.country_name,
+        settlementName: row.settlement_name, itemName: UNITS[row.unit_type]?.name ?? row.unit_type,
+        quantity: isObserver ? 1 : remaining, refundableAmount: Math.floor(paid * remaining / Math.max(1, total)),
+        progressNote: remaining === total ? "Teslimat başlamadı" : `${remaining.toLocaleString("tr-TR")}/${total.toLocaleString("tr-TR")} personel bekliyor`
+      });
+    }
+    for (const row of shipOrders.rows) {
+      purchases.push({
+        key: `SHIP|${row.id}`, kind: "SHIP", countryName: row.country_name,
+        settlementName: row.settlement_name, itemName: SHIPS[row.ship_type]?.name ?? row.ship_type,
+        quantity: Number(row.quantity), refundableAmount: Number(row.paid_amount),
+        progressNote: `Tur ${row.completion_turn} tamamlanacak`
+      });
+    }
+    for (const row of siegeOrders.rows) {
+      purchases.push({
+        key: `SIEGE|${row.id}`, kind: "SIEGE", countryName: row.country_name,
+        settlementName: row.settlement_name, itemName: SIEGE_ASSETS[row.asset_type]?.name ?? row.asset_type,
+        quantity: Number(row.quantity), refundableAmount: Number(row.paid_amount),
+        progressNote: `Tur ${row.completion_turn} tamamlanacak`
+      });
+    }
+    for (const row of buildingOrders.rows) {
+      const definition = BUILDINGS[row.building_type];
+      const description = `${row.settlement_name}: ${definition?.name ?? row.building_type} Sv${row.target_level}`;
+      const payment = await pool.query<{ amount: number }>(
+        `SELECT amount FROM transactions
+          WHERE country_id=$1 AND turn=$2 AND kind='BUILDING_PURCHASE' AND amount<0 AND description=$3
+          ORDER BY created_at DESC LIMIT 1`,
+        [row.country_id, row.started_turn, description]
+      );
+      purchases.push({
+        key: `BUILDING|${row.settlement_id}|${row.building_type}`, kind: "BUILDING",
+        countryName: row.country_name, settlementName: row.settlement_name,
+        itemName: `${definition?.name ?? row.building_type} Sv${row.target_level}`,
+        quantity: 1, refundableAmount: Math.max(0, -Number(payment.rows[0]?.amount ?? 0)),
+        progressNote: `Tur ${row.completion_turn} tamamlanacak`
+      });
+    }
+
+    const needle = query.toLocaleLowerCase("tr-TR").trim();
+    return purchases
+      .filter((purchase) => !needle || [
+        purchase.countryName, purchase.settlementName, purchase.itemName, purchase.kind
+      ].some((value) => value.toLocaleLowerCase("tr-TR").includes(needle)))
+      .sort((left, right) => `${left.countryName}|${left.settlementName}|${left.itemName}`
+        .localeCompare(`${right.countryName}|${right.settlementName}|${right.itemName}`, "tr-TR"))
+      .slice(0, 25);
+  },
+
+  async cancelPendingPurchase(input: {
+    guildId: string; actorId: string; purchaseKey: string;
+  }): Promise<PurchaseCancellationResult> {
+    const [kind, id, extra] = input.purchaseKey.split("|");
+    if (!["UNIT", "SHIP", "SIEGE", "BUILDING"].includes(kind ?? "")) {
+      throw new GameError("Geçersiz alım kaydı.");
+    }
+    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (!id || !uuidPattern.test(id)) throw new GameError("Geçersiz alım kimliği.");
+
+    return withTransaction(async (client) => {
+      const guild = await getGuild(client, input.guildId);
+      let countryId = "";
+      let settlementId = "";
+      let entityId = id;
+      let refund = 0;
+      let purchase: PendingPurchase;
+
+      if (kind === "UNIT") {
+        const result = await client.query<{
+          id: string; country_id: string; settlement_id: string; country_name: string; settlement_name: string;
+          unit_type: keyof typeof UNITS; total_quantity: number; remaining_quantity: number; paid_amount: number; ordered_turn: number;
+        }>(`SELECT ro.id,ro.country_id,ro.settlement_id,c.name AS country_name,s.name AS settlement_name,
+                   ro.unit_type,ro.total_quantity,ro.remaining_quantity,ro.paid_amount,ro.ordered_turn
+              FROM recruitment_orders ro
+              JOIN countries c ON c.id=ro.country_id
+              JOIN settlements s ON s.id=ro.settlement_id
+             WHERE ro.id=$1 AND c.guild_id=$2 AND ro.status='TRAINING'
+             FOR UPDATE OF ro,c,s`, [id, input.guildId]);
+        const row = result.rows[0];
+        if (!row) throw new GameError("Bu asker alımı bulunamadı veya artık tamamlanmış/iptal edilmiş.");
+        const total = Number(row.total_quantity);
+        const remaining = Number(row.remaining_quantity);
+        refund = Math.floor(Number(row.paid_amount) * remaining / Math.max(1, total));
+        countryId = row.country_id;
+        settlementId = row.settlement_id;
+        await client.query("DELETE FROM recruitment_waves WHERE order_id=$1 AND processed_at IS NULL", [row.id]);
+        await client.query("UPDATE recruitment_orders SET status='CANCELLED',remaining_quantity=0 WHERE id=$1", [row.id]);
+        await client.query(
+          `UPDATE recruitment_usage
+              SET quantity=GREATEST(0,quantity-$1)
+            WHERE settlement_id=$2 AND acquisition_turn=$3`,
+          [remaining, row.settlement_id, row.ordered_turn]
+        );
+        const isObserver = row.unit_type === "observer";
+        purchase = {
+          key: input.purchaseKey, kind: "UNIT", countryName: row.country_name,
+          settlementName: row.settlement_name, itemName: UNITS[row.unit_type]?.name ?? row.unit_type,
+          quantity: isObserver ? 1 : remaining, refundableAmount: refund,
+          progressNote: remaining === total ? "Siparişin tamamı iptal edildi" : `Teslim edilmemiş ${remaining.toLocaleString("tr-TR")}/${total.toLocaleString("tr-TR")} personel iptal edildi`
+        };
+      } else if (kind === "SHIP") {
+        const result = await client.query<{
+          id: string; country_id: string; settlement_id: string; country_name: string; settlement_name: string;
+          ship_type: keyof typeof SHIPS; quantity: number; paid_amount: number; completion_turn: number;
+        }>(`SELECT no.id,no.country_id,no.settlement_id,c.name AS country_name,s.name AS settlement_name,
+                   no.ship_type,no.quantity,no.paid_amount,no.completion_turn
+              FROM naval_orders no
+              JOIN countries c ON c.id=no.country_id
+              JOIN settlements s ON s.id=no.settlement_id
+             WHERE no.id=$1 AND c.guild_id=$2 AND no.status='BUILDING'
+             FOR UPDATE OF no,c,s`, [id, input.guildId]);
+        const row = result.rows[0];
+        if (!row) throw new GameError("Bu gemi alımı bulunamadı veya artık tamamlanmış/iptal edilmiş.");
+        countryId = row.country_id;
+        settlementId = row.settlement_id;
+        refund = Number(row.paid_amount);
+        await client.query("UPDATE naval_orders SET status='CANCELLED' WHERE id=$1", [row.id]);
+        purchase = {
+          key: input.purchaseKey, kind: "SHIP", countryName: row.country_name,
+          settlementName: row.settlement_name, itemName: SHIPS[row.ship_type]?.name ?? row.ship_type,
+          quantity: Number(row.quantity), refundableAmount: refund, progressNote: "Gemi üretim emri iptal edildi"
+        };
+      } else if (kind === "SIEGE") {
+        const result = await client.query<{
+          id: string; country_id: string; settlement_id: string; country_name: string; settlement_name: string;
+          asset_type: keyof typeof SIEGE_ASSETS; quantity: number; paid_amount: number; completion_turn: number;
+        }>(`SELECT so.id,so.country_id,so.settlement_id,c.name AS country_name,s.name AS settlement_name,
+                   so.asset_type,so.quantity,so.paid_amount,so.completion_turn
+              FROM siege_orders so
+              JOIN countries c ON c.id=so.country_id
+              JOIN settlements s ON s.id=so.settlement_id
+             WHERE so.id=$1 AND c.guild_id=$2 AND so.status='BUILDING'
+             FOR UPDATE OF so,c,s`, [id, input.guildId]);
+        const row = result.rows[0];
+        if (!row) throw new GameError("Bu kuşatma aleti alımı bulunamadı veya artık tamamlanmış/iptal edilmiş.");
+        countryId = row.country_id;
+        settlementId = row.settlement_id;
+        refund = Number(row.paid_amount);
+        await client.query("UPDATE siege_orders SET status='CANCELLED' WHERE id=$1", [row.id]);
+        purchase = {
+          key: input.purchaseKey, kind: "SIEGE", countryName: row.country_name,
+          settlementName: row.settlement_name, itemName: SIEGE_ASSETS[row.asset_type]?.name ?? row.asset_type,
+          quantity: Number(row.quantity), refundableAmount: refund, progressNote: "Kuşatma aleti üretim emri iptal edildi"
+        };
+      } else {
+        if (!extra || !BUILDINGS[extra]) throw new GameError("Geçersiz bina alımı.");
+        const result = await client.query<{
+          country_id: string; country_name: string; settlement_id: string; settlement_name: string;
+          building_type: string; level: number; target_level: number; started_turn: number;
+        }>(`SELECT c.id AS country_id,c.name AS country_name,s.id AS settlement_id,s.name AS settlement_name,
+                   b.building_type,b.level,b.target_level,b.started_turn
+              FROM buildings b
+              JOIN settlements s ON s.id=b.settlement_id
+              JOIN countries c ON c.id=s.country_id
+             WHERE b.settlement_id=$1 AND b.building_type=$2 AND b.status='BUILDING' AND c.guild_id=$3
+             FOR UPDATE OF b,c,s`, [id, extra, input.guildId]);
+        const row = result.rows[0];
+        if (!row) throw new GameError("Bu bina alımı bulunamadı veya artık tamamlanmış/iptal edilmiş.");
+        const definition = BUILDINGS[row.building_type]!;
+        const description = `${row.settlement_name}: ${definition.name} Sv${row.target_level}`;
+        const payment = await client.query<{ amount: number }>(
+          `SELECT amount FROM transactions
+            WHERE country_id=$1 AND turn=$2 AND kind='BUILDING_PURCHASE' AND amount<0 AND description=$3
+            ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
+          [row.country_id, row.started_turn, description]
+        );
+        refund = Math.max(0, -Number(payment.rows[0]?.amount ?? 0));
+        if (refund <= 0) throw new GameError("Bina alımının özgün ödeme kaydı bulunamadı; güvenli iade yapılamadı.");
+        countryId = row.country_id;
+        settlementId = row.settlement_id;
+        entityId = row.settlement_id;
+        if (Number(row.level) <= 0) {
+          await client.query("DELETE FROM buildings WHERE settlement_id=$1 AND building_type=$2", [row.settlement_id, row.building_type]);
+        } else {
+          await client.query(
+            "UPDATE buildings SET status='ACTIVE',target_level=NULL,started_turn=NULL,completion_turn=NULL WHERE settlement_id=$1 AND building_type=$2",
+            [row.settlement_id, row.building_type]
+          );
+        }
+        purchase = {
+          key: input.purchaseKey, kind: "BUILDING", countryName: row.country_name,
+          settlementName: row.settlement_name, itemName: `${definition.name} Sv${row.target_level}`,
+          quantity: 1, refundableAmount: refund, progressNote: "Bina inşaatı/seviye yükseltmesi iptal edildi"
+        };
+      }
+
+      if (refund <= 0) throw new GameError("Bu alım için iade edilebilir ödeme kalmamış.");
+      await client.query("UPDATE settlements SET local_treasury=local_treasury+$1 WHERE id=$2", [refund, settlementId]);
+      const treasury = await syncCountryTreasury(client, countryId);
+      await client.query(
+        "INSERT INTO transactions(country_id,turn,kind,amount,description) VALUES($1,$2,'PURCHASE_REFUND',$3,$4)",
+        [countryId, guild.current_turn, refund, `${purchase.settlementName}: ${purchase.itemName} yönetici iptali ve iadesi`]
+      );
+      await audit(client, input.guildId, input.actorId, "ADMIN_PURCHASE_CANCEL", "purchase", entityId, {
+        purchaseKey: input.purchaseKey, kind: purchase.kind, settlementId,
+        itemName: purchase.itemName, quantity: purchase.quantity, refund
+      });
+      return { ...purchase, refundableAmount: refund, treasury };
+    });
+  },
+
   async purchaseBuilding(input: { guildId: string; actorId: string; countryId: string; settlementId: string; buildingType: string }): Promise<{ targetLevel: number; completionTurn: number; cost: number }> {
     return withTransaction(async (client) => {
       const guild = await getGuild(client, input.guildId);

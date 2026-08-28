@@ -121,6 +121,9 @@ export const commandBuilders = [
     .addIntegerOption((option) => option.setName("miktar").setDescription("Üretilecek adet").setMinValue(1).setRequired(true))
     .addStringOption(countryOption),
   new SlashCommandBuilder()
+    .setName("alim-iptal").setDescription("Yalnızca yönetici: hatalı bekleyen alımı iptal eder ve ücretini iade eder")
+    .addStringOption((option) => option.setName("siparis").setDescription("İptal edilecek bekleyen alımı yazmaya başlayarak seçin").setRequired(true).setAutocomplete(true)),
+  new SlashCommandBuilder()
     .setName("seferberlik").setDescription("Ülkenin seferberlik seviyesini değiştirir")
     .addStringOption((option) => option.setName("seviye").setDescription("Yeni seferberlik seviyesi").setRequired(true)
       .addChoices(...Object.entries(MOBILIZATION_RULES).map(([value, rule]) => ({ name: rule.label, value }))))

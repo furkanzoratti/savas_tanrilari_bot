@@ -499,6 +499,20 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
   if (interaction.commandName === "belge") {
     const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
     await sendDocument(interaction, country.id);
+  } else if (interaction.commandName === "alim-iptal") {
+    requireGameMaster(interaction);
+    if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
+    await interaction.deferReply({ ephemeral: true });
+    const result = await gameService.cancelPendingPurchase({
+      guildId: interaction.guildId,
+      actorId: interaction.user.id,
+      purchaseKey: interaction.options.getString("siparis", true)
+    });
+    await interaction.editReply(
+      `✅ **${result.countryName} / ${result.settlementName}** — ${number(result.quantity)} **${result.itemName}** alımı iptal edildi.\n` +
+      `💰 **${gold(result.refundableAmount)}** yerel hazineye iade edildi. Devlet hazinesi: **${gold(result.treasury)}**.\n` +
+      `_${result.progressNote}_`
+    );
   } else if (interaction.commandName === "alim") {
     await startPurchase(interaction, "build");
   } else if (interaction.commandName === "asker-alimi") {
@@ -673,11 +687,25 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
 }
 
 async function handleAutocomplete(interaction: AutocompleteInteraction): Promise<void> {
-  if (interaction.commandName !== "yonetim" || interaction.options.getFocused(true).name !== "kultur") {
+  const focused = interaction.options.getFocused(true);
+  if (interaction.commandName === "alim-iptal" && focused.name === "siparis") {
+    if (!interaction.guildId || !isGameMaster(interaction)) {
+      await interaction.respond([]);
+      return;
+    }
+    const purchases = await gameService.listPendingPurchases(interaction.guildId, String(focused.value));
+    const icons = { UNIT: "⚔️", SHIP: "⚓", SIEGE: "🏗️", BUILDING: "🏛️" } as const;
+    await interaction.respond(purchases.map((purchase) => ({
+      name: `${icons[purchase.kind]} ${purchase.countryName} / ${purchase.settlementName} • ${number(purchase.quantity)} ${purchase.itemName} • iade ${gold(purchase.refundableAmount)}`.slice(0, 100),
+      value: purchase.key
+    })));
+    return;
+  }
+  if (interaction.commandName !== "yonetim" || focused.name !== "kultur") {
     await interaction.respond([]);
     return;
   }
-  const query = String(interaction.options.getFocused()).toLocaleLowerCase("tr-TR").trim();
+  const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
   const choices = Object.entries(CULTURE_GROUPS)
     .filter(([key, value]) => key !== "UNASSIGNED" && (!query || key.toLocaleLowerCase("tr-TR").includes(query) || value.label.toLocaleLowerCase("tr-TR").includes(query)))
     .slice(0, 25)
