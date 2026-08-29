@@ -16,12 +16,18 @@ export interface TurnAnnouncementInput {
   recruitmentArrivalDetails?: Array<{ settlementName: string; unitName: string; quantity: number }>;
   completedShipDetails?: Array<{ settlementName: string; shipName: string; quantity: number }>;
   completedSiegeDetails?: Array<{ settlementName: string; assetName: string; quantity: number }>;
+  garrisonReplenishmentStartedDetails?: Array<{ settlementName: string; personnel: number; cost: number; completionTurn: number; reason: string }>;
+  garrisonReplenishmentCompletedDetails?: Array<{ settlementName: string; personnel: number }>;
   garrisonUpgradeDetails?: string[];
   activatedPolicyDetails?: Array<{ settlementName: string; policyName: string }>;
   unrestDetails?: Array<{ settlementName: string; chance: number; roll: number }>;
   starvationDetails?: Array<{ settlementName: string; remaining: number; capacity: number }>;
   pantheonLoanDetails?: Array<{ settlementName: string; amount: number; remaining: number }>;
   incomePenaltyDetails?: Array<{ settlementName: string; percent: number; deductedAmount: number; remainingAcquisitionTurns: number; reason: string }>;
+  mercenaryArrivalDetails?: Array<{ countryName: string; settlementName: string; companyName: string; upkeep: number }>;
+  mercenaryUpkeepDetails?: Array<{ countryName: string; companyName: string; amount: number }>;
+  mercenaryUnpaidDetails?: Array<{ countryName: string; companyName: string; amount: number }>;
+  mercenaryEndedDetails?: Array<{ countryName: string; companyName: string; reason: string }>;
 }
 
 function fieldValue(lines: string[]): string {
@@ -46,7 +52,7 @@ export function turnAnnouncement(input: TurnAnnouncementInput): EmbedBuilder {
       "Yeni rol turu açılmıştır. Askerî hareketler, diplomatik girişimler ve devlet hamleleri işleme alınabilir.",
       input.acquisition ? "🪙 **Bu tur bir Alım Turudur.** Gelir, nüfus ve bakım sonuçları işlenmiştir." : "Bu tur standart rol turudur.",
       `🏗️ Tamamlanan bina: **${input.completedBuildings ?? 0}** • ⚔️ Katılan asker: **${(input.recruitmentArrivals ?? 0).toLocaleString("tr-TR")}**`,
-      `🛡️ Garnizon yükselişi: **${input.garrisonUpgrades ?? 0}** • 🚢 Tamamlanan gemi: **${input.completedShips ?? 0}** • 🛠️ Kuşatma aleti: **${input.completedSiegeAssets ?? 0}**`
+      `🛡️ Tamamlanan garnizon: **${input.garrisonUpgrades ?? 0}** • 🚢 Tamamlanan gemi: **${input.completedShips ?? 0}** • 🛠️ Kuşatma aleti: **${input.completedSiegeAssets ?? 0}**`
     ].join("\n"))
     .setImage(BRAND_BANNER_URL)
     .setFooter({ text: "Savaş Tanrıları Role Play • Resmî Tur Duyurusu" })
@@ -69,8 +75,14 @@ export function turnAnnouncement(input: TurnAnnouncementInput): EmbedBuilder {
     value: fieldValue(input.completedSiegeDetails.map((item) => `• **${item.settlementName}** — ${item.quantity.toLocaleString("tr-TR")} ${item.assetName}`))
   });
   if (input.garrisonUpgradeDetails?.length) embed.addFields({
-    name: "🛡️ Garnizon Kademesi Yükselen Yerleşkeler",
-    value: fieldValue(input.garrisonUpgradeDetails.map((name) => `• **${name}**`))
+    name: "🛡️ Garnizonu Tamamlanan Yerleşkeler",
+    value: fieldValue((input.garrisonReplenishmentCompletedDetails ?? []).map((item) => `• **${item.settlementName}** — ${item.personnel.toLocaleString("tr-TR")} asker`))
+  });
+  if (input.garrisonReplenishmentStartedDetails?.length) embed.addFields({
+    name: "🛡️ Başlatılan Zorunlu Garnizon Yenilemeleri",
+    value: fieldValue(input.garrisonReplenishmentStartedDetails.map((item) =>
+      `• **${item.settlementName}** — ${item.personnel.toLocaleString("tr-TR")} asker • ${item.cost.toLocaleString("tr-TR")} Altın • Tur ${item.completionTurn}`
+    ))
   });
   if (input.activatedPolicyDetails?.length) embed.addFields({
     name: "⚖️ Etkinleşen Şehir Politikaları",
@@ -93,6 +105,28 @@ export function turnAnnouncement(input: TurnAnnouncementInput): EmbedBuilder {
     value: fieldValue(input.incomePenaltyDetails.map((item) =>
       `• **${item.settlementName}** — %${item.percent} • ${item.deductedAmount.toLocaleString("tr-TR")} Altın kesildi • Kalan: ${item.remainingAcquisitionTurns} Alım Turu • ${item.reason}`
     ))
+  });
+  if (input.mercenaryArrivalDetails?.length) embed.addFields({
+    name: "\u{1FA99} Yerleşkeye Ulaşan Paralı Askerler",
+    value: fieldValue(input.mercenaryArrivalDetails.map((item) =>
+      `- **${item.countryName} / ${item.settlementName}** - ${item.companyName} - Ilk bakim: ${item.upkeep.toLocaleString("tr-TR")} Altin`
+    ))
+  });
+  if (input.mercenaryUpkeepDetails?.length) embed.addFields({
+    name: "\u{1F4B0} Paralı Asker Bakımları",
+    value: fieldValue(input.mercenaryUpkeepDetails.map((item) =>
+      `- **${item.countryName}** - ${item.companyName}: -${item.amount.toLocaleString("tr-TR")} Altin`
+    ))
+  });
+  if (input.mercenaryUnpaidDetails?.length) embed.addFields({
+    name: "\u26A0\uFE0F Ödenemeyen Paralı Asker Bakımları",
+    value: fieldValue(input.mercenaryUnpaidDetails.map((item) =>
+      `- **${item.countryName}** - ${item.companyName}: ${item.amount.toLocaleString("tr-TR")} Altin - Hareket ve savas kilitlendi`
+    ))
+  });
+  if (input.mercenaryEndedDetails?.length) embed.addFields({
+    name: "\u{1F4DC} Sona Eren Paralı Asker Sözleşmeleri",
+    value: fieldValue(input.mercenaryEndedDetails.map((item) => `- **${item.countryName}** - ${item.companyName} - ${item.reason}`))
   });
   return embed;
 }

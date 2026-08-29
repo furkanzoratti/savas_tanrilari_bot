@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { garrisonComposition, garrisonLevel } from "./garrison.js";
+import { garrisonComposition, garrisonDeficit, garrisonLevel, garrisonPersonnel, garrisonRecruitmentCost } from "./garrison.js";
 
 describe("standart yerleşke garnizonu", () => {
   it.each([
@@ -27,5 +27,19 @@ describe("standart yerleşke garnizonu", () => {
     expect(garrisonLevel(74_999)).toBe(1);
     expect(garrisonLevel(75_000)).toBe(2);
     expect(garrisonLevel(200_000)).toBe(7);
+  });
+
+  it("yalnız eksik standart birlikleri iki turluk yenilemeye ayırır", () => {
+    const deficit = garrisonDeficit(
+      { lightInfantry: 400, spears: 400, archers: 200 },
+      { lightInfantry: 250, spears: 400, archers: 50 }
+    );
+    expect(deficit).toEqual({ lightInfantry: 150, spears: 0, archers: 150 });
+    expect(garrisonPersonnel(deficit)).toBe(300);
+  });
+
+  it("garnizon maliyetini 1.000 kişilik temel fiyatlardan orantılar", () => {
+    expect(garrisonRecruitmentCost({ lightInfantry: 200, spears: 200, archers: 100 })).toBe(850);
+    expect(garrisonRecruitmentCost({ lightInfantry: 49, spears: 49, archers: 25 })).toBe(210);
   });
 });

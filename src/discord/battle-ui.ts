@@ -134,12 +134,12 @@ function publicPayload(view: BattleView, result?: Parameters<typeof battleEmbed>
   return { embeds: [battleEmbed(view, result)], components: components(view), files: [new AttachmentBuilder(asset.path, { name: asset.name })] };
 }
 
-function casualtyReportEmbed(view: BattleView, rows: Array<{ side_key: BattleSideKey; force_type: string; calculated_loss: number; applied_loss: number; shortfall: number; population_loss_applied: number; population_shortfall: number }>): EmbedBuilder {
+function casualtyReportEmbed(view: BattleView, rows: Array<{ side_key: BattleSideKey; force_type: string; calculated_loss: number; applied_loss: number; shortfall: number; mercenary_loss_applied: number; population_loss_applied: number; population_shortfall: number }>): EmbedBuilder {
   const lineFor = (row: typeof rows[number]) => {
     const naval = row.force_type in NAVAL_UNIT_STATS;
     const label = BATTLE_UNIT_STATS[row.force_type as BattleUnitType]?.label ?? NAVAL_UNIT_STATS[row.force_type as NavalUnitType]?.label ?? row.force_type;
     const personnelLabel = naval ? "mürettebat/nüfus" : "nüfus";
-    return `• ${label}: hesaplanan **${number(row.calculated_loss)}** • birlikten düşülen **${number(row.applied_loss)}**${row.shortfall ? ` • ⚠️ birlik açığı **${number(row.shortfall)}**` : ""}${row.population_loss_applied ? ` • ${personnelLabel} **-${number(row.population_loss_applied)}**` : ""}${row.population_shortfall ? ` • ⚠️ ${personnelLabel} açığı **${number(row.population_shortfall)}**` : ""}`;
+    return `• ${label}: hesaplanan **${number(row.calculated_loss)}** • birlikten düşülen **${number(row.applied_loss)}**${row.mercenary_loss_applied ? ` • paralı askerden **-${number(row.mercenary_loss_applied)}**` : ""}${row.shortfall ? ` • ⚠️ birlik açığı **${number(row.shortfall)}**` : ""}${row.population_loss_applied ? ` • ${personnelLabel} **-${number(row.population_loss_applied)}**` : ""}${row.population_shortfall ? ` • ⚠️ ${personnelLabel} açığı **${number(row.population_shortfall)}**` : ""}`;
   };
   const text = (["A", "B"] as BattleSideKey[]).map((side) => {
     const sideRows = rows.filter((row) => row.side_key === side);
@@ -199,6 +199,12 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
     const view = await battleService.setSupport({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id,
       side, assetType: interaction.options.getString("alet", true) as SiegeAssetType, target: interaction.options.getString("hedef", true) as SiegeTarget, quantity: interaction.options.getInteger("miktar", true) });
     await interaction.reply({ content: `✅ ${side} tarafının gizli kuşatma desteği güncellendi. Hedef: **${interaction.options.getString("hedef", true)}**`, ephemeral: true });
+  } else if (sub === "parali-asker-ayarla") {
+    requireGameMaster(interaction);
+    const side = interaction.options.getString("taraf", true) as BattleSideKey;
+    const action = interaction.options.getString("islem", true) as "ADD" | "REMOVE";
+    const view = await battleService.setMercenaryAssignment({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id, side, action, companyKey: interaction.options.getString("sirket", true) });
+    await interaction.reply({ content: `✅ Paralı asker şirketi ${action === "ADD" ? "savaş taslağına eklendi" : "savaş taslağından çıkarıldı"}. ${side} tarafının açık toplamı: **${number(view.sides[side].initial_total)}**`, ephemeral: true });
   } else if (sub === "saha-aleti-al") {
     const assetType = interaction.options.getString("alet", true) as "ladder_group" | "ram";
     const quantity = interaction.options.getInteger("miktar", true);

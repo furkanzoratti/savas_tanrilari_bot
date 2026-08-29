@@ -39,3 +39,27 @@ describe("yirmi ikinci migration", () => {
     expect(migration?.sql.match(/'CRITICAL'/g)).toHaveLength(2);
   });
 });
+
+describe("yirmi ucuncu migration", () => {
+  const migration = migrations.find((item) => item.version === 23);
+  it("parali asker sozlesmelerini ve savas kaynaklarini saklar", () => {
+    expect(migration?.name).toBe("mercenary_contracts_and_battle_sources");
+    expect(migration?.sql).toContain("CREATE TABLE IF NOT EXISTS mercenary_contracts");
+    expect(migration?.sql).toContain("arrival_turn=hired_turn+1");
+    expect(migration?.sql).toContain("CREATE TABLE IF NOT EXISTS battle_mercenary_assignments");
+
+    expect(migration?.sql).toContain("mercenary_loss_applied INTEGER");
+  });
+});
+
+describe("yirmi dördüncü migration", () => {
+  const migration = migrations.find((item) => item.version === 24);
+
+  it("zorunlu garnizon yenilemesini iki rol turuna bağlar", () => {
+    expect(migration?.name).toBe("mandatory_garrison_replenishment");
+    expect(migration?.sql).toContain("CREATE TABLE IF NOT EXISTS garrison_replenishment_orders");
+    expect(migration?.sql).toContain("completion_turn=ordered_turn+2");
+    expect(migration?.sql).toContain("personnel_reserved=light_infantry+spears+archers");
+    expect(migration?.sql).toContain("garrison_replenishment_active_settlement_idx");
+  });
+});

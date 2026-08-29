@@ -217,7 +217,7 @@ export function rollSiegeSupport(
   const bonus = enhancedAssets ? Object.values(enhancedAssets).some((count) => (count ?? 0) > 0) ? 1 : 0 : uniformBonus;
   const ladder = composition.ladder_group ?? 0, ram = Math.min(1, composition.ram ?? 0), mantlet = composition.mantlet ?? 0;
   const ballista = composition.ballista ?? 0, wallBallista = composition.wall_ballista ?? 0, catapult = composition.catapult ?? 0, tower = composition.siege_tower ?? 0;
-  const ladderClash = roll(ladder, 1, 3), towerClash = roll(tower, 2, 20), mantletClash = roll(mantlet, 1, 4);
+  const ladderClash = roll(ladder, 1, 2), towerClash = roll(tower, 2, 20), mantletClash = roll(mantlet, 1, 4);
   const ballistaRoll = roll(ballista, 1, 10) + diceBonus("ballista", ballista, 1);
   const wallBallistaDamage = roll(wallBallista, 2, 8) + diceBonus("wall_ballista", wallBallista, 2);
   const catapultRoll = roll(catapult, 1, 20) + diceBonus("catapult", catapult, 1);

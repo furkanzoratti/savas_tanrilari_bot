@@ -74,6 +74,34 @@ function renderLandForces(
   return [...rows, `**Toplam:** ${number(units.reduce((sum, unit) => sum + unit.quantity, 0))} • Bakım ${gold(upkeep)}`].join("\n");
 }
 
+const mercenaryStatusLabels: Record<string, string> = {
+  PENDING: "⏳ Yolda",
+  ACTIVE: "✅ Aktif",
+  UNPAID: "⚠️ Bakımı Ödenmedi",
+  ENDED: "Sona Erdi",
+  CANCELLED: "İptal Edildi",
+  DESTROYED: "Yok Edildi"
+};
+
+function renderMercenaryContract(contract: CountryDocument["mercenaries"][number], currentTurn: number): string {
+  const units = contract.units.filter((row) => row.current_quantity > 0)
+    .map((row) => `• **${number(row.current_quantity)}** ${UNITS[row.unit_type]?.name ?? row.unit_type}`);
+  const ships = contract.ships.filter((row) => row.current_quantity > 0)
+    .map((row) => `• **${number(row.current_quantity)}** ${SHIPS[row.ship_type]?.name ?? row.ship_type}`);
+  const assets = contract.assets.filter((row) => row.current_quantity > 0)
+    .map((row) => `• **${number(row.current_quantity)}** ${SIEGE_ASSETS[row.asset_type]?.name ?? row.asset_type}`);
+  const timing = contract.status === "PENDING"
+    ? `Ulaşma: **Tur ${contract.arrival_turn}**`
+    : `Sözleşme sonu: **Tur ${contract.end_turn}**${contract.last_upkeep_turn === currentTurn ? " • Bu turun bakımı ödendi" : ""}`;
+  return [
+    `**${contract.companyName}** • ${mercenaryStatusLabels[contract.status] ?? contract.status}`,
+    `${timing} • Bakım: **${gold(contract.turn_upkeep)}**`,
+    ...units,
+    ...ships,
+    ...assets
+  ].join("\n");
+}
+
 export function renderDocument(document: CountryDocument): EmbedBuilder[] {
   const tradeSummary = document.tradeAgreements.length
     ? document.tradeAgreements.map((agreement) => `${agreement.status === "ACTIVE" ? "✅" : "⏳"} **${agreement.partner_name}** • ${TRADE_ROUTE_LABELS[agreement.route]}\n${agreement.proposer_settlement_name} (${RESOURCES[agreement.proposer_resource].label}) ⇄ ${agreement.receiver_settlement_name} (${RESOURCES[agreement.receiver_resource].label})`).join("\n\n")
@@ -86,6 +114,9 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
         return `${role.emoji} **${character.name}** — ${role.label} (+${character.skill_bonus})\n↳ ${assignment}`;
       }).join("\n\n")
     : "Henüz yetiştirilmiş devlet görevlisi yok.";
+  const mercenarySummary = (document.mercenaries ?? []).length
+    ? (document.mercenaries ?? []).map((contract) => `• **${contract.companyName}** — ${contract.settlement_name}\n↳ ${mercenaryStatusLabels[contract.status] ?? contract.status} • Bakım ${gold(contract.turn_upkeep)}`).join("\n\n")
+    : "Aktif veya yolda paralı asker sözleşmesi yok.";
 
   const summary = new EmbedBuilder()
     .setColor(0xc59b45)
@@ -117,6 +148,7 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
         inline: true
       },
       { name: "🎓 Devlet Görevlileri", value: spacedSection(characterSummary) },
+      { name: "🪙 Paralı Asker Sözleşmeleri", value: spacedSection(mercenarySummary) },
       { name: "🛡️ Müttefikler", value: spacedSection((document.allies ?? []).length
         ? (document.allies ?? []).map((ally) => `• **${ally.name}**`).join("\n")
         : "Aktif müttefik bulunmuyor.") },
@@ -222,6 +254,13 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
     }
     if (army) embed.addFields({ name: "⚔️ Ordu", value: spacedSection(army), inline: true });
 
+    if ((settlement.mercenaries ?? []).length) {
+      embed.addFields({
+        name: "🪙 Paralı Askerler",
+        value: spacedSection((settlement.mercenaries ?? []).map((contract) => renderMercenaryContract(contract, document.guild.current_turn)).join("\n\n"))
+      });
+    }
+
     if (settlement.ships.length) {
       const ships = settlement.ships.map((ship) => `• **${ship.quantity}** ${SHIPS[ship.ship_type]?.name ?? ship.ship_type}`).join("\n");
       const crew = settlement.ships.reduce((sum, ship) => sum + SHIPS[ship.ship_type].manpower * ship.quantity, 0);
@@ -236,7 +275,8 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
         ? `👁️ Tur ${wave.due_turn}: **1 Gözcü Birliği** (${number(wave.quantity)} personel)`
         : `⚔️ Tur ${wave.due_turn}: **${number(wave.quantity)}** ${UNITS[wave.unit_type]?.name ?? wave.unit_type}`),
       ...settlement.pendingShips.map((ship) => `🚢 Tur ${ship.completion_turn}: **${ship.quantity}** ${SHIPS[ship.ship_type]?.name ?? ship.ship_type}`),
-      ...(settlement.pendingSiege ?? []).map((order) => `🛠️ Tur ${order.completion_turn}: **${order.quantity}** ${SIEGE_ASSETS[order.asset_type]?.name ?? order.asset_type}`)
+      ...(settlement.pendingSiege ?? []).map((order) => `🛠️ Tur ${order.completion_turn}: **${order.quantity}** ${SIEGE_ASSETS[order.asset_type]?.name ?? order.asset_type}`),
+      ...(settlement.pendingGarrison ?? []).map((order) => `🛡️ Tur ${order.completion_turn}: **${number(order.personnel_reserved)}** zorunlu garnizon • ${gold(order.paid_amount)} ödendi`)
     ];
     if (pending.length) embed.addFields({ name: "⚙️ Üretim", value: spacedSection(pending.join("\n")) });
 

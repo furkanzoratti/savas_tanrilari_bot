@@ -71,6 +71,9 @@ describe("savaş motoru", () => {
     expect(minimum.detail.catapultWall).toBe(40);
     expect(minimum.gateDamage).toBe(35);
 
+    const maximumLadder = rollSiegeSupport({ ladder_group: 1 }, { ladder_group: "ASSAULT" }, (max) => max - 1);
+    expect(maximumLadder.detail.ladderClash).toBe(2);
+
     const army = rollSiegeSupport(
       { ballista: 1, catapult: 1 },
       { ballista: "ARMY", catapult: "ARMY" },

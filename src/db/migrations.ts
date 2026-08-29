@@ -861,4 +861,95 @@ export const migrations = [
       ALTER TABLE battle_rounds ADD CONSTRAINT battle_rounds_order_b_check
         CHECK (order_b IN ('ORDERED','WORN','SHAKEN','CRITICAL','BROKEN'));
     `
+  },
+  {
+    version: 23,
+    name: "mercenary_contracts_and_battle_sources",
+    sql: `
+      CREATE TABLE IF NOT EXISTS mercenary_contracts (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        guild_id TEXT NOT NULL REFERENCES guilds(discord_id) ON DELETE CASCADE,
+        company_key TEXT NOT NULL,
+        country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        settlement_id UUID NOT NULL REFERENCES settlements(id) ON DELETE CASCADE,
+        status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING','ACTIVE','UNPAID','ENDED','CANCELLED','DESTROYED')),
+        hired_turn INTEGER NOT NULL,
+        arrival_turn INTEGER NOT NULL,
+        end_turn INTEGER NOT NULL,
+        hire_cost BIGINT NOT NULL CHECK (hire_cost >= 0),
+        turn_upkeep BIGINT NOT NULL CHECK (turn_upkeep >= 0),
+        last_upkeep_turn INTEGER,
+        unpaid_since_turn INTEGER,
+        created_by TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CHECK (arrival_turn=hired_turn+1),
+        CHECK (end_turn>=arrival_turn+2)
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS mercenary_company_unavailable_idx
+        ON mercenary_contracts(guild_id,company_key) WHERE status IN ('PENDING','ACTIVE','UNPAID');
+      CREATE INDEX IF NOT EXISTS mercenary_contract_country_idx ON mercenary_contracts(country_id,status);
+      CREATE TABLE IF NOT EXISTS mercenary_contract_units (
+        contract_id UUID NOT NULL REFERENCES mercenary_contracts(id) ON DELETE CASCADE,
+        unit_type TEXT NOT NULL,
+        initial_quantity INTEGER NOT NULL CHECK (initial_quantity >= 0),
+        current_quantity INTEGER NOT NULL CHECK (current_quantity >= 0),
+        PRIMARY KEY(contract_id,unit_type)
+      );
+      CREATE TABLE IF NOT EXISTS mercenary_contract_ships (
+        contract_id UUID NOT NULL REFERENCES mercenary_contracts(id) ON DELETE CASCADE,
+        ship_type TEXT NOT NULL,
+        initial_quantity INTEGER NOT NULL CHECK (initial_quantity >= 0),
+        current_quantity INTEGER NOT NULL CHECK (current_quantity >= 0),
+        PRIMARY KEY(contract_id,ship_type)
+      );
+      CREATE TABLE IF NOT EXISTS mercenary_contract_assets (
+        contract_id UUID NOT NULL REFERENCES mercenary_contracts(id) ON DELETE CASCADE,
+        asset_type TEXT NOT NULL,
+        initial_quantity INTEGER NOT NULL CHECK (initial_quantity >= 0),
+        current_quantity INTEGER NOT NULL CHECK (current_quantity >= 0),
+        PRIMARY KEY(contract_id,asset_type)
+      );
+      CREATE TABLE IF NOT EXISTS battle_mercenary_assignments (
+        battle_id UUID NOT NULL REFERENCES battles(id) ON DELETE CASCADE,
+        side_key TEXT NOT NULL CHECK (side_key IN ('A','B')),
+        contract_id UUID NOT NULL REFERENCES mercenary_contracts(id) ON DELETE CASCADE,
+        initial_land JSONB NOT NULL DEFAULT '{}'::jsonb,
+        initial_ships JSONB NOT NULL DEFAULT '{}'::jsonb,
+        initial_assets JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY(battle_id,contract_id),
+        UNIQUE(battle_id,side_key,contract_id)
+      );
+      ALTER TABLE battle_casualty_applications
+        ADD COLUMN IF NOT EXISTS mercenary_loss_applied INTEGER NOT NULL DEFAULT 0 CHECK (mercenary_loss_applied >= 0);
+    `
+  },
+  {
+    version: 24,
+    name: "mandatory_garrison_replenishment",
+    sql: `
+      CREATE TABLE IF NOT EXISTS garrison_replenishment_orders (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        settlement_id UUID NOT NULL REFERENCES settlements(id) ON DELETE CASCADE,
+        country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        status TEXT NOT NULL DEFAULT 'BUILDING' CHECK (status IN ('BUILDING','COMPLETED','CANCELLED')),
+        reason TEXT NOT NULL CHECK (reason IN ('CONQUEST','BATTLE_LOSS','ROUTINE')),
+        light_infantry INTEGER NOT NULL DEFAULT 0 CHECK (light_infantry >= 0),
+        spears INTEGER NOT NULL DEFAULT 0 CHECK (spears >= 0),
+        archers INTEGER NOT NULL DEFAULT 0 CHECK (archers >= 0),
+        personnel_reserved INTEGER NOT NULL CHECK (personnel_reserved > 0),
+        paid_amount BIGINT NOT NULL CHECK (paid_amount >= 0),
+        ordered_turn INTEGER NOT NULL,
+        completion_turn INTEGER NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        completed_at TIMESTAMPTZ,
+        CHECK (completion_turn=ordered_turn+2),
+        CHECK (personnel_reserved=light_infantry+spears+archers)
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS garrison_replenishment_active_settlement_idx
+        ON garrison_replenishment_orders(settlement_id) WHERE status='BUILDING';
+      CREATE INDEX IF NOT EXISTS garrison_replenishment_due_idx
+        ON garrison_replenishment_orders(completion_turn,status);
+    `
   }] as const;

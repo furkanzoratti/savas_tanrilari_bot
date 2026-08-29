@@ -8,8 +8,10 @@ import {
   type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeComposition, type SiegeTarget, type SiegeTargets
 } from "../domain/battle.js";
 import { SIEGE_ASSETS, shipCrewRequirement } from "../domain/catalog.js";
+import { allocateLossBySource } from "../domain/loss-sources.js";
 import { siegeCostMultiplier, type ResourceType } from "../domain/resources.js";
 import { settlementResourceAccess } from "./resource-service.js";
+import { scheduleMandatoryGarrisonReplenishment } from "./garrison-service.js";
 import { GameError } from "./game-service.js";
 
 export type BattleStatus = "DRAFT" | "WAITING_FIRST_ROLL" | "WAITING_SECOND_ROLL" | "READY_TO_RESOLVE" | "FINISHED" | "CANCELLED";
@@ -38,7 +40,7 @@ export interface BattleRollRow {
 
 export interface CasualtyApplication {
   side_key: BattleSideKey; force_type: string; calculated_loss: number; applied_loss: number; shortfall: number;
-  population_loss_applied: number; population_shortfall: number;
+  mercenary_loss_applied: number; population_loss_applied: number; population_shortfall: number;
 }
 
 export interface BattleView { battle: BattleRow; sides: Record<BattleSideKey, BattleSideRow>; rolls: BattleRollRow[] }
@@ -121,6 +123,7 @@ function applyProportionalLoss(composition: BattleComposition, requestedLoss: nu
   return { remaining: result, applied };
 }
 
+
 function retreatLoss(view: BattleView, side: BattleSideKey): number {
   if (view.battle.round_number <= 1) return 0;
   const loser = view.sides[side];
@@ -139,7 +142,7 @@ function retreatLoss(view: BattleView, side: BattleSideKey): number {
 }
 
 async function casualtyRows(client: DbClient, battleId: string): Promise<CasualtyApplication[]> {
-  return (await client.query<CasualtyApplication>("SELECT side_key,force_type,calculated_loss,applied_loss,shortfall,population_loss_applied,population_shortfall FROM battle_casualty_applications WHERE battle_id=$1 ORDER BY side_key,force_type", [battleId])).rows;
+  return (await client.query<CasualtyApplication>("SELECT side_key,force_type,calculated_loss,applied_loss,shortfall,mercenary_loss_applied,population_loss_applied,population_shortfall FROM battle_casualty_applications WHERE battle_id=$1 ORDER BY side_key,force_type", [battleId])).rows;
 }
 
 async function applyLossesToDocuments(client: DbClient, battleId: string, guildId: string, actorId: string): Promise<CasualtyApplication[]> {
@@ -147,16 +150,47 @@ async function applyLossesToDocuments(client: DbClient, battleId: string, guildI
   if (!battle) throw new GameError("Savaş bulunamadı.");
   if (battle.losses_applied_at) return casualtyRows(client, battleId);
   const sides = (await client.query<BattleSideRow>("SELECT bs.*,c.name AS country_name FROM battle_sides bs JOIN countries c ON c.id=bs.country_id WHERE battle_id=$1 ORDER BY side_key FOR UPDATE OF bs", [battleId])).rows;
+  const garrisonLossSettlements = new Set<string>();
   for (const side of sides) {
     const keys = new Set([...Object.keys(side.initial_composition ?? {}), ...Object.keys(side.composition ?? {})]);
     for (const forceType of keys) {
       const calculated = Math.max(0, (side.initial_composition[forceType as BattleForceType] ?? 0) - (side.composition[forceType as BattleForceType] ?? 0));
       if (!calculated) continue;
       const naval = forceType in NAVAL_UNIT_STATS;
+      const assignmentRows = (await client.query<{ contract_id: string; initial_land: BattleComposition; initial_ships: BattleComposition }>(
+        "SELECT contract_id,initial_land,initial_ships FROM battle_mercenary_assignments WHERE battle_id=$1 AND side_key=$2 ORDER BY contract_id",
+        [battleId, side.side_key]
+      )).rows;
+      const mercenarySources = assignmentRows.map((row) => ({
+        contractId: row.contract_id,
+        quantity: Number((naval ? row.initial_ships : row.initial_land)?.[forceType as BattleForceType] ?? 0)
+      })).filter((row) => row.quantity > 0);
+      const allocation = allocateLossBySource(calculated, Number(side.initial_composition[forceType as BattleForceType] ?? 0), mercenarySources);
+      let mercenaryApplied = 0;
+      for (const share of allocation.mercenaries) {
+        const table = naval ? "mercenary_contract_ships" : "mercenary_contract_units";
+        const column = naval ? "ship_type" : "unit_type";
+        const row = (await client.query<{ current_quantity: number }>(`SELECT current_quantity FROM ${table} WHERE contract_id=$1 AND ${column}=$2 FOR UPDATE`, [share.contractId, forceType])).rows[0];
+        const deducted = Math.min(Number(row?.current_quantity ?? 0), share.loss);
+        if (deducted > 0) {
+          await client.query(`UPDATE ${table} SET current_quantity=current_quantity-$1 WHERE contract_id=$2 AND ${column}=$3`, [deducted, share.contractId, forceType]);
+          mercenaryApplied += deducted;
+        }
+      }
       const rows = naval
         ? (await client.query<{ id: string; quantity: number; settlement_id: string }>(`SELECT n.id,n.quantity,n.settlement_id FROM naval_units n JOIN settlements s ON s.id=n.settlement_id WHERE s.country_id=$1 AND n.ship_type=$2 ORDER BY CASE n.status WHEN 'HOSTILE' THEN 0 WHEN 'ACTIVE' THEN 1 ELSE 2 END,n.id FOR UPDATE OF n`, [side.country_id, forceType])).rows
-        : (await client.query<{ id: string; quantity: number; settlement_id: string }>(`SELECT u.id,u.quantity,u.settlement_id FROM unit_stacks u JOIN settlements s ON s.id=u.settlement_id WHERE s.country_id=$1 AND u.unit_type=$2 ORDER BY CASE u.status WHEN 'FIELD_HOSTILE' THEN 0 WHEN 'FIELD_FRIENDLY' THEN 1 ELSE 2 END,u.id FOR UPDATE OF u`, [side.country_id, forceType])).rows;
-      let remaining = calculated;
+        : battle.terrain === "SIEGE" && side.side_key === "B" && battle.defender_settlement_id
+          ? (await client.query<{ id: string; quantity: number; settlement_id: string; force_type: "ARMY" | "GARRISON" }>(
+              `SELECT u.id,u.quantity,u.settlement_id,u.force_type FROM unit_stacks u JOIN settlements s ON s.id=u.settlement_id
+                WHERE s.country_id=$1 AND u.unit_type=$2 AND (u.force_type='ARMY' OR (u.force_type='GARRISON' AND u.settlement_id=$3))
+                ORDER BY CASE u.status WHEN 'FIELD_HOSTILE' THEN 0 WHEN 'FIELD_FRIENDLY' THEN 1 ELSE 2 END,u.id FOR UPDATE OF u`,
+              [side.country_id, forceType, battle.defender_settlement_id]
+            )).rows
+          : (await client.query<{ id: string; quantity: number; settlement_id: string; force_type: "ARMY" }>(
+              `SELECT u.id,u.quantity,u.settlement_id,u.force_type FROM unit_stacks u JOIN settlements s ON s.id=u.settlement_id
+                WHERE s.country_id=$1 AND u.unit_type=$2 AND u.force_type='ARMY'
+                ORDER BY CASE u.status WHEN 'FIELD_HOSTILE' THEN 0 WHEN 'FIELD_FRIENDLY' THEN 1 ELSE 2 END,u.id FOR UPDATE OF u`, [side.country_id, forceType])).rows;
+      let remaining = calculated - mercenaryApplied;
       let populationApplied = 0;
       if (!naval && forceType === "militia" && side.side_key === "B" && battle.defender_settlement_id && side.temporary_militia > 0) {
         const temporaryLoss = Math.min(remaining, side.temporary_militia);
@@ -181,20 +215,33 @@ async function applyLossesToDocuments(client: DbClient, battleId: string, guildI
           const population = Number((await client.query<{ population: number }>("SELECT population FROM settlements WHERE id=$1 FOR UPDATE", [row.settlement_id])).rows[0]?.population ?? 0);
           const populationLoss = Math.min(population, personnelLoss);
           if (populationLoss > 0) await client.query("UPDATE settlements SET population=population-$1 WHERE id=$2", [populationLoss, row.settlement_id]);
+          if (!naval && "force_type" in row && row.force_type === "GARRISON") garrisonLossSettlements.add(row.settlement_id);
           populationApplied += populationLoss;
         }
         remaining -= deducted;
       }
       const applied = calculated - remaining;
+      const stateApplied = Math.max(0, applied - mercenaryApplied);
       const expectedPopulationLoss = naval
-        ? shipCrewRequirement(forceType as keyof typeof import("../domain/catalog.js").SHIPS, applied)
-        : applied;
+        ? shipCrewRequirement(forceType as keyof typeof import("../domain/catalog.js").SHIPS, stateApplied)
+        : stateApplied;
       const populationShortfall = Math.max(0, expectedPopulationLoss - populationApplied);
-      await client.query(`INSERT INTO battle_casualty_applications(battle_id,side_key,force_type,calculated_loss,applied_loss,shortfall,population_loss_applied,population_shortfall)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(battle_id,side_key,force_type) DO UPDATE SET calculated_loss=EXCLUDED.calculated_loss,applied_loss=EXCLUDED.applied_loss,shortfall=EXCLUDED.shortfall,population_loss_applied=EXCLUDED.population_loss_applied,population_shortfall=EXCLUDED.population_shortfall`,
-      [battleId, side.side_key, forceType, calculated, applied, remaining, populationApplied, populationShortfall]);
+      await client.query(`INSERT INTO battle_casualty_applications(battle_id,side_key,force_type,calculated_loss,applied_loss,shortfall,mercenary_loss_applied,population_loss_applied,population_shortfall)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(battle_id,side_key,force_type) DO UPDATE SET calculated_loss=EXCLUDED.calculated_loss,applied_loss=EXCLUDED.applied_loss,shortfall=EXCLUDED.shortfall,mercenary_loss_applied=EXCLUDED.mercenary_loss_applied,population_loss_applied=EXCLUDED.population_loss_applied,population_shortfall=EXCLUDED.population_shortfall`,
+      [battleId, side.side_key, forceType, calculated, applied, remaining, mercenaryApplied, populationApplied, populationShortfall]);
     }
   }
+  if (garrisonLossSettlements.size) {
+    const currentTurn = Number((await client.query<{ current_turn: number }>("SELECT current_turn FROM guilds WHERE discord_id=$1", [guildId])).rows[0]?.current_turn ?? 1);
+    for (const settlementId of garrisonLossSettlements) {
+      await scheduleMandatoryGarrisonReplenishment(client, { settlementId, currentTurn, reason: "BATTLE_LOSS" });
+    }
+  }
+  await client.query(`UPDATE mercenary_contracts mc SET status='DESTROYED',updated_at=NOW()
+    WHERE mc.id IN (SELECT contract_id FROM battle_mercenary_assignments WHERE battle_id=$1)
+      AND mc.status IN ('ACTIVE','UNPAID')
+      AND NOT EXISTS (SELECT 1 FROM mercenary_contract_units u WHERE u.contract_id=mc.id AND u.current_quantity>0)
+      AND NOT EXISTS (SELECT 1 FROM mercenary_contract_ships n WHERE n.contract_id=mc.id AND n.current_quantity>0)`, [battleId]);
   await client.query("UPDATE battles SET losses_applied_at=NOW() WHERE id=$1", [battleId]);
   await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'battle.casualties.apply','battle',$3,$4::jsonb)", [guildId, actorId, battleId, JSON.stringify({ automatic: true })]);
   return casualtyRows(client, battleId);
@@ -264,11 +311,67 @@ export const battleService = {
     });
   },
 
+  async setMercenaryAssignment(input: { guildId: string; channelId: string; actorId: string; side: BattleSideKey; companyKey: string; action: "ADD" | "REMOVE" }): Promise<BattleView> {
+    return withTransaction(async (client) => {
+      const battle = await activeInChannel(client, input.guildId, input.channelId);
+      if (!battle || battle.status !== "DRAFT") throw new GameError("Bu kanalda düzenlenebilir bir savaş taslağı yok.");
+      const view = await loadView(client, battle.id, true);
+      const target = view.sides[input.side];
+      if (input.action === "REMOVE") {
+        const assignment = (await client.query<{ contract_id: string; initial_land: BattleComposition; initial_ships: BattleComposition; initial_assets: SiegeComposition }>(
+          `SELECT bma.contract_id,bma.initial_land,bma.initial_ships,bma.initial_assets FROM battle_mercenary_assignments bma
+            JOIN mercenary_contracts mc ON mc.id=bma.contract_id WHERE bma.battle_id=$1 AND bma.side_key=$2 AND mc.company_key=$3 FOR UPDATE OF bma`,
+          [battle.id, input.side, input.companyKey]
+        )).rows[0];
+        if (!assignment) throw new GameError("Bu şirket savaş taslağına atanmış değil.");
+        const used = battle.terrain === "NAVAL" ? assignment.initial_ships : assignment.initial_land;
+        const composition: BattleComposition = { ...target.composition };
+        for (const [type, quantity] of Object.entries(used)) composition[type as BattleForceType] = Math.max(0, (composition[type as BattleForceType] ?? 0) - Number(quantity ?? 0));
+        const support: SiegeComposition = { ...target.support_assets };
+        for (const [type, quantity] of Object.entries(assignment.initial_assets)) support[type as SiegeAssetType] = Math.max(0, (support[type as SiegeAssetType] ?? 0) - Number(quantity ?? 0));
+        await client.query("DELETE FROM battle_mercenary_assignments WHERE battle_id=$1 AND contract_id=$2", [battle.id, assignment.contract_id]);
+        const total = compositionTotal(composition);
+        await client.query("UPDATE battle_sides SET composition=$1::jsonb,support_assets=$2::jsonb,initial_total=$3,current_total=$3,seal=$4 WHERE battle_id=$5 AND side_key=$6", [JSON.stringify(composition), JSON.stringify(support), total, sealFor({ ...composition, ...support }), battle.id, input.side]);
+        return loadView(client, battle.id);
+      }
+
+      const contract = (await client.query<{ id: string; country_id: string; status: string }>("SELECT id,country_id,status FROM mercenary_contracts WHERE guild_id=$1 AND company_key=$2 AND status IN ('PENDING','ACTIVE','UNPAID') ORDER BY created_at DESC LIMIT 1 FOR UPDATE", [input.guildId, input.companyKey])).rows[0];
+      if (!contract || contract.country_id !== target.country_id) throw new GameError("Bu şirket savaş tarafındaki ülkeye bağlı değil.");
+      if (contract.status !== "ACTIVE") throw new GameError("Yalnızca bakımı ödenmiş ve yerleşkeye ulaşmış etkin şirket savaşa katılabilir.");
+      const inOtherBattle = await client.query(`SELECT 1 FROM battle_mercenary_assignments bma JOIN battles b ON b.id=bma.battle_id
+        WHERE bma.contract_id=$1 AND b.id<>$2 AND b.status NOT IN ('FINISHED','CANCELLED') LIMIT 1`, [contract.id, battle.id]);
+      if (inOtherBattle.rowCount) throw new GameError("Bu şirket başka bir etkin savaşa atanmış.");
+      if ((await client.query("SELECT 1 FROM battle_mercenary_assignments WHERE battle_id=$1 AND contract_id=$2", [battle.id, contract.id])).rowCount) throw new GameError("Bu şirket zaten savaş taslağına atanmış.");
+      const land = Object.fromEntries((await client.query<{ unit_type: string; current_quantity: number }>("SELECT unit_type,current_quantity FROM mercenary_contract_units WHERE contract_id=$1 AND current_quantity>0", [contract.id])).rows.map((row) => [row.unit_type, Number(row.current_quantity)])) as BattleComposition;
+      const ships = Object.fromEntries((await client.query<{ ship_type: string; current_quantity: number }>("SELECT ship_type,current_quantity FROM mercenary_contract_ships WHERE contract_id=$1 AND current_quantity>0", [contract.id])).rows.map((row) => [row.ship_type, Number(row.current_quantity)])) as BattleComposition;
+      const allAssets = Object.fromEntries((await client.query<{ asset_type: string; current_quantity: number }>("SELECT asset_type,current_quantity FROM mercenary_contract_assets WHERE contract_id=$1 AND current_quantity>0", [contract.id])).rows.map((row) => [row.asset_type, Number(row.current_quantity)])) as SiegeComposition;
+      const used = battle.terrain === "NAVAL" ? ships : land;
+      if (!compositionTotal(used)) throw new GameError(battle.terrain === "NAVAL" ? "Bu şirkette savaşa katılabilecek gemi yok." : "Bu şirkette savaşa katılabilecek kara birliği yok.");
+      const assets: SiegeComposition = battle.terrain === "SIEGE" && input.side === "A" ? allAssets : {};
+      if ((target.support_assets.ram ?? 0) + (assets.ram ?? 0) > 1) throw new GameError("Kuşatmada toplam Koçbaşı sayısı 1'i aşamaz.");
+      const composition: BattleComposition = { ...target.composition };
+      for (const [type, quantity] of Object.entries(used)) composition[type as BattleForceType] = (composition[type as BattleForceType] ?? 0) + Number(quantity ?? 0);
+      const support: SiegeComposition = { ...target.support_assets };
+      const targets: SiegeTargets = { ...target.support_targets };
+      for (const [type, quantity] of Object.entries(assets)) {
+        const asset = type as SiegeAssetType;
+        support[asset] = (support[asset] ?? 0) + Number(quantity ?? 0);
+        targets[asset] = asset === "ram" ? "GATE" : ["ladder_group", "mantlet", "siege_tower"].includes(asset) ? "ASSAULT" : asset === "catapult" ? "WALL" : "ARMY";
+      }
+      await client.query("INSERT INTO battle_mercenary_assignments(battle_id,side_key,contract_id,initial_land,initial_ships,initial_assets) VALUES($1,$2,$3,$4::jsonb,$5::jsonb,$6::jsonb)", [battle.id, input.side, contract.id, JSON.stringify(battle.terrain === "NAVAL" ? {} : land), JSON.stringify(battle.terrain === "NAVAL" ? ships : {}), JSON.stringify(assets)]);
+      const total = compositionTotal(composition);
+      await client.query("UPDATE battle_sides SET composition=$1::jsonb,support_assets=$2::jsonb,support_targets=$3::jsonb,initial_total=$4,current_total=$4,seal=$5 WHERE battle_id=$6 AND side_key=$7", [JSON.stringify(composition), JSON.stringify(support), JSON.stringify(targets), total, sealFor({ ...composition, ...support }), battle.id, input.side]);
+      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'battle.mercenary.assign','battle',$3,$4::jsonb)", [input.guildId, input.actorId, battle.id, JSON.stringify({ side: input.side, companyKey: input.companyKey })]);
+      return loadView(client, battle.id);
+    });
+  },
+
   async setUnit(input: { guildId: string; channelId: string; actorId: string; side: BattleSideKey; unitType: BattleForceType; quantity: number }): Promise<BattleView> {
     return withTransaction(async (client) => {
       const battle = await activeInChannel(client, input.guildId, input.channelId);
       if (!battle || battle.status !== "DRAFT") throw new GameError("Bu kanalda düzenlenebilir bir savaş taslağı yok.");
       const view = await loadView(client, battle.id, true);
+      if ((await client.query("SELECT 1 FROM battle_mercenary_assignments WHERE battle_id=$1 AND side_key=$2 LIMIT 1", [battle.id, input.side])).rowCount) throw new GameError("Önce bu taraftaki paralı asker atamalarını kaldırın; ardından kadroyu düzenleyip şirketleri yeniden ekleyin.");
       const naval = battle.terrain === "NAVAL";
       if (naval && !(input.unitType in NAVAL_UNIT_STATS)) throw new GameError("Deniz savaşına yalnızca gemi eklenebilir.");
       if (!naval && !(input.unitType in BATTLE_UNIT_STATS)) throw new GameError("Bu savaş türüne yalnızca kara birlikleri eklenebilir.");
@@ -286,6 +389,7 @@ export const battleService = {
       const battle = await activeInChannel(client, input.guildId, input.channelId);
       if (!battle || battle.status !== "DRAFT") throw new GameError("Bu kanalda düzenlenebilir bir savaş taslağı yok.");
       if ((battle.terrain === "NAVAL") !== input.naval) throw new GameError(input.naval ? "Filo kadrosu yalnızca deniz savaşına girilebilir." : "Kara kadrosu deniz savaşına girilemez.");
+      if ((await client.query("SELECT 1 FROM battle_mercenary_assignments WHERE battle_id=$1 AND side_key=$2 LIMIT 1", [battle.id, input.side])).rowCount) throw new GameError("Önce bu taraftaki paralı asker atamalarını kaldırın; ardından kadroyu düzenleyip şirketleri yeniden ekleyin.");
       const allowed = input.naval ? NAVAL_UNIT_STATS : BATTLE_UNIT_STATS;
       const clean: BattleComposition = {};
       for (const [key, quantity] of Object.entries(input.composition)) {
@@ -308,6 +412,7 @@ export const battleService = {
       if (!battle || battle.status !== "DRAFT") throw new GameError("Bu kanalda düzenlenebilir bir savaş taslağı yok.");
       if (battle.terrain !== "SIEGE") throw new GameError("Kuşatma aletleri yalnızca kuşatma savaşına eklenebilir.");
       validateSiegeTarget(input.side, input.assetType, input.target);
+      if ((await client.query("SELECT 1 FROM battle_mercenary_assignments WHERE battle_id=$1 AND side_key=$2 AND COALESCE((initial_assets->>$3)::integer,0)>0 LIMIT 1", [battle.id, input.side, input.assetType])).rowCount) throw new GameError("Bu alet türü atanmış paralı asker şirketinden geliyor. Önce şirketi taslaktan kaldırın.");
       const view = await loadView(client, battle.id, true);
       if (input.quantity > 0 && (input.assetType === "ladder_group" || input.assetType === "ram")) {
         throw new GameError("Merdiven ve Koçbaşı miktarı yalnızca /savas saha-aleti-al ile satın alınarak artırılabilir.");
@@ -472,6 +577,8 @@ export const battleService = {
       const member = Boolean((await client.query("SELECT 1 FROM country_members WHERE country_id=$1 AND discord_user_id=$2", [target.country_id, input.actorId])).rows[0]);
       if (target.controller === "GM" && !input.isGameMaster) throw new GameError("Bu taraf NPC olarak yönetiliyor; zarı yalnızca oyun yöneticisi atabilir.");
       if (target.controller === "PLAYERS" && !member && !input.isGameMaster) throw new GameError("Sıra bu ülkenin oyuncularında.");
+      const inactiveMercenary = await client.query(`SELECT mc.company_key FROM battle_mercenary_assignments bma JOIN mercenary_contracts mc ON mc.id=bma.contract_id WHERE bma.battle_id=$1 AND bma.side_key=$2 AND mc.status<>'ACTIVE' LIMIT 1`, [active.id, side]);
+      if (inactiveMercenary.rowCount) throw new GameError("Bu taraftaki bir paralı asker şirketinin bakımı ödenmedi veya sözleşmesi etkin değil; savaş zarı atılamaz.");
       const terrain = BATTLE_TERRAINS[view.battle.terrain];
       const frontage = side === "A" ? terrain.frontageA : terrain.frontageB;
       let wallDamage = 0, gateDamage = 0;

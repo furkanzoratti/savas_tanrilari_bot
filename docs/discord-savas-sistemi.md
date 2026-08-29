@@ -222,7 +222,7 @@ Erişimle birlikte şu şartların tamamı aranır:
 
 Bir alet türünün aynı turda en fazla **25** adedi etkindir. Alet eklenirken hedef seçilir.
 
-• **Merdiven — Hücum:** Adet başına 1d3 Çarpışma; erişim sağlar.
+• **Merdiven — Hücum:** Adet başına 1d2 Çarpışma; erişim sağlar.
 • **Koçbaşı — Kapı:** Her kuşatmada en fazla 1 adet alınabilir; üst üste birikmez ve 1d8×35 Kapı Hasarı verir.
 • **Mantlet — Hücum:** Adet başına 1d4 Çarpışma; her biri B'nin A'ya Hasarını %5 azaltır, üst sınır %50.
 • **Balista — Sur:** Adet başına 1d10×5 Sur Hasarı.
