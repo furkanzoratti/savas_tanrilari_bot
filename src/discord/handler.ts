@@ -112,6 +112,15 @@ async function handleMercenaryCommand(interaction: ChatInputCommandInteraction):
     const settlement = await findSettlement(country.id, interaction.options.getString("yerleske", true));
     const name = await gameService.moveMercenary({ guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id, companyKey, settlementId: settlement.id });
     await interaction.editReply(`✅ Paralı asker grubu **${name}** yerleşkesine taşındı.`);
+  } else if (sub === "kayip-ekle") {
+    const unitType = interaction.options.getString("kalem", true) as keyof typeof UNITS;
+    const quantity = interaction.options.getInteger("miktar", true);
+    const result = await gameService.addMercenaryLoss({
+      guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id,
+      companyKey, unitType, quantity
+    });
+    const companyName = MERCENARY_COMPANIES[companyKey]?.name ?? companyKey;
+    await interaction.editReply(`✅ **${companyName}** kampanyasından **${number(quantity)} ${UNITS[unitType]?.name ?? unitType}** kayıp düşüldü. Kalan: **${number(result.remaining)}**.${result.destroyed ? "\n💀 Şirketin savaş personeli kalmadığı için sözleşme **Yok Edildi** durumuna geçti." : ""}`);
   } else if (sub === "mevcut-duzelt") {
     const kind = interaction.options.getString("tur", true) as "UNIT" | "SHIP" | "ASSET";
     const itemType = interaction.options.getString("kalem", true);

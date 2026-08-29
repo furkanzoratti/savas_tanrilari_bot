@@ -22,4 +22,12 @@ describe("ticaret ve rol raporu komutları", () => {
     expect(names).not.toEqual(expect.arrayContaining(["vergi-geliri", "kara-ticareti", "deniz-ticareti"]));
     expect(admin?.options?.some((option) => option.name === "yerleske-hazinesi")).toBe(true);
   });
+
+  it("paralı asker kampanyasına elle kara birliği kaybı ekleme komutunu kaydeder", () => {
+    const command = commandBuilders.find((item) => item.name === "parali-asker");
+    const loss = command?.options?.find((option) => option.name === "kayip-ekle");
+    expect(loss?.options?.map((option) => option.name)).toEqual(["ulke", "sirket", "kalem", "miktar"]);
+    expect(loss?.options?.find((option) => option.name === "miktar")).toMatchObject({ required: true, min_value: 1 });
+    expect(loss?.options?.find((option) => option.name === "kalem")?.choices).toHaveLength(7);
+  });
 });

@@ -19,12 +19,13 @@
 - `/parali-asker feshet`: Sözleşmeyi bitirir; erken fesih varsa bir bakım bedeli keser.
 - `/parali-asker tasi`: Etkin şirketin bağlı olduğu dost yerleşkeyi değiştirir.
 - `/parali-asker mevcut-duzelt`: Yönetici kararıyla birlik, gemi veya kuşatma aleti mevcudunu düzeltir.
+- `/parali-asker kayip-ekle`: Seçilen kampanyanın belirtilen kara birliğinden girilen kayıp miktarını düşer; kalan mevcudu bildirir.
 - `/savas parali-asker-ayarla`: Etkin şirketi savaş taslağındaki A veya B tarafına ekler ya da çıkarır.
 
 ## ⚔️ Belge ve savaş bağlantısı
 
 - Şirketler yerleşke belgesinde normal ordu ve garnizondan ayrı gösterilir.
-- Paralı asker personeli devletin askerî personel sınırına dâhildir; yerleşke eğitim kapasitesini kullanmaz.
+- Paralı asker personeli şimdilik devlet ve yerleşke askerî personel sınırlarına dâhil değildir; yerleşke eğitim kapasitesini de kullanmaz.
 - Savaş kayıpları başlangıçtaki devlet/paralı asker oranına göre kaynaklara dağıtılır.
 - Paralı asker kaybı şirket mevcudundan düşer; yerleşke nüfusundan ve devlet garnizonundan düşmez.
 - Devlet askerlerinin kaybı normal biçimde birlik belgesine ve yerleşke nüfusuna uygulanır.

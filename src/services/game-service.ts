@@ -9,7 +9,7 @@ import type { CultureGroup } from "../domain/cultures.js";
 import type { CharacterRole, ForceType, Mobilization, RuinStage, ShipStatus, UnitStatus } from "../domain/types.js";
 import { buildingCostMultiplier, buildingDurationReduction, shipCostMultiplier, siegeCostMultiplier, unitCostMultiplier, type ResourceType } from "../domain/resources.js";
 import { settlementResourceAccess } from "./resource-service.js";
-import { MERCENARY_COMPANIES, MERCENARY_CONTRACT_LIMITS, importedMercenarySchedule, mercenaryContractSchedule, mercenaryPersonnel, type MercenaryCompanyKey } from "../domain/mercenaries.js";
+import { MERCENARY_COMPANIES, MERCENARY_CONTRACT_LIMITS, importedMercenarySchedule, mercenaryContractSchedule, type MercenaryCompanyKey } from "../domain/mercenaries.js";
 import { cancelActiveGarrisonReplenishment, completeDueGarrisonReplenishments, scheduleAllMissingGarrisons, scheduleMandatoryGarrisonReplenishment, type GarrisonReplenishmentReason } from "./garrison-service.js";
 
 export class GameError extends Error {}
@@ -279,11 +279,6 @@ async function loadMercenaryContracts(client: DbClient, countryId: string): Prom
   }));
 }
 
-function contractCurrentPersonnel(contract: MercenaryContractDocument): number {
-  return contract.units.reduce((sum, unit) => sum + unit.current_quantity, 0)
-    + contract.ships.reduce((sum, ship) => sum + (SHIPS[ship.ship_type]?.manpower ?? 0) * ship.current_quantity, 0);
-}
-
 async function countryManpower(client: DbClient, countryId: string): Promise<{ population: number; used: number }> {
   const populationResult = await client.query<{ total: number }>(
     "SELECT COALESCE(SUM(population), 0)::bigint AS total FROM settlements WHERE country_id = $1 AND is_conquered=FALSE",
@@ -313,12 +308,9 @@ async function countryManpower(client: DbClient, countryId: string): Promise<{ p
   );
   const shipManpower = [...ships.rows, ...pendingShips.rows]
     .reduce((sum, row) => sum + (SHIPS[row.ship_type]?.manpower ?? 0) * row.quantity, 0);
-  const mercenaryPersonnelUsed = (await loadMercenaryContracts(client, countryId))
-    .filter((contract) => contract.status === "ACTIVE" || contract.status === "UNPAID")
-    .reduce((sum, contract) => sum + contractCurrentPersonnel(contract), 0);
   return {
     population: populationResult.rows[0]?.total ?? 0,
-    used: (unitResult.rows[0]?.total ?? 0) + (pendingResult.rows[0]?.total ?? 0) + (pendingGarrison.rows[0]?.total ?? 0) + shipManpower + mercenaryPersonnelUsed
+    used: (unitResult.rows[0]?.total ?? 0) + (pendingResult.rows[0]?.total ?? 0) + (pendingGarrison.rows[0]?.total ?? 0) + shipManpower
   };
 }
 
@@ -329,13 +321,7 @@ async function settlementManpower(client: DbClient, settlementId: string): Promi
   const ships = await client.query<{ ship_type: keyof typeof SHIPS; quantity: number }>("SELECT ship_type,SUM(quantity)::integer AS quantity FROM naval_units WHERE settlement_id=$1 GROUP BY ship_type", [settlementId]);
   const pendingShips = await client.query<{ ship_type: keyof typeof SHIPS; quantity: number }>("SELECT ship_type,SUM(quantity)::integer AS quantity FROM naval_orders WHERE settlement_id=$1 AND status='BUILDING' GROUP BY ship_type", [settlementId]);
   const shipManpower = [...ships.rows, ...pendingShips.rows].reduce((sum, row) => sum + (SHIPS[row.ship_type]?.manpower ?? 0) * row.quantity, 0);
-  const country = (await client.query<{ country_id: string }>("SELECT country_id FROM settlements WHERE id=$1", [settlementId])).rows[0];
-  const mercenaryPersonnelUsed = country
-    ? (await loadMercenaryContracts(client, country.country_id))
-      .filter((contract) => contract.settlement_id === settlementId && (contract.status === "ACTIVE" || contract.status === "UNPAID"))
-      .reduce((sum, contract) => sum + contractCurrentPersonnel(contract), 0)
-    : 0;
-  return (units.rows[0]?.total ?? 0) + (pending.rows[0]?.total ?? 0) + (pendingGarrison.rows[0]?.total ?? 0) + shipManpower + mercenaryPersonnelUsed;
+  return (units.rows[0]?.total ?? 0) + (pending.rows[0]?.total ?? 0) + (pendingGarrison.rows[0]?.total ?? 0) + shipManpower;
 }
 
 async function countryHasMaintenanceDebt(client: DbClient, countryId: string): Promise<boolean> {
@@ -623,12 +609,6 @@ export const gameService = {
       const slotCost = company.slotCost ?? 1;
       const slotLimit = MERCENARY_CONTRACT_LIMITS[country.mobilization];
       if (usedSlots + slotCost > slotLimit) throw new GameError(`Sozlesme siniri asiliyor. ${country.mobilization}: ${usedSlots}/${slotLimit} hak kullaniliyor; bu grup ${slotCost} hak ister.`);
-      const manpower = await countryManpower(client, country.id);
-      const pendingPersonnel = currentContracts.filter((contract) => contract.status === "PENDING").reduce((sum, contract) => sum + contractCurrentPersonnel(contract), 0);
-      const personnel = mercenaryPersonnel(company);
-      if (manpower.used + pendingPersonnel + personnel > militaryLimit(manpower.population, country.mobilization)) {
-        throw new GameError("Bu sozlesme devletin askeri personel sinirini asiyor.");
-      }
       const hasGold = Boolean((await client.query("SELECT 1 FROM settlements WHERE country_id=$1 AND resource_type='GOLD' LIMIT 1", [country.id])).rowCount);
       const cost = Math.ceil(company.hireCost * (hasGold ? 0.90 : 1));
       await adjustCountryLocalTreasuries(client, country.id, -cost);
@@ -674,12 +654,6 @@ export const gameService = {
       const slotCost = company.slotCost ?? 1;
       const slotLimit = MERCENARY_CONTRACT_LIMITS[country.mobilization];
       if (usedSlots + slotCost > slotLimit) throw new GameError(`Sözleşme sınırı aşılıyor: ${usedSlots}/${slotLimit} hak kullanımda; bu grup ${slotCost} hak ister.`);
-      const manpower = await countryManpower(client, country.id);
-      const pendingPersonnel = currentContracts.filter((contract) => contract.status === "PENDING").reduce((sum, contract) => sum + contractCurrentPersonnel(contract), 0);
-      const personnel = mercenaryPersonnel(company);
-      if (manpower.used + pendingPersonnel + personnel > militaryLimit(manpower.population, country.mobilization)) {
-        throw new GameError("Bu şirket devletin askerî personel sınırını aşıyor.");
-      }
 
       const { hiredTurn, arrivalTurn, endTurn, firstUpkeepTurn } = importedMercenarySchedule(guild.current_turn);
       const inserted = (await client.query<{ id: string }>(
@@ -780,6 +754,43 @@ export const gameService = {
       await client.query(`INSERT INTO ${table}(contract_id,${column},initial_quantity,current_quantity) VALUES($1,$2,$3,$3)
         ON CONFLICT(contract_id,${column}) DO UPDATE SET current_quantity=EXCLUDED.current_quantity`,[contract.id,input.itemType,input.quantity]);
       await audit(client,input.guildId,input.actorId,"MERCENARY_ADJUST","mercenary_contract",contract.id,{kind:input.kind,itemType:input.itemType,quantity:input.quantity});
+    });
+  },
+
+  async addMercenaryLoss(input: { guildId: string; actorId: string; countryId: string; companyKey: MercenaryCompanyKey; unitType: keyof typeof UNITS; quantity: number }): Promise<{ previous: number; remaining: number; destroyed: boolean }> {
+    return withTransaction(async (client) => {
+      if (!Number.isSafeInteger(input.quantity) || input.quantity <= 0) throw new GameError("Kayıp miktarı pozitif bir tam sayı olmalıdır.");
+      if (!(input.unitType in UNITS) || input.unitType === "observer" || input.unitType === "militia") throw new GameError("Geçersiz paralı asker birimi.");
+      const contract = (await client.query<{ id: string }>(
+        "SELECT id FROM mercenary_contracts WHERE guild_id=$1 AND country_id=$2 AND company_key=$3 AND status IN ('PENDING','ACTIVE','UNPAID') FOR UPDATE",
+        [input.guildId, input.countryId, input.companyKey]
+      )).rows[0];
+      if (!contract) throw new GameError("Canlı paralı asker sözleşmesi bulunamadı.");
+      const unit = (await client.query<{ current_quantity: number }>(
+        "SELECT current_quantity FROM mercenary_contract_units WHERE contract_id=$1 AND unit_type=$2 FOR UPDATE",
+        [contract.id, input.unitType]
+      )).rows[0];
+      if (!unit) throw new GameError("Bu şirketin kadrosunda seçilen birlik bulunmuyor.");
+      const previous = Number(unit.current_quantity);
+      if (input.quantity > previous) throw new GameError(`Şirkette bu birimden yalnızca ${previous.toLocaleString("tr-TR")} asker bulunuyor.`);
+      const remaining = previous - input.quantity;
+      await client.query(
+        "UPDATE mercenary_contract_units SET current_quantity=$1 WHERE contract_id=$2 AND unit_type=$3",
+        [remaining, contract.id, input.unitType]
+      );
+      const hasPersonnel = await client.query(
+        `SELECT 1 FROM mercenary_contract_units WHERE contract_id=$1 AND current_quantity>0
+         UNION ALL
+         SELECT 1 FROM mercenary_contract_ships WHERE contract_id=$1 AND current_quantity>0
+         LIMIT 1`,
+        [contract.id]
+      );
+      const destroyed = !hasPersonnel.rowCount;
+      if (destroyed) await client.query("UPDATE mercenary_contracts SET status='DESTROYED',updated_at=NOW() WHERE id=$1", [contract.id]);
+      await audit(client, input.guildId, input.actorId, "MERCENARY_LOSS_ADD", "mercenary_contract", contract.id, {
+        unitType: input.unitType, loss: input.quantity, previous, remaining, destroyed
+      });
+      return { previous, remaining, destroyed };
     });
   },
 
@@ -963,7 +974,6 @@ export const gameService = {
           + settlementShips.reduce((sum, ship) => sum + SHIPS[ship.ship_type].manpower * ship.quantity, 0)
           + waves.filter((wave) => wave.settlement_id === settlement.id).reduce((sum, wave) => sum + wave.quantity, 0)
           + pendingShips.filter((ship) => ship.settlement_id === settlement.id).reduce((sum, ship) => sum + SHIPS[ship.ship_type].manpower * ship.quantity, 0)
-          + activeSettlementMercenaries.reduce((sum, contract) => sum + contractCurrentPersonnel(contract), 0)
           + pendingGarrisons.filter((order) => order.settlement_id === settlement.id).reduce((sum, order) => sum + Number(order.personnel_reserved), 0);
         const trainingCapacity = settlement.is_conquered ? 0 : settlementTrainingCapacity(settlement.population, country.mobilization);
         const trainingUsed = recruitmentUsage.find((usage) => usage.settlement_id === settlement.id)?.quantity ?? 0;

@@ -265,7 +265,12 @@ export const commandBuilders = [
         { name: "Kara Birliği", value: "UNIT" }, { name: "Gemi", value: "SHIP" }, { name: "Kuşatma Aleti", value: "ASSET" }
       ))
       .addStringOption((o) => o.setName("kalem").setDescription("Birim, gemi veya alet").setRequired(true).setAutocomplete(true))
-      .addIntegerOption((o) => o.setName("miktar").setDescription("Yeni mevcut").setMinValue(0).setRequired(true))),
+      .addIntegerOption((o) => o.setName("miktar").setDescription("Yeni mevcut").setMinValue(0).setRequired(true)))
+    .addSubcommand((sub) => sub.setName("kayip-ekle").setDescription("Bir paralı asker kampanyasından kara birliği kaybı düşer")
+      .addStringOption((o) => o.setName("ulke").setDescription("Ülke").setRequired(true))
+      .addStringOption((o) => o.setName("sirket").setDescription("Paralı asker grubu").setRequired(true).setAutocomplete(true))
+      .addStringOption((o) => o.setName("kalem").setDescription("Kayıp verilecek kara birliği").setRequired(true).addChoices(...Object.entries(UNITS).filter(([key]) => !["observer", "militia"].includes(key)).map(([value, unit]) => ({ name: unit.name, value }))))
+      .addIntegerOption((o) => o.setName("miktar").setDescription("Düşülecek asker sayısı").setMinValue(1).setRequired(true))),
   new SlashCommandBuilder()
     .setName("savas").setDescription("Kalıcılığa sahip açık zar savaş sistemini yönetir")
     .addSubcommand((sub) => sub.setName("baslat").setDescription("Bu kanalda yeni savaş taslağı oluşturur")
