@@ -101,7 +101,7 @@ function validBuildingCandidates(doc: CountryDocument, doctrine: NpcAutoPurchase
         const hasPort = settlement.buildings.some((building) => building.building_type === "port" && building.status === "ACTIVE" && building.level >= 1);
         if (!hasPort) continue;
       }
-      const terms = buildingPurchaseTerms(buildingType, targetLevel, settlement.effectiveResources, policies);
+      const terms = buildingPurchaseTerms(buildingType, targetLevel, settlement.effectiveResources, policies, doc.country.active_formable_key);
       if (terms.cost > settlement.local_treasury || terms.cost > spendLimit) continue;
       candidates.push({
         settlementId: settlement.id,
@@ -174,7 +174,7 @@ export function planCountryPurchases(doc: CountryDocument, config: NpcAutoPurcha
       .filter((settlement) => (settlementCapacity.get(settlement.id) ?? 0) >= 1_000)
       .map((settlement) => ({
         settlement,
-        cost: unitPurchaseCost(unitType, 1_000, settlement.effectiveResources, activePolicyKeys(settlement))
+        cost: unitPurchaseCost(unitType, 1_000, settlement.effectiveResources, activePolicyKeys(settlement), doc.country.active_formable_key)
       }))
       .filter(({ settlement, cost }) => cost <= remainingBudget && cost <= (localTreasury.get(settlement.id) ?? 0))
       .sort((left, right) => (settlementCapacity.get(right.settlement.id) ?? 0) - (settlementCapacity.get(left.settlement.id) ?? 0)
@@ -205,7 +205,7 @@ export function planCountryPurchases(doc: CountryDocument, config: NpcAutoPurcha
 
   const unitActions = [...grouped.values()].map((action) => {
     const settlement = doc.settlements.find((item) => item.id === action.settlementId)!;
-    return { ...action, cost: unitPurchaseCost(action.unitType, action.quantity, settlement.effectiveResources, activePolicyKeys(settlement)) };
+    return { ...action, cost: unitPurchaseCost(action.unitType, action.quantity, settlement.effectiveResources, activePolicyKeys(settlement), doc.country.active_formable_key) };
   });
   const plannedCost = buildingActions.reduce((sum, action) => sum + action.cost, 0) + unitActions.reduce((sum, action) => sum + action.cost, 0);
   const notes: string[] = [];

@@ -55,7 +55,7 @@ export function calculateUnitUpkeep(
   void status; // Konum bazlı bakım çarpanları şimdilik pasiftir.
   const unit = UNITS[unitType];
   const multiplier = (1 + MOBILIZATION_RULES[mobilization].upkeepExtra) * (overLimitPenalty ? 1.25 : 1);
-  const detachments = unitType === "observer" ? quantity / 200 : quantity / 1_000;
+  const detachments = unitType === "observer" ? (quantity > 0 ? 1 : 0) : quantity / 1_000;
   return Math.ceil(detachments * unit.upkeep * multiplier * armyUpkeepMultiplier(resources));
 }
 

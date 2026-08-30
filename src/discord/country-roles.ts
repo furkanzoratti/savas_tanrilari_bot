@@ -69,6 +69,10 @@ export async function ensureCountryRole(
   }
 
   assertManageableRole(role, botMember.roles.highest.position);
+  const desiredName = countryRoleName(country.name);
+  if (role.name !== desiredName) {
+    role = await role.edit({ name: desiredName, reason: `Devlet adı değişikliğiyle eşitlendi • Yönetici: ${actorId}` });
+  }
   let colorApplied = created && desiredColor !== null;
   if (!created && desiredColor !== null && role.color !== desiredColor) {
     role = await role.edit({ color: desiredColor, reason: `Devlet rolü harita rengiyle eşitlendi • Yönetici: ${actorId}` });

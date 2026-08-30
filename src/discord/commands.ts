@@ -36,7 +36,12 @@ export const commandBuilders = [
     .addChannelOption((option) => option.setName("kanal").setDescription("Hoş geldin mesajlarının gönderileceği kanal").addChannelTypes(ChannelType.GuildText))
     .addStringOption((option) => option.setName("mesaj").setDescription("İsteğe bağlı metin; {uye} ve {sunucu} kullanılabilir").setMaxLength(1500)),
   new SlashCommandBuilder()
-    .setName("devlet-rolleri").setDescription("Yalnızca yönetici: eksik devlet rollerini oluşturur ve üyelikleri eşitler"),  new SlashCommandBuilder()
+    .setName("devlet-rolleri").setDescription("Yalnızca yönetici: eksik devlet rollerini oluşturur ve üyelikleri eşitler"),
+  new SlashCommandBuilder()
+    .setName("ulke-formla").setDescription("Yalnızca yönetici: devleti kurulabilir ülkeye dönüştürür ve bonuslarını açar")
+    .addStringOption((option) => option.setName("mevcut-ulke").setDescription("Formlanacak mevcut devletin tam adı").setRequired(true))
+    .addStringOption((option) => option.setName("formlanan-ulke").setDescription("Kurulacak ülkeyi yazmaya başlayarak seçin").setRequired(true).setAutocomplete(true)),
+  new SlashCommandBuilder()
     .setName("ozel-birlik-yetkisi").setDescription("Yalnızca yönetici: ülkelere özel birlik erişimi verir veya kaldırır")
     .addSubcommand((sub) => sub.setName("ayarla").setDescription("Bir ülkenin özel birlik erişimini değiştirir")
       .addStringOption((o) => o.setName("ulke").setDescription("Yetkisi değiştirilecek ülke").setRequired(true))

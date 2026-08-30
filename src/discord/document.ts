@@ -6,6 +6,7 @@ import { SETTLEMENT_EVENT_TYPES, type SettlementEventType } from "../domain/even
 import { gold, number } from "../domain/format.js";
 import { RESOURCES } from "../domain/resources.js";
 import { SPECIAL_UNITS } from "../domain/special-units.js";
+import { FORMABLE_COUNTRIES } from "../domain/formable-countries.js";
 import { TRADE_ROUTE_LABELS } from "../domain/trade.js";
 import type { CountryDocument } from "../services/game-service.js";
 import { TEMPLE_BANNER_URL } from "./assets.js";
@@ -115,6 +116,7 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
         return `${role.emoji} **${character.name}** — ${role.label} (+${character.skill_bonus})\n↳ ${assignment}`;
       }).join("\n\n")
     : "Henüz yetiştirilmiş devlet görevlisi yok.";
+  const formable = document.country.active_formable_key ? FORMABLE_COUNTRIES[document.country.active_formable_key] : null;
   const mercenarySummary = (document.mercenaries ?? []).length
     ? (document.mercenaries ?? []).map((contract) => `• **${contract.companyName}** — ${contract.settlement_name}\n↳ ${mercenaryStatusLabels[contract.status] ?? contract.status} • Bakım ${gold(contract.turn_upkeep)}`).join("\n\n")
     : "Aktif veya yolda paralı asker sözleşmesi yok.";
@@ -134,6 +136,7 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
       { name: "👥 Özgür Nüfus", value: spacedSection(`**${number(document.freePopulation)}**`), inline: true },
       { name: "⚔️ Askerî Kapasite", value: spacedSection(`Mevcut: **${number(document.militaryUsed)}**\nSınır: ${number(document.militaryLimit)}\nKalan: ${number(remainingCapacity)}${document.manpowerPenaltyActive ? "\n⚠️ Sınır aşımı: bakım +%25" : document.militaryUsed > document.militaryLimit ? "\n⏳ Sınır aşımı: düzeltme süresi" : ""}`), inline: true },
       { name: "🛡️ Özel Birlik Erişimi", value: spacedSection((document.specialUnitUnlocks ?? []).length ? (document.specialUnitUnlocks ?? []).map((unitType) => `• **${SPECIAL_UNITS[unitType].name}**`).join("\n") : "Özel birlik erişimi bulunmuyor.") },
+      ...(formable ? [{ name: `${formable.emoji} Kurulabilir Ülke Bonusları`, value: spacedSection(formable.buffs.map((buff) => `• ${buff}`).join("\n")) }] : []),
       {
         name: "📥 Gelir Dağılımı",
         value: spacedSection([

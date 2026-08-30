@@ -13,8 +13,9 @@ import { TRADE_ROUTE_LABELS, type TradeRoute } from "../domain/trade.js";
 import { MERCENARY_COMPANIES, type MercenaryCompanyKey } from "../domain/mercenaries.js";
 import { NPC_AUTO_PURCHASE_DOCTRINES, type NpcAutoPurchaseDoctrine } from "../domain/npc-auto-purchase.js";
 import { SPECIAL_UNITS, isSpecialUnitType, type SpecialUnitType } from "../domain/special-units.js";
-import { RESOURCES, shipCostMultiplier, unitCostMultiplier, type ResourceType } from "../domain/resources.js";
-import { buildingPurchaseTerms, gameService, GameError } from "../services/game-service.js";
+import { FORMABLE_COUNTRIES, formableModifiers } from "../domain/formable-countries.js";
+import { RESOURCES, shipCostMultiplier, type ResourceType } from "../domain/resources.js";
+import { buildingPurchaseTerms, unitPurchaseCost, gameService, GameError } from "../services/game-service.js";
 import { cityService } from "../services/city-service.js";
 import { commandLogService } from "../services/command-log-service.js";
 import { roleReportService } from "../services/role-report-service.js";
@@ -726,6 +727,22 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     );
   } else if (interaction.commandName === "parali-asker") {
     await handleMercenaryCommand(interaction);
+  } else if (interaction.commandName === "ulke-formla") {
+    requireGameMaster(interaction);
+    if (!interaction.guildId || !interaction.guild) throw new GameError("Sunucu bulunamadı.");
+    await interaction.deferReply({ ephemeral: true });
+    const result = await gameService.formCountry({ guildId: interaction.guildId, actorId: interaction.user.id, currentCountryName: interaction.options.getString("mevcut-ulke", true), formableKeyInput: interaction.options.getString("formlanan-ulke", true) });
+    const country = await gameService.countryByName(interaction.guildId, result.formedName);
+    let roleText = "Bağlı devlet rolü bulunmadığı için yalnız belge adı güncellendi.";
+    if (country) {
+      try {
+        const ensured = await ensureCountryRole(interaction.guild, country, interaction.user.id);
+        roleText = `${ensured.role} rolü yeni devlet adıyla eşitlendi.`;
+      } catch (error) {
+        roleText = `Devlet ve belge güncellendi; Discord rolü güncellenemedi: ${error instanceof Error ? error.message : "bilinmeyen hata"}`;
+      }
+    }
+    await interaction.editReply(`✅ **${result.previousName}**, **${result.formedName}** olarak formlandı.\n${roleText}\n\n✨ **Etkin ülke bonusları**\n${result.buffs.map((buff) => `• ${buff}`).join("\n")}`);
   } else if (interaction.commandName === "belge") {
     const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
     await sendDocument(interaction, country.id);
@@ -865,7 +882,7 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
       if (!current && occupiedSlots >= settlement.slotLimit) return [];
       if (building.key === "port" && !settlement.is_coastal) return [];
       if (building.key === "shipyard" && !hasPort) return [];
-      const terms = buildingPurchaseTerms(building.key, next, settlement.effectiveResources, activePolicies);
+      const terms = buildingPurchaseTerms(building.key, next, settlement.effectiveResources, activePolicies, doc.country.active_formable_key);
       return [{
         label: `${building.name} Sv${next}`.slice(0, 100),
         description: `${BUILDING_CATEGORIES[building.category].label} • ${gold(terms.cost)} • ${terms.duration} tur`.slice(0, 100),
@@ -886,7 +903,7 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
     const settlement = document.settlements.find((item) => item.id === settlementId);
     if (!settlement) throw new GameError("Yerleşke bulunamadı.");
     const availableUnits = unitChoices.filter(([key]) => !isSpecialUnitType(key) || (document.specialUnitUnlocks ?? []).includes(key));
-    await interaction.update({ content: `Alınacak birim türünü seç:\n🎖️ Ordu Limiti: **${number(settlement.militaryUsed)}/${number(settlement.militaryLimit)}**\n🏋️ Bu Alım Turu Eğitim Kapasitesi: **${number(settlement.trainingUsed)}/${number(settlement.trainingCapacity)}** • Kalan: **${number(settlement.trainingRemaining)}**`, components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder().setCustomId(`uc|${countryId}|${settlementId}`).setPlaceholder("Birim seç").addOptions(availableUnits.map(([key, unit]) => ({ label: unit.name, description: `${gold(Math.ceil(unit.price * unitCostMultiplier(key, settlement.effectiveResources)))} / 1.000${isSpecialUnitType(key) ? " • Özel Birlik" : ""}`, value: key }))))] });
+    await interaction.update({ content: `Alınacak birim türünü seç:\n🎖️ Ordu Limiti: **${number(settlement.militaryUsed)}/${number(settlement.militaryLimit)}**\n🏋️ Bu Alım Turu Eğitim Kapasitesi: **${number(settlement.trainingUsed)}/${number(settlement.trainingCapacity)}** • Kalan: **${number(settlement.trainingRemaining)}**`, components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder().setCustomId(`uc|${countryId}|${settlementId}`).setPlaceholder("Birim seç").addOptions(availableUnits.map(([key, unit]) => ({ label: unit.name, description: `${gold(unitPurchaseCost(key as keyof typeof UNITS, 1_000, settlement.effectiveResources, settlement.policies.filter((policy) => policy.status === "ACTIVE").map((policy) => policy.policy_key), document.country.active_formable_key))} / 1.000${isSpecialUnitType(key) ? " • Özel Birlik" : ""}`, value: key }))))] });
   } else if (kind === "uc" && settlementIdFromId) {
     const unitType = interaction.values[0]!;
     const modal = new ModalBuilder().setCustomId(`um|${countryId}|${settlementIdFromId}|${unitType}`).setTitle("Asker Alımı");
@@ -894,10 +911,11 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
     await interaction.showModal(modal);
   } else if (kind === "ss") {
     const settlementId = interaction.values[0]!;
-    const settlement = (await gameService.document(countryId)).settlements.find((item) => item.id === settlementId);
+    const document = await gameService.document(countryId);
+    const settlement = document.settlements.find((item) => item.id === settlementId);
     if (!settlement) throw new GameError("Yerleşke bulunamadı.");
     const productionPoints: Record<keyof typeof SHIPS, number> = { kerkouros: 1, trireme: 2, quinquereme: 4 };
-    await interaction.update({ content: "Üretilecek gemi türünü seç:", components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder().setCustomId(`sc|${countryId}|${settlementId}`).setPlaceholder("Gemi seç").addOptions(shipChoices.map(([key, ship]) => ({ label: ship.name, description: `${gold(Math.ceil(ship.price * shipCostMultiplier(settlement.effectiveResources)))} • ${ship.manpower} mürettebat • ${productionPoints[key as keyof typeof SHIPS]} puan`, value: key }))))] });
+    await interaction.update({ content: "Üretilecek gemi türünü seç:", components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder().setCustomId(`sc|${countryId}|${settlementId}`).setPlaceholder("Gemi seç").addOptions(shipChoices.map(([key, ship]) => ({ label: ship.name, description: `${gold(Math.ceil(ship.price * Math.max(0.5, shipCostMultiplier(settlement.effectiveResources) - (formableModifiers(document.country.active_formable_key).shipDiscount ?? 0))))} • ${ship.manpower} mürettebat • ${productionPoints[key as keyof typeof SHIPS]} puan`, value: key }))))] });
   } else if (kind === "sc" && settlementIdFromId) {
     const shipType = interaction.values[0]!;
     const modal = new ModalBuilder().setCustomId(`sm|${countryId}|${settlementIdFromId}|${shipType}`).setTitle("Gemi Alımı");
@@ -959,6 +977,15 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
 
 async function handleAutocomplete(interaction: AutocompleteInteraction): Promise<void> {
   const focused = interaction.options.getFocused(true);
+  if (interaction.commandName === "ulke-formla" && focused.name === "formlanan-ulke") {
+    if (!interaction.guildId || !isGameMaster(interaction)) { await interaction.respond([]); return; }
+    const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
+    await interaction.respond(Object.entries(FORMABLE_COUNTRIES)
+      .filter(([key, country]) => !query || key.toLocaleLowerCase("tr-TR").includes(query) || country.name.toLocaleLowerCase("tr-TR").includes(query))
+      .slice(0, 25)
+      .map(([value, country]) => ({ name: `${country.emoji} ${country.name}`, value })));
+    return;
+  }
   if (interaction.commandName === "savas-sonlandir" && focused.name === "kazanan") {
     if (!interaction.guildId || !isGameMaster(interaction)) { await interaction.respond([]); return; }
     const warId = interaction.options.getString("savas");

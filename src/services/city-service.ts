@@ -4,10 +4,11 @@ import { pool, withTransaction } from "../db/pool.js";
 import { CHARACTER_ROLES, CITY_POLICIES, type CityPolicyKey } from "../domain/catalog.js";
 import { isAcquisitionTurn } from "../domain/mobilization.js";
 import type { CharacterRole } from "../domain/types.js";
+import { formableModifiers, type FormableCountryKey } from "../domain/formable-countries.js";
 import { settlementResourceAccess } from "./resource-service.js";
 import { GameError, type AcademyTrainingSession, type CountryCharacter, type SettlementPolicyRow } from "./game-service.js";
 
-interface CountryRow { id: string; guild_id: string; name: string }
+interface CountryRow { id: string; guild_id: string; name: string; active_formable_key: FormableCountryKey | null }
 interface GuildRow { current_turn: number; acquisition_interval: number; turn_phase: string }
 interface SettlementRow {
   id: string; country_id: string; name: string; population: number; local_treasury: number;
@@ -17,7 +18,7 @@ interface SettlementRow {
 const ROLE_ORDER: CharacterRole[] = ["SPY", "MERCHANT", "COMMANDER"];
 
 async function getCountry(client: DbClient, guildId: string, countryId: string): Promise<CountryRow> {
-  const country = (await client.query<CountryRow>("SELECT id,guild_id,name FROM countries WHERE id=$1 AND guild_id=$2 AND status='ACTIVE'", [countryId, guildId])).rows[0];
+  const country = (await client.query<CountryRow>("SELECT id,guild_id,name,active_formable_key FROM countries WHERE id=$1 AND guild_id=$2 AND status='ACTIVE'", [countryId, guildId])).rows[0];
   if (!country) throw new GameError("Ülke bulunamadı veya bu sunucuya ait değil.");
   return country;
 }
@@ -70,7 +71,7 @@ export const cityService = {
   async setPolicy(input: { guildId: string; actorId: string; countryId: string; settlementId: string; policyKey: CityPolicyKey; slot: 1 | 2 }): Promise<SettlementPolicyRow> {
     return withTransaction(async (client) => {
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`country:${input.countryId}`]);
-      await getCountry(client, input.guildId, input.countryId);
+      const country = await getCountry(client, input.guildId, input.countryId);
       const settlement = await getSettlement(client, input.countryId, input.settlementId, true);
       const guild = await guildState(client, input.guildId);
       if (guild.turn_phase !== "OPEN") throw new GameError("Şehir politikaları yalnızca hareketler açıkken değiştirilebilir.");
@@ -89,9 +90,10 @@ export const cityService = {
       const duplicate = await client.query("SELECT 1 FROM settlement_policies WHERE settlement_id=$1 AND policy_key=$2 AND slot<>$3", [settlement.id, input.policyKey, input.slot]);
       if (duplicate.rowCount) throw new GameError("Aynı şehir politikası iki yuvada birden uygulanamaz.");
       if (input.policyKey === "CONSCRIPTION") {
+        const populationCost = country.active_formable_key === "GERMANIC_UNION" ? 4_000 : 5_000;
         const battle = await client.query("SELECT b.id FROM battles b JOIN battle_sides bs ON bs.battle_id=b.id WHERE bs.country_id=$1 AND b.status NOT IN ('FINISHED','CANCELLED') LIMIT 1", [input.countryId]);
         if (!battle.rowCount) throw new GameError("Zorunlu Askerlik yalnızca devlet aktif bir savaştayken başlatılabilir.");
-        if (settlement.population < 5_000) throw new GameError("Zorunlu Askerlik için yerleşkede en az 5.000 özgür nüfus gerekir.");
+        if (settlement.population < populationCost) throw new GameError(`Zorunlu Askerlik için yerleşkede en az ${populationCost.toLocaleString("tr-TR")} özgür nüfus gerekir.`);
       }
       const activationTurn = guild.current_turn + 1;
       const result = await client.query<SettlementPolicyRow>(
@@ -153,7 +155,7 @@ export const cityService = {
 
   async rollTraining(input: { guildId: string; actorId: string; countryId: string; sessionId: string }): Promise<AcademyTrainingSession> {
     return withTransaction(async (client) => {
-      await getCountry(client, input.guildId, input.countryId);
+      const country = await getCountry(client, input.guildId, input.countryId);
       const session = (await client.query<AcademyTrainingSession>("SELECT * FROM academy_training_sessions WHERE id=$1 AND country_id=$2 FOR UPDATE", [input.sessionId, input.countryId])).rows[0];
       if (!session) throw new GameError("Akademi eğitim oturumu bulunamadı.");
       if (session.status !== "PENDING_ROLL") throw new GameError("Bu Akademi eğitiminin zarı zaten atılmış.");
@@ -164,7 +166,8 @@ export const cityService = {
         const available = ROLE_ORDER.filter((item) => item !== session.excluded_role);
         role = available[roll <= 10 ? 0 : 1]!;
       } else role = session.selected_role!;
-      const updated = await client.query<AcademyTrainingSession>("UPDATE academy_training_sessions SET roll_value=$1,result_role=$2,status='AWAITING_NAME' WHERE id=$3 RETURNING *", [roll, role, session.id]);
+      const skillBonus = session.skill_bonus + (formableModifiers(country.active_formable_key).academyRoleSkillBonus?.[role] ?? 0);
+      const updated = await client.query<AcademyTrainingSession>("UPDATE academy_training_sessions SET roll_value=$1,result_role=$2,skill_bonus=$3,status='AWAITING_NAME' WHERE id=$4 RETURNING *", [roll, role, skillBonus, session.id]);
       await audit(client, input.guildId, input.actorId, "ACADEMY_TRAINING_ROLL", "academy_training", session.id, { roll, sides: session.roll_sides, role });
       return updated.rows[0]!;
     });
@@ -230,12 +233,13 @@ export const cityService = {
 
   async rollDisease(input: { guildId: string; actorId: string; countryId: string; settlementId: string; baseChance: number }): Promise<{ baseChance: number; chance: number; roll: number; triggered: boolean; oliveProtected: boolean; pantheonProtected: boolean }> {
     return withTransaction(async (client) => {
-      await getCountry(client, input.guildId, input.countryId);
+      const country = await getCountry(client, input.guildId, input.countryId);
       const settlement = await getSettlement(client, input.countryId, input.settlementId, true);
       if (!Number.isSafeInteger(input.baseChance) || input.baseChance < 0 || input.baseChance > 100) throw new GameError("Salgın temel riski 0 ile 100 arasında olmalıdır.");
       const resources = (await settlementResourceAccess(client, input.countryId)).get(settlement.id) ?? [];
       const oliveProtected = resources.includes("OLIVE");
-      const pantheonProtected = (await activeBuildingLevel(client, settlement.id, "pantheon")) >= 2;
+      const requiredPantheonLevel = country.active_formable_key === "KUSH" ? 1 : 2;
+      const pantheonProtected = (await activeBuildingLevel(client, settlement.id, "pantheon")) >= requiredPantheonLevel;
       const chance = Math.max(0, Math.floor((input.baseChance - (oliveProtected ? 10 : 0)) * (pantheonProtected ? 0.50 : 1)));
       const roll = randomInt(1, 101);
       const triggered = roll <= chance;

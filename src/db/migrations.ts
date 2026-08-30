@@ -1058,4 +1058,24 @@ export const migrations = [
       ALTER TABLE npc_auto_purchase_runs
         ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 1 CHECK (attempt_count >= 1);
     `
+  },
+  {
+    version: 31,
+    name: "formable_country_identities",
+    sql: `
+      ALTER TABLE countries ADD COLUMN IF NOT EXISTS active_formable_key TEXT;
+      CREATE TABLE IF NOT EXISTS country_formations (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        guild_id TEXT NOT NULL REFERENCES guilds(discord_id) ON DELETE CASCADE,
+        previous_name TEXT NOT NULL,
+        formable_key TEXT NOT NULL,
+        formed_name TEXT NOT NULL,
+        formed_turn INTEGER NOT NULL CHECK (formed_turn >= 0),
+        formed_by TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE(country_id, formable_key)
+      );
+      CREATE INDEX IF NOT EXISTS country_formations_country_idx ON country_formations(country_id,created_at DESC);
+    `
   }] as const;

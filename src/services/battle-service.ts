@@ -13,6 +13,7 @@ import { siegeCostMultiplier, type ResourceType } from "../domain/resources.js";
 import { settlementResourceAccess } from "./resource-service.js";
 import { scheduleMandatoryGarrisonReplenishment } from "./garrison-service.js";
 import { GameError } from "./game-service.js";
+import { formableModifiers, type FormableCountryKey } from "../domain/formable-countries.js";
 
 export type BattleStatus = "DRAFT" | "WAITING_FIRST_ROLL" | "WAITING_SECOND_ROLL" | "READY_TO_RESOLVE" | "FINISHED" | "CANCELLED";
 export type SiegePhase = "BOMBARDMENT" | "ASSAULT";
@@ -430,7 +431,8 @@ export const battleService = {
         const reinforced = Boolean((await client.query(
           "SELECT 1 FROM settlement_policies WHERE settlement_id=$1 AND policy_key='GARRISON_REINFORCEMENT' AND status='ACTIVE'", [defenderSettlementId]
         )).rowCount);
-        const bonus = Math.min(5, (farmLevel >= 3 ? 3 : farmLevel >= 2 ? 1 : 0) + (aqueductLevel >= 2 ? 2 : 0) + (reinforced ? 1 : 0));
+        const defenderFormable = (await client.query<{ active_formable_key: FormableCountryKey | null }>("SELECT c.active_formable_key FROM settlements s JOIN countries c ON c.id=s.country_id WHERE s.id=$1", [defenderSettlementId])).rows[0]?.active_formable_key;
+        const bonus = Math.min(8, (farmLevel >= 3 ? 3 : farmLevel >= 2 ? 1 : 0) + (aqueductLevel >= 2 ? 2 : 0) + (reinforced ? 1 : 0) + (formableModifiers(defenderFormable).starvationBonus ?? 0));
         starvationCapacity = 3 + bonus;
         currentTurn = (await client.query<{ current_turn: number }>("SELECT current_turn FROM guilds WHERE discord_id=$1", [input.guildId])).rows[0]?.current_turn ?? 0;
       }
@@ -639,7 +641,8 @@ export const battleService = {
       }
       const resources = (await settlementResourceAccess(client, settlement.country_id)).get(settlement.id) ?? [settlement.resource_type];
       const asset = SIEGE_ASSETS[input.assetType];
-      const cost = Math.ceil(asset.price * input.quantity * siegeCostMultiplier(input.assetType, resources));
+      const formableKey = (await client.query<{ active_formable_key: FormableCountryKey | null }>("SELECT active_formable_key FROM countries WHERE id=$1", [settlement.country_id])).rows[0]?.active_formable_key;
+      const cost = Math.ceil(asset.price * input.quantity * Math.max(0.5, siegeCostMultiplier(input.assetType, resources) - (formableModifiers(formableKey).siegeAssetDiscount ?? 0)));
       if (settlement.local_treasury < cost) throw new GameError("Ödeme yerleşkesinin hazinesinde yeterli altın yok.");
 
       const support = { ...attacker.support_assets, [input.assetType]: (attacker.support_assets[input.assetType] ?? 0) + input.quantity };
@@ -695,7 +698,11 @@ export const battleService = {
       const catapultCount = Math.min(configured, 25);
       const enhancedCatapults = Math.min(catapultCount, attacker.support_enhanced?.catapult ?? 0);
       const support = rollSiegeSupport({ catapult: catapultCount }, { catapult: "WALL" }, undefined, { catapult: enhancedCatapults });
-      const wallDamage = Math.min(view.battle.wall_current_hp ?? 0, support.wallDamage);
+      const defenderFormable = view.battle.defender_settlement_id
+        ? (await client.query<{ active_formable_key: FormableCountryKey | null }>("SELECT c.active_formable_key FROM settlements s JOIN countries c ON c.id=s.country_id WHERE s.id=$1", [view.battle.defender_settlement_id])).rows[0]?.active_formable_key
+        : null;
+      const fortificationMultiplier = formableModifiers(defenderFormable).wallSiegeDamageMultiplier ?? 1;
+      const wallDamage = Math.min(view.battle.wall_current_hp ?? 0, Math.floor(support.wallDamage * fortificationMultiplier));
       const wallAfter = Math.max(0, (view.battle.wall_current_hp ?? 0) - wallDamage);
       const bombardmentNumber = view.battle.bombardment_round + 1;
       await client.query("INSERT INTO battle_bombardments(battle_id,bombardment_number,actor_user_id,catapult_count,wall_damage,wall_hp_after,game_turn) VALUES($1,$2,$3,$4,$5,$6,$7)", [battle.id, bombardmentNumber, input.actorId, catapultCount, wallDamage, wallAfter, view.battle.game_turn ?? 0]);
@@ -713,11 +720,19 @@ export const battleService = {
         const prepared = Boolean((await client.query(
           "SELECT 1 FROM settlement_policies WHERE settlement_id=$1 AND policy_key='WAR_PREPARATION' AND status='ACTIVE'", [battle.defender_settlement_id]
         )).rowCount);
-        if (prepared) {
-          const composition: BattleComposition = { ...view.sides.B.composition, militia: (view.sides.B.composition.militia ?? 0) + 500 };
+        const defenderState = (await client.query<{ active_formable_key: FormableCountryKey | null; curia_level: number }>(
+          `SELECT c.active_formable_key,COALESCE((SELECT level FROM buildings WHERE settlement_id=s.id AND building_type='curia' AND status='ACTIVE'),0)::integer AS curia_level
+             FROM settlements s JOIN countries c ON c.id=s.country_id WHERE s.id=$1`, [battle.defender_settlement_id]
+        )).rows[0];
+        const modifiers = formableModifiers(defenderState?.active_formable_key);
+        const policyMilitia = prepared ? (modifiers.warPreparationMilitia ?? Math.floor(500 * (modifiers.policyMilitiaMultiplier ?? 1))) : 0;
+        const gallicMilitia = defenderState?.active_formable_key === "GALLIC_CONFEDERATION" && defenderState.curia_level >= 2 ? 500 : 0;
+        const militia = policyMilitia + gallicMilitia;
+        if (militia > 0) {
+          const composition: BattleComposition = { ...view.sides.B.composition, militia: (view.sides.B.composition.militia ?? 0) + militia };
           const total = compositionTotal(composition);
           const seal = sealFor({ ...composition, ...view.sides.B.support_assets });
-          await client.query("UPDATE battle_sides SET composition=$1::jsonb,initial_total=$2,current_total=$2,temporary_militia=500,seal=$3 WHERE battle_id=$4 AND side_key='B'", [JSON.stringify(composition), total, seal, battle.id]);
+          await client.query("UPDATE battle_sides SET composition=$1::jsonb,initial_total=$2,current_total=$2,temporary_militia=$3,seal=$4 WHERE battle_id=$5 AND side_key='B'", [JSON.stringify(composition), total, militia, seal, battle.id]);
         }
       }
       await client.query("UPDATE battle_sides SET initial_composition=composition WHERE battle_id=$1", [battle.id]);
@@ -762,8 +777,15 @@ export const battleService = {
       } else if (view.battle.terrain === "SIEGE") {
         const activeAssets = side === "A" ? activeSiegeAssaultAssets(target.support_assets, terrain.frontageA) : target.support_assets;
         const support = rollSiegeSupport(activeAssets, target.support_targets, undefined, target.support_enhanced ?? {});
-        wallDamage = side === "A" ? support.wallDamage : 0;
-        gateDamage = side === "A" ? support.gateDamage : 0;
+        if (side === "A") {
+          const defenderFormable = view.battle.defender_settlement_id
+            ? (await client.query<{ active_formable_key: FormableCountryKey | null }>("SELECT c.active_formable_key FROM settlements s JOIN countries c ON c.id=s.country_id WHERE s.id=$1", [view.battle.defender_settlement_id])).rows[0]?.active_formable_key
+            : null;
+          const fortificationMultiplier = formableModifiers(defenderFormable).wallSiegeDamageMultiplier ?? 1;
+          const catapultWallDamage = Number(support.detail.catapultWall ?? 0);
+          wallDamage = support.wallDamage - catapultWallDamage + Math.floor(catapultWallDamage * fortificationMultiplier);
+          gateDamage = Math.floor(support.gateDamage * fortificationMultiplier);
+        }
         const wallAfterSupport = Math.max(0, (view.battle.wall_current_hp ?? 0) - wallDamage);
         const gateAfterSupport = Math.max(0, (view.battle.gate_current_hp ?? 0) - gateDamage);
         const rollComposition = side === "A"
