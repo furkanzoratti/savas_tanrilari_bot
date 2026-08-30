@@ -5,7 +5,7 @@ import {
   type NpcAutoPurchaseDoctrine, type PurchasableUnitType
 } from "../domain/npc-auto-purchase.js";
 import { pool } from "../db/pool.js";
-import { MAX_SPECIAL_UNIT_ARMY_RATIO, MAX_SPECIAL_UNIT_RECRUITMENT_PER_ACQUISITION, isSpecialUnitType, type SpecialUnitType } from "../domain/special-units.js";
+import { type SpecialUnitType } from "../domain/special-units.js";
 import {
   GameError, buildingPurchaseTerms, gameService, unitPurchaseCost,
   type CountryDocument
@@ -161,24 +161,14 @@ function planCountryPurchases(doc: CountryDocument, config: NpcAutoPurchaseConfi
     order.push(baseOrder[index]!);
     if (unlockedSpecials.length && index % 4 === 3) order.push(unlockedSpecials[Math.floor(index / 4) % unlockedSpecials.length]!);
   }
-  const currentSpecialPersonnel = doc.settlements.reduce((total, settlement) => total
-    + settlement.units.filter((unit) => isSpecialUnitType(unit.unit_type)).reduce((sum, unit) => sum + unit.quantity, 0)
-    + settlement.pendingRecruitment.filter((unit) => isSpecialUnitType(unit.unit_type)).reduce((sum, unit) => sum + unit.quantity, 0), 0);
-  let remainingSpecialCapacity = Math.max(0, Math.floor((doc.militaryLimit * MAX_SPECIAL_UNIT_ARMY_RATIO) / 1_000) * 1_000 - currentSpecialPersonnel);
-  const plannedSpecialByType = new Map<SpecialUnitType, number>();
+
   const grouped = new Map<string, UnitAction>();
   let orderIndex = 0;
   let stalled = 0;
   while (remainingPersonnel >= 1_000 && remainingBudget > 0 && stalled < order.length) {
     const unitType = order[orderIndex % order.length]!;
     orderIndex += 1;
-    if (isSpecialUnitType(unitType)) {
-      const typeRemaining = MAX_SPECIAL_UNIT_RECRUITMENT_PER_ACQUISITION - (plannedSpecialByType.get(unitType) ?? 0);
-      if (typeRemaining < 1_000 || remainingSpecialCapacity < 1_000) {
-        stalled += 1;
-        continue;
-      }
-    }
+
     const eligible = doc.settlements
       .filter((settlement) => (settlementCapacity.get(settlement.id) ?? 0) >= 1_000)
       .map((settlement) => ({
@@ -209,10 +199,7 @@ function planCountryPurchases(doc: CountryDocument, config: NpcAutoPurchaseConfi
     localTreasury.set(selected.settlement.id, (localTreasury.get(selected.settlement.id) ?? 0) - selected.cost);
     remainingPersonnel -= 1_000;
     remainingBudget -= selected.cost;
-    if (isSpecialUnitType(unitType)) {
-      plannedSpecialByType.set(unitType, (plannedSpecialByType.get(unitType) ?? 0) + 1_000);
-      remainingSpecialCapacity -= 1_000;
-    }
+
   }
 
   const unitActions = [...grouped.values()].map((action) => {

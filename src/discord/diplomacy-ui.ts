@@ -38,11 +38,16 @@ export function renderPublicCountryProfile(profile: PublicCountryProfile): Embed
     ? profile.wars.map((opponent) => `• **${opponent.name}**`).join("\n")
     : "Devlet herhangi bir savaşta bulunmuyor.";
 
+  const destroyed = profile.status === "YOK_EDİLDİ";
+  const status = destroyed
+    ? `**YOK EDİLDİ**${profile.destroyed_turn === null ? "" : ` • Tur ${profile.destroyed_turn}`}\n${profile.destroyed_reason ?? "Açıklama belirtilmemiş."}`
+    : "**Aktif Devlet**";
   return new EmbedBuilder()
-    .setColor(0xc59b45)
-    .setTitle(`🏛️ ${profile.name} • Herkese Açık Devlet Bilgisi`)
+    .setColor(destroyed ? 0x4b4d52 : 0xc59b45)
+    .setTitle(`${destroyed ? "🏴" : "🏛️"} ${profile.name} • Herkese Açık Devlet Bilgisi`)
     .setImage(STATE_PROFILE_BANNER_URL)
     .addFields(
+      { name: "📌 Devlet Durumu", value: embedValue(status) },
       { name: "🗺️ Yerleşkeler ve Hammaddeler", value: embedValue(settlements) },
       { name: "🤝 Müttefikler", value: embedValue(allies) },
       { name: "🏛️ Üye Olunan Paktlar", value: embedValue(pacts) },

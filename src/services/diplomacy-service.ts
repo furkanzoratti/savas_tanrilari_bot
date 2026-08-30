@@ -58,6 +58,9 @@ export interface PactInvitationView {
 export interface PublicCountryProfile {
   id: string;
   name: string;
+  status: "ACTIVE" | "YOK_EDİLDİ";
+  destroyed_turn: number | null;
+  destroyed_reason: string | null;
   settlements: Array<{ name: string; resource_type: ResourceType }>;
   allies: CountryDiplomacyEntry[];
   pacts: CountryPactEntry[];
@@ -73,7 +76,7 @@ const allianceViewSql = `SELECT alliance.id,alliance.guild_id,alliance.proposer_
 
 const pactViewSql = `SELECT pact.id,pact.guild_id,pact.founder_country_id,
   founder.name AS founder_country_name,pact.name,pact.purpose,pact.description,
-  (SELECT COUNT(*)::integer FROM pact_memberships member WHERE member.pact_id=pact.id) AS member_count
+  (SELECT COUNT(*)::integer FROM pact_memberships member JOIN countries member_country ON member_country.id=member.country_id WHERE member.pact_id=pact.id AND member_country.status='ACTIVE') AS member_count
   FROM diplomatic_pacts pact
   JOIN countries founder ON founder.id=pact.founder_country_id`;
 
@@ -95,7 +98,7 @@ async function audit(client: DbClient, guildId: string, actorId: string, action:
 }
 
 async function verifyCountry(client: DbClient, guildId: string, countryId: string): Promise<void> {
-  const result = await client.query("SELECT 1 FROM countries WHERE id=$1 AND guild_id=$2", [countryId, guildId]);
+  const result = await client.query("SELECT 1 FROM countries WHERE id=$1 AND guild_id=$2 AND status='ACTIVE'", [countryId, guildId]);
   if (!result.rowCount) throw new GameError("Belirtilen ülke bu sunucuda bulunamadı.");
 }
 
@@ -178,8 +181,8 @@ export const diplomacyService = {
   async publicCountry(guildId: string, name: string): Promise<PublicCountryProfile> {
     const client = await pool.connect();
     try {
-      const country = (await client.query<CountryDiplomacyEntry>(
-        "SELECT id,name FROM countries WHERE guild_id=$1 AND LOWER(name)=LOWER($2) LIMIT 1", [guildId, name.trim()]
+      const country = (await client.query<CountryDiplomacyEntry & { status: "ACTIVE" | "YOK_EDİLDİ"; destroyed_turn: number | null; destroyed_reason: string | null }>(
+        "SELECT id,name,status,destroyed_turn,destroyed_reason FROM countries WHERE guild_id=$1 AND LOWER(name)=LOWER($2) LIMIT 1", [guildId, name.trim()]
       )).rows[0];
       if (!country) throw new GameError("Belirtilen ülke bulunamadı.");
       const settlements = (await client.query<{ name: string; resource_type: ResourceType }>(
@@ -303,7 +306,7 @@ export const diplomacyService = {
     const members = (await pool.query<CountryDiplomacyEntry>(
       `SELECT country.id,country.name FROM pact_memberships membership
         JOIN countries country ON country.id=membership.country_id
-       WHERE membership.pact_id=$1 ORDER BY country.name`, [pact.id]
+       WHERE membership.pact_id=$1 AND country.status='ACTIVE' ORDER BY country.name`, [pact.id]
     )).rows;
     return { ...pact, members };
   },

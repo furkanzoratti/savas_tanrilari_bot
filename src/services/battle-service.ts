@@ -398,7 +398,7 @@ export const battleService = {
   async create(input: { guildId: string; channelId: string; actorId: string; countryAName: string; countryBName: string; terrain: BattleTerrain; narrative: string; controllerA: BattleController; controllerB: BattleController; defenderSettlementName?: string | null }): Promise<BattleView> {
     return withTransaction(async (client) => {
       if (await activeInChannel(client, input.guildId, input.channelId)) throw new GameError("Bu kanalda zaten etkin bir savaş var.");
-      const countries = await client.query<{ id: string; name: string }>("SELECT id,name FROM countries WHERE guild_id=$1 AND LOWER(name) IN (LOWER($2),LOWER($3))", [input.guildId, input.countryAName, input.countryBName]);
+      const countries = await client.query<{ id: string; name: string }>("SELECT id,name FROM countries WHERE guild_id=$1 AND status='ACTIVE' AND LOWER(name) IN (LOWER($2),LOWER($3))", [input.guildId, input.countryAName, input.countryBName]);
       const a = countries.rows.find((country) => country.name.toLocaleLowerCase("tr-TR") === input.countryAName.toLocaleLowerCase("tr-TR"));
       const b = countries.rows.find((country) => country.name.toLocaleLowerCase("tr-TR") === input.countryBName.toLocaleLowerCase("tr-TR"));
       if (!a || !b) throw new GameError("Taraf ülkelerden biri bulunamadı.");
@@ -448,7 +448,7 @@ export const battleService = {
       const battle = await activeInChannel(client, input.guildId, input.channelId);
       if (!battle || battle.status !== "DRAFT") throw new GameError("Ülkeler yalnızca düzenlenebilir savaş taslağına eklenebilir veya çıkarılabilir.");
       const country = (await client.query<{ id: string; name: string }>(
-        "SELECT id,name FROM countries WHERE guild_id=$1 AND lower(name)=lower($2) FOR UPDATE",
+        "SELECT id,name FROM countries WHERE guild_id=$1 AND status='ACTIVE' AND lower(name)=lower($2) FOR UPDATE",
         [input.guildId, input.countryName.trim()]
       )).rows[0];
       if (!country) throw new GameError("Ülke bulunamadı.");

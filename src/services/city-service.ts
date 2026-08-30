@@ -17,7 +17,7 @@ interface SettlementRow {
 const ROLE_ORDER: CharacterRole[] = ["SPY", "MERCHANT", "COMMANDER"];
 
 async function getCountry(client: DbClient, guildId: string, countryId: string): Promise<CountryRow> {
-  const country = (await client.query<CountryRow>("SELECT id,guild_id,name FROM countries WHERE id=$1 AND guild_id=$2", [countryId, guildId])).rows[0];
+  const country = (await client.query<CountryRow>("SELECT id,guild_id,name FROM countries WHERE id=$1 AND guild_id=$2 AND status='ACTIVE'", [countryId, guildId])).rows[0];
   if (!country) throw new GameError("Ülke bulunamadı veya bu sunucuya ait değil.");
   return country;
 }

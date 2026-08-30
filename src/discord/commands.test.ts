@@ -15,11 +15,12 @@ describe("yönetim komutları", () => {
     const admin = commandBuilders.find((command) => command.name === "yonetim");
     const names = admin?.options?.map((option) => option.name) ?? [];
     expect(names).toEqual(expect.arrayContaining([
-      "ulkeleri-listele", "devlet-belgeleri", "ulke-sil", "yerleske-sil", "nufus-sil", "yerleske-devret"
+      "ulkeleri-listele", "devlet-belgeleri", "ulke-yok-et", "yerleske-sil", "nufus-sil", "yerleske-devret"
     ]));
-    for (const destructive of ["ulke-sil", "yerleske-sil"]) {
+    for (const destructive of ["ulke-yok-et", "yerleske-sil"]) {
       expect(admin?.options?.find((option) => option.name === destructive)?.options?.find((option) => option.name === "onay")).toMatchObject({ required: true });
     }
+    expect(admin?.options?.find((option) => option.name === "ulke-yok-et")?.options?.find((option) => option.name === "neden")).toMatchObject({ required: true });
   });
 
   it("gözcü, atölye, saha aleti ve asimilasyon komutlarını kaydeder", () => {
@@ -44,5 +45,9 @@ describe("yönetim komutları", () => {
 
     expect(command?.description).toContain("Yalnızca yönetici");
     expect(purchase).toMatchObject({ required: true, autocomplete: true });
+  });
+  it("bu Alım Turunun paralı asker bakımlarını tek seferlik toplu tahsil eder", () => {
+    const command = commandBuilders.find((item) => item.name === "parali-bakim-topla");
+    expect(command?.description).toContain("Yalnızca yönetici");
   });
 });

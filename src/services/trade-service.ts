@@ -64,7 +64,7 @@ export const tradeService = {
       for (const countryId of [input.proposerCountryId, input.receiverCountryId].sort()) {
         await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`trade:${countryId}`]);
       }
-      const receiver = await client.query("SELECT 1 FROM countries WHERE id=$1 AND guild_id=$2", [input.receiverCountryId, input.guildId]);
+      const receiver = await client.query("SELECT 1 FROM countries WHERE id=$1 AND guild_id=$2 AND status='ACTIVE'", [input.receiverCountryId, input.guildId]);
       if (!receiver.rowCount) throw new GameError("Hedef ülke bulunamadı.");
       await assertSettlement(client, input.proposerSettlementId, input.proposerCountryId);
       await assertSettlement(client, input.receiverSettlementId, input.receiverCountryId);

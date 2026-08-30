@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { BATTLE_UNIT_STATS } from "./battle.js";
 import { UNITS } from "./catalog.js";
-import {
-  MAX_SPECIAL_UNIT_ARMY_RATIO, MAX_SPECIAL_UNIT_RECRUITMENT_PER_ACQUISITION,
-  SPECIAL_UNIT_TYPES, SPECIAL_UNITS, isSpecialUnitType
-} from "./special-units.js";
+import { SPECIAL_UNIT_TYPES, SPECIAL_UNITS, isSpecialUnitType } from "./special-units.js";
 
 describe("ülkeye özel birlikler", () => {
   it("kararlaştırılan adları, fiyatları ve bakım değerlerini kullanır", () => {
@@ -26,9 +23,7 @@ describe("ülkeye özel birlikler", () => {
     expect(BATTLE_UNIT_STATS.briton_longbow).toMatchObject({ clashDice: 1, clashSides: 10, damageDice: 2, damageSides: 10, durability: 1 });
   });
 
-  it("özel birlik sınırlarını ve tür denetimini sabit tutar", () => {
-    expect(MAX_SPECIAL_UNIT_RECRUITMENT_PER_ACQUISITION).toBe(3_000);
-    expect(MAX_SPECIAL_UNIT_ARMY_RATIO).toBe(0.20);
+  it("özel birlik tür denetimini korur; özel alım kotası tanımlamaz", () => {
     expect(isSpecialUnitType("briton_longbow")).toBe(true);
     expect(isSpecialUnitType("archer")).toBe(false);
   });

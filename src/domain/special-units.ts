@@ -8,9 +8,6 @@ export const SPECIAL_UNITS = {
 
 export type SpecialUnitType = keyof typeof SPECIAL_UNITS;
 export const SPECIAL_UNIT_TYPES = Object.keys(SPECIAL_UNITS) as SpecialUnitType[];
-export const MAX_SPECIAL_UNIT_RECRUITMENT_PER_ACQUISITION = 3_000;
-export const MAX_SPECIAL_UNIT_ARMY_RATIO = 0.20;
-
 export function isSpecialUnitType(value: string): value is SpecialUnitType {
   return Object.prototype.hasOwnProperty.call(SPECIAL_UNITS, value);
 }

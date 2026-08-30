@@ -59,10 +59,10 @@ export const commandBuilders = [
   new SlashCommandBuilder()
     .setName("aktif-savaslar").setDescription("Devam eden bütün resmî devlet savaşlarını herkese açık listeler"),
   new SlashCommandBuilder()
-    .setName("savas-sonlandir").setDescription("Yalnızca yönetici: resmî devlet savaşını tazminatsız olarak sonlandırır")
-    .addStringOption((option) => option.setName("ulke-a").setDescription("Savaşın ilk tarafı").setRequired(true))
-    .addStringOption((option) => option.setName("ulke-b").setDescription("Savaşın diğer tarafı").setRequired(true))
-    .addStringOption((option) => option.setName("neden").setDescription("Savaşın sona erme gerekçesi").setRequired(true).setMinLength(2).setMaxLength(500)),
+    .setName("savas-sonlandir").setDescription("Yalnızca yönetici: aktif bir savaşı sonuçlandırır ve herkese duyurur")
+    .addStringOption((option) => option.setName("savas").setDescription("Sonlandırılacak aktif savaşı yazmaya başlayarak seçin").setRequired(true).setAutocomplete(true))
+    .addStringOption((option) => option.setName("kazanan").setDescription("Kazanan devlet; kazanan yoksa Beyaz Barış").setRequired(true).setAutocomplete(true))
+    .addStringOption((option) => option.setName("aciklama").setDescription("Herkese açık savaş bitiş açıklaması").setRequired(true).setMinLength(2).setMaxLength(2000)),
   new SlashCommandBuilder()
     .setName("ittifak").setDescription("İki devlet arasındaki karşılıklı müttefikliği yönetir")
     .addSubcommand((sub) => sub.setName("teklif").setDescription("Başka bir devlete ittifak daveti gönderir")
@@ -247,6 +247,8 @@ export const commandBuilders = [
     .addStringOption((option) => option.setName("donem").setDescription("Sıralama dönemi").setRequired(true)
       .addChoices({ name: "Son 24 saat", value: "daily" }, { name: "Son 7 gün", value: "weekly" })),
   new SlashCommandBuilder()
+    .setName("parali-bakim-topla").setDescription("Yalnızca yönetici: bu turun vadesi gelen tüm paralı asker bakımlarını toplar"),
+  new SlashCommandBuilder()
     .setName("parali-asker").setDescription("Yalnızca yönetici: paralı asker sözleşmelerini yönetir")
     .addSubcommand((sub) => sub.setName("kirala").setDescription("Bir paralı asker grubunu kiralar")
       .addStringOption((o) => o.setName("ulke").setDescription("Sözleşmeyi yapacak ülke").setRequired(true))
@@ -392,9 +394,10 @@ export const commandBuilders = [
       .addIntegerOption((o) => o.setName("hazine").setDescription("Başlangıç hazinesi").setMinValue(0).setRequired(true)))
     .addSubcommand((sub) => sub.setName("ulkeleri-listele").setDescription("Oyundaki bütün aktif devletleri listeler"))
     .addSubcommand((sub) => sub.setName("devlet-belgeleri").setDescription("Bütün devletlerin ayrıntılı bilgi kutularını gösterir"))
-    .addSubcommand((sub) => sub.setName("ulke-sil").setDescription("Bir devleti ve bağlı bütün verilerini kalıcı olarak siler")
-      .addStringOption((o) => o.setName("ulke").setDescription("Silinecek ülke").setRequired(true))
-      .addStringOption((o) => o.setName("onay").setDescription("Onaylamak için SIL yazın").setRequired(true)))
+    .addSubcommand((sub) => sub.setName("ulke-yok-et").setDescription("Topraksız bir devleti kayıtlarını koruyarak YOK EDİLDİ durumuna alır")
+      .addStringOption((o) => o.setName("ulke").setDescription("Yok edilmiş sayılacak ülke").setRequired(true))
+      .addStringOption((o) => o.setName("neden").setDescription("Herkese açık/tarihsel yok edilme açıklaması").setRequired(true).setMinLength(2).setMaxLength(500))
+      .addStringOption((o) => o.setName("onay").setDescription("Onaylamak için YOK_ET yazın").setRequired(true)))
     .addSubcommand((sub) => sub.setName("yerleske-sil").setDescription("Bir yerleşkeyi ve bağlı bütün verilerini kalıcı olarak siler")
       .addStringOption((o) => o.setName("ulke").setDescription("Yerleşkenin bağlı olduğu ülke").setRequired(true))
       .addStringOption((o) => o.setName("yerleske").setDescription("Silinecek yerleşke").setRequired(true))

@@ -105,7 +105,7 @@ async function riskReport(client: DbClient, guildId: string, type: SettlementEve
   if (!guild) throw new GameError("Sunucu oyun ayarları bulunamadı.");
 
   if (scopeCountryId) {
-    const scope = await client.query("SELECT 1 FROM countries WHERE id=$1 AND guild_id=$2", [scopeCountryId, guildId]);
+    const scope = await client.query("SELECT 1 FROM countries WHERE id=$1 AND guild_id=$2 AND status='ACTIVE'", [scopeCountryId, guildId]);
     if (!scope.rowCount) throw new GameError("Seçilen ülke bu Discord sunucusuna ait değil.");
   }
 
@@ -115,7 +115,7 @@ async function riskReport(client: DbClient, guildId: string, type: SettlementEve
             EXISTS(SELECT 1 FROM battles b WHERE b.defender_settlement_id=s.id AND b.terrain='SIEGE'
                        AND b.status NOT IN ('FINISHED','CANCELLED')) AS besieged
        FROM settlements s JOIN countries c ON c.id=s.country_id
-      WHERE c.guild_id=$1 AND ($2::uuid IS NULL OR c.id=$2::uuid)
+      WHERE c.guild_id=$1 AND c.status='ACTIVE' AND ($2::uuid IS NULL OR c.id=$2::uuid)
       ORDER BY c.name,s.name,s.id`,
     [guildId, scopeCountryId]
   )).rows;

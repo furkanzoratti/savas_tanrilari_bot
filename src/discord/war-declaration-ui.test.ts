@@ -12,7 +12,7 @@ import {
   WAR_DECLARATION_BANNER_PATH, WAR_DECLARATION_BANNER_URL,
   PEACE_TREATY_BANNER_PATH, PEACE_TREATY_BANNER_URL
 } from "./assets.js";
-import { parsePeaceIndemnity, renderPeaceAnnouncement, renderPeaceOffer, renderWarDeclaration } from "./war-declaration-ui.js";
+import { parsePeaceIndemnity, renderPeaceAnnouncement, renderPeaceOffer, renderWarDeclaration, renderWarEndAnnouncement } from "./war-declaration-ui.js";
 
 describe("resmî savaş ilanları ve barış duyuruları", () => {
   it("oyuncu ve yönetici savaş komutlarını ayrı ayrı kaydeder", () => {
@@ -28,7 +28,8 @@ describe("resmî savaş ilanları ve barış duyuruları", () => {
       id: "war", guild_id: "guild", attacker_country_id: "roma", attacker_country_name: "Roma",
       defender_country_id: "kartaca", defender_country_name: "Kartaca", reason: "Sınır anlaşmazlığı",
       declaration: "Senatonun resmî kararı", status: "ACTIVE", started_turn: 12,
-      ended_turn: null, channel_id: null, message_id: null
+      ended_turn: null, winner_country_id: null, winner_country_name: null, end_outcome: null, end_description: null,
+      channel_id: null, message_id: null
     }).toJSON();
     expect(JSON.stringify(embed)).toContain("Sınır anlaşmazlığı");
     expect(JSON.stringify(embed)).toContain("Senatonun resmî kararı");
@@ -46,6 +47,33 @@ describe("resmî savaş ilanları ve barış duyuruları", () => {
     }).toJSON();
     expect(JSON.stringify(embed)).toContain("10.000 Altın");
     expect(JSON.stringify(embed)).toContain("Sınırlar korunacak.");
+  });
+
+  it("savaş sonlandırma komutunda aktif savaş seçimi ve üç sonuç seçeneği sunar", () => {
+    const command = commandBuilders.find((item) => item.name === "savas-sonlandir");
+    const warOption = command?.options?.find((option) => option.name === "savas");
+    const winnerOption = command?.options?.find((option) => option.name === "kazanan");
+    expect(warOption).toMatchObject({ required: true, autocomplete: true });
+    expect(winnerOption).toMatchObject({ required: true, autocomplete: true });
+  });
+
+  it("kazananı ve yönetici açıklamasını kamuya açık savaş bitiş duyurusunda gösterir", () => {
+    const embed = renderWarEndAnnouncement({
+      firstCountry: "Roma", secondCountry: "Kartaca", winnerCountry: "Roma",
+      outcome: "ATTACKER_VICTORY", turn: 14, description: "Kartaca ordusu teslim oldu."
+    }).toJSON();
+    expect(JSON.stringify(embed)).toContain("Kazanan: **Roma**");
+    expect(JSON.stringify(embed)).toContain("Kartaca ordusu teslim oldu.");
+    expect(embed.image?.url).toBe(PEACE_TREATY_BANNER_URL);
+  });
+
+  it("beyaz barış sonucunda kazanan devlet göstermeden savaşı kapatır", () => {
+    const embed = renderWarEndAnnouncement({
+      firstCountry: "Roma", secondCountry: "Kartaca", winnerCountry: null,
+      outcome: "WHITE_PEACE", turn: 14, description: "Taraflar mevcut sınırlara döndü."
+    }).toJSON();
+    expect(JSON.stringify(embed)).toContain("Beyaz Barış");
+    expect(JSON.stringify(embed)).not.toContain("Kazanan:");
   });
 
   it("kamuya açık barış kapanışını özgün banner ile gösterir", () => {

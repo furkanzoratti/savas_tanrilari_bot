@@ -13,9 +13,15 @@ export interface OfficialWarView {
   status: "ACTIVE" | "ENDED";
   started_turn: number;
   ended_turn: number | null;
+  winner_country_id: string | null;
+  winner_country_name: string | null;
+  end_outcome: WarEndOutcome | null;
+  end_description: string | null;
   channel_id: string | null;
   message_id: string | null;
 }
+
+export type WarEndOutcome = "ATTACKER_VICTORY" | "DEFENDER_VICTORY" | "WHITE_PEACE";
 
 export interface PeaceOfferView {
   id: string;
@@ -61,10 +67,13 @@ interface TreasuryRow {
 const warViewSql = `SELECT war.id,war.guild_id,war.attacker_country_id,
   attacker.name AS attacker_country_name,war.defender_country_id,
   defender.name AS defender_country_name,war.reason,war.declaration,
-  war.status,war.started_turn,war.ended_turn,war.channel_id,war.message_id
+  war.status,war.started_turn,war.ended_turn,war.winner_country_id,
+  winner.name AS winner_country_name,war.end_outcome,war.end_description,
+  war.channel_id,war.message_id
   FROM state_wars war
   JOIN countries attacker ON attacker.id=war.attacker_country_id
-  JOIN countries defender ON defender.id=war.defender_country_id`;
+  JOIN countries defender ON defender.id=war.defender_country_id
+  LEFT JOIN countries winner ON winner.id=war.winner_country_id`;
 
 const offerViewSql = `SELECT offer.id,offer.guild_id,offer.war_id,
   offer.proposer_country_id,proposer.name AS proposer_country_name,
@@ -101,7 +110,7 @@ async function currentTurn(client: DbClient, guildId: string): Promise<number> {
 
 async function verifyCountries(client: DbClient, guildId: string, countryIds: string[]): Promise<void> {
   for (const id of countryIds) {
-    const result = await client.query("SELECT 1 FROM countries WHERE id=$1 AND guild_id=$2", [id, guildId]);
+    const result = await client.query("SELECT 1 FROM countries WHERE id=$1 AND guild_id=$2 AND status='ACTIVE'", [id, guildId]);
     if (!result.rowCount) throw new GameError("Belirtilen devletlerden biri bu sunucuda bulunamadı.");
   }
 }
@@ -343,8 +352,8 @@ export const warDeclarationService = {
       await client.query("UPDATE peace_offers SET status=$2,resolved_turn=$3,resolved_by=$4,resolved_at=NOW() WHERE id=$1",
         [input.offerId, input.accept ? "ACCEPTED" : "REJECTED", turn, input.actorId]);
       if (input.accept) {
-        await client.query("UPDATE state_wars SET status='ENDED',ended_turn=$2,ended_by=$3,ended_at=NOW() WHERE id=$1",
-          [locked.war_id, turn, input.actorId]);
+        await client.query("UPDATE state_wars SET status='ENDED',ended_turn=$2,ended_by=$3,ended_at=NOW(),winner_country_id=NULL,end_outcome='WHITE_PEACE',end_description=(SELECT terms FROM peace_offers WHERE id=$4) WHERE id=$1",
+          [locked.war_id, turn, input.actorId, input.offerId]);
       }
       await audit(client, input.guildId, input.actorId, input.accept ? "PEACE_OFFER_ACCEPT" : "PEACE_OFFER_REJECT", "peace_offer", input.offerId,
         { ...input, indemnity: locked.indemnity_amount, deductions, credits, turn });
@@ -352,22 +361,34 @@ export const warDeclarationService = {
     });
   },
 
-  async forceEnd(input: { guildId: string; actorId: string; firstCountryId: string; secondCountryId: string; reason: string }): Promise<OfficialWarView> {
-    const reason = input.reason.trim();
-    if (reason.length < 2) throw new GameError("Savaşın sonlandırılma nedeni belirtilmelidir.");
+  async forceEnd(input: { guildId: string; actorId: string; warId: string; winnerCountryId: string | null; description: string }): Promise<OfficialWarView> {
+    const description = input.description.trim();
+    if (description.length < 2 || description.length > 2000) throw new GameError("Savaş bitiş açıklaması 2–2.000 karakter arasında olmalıdır.");
     return withTransaction(async (client) => {
-      await lockTurnAndCountries(client, input.guildId, [input.firstCountryId, input.secondCountryId]);
-      const existing = (await client.query<{ id: string }>(
-        `SELECT id FROM state_wars WHERE guild_id=$1 AND status='ACTIVE'
-          AND ((attacker_country_id=$2 AND defender_country_id=$3)
-            OR (attacker_country_id=$3 AND defender_country_id=$2)) FOR UPDATE`,
-        [input.guildId, input.firstCountryId, input.secondCountryId]
+      const preview = (await client.query<{ attacker_country_id: string; defender_country_id: string }>(
+        "SELECT attacker_country_id,defender_country_id FROM state_wars WHERE id=$1 AND guild_id=$2 AND status='ACTIVE'",
+        [input.warId, input.guildId]
       )).rows[0];
-      if (!existing) throw new GameError("Bu devletler arasında devam eden bir savaş bulunmuyor.");
+      if (!preview) throw new GameError("Seçilen savaş aktif değil veya bu sunucuya ait değil.");
+      await lockTurnAndCountries(client, input.guildId, [preview.attacker_country_id, preview.defender_country_id]);
+      const existing = (await client.query<{ id: string; attacker_country_id: string; defender_country_id: string }>(
+        "SELECT id,attacker_country_id,defender_country_id FROM state_wars WHERE id=$1 AND guild_id=$2 AND status='ACTIVE' FOR UPDATE",
+        [input.warId, input.guildId]
+      )).rows[0];
+      if (!existing) throw new GameError("Seçilen savaş artık aktif değil.");
       const turn = await currentTurn(client, input.guildId);
-      await client.query("UPDATE state_wars SET status='ENDED',ended_turn=$2,ended_by=$3,ended_at=NOW() WHERE id=$1", [existing.id, turn, input.actorId]);
+      if (input.winnerCountryId !== null && ![existing.attacker_country_id, existing.defender_country_id].includes(input.winnerCountryId)) {
+        throw new GameError("Kazanan devlet seçilen savaşın taraflarından biri olmalıdır.");
+      }
+      const outcome: WarEndOutcome = input.winnerCountryId === null
+        ? "WHITE_PEACE"
+        : input.winnerCountryId === existing.attacker_country_id ? "ATTACKER_VICTORY" : "DEFENDER_VICTORY";
+      await client.query(
+        "UPDATE state_wars SET status='ENDED',ended_turn=$2,ended_by=$3,ended_at=NOW(),winner_country_id=$4,end_outcome=$5,end_description=$6 WHERE id=$1",
+        [existing.id, turn, input.actorId, input.winnerCountryId, outcome, description]
+      );
       await client.query("UPDATE peace_offers SET status='CANCELLED',resolved_turn=$2,resolved_by=$3,resolved_at=NOW() WHERE war_id=$1 AND status='PENDING'", [existing.id, turn, input.actorId]);
-      await audit(client, input.guildId, input.actorId, "STATE_WAR_FORCE_END", "state_war", existing.id, { ...input, turn });
+      await audit(client, input.guildId, input.actorId, "STATE_WAR_FORCE_END", "state_war", existing.id, { ...input, description, outcome, turn });
       return (await warById(client, existing.id))!;
     });
   }

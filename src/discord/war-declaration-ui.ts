@@ -6,7 +6,7 @@ import {
 import { gold } from "../domain/format.js";
 import { gameService, GameError } from "../services/game-service.js";
 import {
-  warDeclarationService, type OfficialWarView, type PeaceOfferView
+  warDeclarationService, type OfficialWarView, type PeaceOfferView, type WarEndOutcome
 } from "../services/war-declaration-service.js";
 import { assertCountryAccess, isGameMaster, requireGameMaster, resolveCountry } from "./auth.js";
 import {
@@ -80,6 +80,26 @@ export function renderPeaceAnnouncement(input: {
   }
   if (input.turn !== null) embed.addFields({ name: "⏳ Antlaşma Turu", value: fieldValue(`Tur ${input.turn}`) });
   return embed.setFooter({ text: "Tazminat dışında yerleşke devri ve diğer hükümler oyun yöneticisi tarafından uygulanır." });
+}
+
+export function renderWarEndAnnouncement(input: {
+  firstCountry: string; secondCountry: string; winnerCountry: string | null;
+  outcome: WarEndOutcome; turn: number | null; description: string;
+}): EmbedBuilder {
+  const whitePeace = input.outcome === "WHITE_PEACE";
+  const result = whitePeace ? "Beyaz Barış" : `Kazanan: **${input.winnerCountry}**`;
+  return new EmbedBuilder()
+    .setColor(whitePeace ? 0x3c8b5c : 0xc59b45)
+    .setTitle(whitePeace ? "🕊️ BEYAZ BARIŞ • SAVAŞ SONA ERDİ" : "🏆 SAVAŞ SONA ERDİ")
+    .setImage(PEACE_TREATY_BANNER_URL)
+    .setDescription(`**${input.firstCountry}** ile **${input.secondCountry}** arasındaki savaş resmen sona erdi.`)
+    .addFields(
+      { name: "⚔️ Savaşın Tarafları", value: fieldValue(`**${input.firstCountry}**\n**${input.secondCountry}**`) },
+      { name: "🏁 Sonuç", value: fieldValue(result) },
+      ...longTextFields("📜 Savaş Bitiş Açıklaması", input.description),
+      ...(input.turn === null ? [] : [{ name: "⏳ Bitiş Turu", value: fieldValue(`Tur ${input.turn}`) }])
+    )
+    .setFooter({ text: "Bu duyuru yalnızca resmî savaş durumunu kapatır; hazine ve yerleşke işlemleri ayrıca uygulanır." });
 }
 
 function peaceButtons(id: string): ActionRowBuilder<ButtonBuilder> {
@@ -160,16 +180,22 @@ export async function handleWarDeclarationCommand(interaction: ChatInputCommandI
   if (interaction.commandName === "savas-sonlandir") {
     requireGameMaster(interaction);
     const channel = await warChannel(interaction);
-    const first = await countryByOption(interaction, "ulke-a");
-    const second = await countryByOption(interaction, "ulke-b");
-    const reason = interaction.options.getString("neden", true);
+    const warId = interaction.options.getString("savas", true);
+    const winnerSelection = interaction.options.getString("kazanan", true);
+    const winnerCountryId = winnerSelection === "WHITE_PEACE" ? null : winnerSelection;
+    const description = interaction.options.getString("aciklama", true);
     await interaction.deferReply({ ephemeral: true });
-    const war = await warDeclarationService.forceEnd({ guildId: interaction.guildId, actorId: interaction.user.id, firstCountryId: first.id, secondCountryId: second.id, reason });
+    const war = await warDeclarationService.forceEnd({ guildId: interaction.guildId, actorId: interaction.user.id, warId, winnerCountryId, description });
+    const outcome = war.end_outcome!;
     await channel.send({
-      embeds: [renderPeaceAnnouncement({ firstCountry: war.attacker_country_name, secondCountry: war.defender_country_name, turn: war.ended_turn, terms: reason })],
+      embeds: [renderWarEndAnnouncement({
+        firstCountry: war.attacker_country_name, secondCountry: war.defender_country_name,
+        winnerCountry: war.winner_country_name, outcome, turn: war.ended_turn, description
+      })],
       files: [new AttachmentBuilder(PEACE_TREATY_BANNER_PATH, { name: PEACE_TREATY_BANNER_NAME })]
     });
-    await interaction.editReply(`✅ **${first.name}** ile **${second.name}** arasındaki resmî savaş sonlandırıldı.`);
+    const resultText = outcome === "WHITE_PEACE" ? "beyaz barışla" : `**${war.winner_country_name}** zaferiyle`;
+    await interaction.editReply(`✅ **${war.attacker_country_name}** ile **${war.defender_country_name}** arasındaki savaş ${resultText} sonlandırıldı ve duyuruldu.`);
     return true;
   }
 

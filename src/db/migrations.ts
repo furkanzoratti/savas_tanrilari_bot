@@ -1026,4 +1026,28 @@ export const migrations = [
       );
       CREATE INDEX IF NOT EXISTS country_special_unit_unlocks_country_idx ON country_special_unit_unlocks(country_id);
     `
+  },
+  {
+    version: 28,
+    name: "state_war_end_results",
+    sql: `
+      ALTER TABLE state_wars ADD COLUMN IF NOT EXISTS winner_country_id UUID REFERENCES countries(id) ON DELETE SET NULL;
+      ALTER TABLE state_wars ADD COLUMN IF NOT EXISTS end_outcome TEXT
+        CHECK (end_outcome IS NULL OR end_outcome IN ('ATTACKER_VICTORY','DEFENDER_VICTORY','WHITE_PEACE'));
+      ALTER TABLE state_wars ADD COLUMN IF NOT EXISTS end_description TEXT;
+      CREATE INDEX IF NOT EXISTS state_wars_winner_idx ON state_wars(winner_country_id,status);
+    `
+  },
+  {
+    version: 29,
+    name: "destroyed_country_lifecycle",
+    sql: `
+      ALTER TABLE countries ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'ACTIVE'
+        CHECK (status IN ('ACTIVE','YOK_EDİLDİ'));
+      ALTER TABLE countries ADD COLUMN IF NOT EXISTS destroyed_turn INTEGER;
+      ALTER TABLE countries ADD COLUMN IF NOT EXISTS destroyed_reason TEXT;
+      ALTER TABLE countries ADD COLUMN IF NOT EXISTS destroyed_by TEXT;
+      ALTER TABLE countries ADD COLUMN IF NOT EXISTS destroyed_at TIMESTAMPTZ;
+      CREATE INDEX IF NOT EXISTS countries_guild_status_idx ON countries(guild_id,status,name);
+    `
   }] as const;

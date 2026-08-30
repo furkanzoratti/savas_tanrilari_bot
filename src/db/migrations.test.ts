@@ -96,3 +96,26 @@ describe("yirmi yedinci migration", () => {
     expect(migration?.sql).toContain("briton_longbow");
   });
 });
+describe("yirmi sekizinci migration", () => {
+  const migration = migrations.find((item) => item.version === 28);
+
+  it("savaş sonucunu, kazananı ve bitiş açıklamasını saklar", () => {
+    expect(migration?.name).toBe("state_war_end_results");
+    expect(migration?.sql).toContain("winner_country_id UUID");
+    expect(migration?.sql).toContain("ATTACKER_VICTORY");
+    expect(migration?.sql).toContain("DEFENDER_VICTORY");
+    expect(migration?.sql).toContain("WHITE_PEACE");
+    expect(migration?.sql).toContain("end_description TEXT");
+  });
+});
+describe("yirmi dokuzuncu migration", () => {
+  const migration = migrations.find((item) => item.version === 29);
+
+  it("yok edilen devletleri silmeden tarihçesiyle saklar", () => {
+    expect(migration?.name).toBe("destroyed_country_lifecycle");
+    expect(migration?.sql).toContain("YOK_EDİLDİ");
+    expect(migration?.sql).toContain("destroyed_turn");
+    expect(migration?.sql).toContain("destroyed_reason");
+    expect(migration?.sql).toContain("destroyed_at");
+  });
+});

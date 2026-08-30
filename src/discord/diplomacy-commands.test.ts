@@ -34,6 +34,7 @@ describe("ittifak, pakt ve herkese açık devlet profili", () => {
   it("herkese açık devlet kartında yalnızca diplomatik ve yerleşke bilgilerini gösterir", () => {
     const embed = renderPublicCountryProfile({
       id: "roma", name: "Roma",
+      status: "ACTIVE", destroyed_turn: null, destroyed_reason: null,
       settlements: [{ name: "Roma", resource_type: "IRON" }, { name: "Neapolis", resource_type: "GRAIN" }],
       allies: [{ id: "kartaca", name: "Kartaca" }],
       pacts: [{ id: "pakt", name: "Akdeniz Birliği", purpose: "Deniz güvenliği", founder_name: "Roma" }],
@@ -42,7 +43,7 @@ describe("ittifak, pakt ve herkese açık devlet profili", () => {
     const fields = embed.fields ?? [];
     const combined = JSON.stringify(embed);
     expect(fields.map((field) => field.name)).toEqual([
-      "🗺️ Yerleşkeler ve Hammaddeler", "🤝 Müttefikler", "🏛️ Üye Olunan Paktlar", "⚔️ Savaşta Olduğu Devletler"
+      "📌 Devlet Durumu", "🗺️ Yerleşkeler ve Hammaddeler", "🤝 Müttefikler", "🏛️ Üye Olunan Paktlar", "⚔️ Savaşta Olduğu Devletler"
     ]);
     expect(combined).toContain("Demir");
     expect(combined).toContain("Tahıl");
@@ -54,7 +55,18 @@ describe("ittifak, pakt ve herkese açık devlet profili", () => {
     expect(existsSync(STATE_PROFILE_BANNER_PATH)).toBe(true);
   });
 
-  it("paktın amaç, açıklama, lider ve üye devletlerini kamuya açık kartta gösterir", () => {
+  it("yok edilen devletin kaydını ve yok edilme açıklamasını kamu kartında korur", () => {
+    const embed = renderPublicCountryProfile({
+      id: "eski", name: "Eski Krallık", status: "YOK_EDİLDİ", destroyed_turn: 12, destroyed_reason: "Son yerleşkesini kaybetti.",
+      settlements: [], allies: [], pacts: [], wars: []
+    }).toJSON();
+    expect(embed.title).toContain("🏴");
+    expect(JSON.stringify(embed)).toContain("YOK EDİLDİ");
+    expect(JSON.stringify(embed)).toContain("Tur 12");
+    expect(JSON.stringify(embed)).toContain("Son yerleşkesini kaybetti.");
+  });
+
+  it("paktın amaç', açıklama, lider ve üye devletlerini kamuya açık kartta gösterir", () => {
     const embed = renderPublicPactProfile({
       id: "pakt", guild_id: "guild", founder_country_id: "roma", founder_country_name: "Roma",
       name: "Akdeniz Birliği", purpose: "Deniz güvenliği", description: "Ortak ticaret yollarını korur.",

@@ -19,6 +19,7 @@ import { cityService } from "../services/city-service.js";
 import { commandLogService } from "../services/command-log-service.js";
 import { roleReportService } from "../services/role-report-service.js";
 import { npcAutoPurchaseService, type NpcAutoPurchaseScope, type NpcCountryOverrideStatus } from "../services/npc-auto-purchase-service.js";
+import { warDeclarationService } from "../services/war-declaration-service.js";
 import { DEFAULT_WELCOME_MESSAGE, renderWelcomeMessage, welcomeService } from "../services/welcome-service.js";
 import { tradeService } from "../services/trade-service.js";
 import { assertCountryAccess, isGameMaster, requireGameMaster, resolveCountry } from "./auth.js";
@@ -373,20 +374,21 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
         }
       }
     }
-  } else if (sub === "ulke-sil") {
-    if (interaction.options.getString("onay", true) !== "SIL") throw new GameError("Ülke silme iptal edildi. Onay alanına tam olarak **SIL** yazmalısınız.");
+  } else if (sub === "ulke-yok-et") {
+    if (interaction.options.getString("onay", true) !== "YOK_ET") throw new GameError("Ülkeyi yok etme işlemi iptal edildi. Onay alanına tam olarak **YOK_ET** yazmalısınız.");
     const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
-    if (!country) throw new GameError("Ülke bulunamadı.");
-    const result = await gameService.deleteCountry({ guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id });
+    if (!country) throw new GameError("Aktif ülke bulunamadı.");
+    const reason = interaction.options.getString("neden", true);
+    const result = await gameService.destroyCountry({ guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id, reason });
     let roleNote = "";
     if (interaction.guild && result.discordRoleId) {
       try {
-        if (await deleteCountryRole(interaction.guild, result.discordRoleId, `Devlet silindi • Yönetici: ${interaction.user.id}`)) roleNote = "\n🏛️ Bağlı Discord rolü de silindi.";
+        if (await deleteCountryRole(interaction.guild, result.discordRoleId, `Devlet yok edildi • Yönetici: ${interaction.user.id}`)) roleNote = "\n🏛️ Bağlı Discord rolü kaldırıldı.";
       } catch {
-        roleNote = "\n⚠️ Bağlı Discord rolü silinemedi; sunucu rollerinden elle kaldırılmalıdır.";
+        roleNote = "\n⚠️ Bağlı Discord rolü kaldırılamadı; sunucu rollerinden elle silinmelidir.";
       }
     }
-    await interaction.editReply(`🗑️ **${result.name}** kalıcı olarak silindi. ${result.settlements} yerleşke ve ${result.battles} bağlı savaş kaydı kaldırıldı.${roleNote}`);
+    await interaction.editReply(`🏴 **${result.name}**, Tur **${result.turn}** itibarıyla **YOK EDİLDİ** durumuna alındı. Veritabanı ve tarihsel kayıtları korundu.\n📜 ${reason}${roleNote}`);
   } else if (sub === "yerleske-sil") {
     if (interaction.options.getString("onay", true) !== "SIL") throw new GameError("Yerleşke silme iptal edildi. Onay alanına tam olarak **SIL** yazmalısınız.");
     const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
@@ -703,7 +705,24 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
   if (await handleWarDeclarationCommand(interaction)) return;
   if (await handleDiplomacyCommand(interaction)) return;
   if (await handleCityCommand(interaction)) return;
-  if (interaction.commandName === "parali-asker") {
+  if (interaction.commandName === "parali-bakim-topla") {
+    requireGameMaster(interaction);
+    if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
+    await interaction.deferReply({ ephemeral: true });
+    const result = await gameService.collectAllMercenaryUpkeep({ guildId: interaction.guildId, actorId: interaction.user.id });
+    const lines = [
+      ...result.paid.map((item) => `✅ **${item.countryName}** • ${item.companyName} — ${gold(item.amount)} ödendi`),
+      ...result.unpaid.map((item) => `❌ **${item.countryName}** • ${item.companyName} — ${gold(item.amount)} için hazine yetersiz`)
+    ];
+    if (!lines.length) lines.push("ℹ️ Bu tur için vadesi gelen veya ödenmemiş paralı asker bakımı bulunmuyor. Daha önce ödenen bakımlar yeniden kesilmedi.");
+    const paidTotal = result.paid.reduce((sum, item) => sum + item.amount, 0);
+    await sendNpcPages(
+      interaction,
+      `💰 Paralı Asker Bakımları • Tur ${result.turn}`,
+      lines,
+      `${result.paid.length} sözleşme ödendi • ${gold(paidTotal)} kesildi • ${result.unpaid.length} ödenemedi`
+    );
+  } else if (interaction.commandName === "parali-asker") {
     await handleMercenaryCommand(interaction);
   } else if (interaction.commandName === "belge") {
     const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
@@ -938,6 +957,30 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
 
 async function handleAutocomplete(interaction: AutocompleteInteraction): Promise<void> {
   const focused = interaction.options.getFocused(true);
+  if (interaction.commandName === "savas-sonlandir" && focused.name === "kazanan") {
+    if (!interaction.guildId || !isGameMaster(interaction)) { await interaction.respond([]); return; }
+    const warId = interaction.options.getString("savas");
+    const war = (await warDeclarationService.activeWars(interaction.guildId)).find((item) => item.id === warId);
+    if (!war) { await interaction.respond([]); return; }
+    const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
+    const choices = [
+      { name: `${war.attacker_country_name} kazandı`, value: war.attacker_country_id },
+      { name: `${war.defender_country_name} kazandı`, value: war.defender_country_id },
+      { name: "Beyaz Barış — kazanan yok", value: "WHITE_PEACE" }
+    ];
+    await interaction.respond(choices.filter((choice) => !query || choice.name.toLocaleLowerCase("tr-TR").includes(query)));
+    return;
+  }
+  if (interaction.commandName === "savas-sonlandir" && focused.name === "savas") {
+    if (!interaction.guildId || !isGameMaster(interaction)) { await interaction.respond([]); return; }
+    const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
+    const wars = await warDeclarationService.activeWars(interaction.guildId);
+    await interaction.respond(wars
+      .filter((war) => !query || `${war.attacker_country_name} ${war.defender_country_name}`.toLocaleLowerCase("tr-TR").includes(query))
+      .slice(0, 25)
+      .map((war) => ({ name: `${war.attacker_country_name} — ${war.defender_country_name} • Tur ${war.started_turn}`.slice(0, 100), value: war.id })));
+    return;
+  }
   if ((interaction.commandName === "parali-asker" || interaction.commandName === "savas") && focused.name === "sirket") {
     if (!isGameMaster(interaction)) { await interaction.respond([]); return; }
     const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
