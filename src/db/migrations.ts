@@ -1050,4 +1050,12 @@ export const migrations = [
       ALTER TABLE countries ADD COLUMN IF NOT EXISTS destroyed_at TIMESTAMPTZ;
       CREATE INDEX IF NOT EXISTS countries_guild_status_idx ON countries(guild_id,status,name);
     `
+  },
+  {
+    version: 30,
+    name: "repeatable_npc_auto_purchase",
+    sql: `
+      ALTER TABLE npc_auto_purchase_runs
+        ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 1 CHECK (attempt_count >= 1);
+    `
   }] as const;

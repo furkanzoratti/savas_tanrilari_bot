@@ -386,7 +386,8 @@ export const commandBuilders = [
         .addChoices(...Object.entries(NPC_AUTO_PURCHASE_DOCTRINES).map(([value, doctrine]) => ({ name: doctrine.label, value })))))
     .addSubcommand((sub) => sub.setName("durum").setDescription("NPC otomatik alım ayarlarını gösterir"))
     .addSubcommand((sub) => sub.setName("onizle").setDescription("Bu Alım Turu için hiçbir ödeme yapmadan emir planını gösterir"))
-    .addSubcommand((sub) => sub.setName("calistir").setDescription("Bu Alım Turunda oyuncusuz devletlerin planlanan emirlerini uygular")),
+    .addSubcommand((sub) => sub.setName("calistir").setDescription("Kalan hazine ve kapasiteyle NPC alımlarını uygular; aynı turda tekrar kullanılabilir"))
+    .addSubcommand((sub) => sub.setName("ek-alim").setDescription("Aynı Alım Turunda kalan hazine ve kapasiteyle ek NPC alımı yapar")),
   new SlashCommandBuilder()
     .setName("yonetim").setDescription("Oyun yöneticisi komutları")
     .addSubcommand((sub) => sub.setName("ulke-olustur").setDescription("Yeni ülke oluşturur")

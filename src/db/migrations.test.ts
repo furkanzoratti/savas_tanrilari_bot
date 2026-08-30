@@ -119,3 +119,12 @@ describe("yirmi dokuzuncu migration", () => {
     expect(migration?.sql).toContain("destroyed_at");
   });
 });
+describe("otuzuncu migration", () => {
+  const migration = migrations.find((item) => item.version === 30);
+
+  it("aynı Alım Turundaki NPC ek alımlarını sayar", () => {
+    expect(migration?.name).toBe("repeatable_npc_auto_purchase");
+    expect(migration?.sql).toContain("attempt_count");
+    expect(migration?.sql).toContain("DEFAULT 1");
+  });
+});

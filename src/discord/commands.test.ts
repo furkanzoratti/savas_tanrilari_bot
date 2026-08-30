@@ -46,6 +46,11 @@ describe("yönetim komutları", () => {
     expect(command?.description).toContain("Yalnızca yönetici");
     expect(purchase).toMatchObject({ required: true, autocomplete: true });
   });
+  it("NPC alımını aynı Alım Turunda çalıştırma ve ek alım olarak tekrar sunar", () => {
+    const command = commandBuilders.find((item) => item.name === "npc-devlet-oto-alim");
+    expect(command?.options?.map((option) => option.name)).toEqual(expect.arrayContaining(["calistir", "ek-alim"]));
+  });
+
   it("bu Alım Turunun paralı asker bakımlarını tek seferlik toplu tahsil eder", () => {
     const command = commandBuilders.find((item) => item.name === "parali-bakim-topla");
     expect(command?.description).toContain("Yalnızca yönetici");

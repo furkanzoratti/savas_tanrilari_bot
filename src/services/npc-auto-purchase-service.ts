@@ -54,7 +54,8 @@ export interface NpcCountryPurchasePlan {
 }
 
 export interface NpcCountryPurchaseResult extends NpcCountryPurchasePlan {
-  status: "COMPLETE" | "PARTIAL" | "SKIPPED" | "FAILED";
+  status: "COMPLETE" | "PARTIAL" | "FAILED";
+  runNumber: number;
   actualCost: number;
   errors: string[];
 }
@@ -76,8 +77,8 @@ function activePolicyKeys(settlement: CountryDocument["settlements"][number]): A
   return settlement.policies.filter((policy) => policy.status === "ACTIVE").map((policy) => policy.policy_key);
 }
 
-function validBuildingCandidates(doc: CountryDocument, doctrine: NpcAutoPurchaseDoctrine, spendLimit: number): BuildingAction[] {
-  if (npcBuildingLimit(doctrine) <= 0) return [];
+function validBuildingCandidates(doc: CountryDocument, doctrine: NpcAutoPurchaseDoctrine, spendLimit: number, buildingLimit: number): BuildingAction[] {
+  if (buildingLimit <= 0) return [];
   const priority = npcBuildingPriority(doctrine, doc.country.id, doc.guild.current_turn);
   const candidates: Array<BuildingAction & { score: number }> = [];
   for (const settlement of doc.settlements) {
@@ -116,15 +117,15 @@ function validBuildingCandidates(doc: CountryDocument, doctrine: NpcAutoPurchase
   return candidates.sort((left, right) => left.score - right.score || left.settlementName.localeCompare(right.settlementName, "tr"));
 }
 
-function planCountryPurchases(doc: CountryDocument, config: NpcAutoPurchaseConfig, doctrine: NpcAutoPurchaseDoctrine): NpcCountryPurchasePlan {
+export function planCountryPurchases(doc: CountryDocument, config: NpcAutoPurchaseConfig, doctrine: NpcAutoPurchaseDoctrine, buildingAllowance = npcBuildingLimit(doctrine)): NpcCountryPurchasePlan {
   const startingTreasury = doc.settlements.reduce((sum, settlement) => sum + Math.max(0, Number(settlement.local_treasury)), 0);
   const spendableAfterReserve = Math.max(0, startingTreasury - config.minimumReserve);
   const spendLimit = Math.min(spendableAfterReserve, Math.floor(startingTreasury * config.budgetPercent / 100));
   const localTreasury = new Map(doc.settlements.map((settlement) => [settlement.id, Math.max(0, Number(settlement.local_treasury))]));
   let remainingBudget = spendLimit;
   const buildingActions: BuildingAction[] = [];
-  const buildingCandidates = validBuildingCandidates(doc, doctrine, remainingBudget);
-  const buildingLimit = npcBuildingLimit(doctrine);
+  const buildingLimit = Math.max(0, Math.min(npcBuildingLimit(doctrine), buildingAllowance));
+  const buildingCandidates = validBuildingCandidates(doc, doctrine, remainingBudget, buildingLimit);
   for (const candidate of buildingCandidates) {
     if (buildingActions.length >= buildingLimit) break;
     if (buildingActions.some((action) => action.settlementId === candidate.settlementId)) continue;
@@ -245,7 +246,11 @@ async function eligibleCountryPlans(guildId: string, config: NpcAutoPurchaseConf
     if (config.scope === "INCLUDED_ONLY" && override?.status !== "INCLUDE") continue;
     const doc = await gameService.document(country.id);
     if (doc.playerIds.length) continue;
-    plans.push(planCountryPurchases(doc, config, override?.doctrine ?? config.doctrine));
+    const doctrine = override?.doctrine ?? config.doctrine;
+    const buildingsStartedThisTurn = doc.settlements.reduce((total, settlement) => total
+      + settlement.buildings.filter((building) => building.status === "BUILDING" && building.started_turn === doc.guild.current_turn).length, 0);
+    const buildingAllowance = Math.max(0, npcBuildingLimit(doctrine) - buildingsStartedThisTurn);
+    plans.push(planCountryPurchases(doc, config, doctrine, buildingAllowance));
   }
   return plans;
 }
@@ -308,6 +313,12 @@ export const npcAutoPurchaseService = {
   },
 
   async execute(guildId: string, actorId: string): Promise<NpcCountryPurchaseResult[]> {
+    const lockClient = await pool.connect();
+    const lockKey = "npc-auto-purchase:" + guildId;
+    let locked = false;
+    try {
+      await lockClient.query("SELECT pg_advisory_lock(hashtext($1))", [lockKey]);
+      locked = true;
     const config = await this.config(guildId);
     if (!config.enabled) throw new GameError("NPC otomatik alım sistemi kapalı. Önce `/npc-devlet-oto-alim ayarla` ile etkinleştirin.");
     const guild = await gameService.guildState(guildId);
@@ -315,15 +326,15 @@ export const npcAutoPurchaseService = {
     const plans = await eligibleCountryPlans(guildId, config);
     const results: NpcCountryPurchaseResult[] = [];
     for (const plan of plans) {
-      const claimed = await pool.query(
-        `INSERT INTO npc_auto_purchase_runs(guild_id,acquisition_turn,country_id,doctrine,status,summary)
-         VALUES($1,$2,$3,$4,'RUNNING','{}'::jsonb) ON CONFLICT DO NOTHING RETURNING country_id`,
+      const claimed = await pool.query<{ attempt_count: number }>(
+        "INSERT INTO npc_auto_purchase_runs(guild_id,acquisition_turn,country_id,doctrine,status,summary,attempt_count) " +
+        "VALUES($1,$2,$3,$4,'RUNNING','{}'::jsonb,1) " +
+        "ON CONFLICT(guild_id,acquisition_turn,country_id) DO UPDATE SET " +
+        "doctrine=EXCLUDED.doctrine,status='RUNNING',summary='{}'::jsonb,completed_at=NULL,attempt_count=npc_auto_purchase_runs.attempt_count+1 " +
+        "RETURNING attempt_count",
         [guildId, guild.current_turn, plan.countryId, plan.doctrine]
       );
-      if (!claimed.rowCount) {
-        results.push({ ...plan, status: "SKIPPED", actualCost: 0, errors: ["Bu ülke mevcut Alım Turunda daha önce işlendi."] });
-        continue;
-      }
+      const runNumber = Number(claimed.rows[0]?.attempt_count ?? 1);
       const errors: string[] = [];
       let actualCost = 0;
       for (const action of plan.buildingActions) {
@@ -344,7 +355,7 @@ export const npcAutoPurchaseService = {
       }
       const attempted = plan.buildingActions.length + plan.unitActions.length;
       const status: NpcCountryPurchaseResult["status"] = errors.length === 0 ? "COMPLETE" : errors.length < attempted ? "PARTIAL" : "FAILED";
-      const result: NpcCountryPurchaseResult = { ...plan, status, actualCost, errors };
+      const result: NpcCountryPurchaseResult = { ...plan, status, runNumber, actualCost, errors };
       await pool.query(
         "UPDATE npc_auto_purchase_runs SET status=$1,summary=$2::jsonb,completed_at=NOW() WHERE guild_id=$3 AND acquisition_turn=$4 AND country_id=$5",
         [status, JSON.stringify(result), guildId, guild.current_turn, plan.countryId]
@@ -352,5 +363,9 @@ export const npcAutoPurchaseService = {
       results.push(result);
     }
     return results;
+    } finally {
+      if (locked) await lockClient.query("SELECT pg_advisory_unlock(hashtext($1))", [lockKey]).catch(() => undefined);
+      lockClient.release();
+    }
   }
 };

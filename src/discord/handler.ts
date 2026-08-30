@@ -607,12 +607,13 @@ async function handleSpecialUnitAccess(interaction: ChatInputCommandInteraction)
     (!enabled ? " Mevcut birlikler silinmedi; yalnızca yeni alım kapatıldı." : "")
   );
 }
-function npcPlanLine(plan: { countryName: string; doctrine: NpcAutoPurchaseDoctrine; plannedCost: number; buildingActions: Array<{ buildingName: string; targetLevel: number }>; unitActions: Array<{ quantity: number }> }): string {
+function npcPlanLine(plan: { countryName: string; doctrine: NpcAutoPurchaseDoctrine; plannedCost: number; runNumber?: number; buildingActions: Array<{ buildingName: string; targetLevel: number }>; unitActions: Array<{ quantity: number }> }): string {
   const buildings = plan.buildingActions.length
     ? plan.buildingActions.map((action) => `${action.buildingName} Sv${action.targetLevel}`).join(", ")
     : "Bina yok";
   const personnel = plan.unitActions.reduce((sum, action) => sum + action.quantity, 0);
-  return `• **${plan.countryName}** — ${NPC_AUTO_PURCHASE_DOCTRINES[plan.doctrine].label}\n  🏗️ ${buildings} • ⚔️ ${number(personnel)} asker • 💰 ${gold(plan.plannedCost)}`;
+  const attempt = plan.runNumber ? ` • Ek alım #${plan.runNumber}` : "";
+  return `• **${plan.countryName}** — ${NPC_AUTO_PURCHASE_DOCTRINES[plan.doctrine].label}${attempt}\n  🏗️ ${buildings} • ⚔️ ${number(personnel)} asker • 💰 ${gold(plan.plannedCost)}`;
 }
 
 async function sendNpcPages(interaction: ChatInputCommandInteraction, title: string, lines: string[], footer: string): Promise<void> {
@@ -681,7 +682,7 @@ async function handleNpcAutoPurchase(interaction: ChatInputCommandInteraction): 
         `Bütçe sınırı: **%${config.budgetPercent}**\nAsgari toplam rezerv: **${gold(config.minimumReserve)}**\n` +
         `Hedef askerî doluluk: **%${config.targetFillPercent}**\n` +
         `Kapsam: **${config.scope === "ALL_PLAYERLESS" ? "Tüm oyuncusuz devletler" : "Yalnızca elle dahil edilenler"}**\n\n` +
-        "Alımlar tur ilerlerken kendiliğinden yapılmaz; Alım Turu açıldıktan sonra yönetici `calistir` alt komutunu kullanır."
+        "Alımlar tur ilerlerken kendiliğinden yapılmaz. `calistir` veya `ek-alim` aynı Alım Turunda tekrar kullanıldığında kalan hazine ve eğitim kapasitesiyle devam eder."
       )] });
     return;
   }
@@ -692,14 +693,15 @@ async function handleNpcAutoPurchase(interaction: ChatInputCommandInteraction): 
   }
   const results = await npcAutoPurchaseService.execute(interaction.guildId, interaction.user.id);
   const lines = results.map((result) => {
-    const icon = result.status === "COMPLETE" ? "✅" : result.status === "PARTIAL" ? "⚠️" : result.status === "SKIPPED" ? "⏭️" : "❌";
+    const icon = result.status === "COMPLETE" ? "✅" : result.status === "PARTIAL" ? "⚠️" : "❌";
     const base = npcPlanLine(result).replace(/^• /, `${icon} `).replace(gold(result.plannedCost), gold(result.actualCost));
     return result.errors.length ? `${base}\n  _${result.errors.slice(0, 2).join(" | ")}_` : base;
   });
   const completed = results.filter((result) => result.status === "COMPLETE").length;
   const partial = results.filter((result) => result.status === "PARTIAL").length;
-  const skipped = results.filter((result) => result.status === "SKIPPED").length;
-  await sendNpcPages(interaction, "🤖 NPC Alımları Uygulandı", lines, `${completed} tamamlandı • ${partial} kısmi • ${skipped} daha önce işlendi`);
+  const failed = results.filter((result) => result.status === "FAILED").length;
+  const spent = results.reduce((sum, result) => sum + result.actualCost, 0);
+  await sendNpcPages(interaction, "🤖 NPC Alımları Uygulandı", lines, `${completed} tamamlandı • ${partial} kısmi • ${failed} başarısız • Toplam ${gold(spent)}`);
 }
 async function handleCommand(interaction: ChatInputCommandInteraction): Promise<void> {
   if (await handleWarDeclarationCommand(interaction)) return;
