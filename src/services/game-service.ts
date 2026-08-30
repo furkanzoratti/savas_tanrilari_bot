@@ -752,10 +752,7 @@ export const gameService = {
       const company = MERCENARY_COMPANIES[input.companyKey];
       if (!company) throw new GameError("Parali asker sirketi bulunamadi.");
       if (await settlementIsBesieged(client, settlement.id)) throw new GameError("Kusatma altindaki yerleskeye parali asker kiralanamaz.");
-      if (company.ships) {
-        const port = await client.query("SELECT 1 FROM buildings WHERE settlement_id=$1 AND building_type='port' AND status='ACTIVE' AND level>0", [settlement.id]);
-        if (!settlement.is_coastal || !port.rowCount) throw new GameError("Kiralik filo yalnizca Liman bulunan bir kiyi yerleskesine teslim edilebilir.");
-      }
+
       const unavailable = await client.query("SELECT 1 FROM mercenary_contracts WHERE guild_id=$1 AND company_key=$2 AND status IN ('PENDING','ACTIVE','UNPAID') FOR UPDATE", [input.guildId, input.companyKey]);
       if (unavailable.rowCount) throw new GameError("Bu parali asker grubu halen baska bir sozlesmeye bagli.");
       const currentContracts = await loadMercenaryContracts(client, country.id);
@@ -797,10 +794,7 @@ export const gameService = {
       if (!settlement) throw new GameError("Yerleşke bulunamadı.");
       const company = MERCENARY_COMPANIES[input.companyKey];
       if (!company) throw new GameError("Paralı asker şirketi bulunamadı.");
-      if (company.ships) {
-        const port = await client.query("SELECT 1 FROM buildings WHERE settlement_id=$1 AND building_type='port' AND status='ACTIVE' AND level>0", [settlement.id]);
-        if (!settlement.is_coastal || !port.rowCount) throw new GameError("Kiralık filo yalnızca Liman bulunan bir kıyı yerleşkesine eklenebilir.");
-      }
+
       const unavailable = await client.query("SELECT 1 FROM mercenary_contracts WHERE guild_id=$1 AND company_key=$2 AND status IN ('PENDING','ACTIVE','UNPAID') FOR UPDATE", [input.guildId, input.companyKey]);
       if (unavailable.rowCount) throw new GameError("Bu paralı asker grubu halen başka bir sözleşmeye bağlı.");
       const currentContracts = await loadMercenaryContracts(client, country.id);

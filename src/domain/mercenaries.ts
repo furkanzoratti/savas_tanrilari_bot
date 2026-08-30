@@ -44,7 +44,7 @@ const MERCENARY_COMPANY_DEFINITIONS = {
 
 export type MercenaryCompanyKey = keyof typeof MERCENARY_COMPANY_DEFINITIONS;
 export const MERCENARY_COMPANIES: Record<MercenaryCompanyKey, MercenaryCompany> = MERCENARY_COMPANY_DEFINITIONS;
-export const MERCENARY_CONTRACT_LIMITS = { PEACE: 2, PARTIAL: 3, GENERAL: 4 } as const;
+export const MERCENARY_CONTRACT_LIMITS = { PEACE: 3, PARTIAL: 3, GENERAL: 4 } as const;
 export const MERCENARY_CATEGORY_LABELS: Record<MercenaryCategory, string> = {
   CHEAP: "Ucuz Grup", STANDARD: "Orta Sınıf", ELITE: "Seçkin Grup", SIEGE: "Kuşatma Şirketi", FLEET: "Kiralık Filo"
 };
