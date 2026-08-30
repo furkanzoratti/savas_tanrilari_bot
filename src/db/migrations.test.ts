@@ -75,3 +75,24 @@ describe("yirmi beşinci migration", () => {
     expect(migration?.sql).toContain("INSERT INTO battle_side_participants");
   });
 });
+describe("yirmi altıncı migration", () => {
+  const migration = migrations.find((item) => item.version === 26);
+
+  it("NPC otomatik alım ayarlarını, ülke istisnalarını ve tek çalıştırma kaydını saklar", () => {
+    expect(migration?.name).toBe("npc_auto_purchase");
+    expect(migration?.sql).toContain("CREATE TABLE IF NOT EXISTS npc_auto_purchase_configs");
+    expect(migration?.sql).toContain("CREATE TABLE IF NOT EXISTS npc_auto_purchase_country_overrides");
+    expect(migration?.sql).toContain("CREATE TABLE IF NOT EXISTS npc_auto_purchase_runs");
+    expect(migration?.sql).toContain("PRIMARY KEY(guild_id,acquisition_turn,country_id)");
+  });
+});
+describe("yirmi yedinci migration", () => {
+  const migration = migrations.find((item) => item.version === 27);
+
+  it("ülke bazlı özel birlik erişimlerini saklar", () => {
+    expect(migration?.name).toBe("country_special_unit_unlocks");
+    expect(migration?.sql).toContain("CREATE TABLE IF NOT EXISTS country_special_unit_unlocks");
+    expect(migration?.sql).toContain("PRIMARY KEY(country_id,unit_type)");
+    expect(migration?.sql).toContain("briton_longbow");
+  });
+});

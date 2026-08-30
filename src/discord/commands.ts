@@ -3,6 +3,8 @@ import { BUILDINGS, CHARACTER_ROLES, CITY_POLICIES, MOBILIZATION_RULES, SHIPS, S
 import { RESOURCE_CHOICES } from "../domain/resources.js";
 import { SETTLEMENT_EVENT_TYPES } from "../domain/events.js";
 import { BATTLE_TERRAINS, BATTLE_UNIT_STATS, NAVAL_UNIT_STATS, SIEGE_ASSET_BATTLE_STATS } from "../domain/battle.js";
+import { NPC_AUTO_PURCHASE_DOCTRINES } from "../domain/npc-auto-purchase.js";
+import { SPECIAL_UNITS } from "../domain/special-units.js";
 
 const countryOption = (option: any) => option.setName("ulke").setDescription("Yalnızca DM: işlem yapılacak ülke").setRequired(false);
 const CHARACTER_ROLE_CHOICES = Object.entries(CHARACTER_ROLES).map(([value, role]) => ({ name: role.label, value }));
@@ -34,7 +36,18 @@ export const commandBuilders = [
     .addChannelOption((option) => option.setName("kanal").setDescription("Hoş geldin mesajlarının gönderileceği kanal").addChannelTypes(ChannelType.GuildText))
     .addStringOption((option) => option.setName("mesaj").setDescription("İsteğe bağlı metin; {uye} ve {sunucu} kullanılabilir").setMaxLength(1500)),
   new SlashCommandBuilder()
-    .setName("devlet-rolleri").setDescription("Yalnızca yönetici: eksik devlet rollerini oluşturur ve üyelikleri eşitler"),
+    .setName("devlet-rolleri").setDescription("Yalnızca yönetici: eksik devlet rollerini oluşturur ve üyelikleri eşitler"),  new SlashCommandBuilder()
+    .setName("ozel-birlik-yetkisi").setDescription("Yalnızca yönetici: ülkelere özel birlik erişimi verir veya kaldırır")
+    .addSubcommand((sub) => sub.setName("ayarla").setDescription("Bir ülkenin özel birlik erişimini değiştirir")
+      .addStringOption((o) => o.setName("ulke").setDescription("Yetkisi değiştirilecek ülke").setRequired(true))
+      .addStringOption((o) => o.setName("birlik").setDescription("Özel birlik türü").setRequired(true)
+        .addChoices(...Object.entries(SPECIAL_UNITS).map(([value, unit]) => ({ name: unit.name, value }))))
+      .addStringOption((o) => o.setName("islem").setDescription("Erişim işlemi").setRequired(true).addChoices(
+        { name: "Erişim aç", value: "UNLOCK" },
+        { name: "Erişimi kaldır", value: "LOCK" }
+      )))
+    .addSubcommand((sub) => sub.setName("listele").setDescription("Bir ülkeye açık özel birlikleri gösterir")
+      .addStringOption((o) => o.setName("ulke").setDescription("Görüntülenecek ülke").setRequired(true))),
   new SlashCommandBuilder()
     .setName("savas-ilani").setDescription("Bir devlete resmî savaş ilan eder ve savaşlar kanalında duyurur")
     .addStringOption((option) => option.setName("hedef-ulke").setDescription("Savaş ilan edilecek devlet").setRequired(true))
@@ -269,7 +282,7 @@ export const commandBuilders = [
     .addSubcommand((sub) => sub.setName("kayip-ekle").setDescription("Bir paralı asker kampanyasından kara birliği kaybı düşer")
       .addStringOption((o) => o.setName("ulke").setDescription("Ülke").setRequired(true))
       .addStringOption((o) => o.setName("sirket").setDescription("Paralı asker grubu").setRequired(true).setAutocomplete(true))
-      .addStringOption((o) => o.setName("kalem").setDescription("Kayıp verilecek kara birliği").setRequired(true).addChoices(...Object.entries(UNITS).filter(([key]) => !["observer", "militia"].includes(key)).map(([value, unit]) => ({ name: unit.name, value }))))
+      .addStringOption((o) => o.setName("kalem").setDescription("Kayıp verilecek kara birliği").setRequired(true).addChoices(...Object.entries(UNITS).filter(([key]) => !["observer", "militia"].includes(key) && !(key in SPECIAL_UNITS)).map(([value, unit]) => ({ name: unit.name, value }))))
       .addIntegerOption((o) => o.setName("miktar").setDescription("Düşülecek asker sayısı").setMinValue(1).setRequired(true))),
   new SlashCommandBuilder()
     .setName("savas").setDescription("Kalıcılığa sahip açık zar savaş sistemini yönetir")
@@ -300,6 +313,11 @@ export const commandBuilders = [
       .addIntegerOption((o) => o.setName("hafif-suvari").setDescription("Hafif Süvari").setMinValue(0).setRequired(true))
       .addIntegerOption((o) => o.setName("agir-suvari").setDescription("Ağır Süvari").setMinValue(0).setRequired(true))
       .addIntegerOption((o) => o.setName("milis").setDescription("Kalıcı Milis").setMinValue(0))
+      .addIntegerOption((o) => o.setName("lejyoner").setDescription("Lejyoner").setMinValue(0))
+      .addIntegerOption((o) => o.setName("hoplit").setDescription("Hoplit").setMinValue(0))
+      .addIntegerOption((o) => o.setName("atli-okcu").setDescription("Atlı Okçu").setMinValue(0))
+      .addIntegerOption((o) => o.setName("deve-suvarisi").setDescription("Deve Süvarisi").setMinValue(0))
+      .addIntegerOption((o) => o.setName("briton-uzun-yayci").setDescription("Briton Uzun Yaycıları").setMinValue(0))
       .addStringOption((o) => o.setName("ulke").setDescription("Koalisyonda kadrosu düzenlenecek ülke; boşsa ana ülke")))
     .addSubcommand((sub) => sub.setName("gemi-ayarla").setDescription("Deniz savaşı taslağının gizli gemi kadrosunu düzenler")
       .addStringOption((o) => o.setName("taraf").setDescription("Savaş tarafı").setRequired(true).addChoices({ name: "A Tarafı", value: "A" }, { name: "B Tarafı", value: "B" }))
@@ -342,6 +360,31 @@ export const commandBuilders = [
       .addStringOption((o) => o.setName("galip").setDescription("Galip taraf").setRequired(true).addChoices({ name: "A Tarafı", value: "A" }, { name: "B Tarafı", value: "B" }, { name: "Galip Yok", value: "NONE" }))
       .addStringOption((o) => o.setName("neden").setDescription("Herkese açık sonuç açıklaması").setRequired(true).setMaxLength(500)))
     .addSubcommand((sub) => sub.setName("iptal").setDescription("Etkin savaşı iptal eder")),
+  new SlashCommandBuilder()
+    .setName("npc-devlet-oto-alim").setDescription("Yalnızca yönetici: oyuncusuz devletlerin Alım Turu emirlerini yönetir")
+    .addSubcommand((sub) => sub.setName("ayarla").setDescription("NPC otomatik alım sisteminin genel kurallarını ayarlar")
+      .addBooleanOption((o) => o.setName("aktif").setDescription("Sistem çalıştırılabilir olsun mu?").setRequired(true))
+      .addStringOption((o) => o.setName("doktrin").setDescription("Varsayılan NPC alım doktrini").setRequired(true)
+        .addChoices(...Object.entries(NPC_AUTO_PURCHASE_DOCTRINES).map(([value, doctrine]) => ({ name: doctrine.label, value }))))
+      .addIntegerOption((o) => o.setName("butce-yuzdesi").setDescription("Toplam yerel hazinenin en fazla harcanacak yüzdesi").setMinValue(1).setMaxValue(100).setRequired(true))
+      .addIntegerOption((o) => o.setName("hedef-doluluk").setDescription("Askerî kapasitenin hedeflenen doluluk yüzdesi").setMinValue(1).setMaxValue(100).setRequired(true))
+      .addIntegerOption((o) => o.setName("asgari-hazine").setDescription("Ülkede korunacak toplam asgari altın").setMinValue(0).setRequired(true))
+      .addStringOption((o) => o.setName("kapsam").setDescription("İşlenecek oyuncusuz ülkeler").setRequired(true).addChoices(
+        { name: "Tüm oyuncusuz devletler", value: "ALL_PLAYERLESS" },
+        { name: "Yalnızca elle dahil edilenler", value: "INCLUDED_ONLY" }
+      )))
+    .addSubcommand((sub) => sub.setName("ulke-ayarla").setDescription("Bir ülkeyi kapsama dahil eder, dışlar veya özel doktrin verir")
+      .addStringOption((o) => o.setName("ulke").setDescription("Ayarlanacak ülke").setRequired(true))
+      .addStringOption((o) => o.setName("durum").setDescription("Ülke kapsam ayarı").setRequired(true).addChoices(
+        { name: "Genel ayarı kullan", value: "AUTO" },
+        { name: "Kapsama dahil et", value: "INCLUDE" },
+        { name: "Kapsam dışında tut", value: "EXCLUDE" }
+      ))
+      .addStringOption((o) => o.setName("doktrin").setDescription("İsteğe bağlı ülkeye özel doktrin")
+        .addChoices(...Object.entries(NPC_AUTO_PURCHASE_DOCTRINES).map(([value, doctrine]) => ({ name: doctrine.label, value })))))
+    .addSubcommand((sub) => sub.setName("durum").setDescription("NPC otomatik alım ayarlarını gösterir"))
+    .addSubcommand((sub) => sub.setName("onizle").setDescription("Bu Alım Turu için hiçbir ödeme yapmadan emir planını gösterir"))
+    .addSubcommand((sub) => sub.setName("calistir").setDescription("Bu Alım Turunda oyuncusuz devletlerin planlanan emirlerini uygular")),
   new SlashCommandBuilder()
     .setName("yonetim").setDescription("Oyun yöneticisi komutları")
     .addSubcommand((sub) => sub.setName("ulke-olustur").setDescription("Yeni ülke oluşturur")

@@ -42,7 +42,12 @@ export const BATTLE_UNIT_STATS: Record<BattleUnitType, {
   archer: { label: "Okçu", clashDice: 1, clashSides: 8, damageDice: 1, damageSides: 10, durability: 1 },
   heavy_infantry: { label: "Ağır Piyade", clashDice: 2, clashSides: 8, damageDice: 2, damageSides: 8, durability: 3 },
   light_cavalry: { label: "Hafif Süvari", clashDice: 2, clashSides: 6, damageDice: 1, damageSides: 8, durability: 2 },
-  heavy_cavalry: { label: "Ağır Süvari", clashDice: 2, clashSides: 10, damageDice: 2, damageSides: 10, durability: 3 }
+  heavy_cavalry: { label: "Ağır Süvari", clashDice: 2, clashSides: 10, damageDice: 2, damageSides: 10, durability: 3 },
+  legionary: { label: "Lejyoner", clashDice: 2, clashSides: 10, damageDice: 2, damageSides: 8, durability: 3 },
+  hoplite: { label: "Hoplit", clashDice: 2, clashSides: 8, damageDice: 1, damageSides: 10, durability: 3 },
+  horse_archer: { label: "Atlı Okçu", clashDice: 2, clashSides: 8, damageDice: 2, damageSides: 8, durability: 2 },
+  camel_cavalry: { label: "Deve Süvarisi", clashDice: 2, clashSides: 8, damageDice: 1, damageSides: 10, durability: 2 },
+  briton_longbow: { label: "Briton Uzun Yaycıları", clashDice: 1, clashSides: 10, damageDice: 2, damageSides: 10, durability: 1 }
 };
 
 export const NAVAL_UNIT_STATS: Record<NavalUnitType, {
@@ -151,14 +156,14 @@ export function siegeAssaultComposition(
   if (wallHp <= 0 || gateHp <= 0) return engagedComposition(composition, frontage);
   const access = siegeAssaultAccess(support, frontage);
   const meleeSource: BattleComposition = {};
-  for (const key of ["light_infantry", "militia", "spear", "heavy_infantry"] as BattleUnitType[]) {
+  for (const key of ["light_infantry", "militia", "spear", "heavy_infantry", "legionary", "hoplite"] as BattleUnitType[]) {
     const quantity = composition[key] ?? 0;
     if (quantity > 0) meleeSource[key] = quantity;
   }
   const melee = engagedComposition(meleeSource, access.capacity);
   const rangedCapacity = Math.max(0, frontage - compositionTotal(melee));
   const rangedSource: BattleComposition = {};
-  for (const key of ["slinger", "archer"] as BattleUnitType[]) {
+  for (const key of ["slinger", "archer", "horse_archer", "briton_longbow"] as BattleUnitType[]) {
     const quantity = composition[key] ?? 0;
     if (quantity > 0) rangedSource[key] = quantity;
   }

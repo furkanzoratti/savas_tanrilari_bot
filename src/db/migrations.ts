@@ -976,4 +976,54 @@ export const migrations = [
       SELECT battle_id,side_key,country_id,TRUE,composition,initial_composition FROM battle_sides
       ON CONFLICT(battle_id,country_id) DO NOTHING;
     `
+  },
+  {
+    version: 26,
+    name: "npc_auto_purchase",
+    sql: `
+      CREATE TABLE IF NOT EXISTS npc_auto_purchase_configs (
+        guild_id TEXT PRIMARY KEY REFERENCES guilds(discord_id) ON DELETE CASCADE,
+        enabled BOOLEAN NOT NULL DEFAULT FALSE,
+        doctrine TEXT NOT NULL DEFAULT 'BALANCED' CHECK (doctrine IN ('BALANCED','DEFENSIVE','OFFENSIVE','CAVALRY','LIGHT_ARMY','HISTORICAL')),
+        budget_percent INTEGER NOT NULL DEFAULT 70 CHECK (budget_percent BETWEEN 1 AND 100),
+        target_fill_percent INTEGER NOT NULL DEFAULT 85 CHECK (target_fill_percent BETWEEN 1 AND 100),
+        minimum_reserve BIGINT NOT NULL DEFAULT 1000 CHECK (minimum_reserve >= 0),
+        scope TEXT NOT NULL DEFAULT 'ALL_PLAYERLESS' CHECK (scope IN ('ALL_PLAYERLESS','INCLUDED_ONLY')),
+        updated_by TEXT,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS npc_auto_purchase_country_overrides (
+        country_id UUID PRIMARY KEY REFERENCES countries(id) ON DELETE CASCADE,
+        status TEXT NOT NULL DEFAULT 'AUTO' CHECK (status IN ('AUTO','INCLUDE','EXCLUDE')),
+        doctrine TEXT CHECK (doctrine IS NULL OR doctrine IN ('BALANCED','DEFENSIVE','OFFENSIVE','CAVALRY','LIGHT_ARMY','HISTORICAL')),
+        updated_by TEXT,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS npc_auto_purchase_runs (
+        guild_id TEXT NOT NULL REFERENCES guilds(discord_id) ON DELETE CASCADE,
+        acquisition_turn INTEGER NOT NULL,
+        country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        doctrine TEXT NOT NULL CHECK (doctrine IN ('BALANCED','DEFENSIVE','OFFENSIVE','CAVALRY','LIGHT_ARMY','HISTORICAL')),
+        status TEXT NOT NULL CHECK (status IN ('RUNNING','COMPLETE','PARTIAL','FAILED')),
+        summary JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        completed_at TIMESTAMPTZ,
+        PRIMARY KEY(guild_id,acquisition_turn,country_id)
+      );
+      CREATE INDEX IF NOT EXISTS npc_auto_purchase_runs_turn_idx ON npc_auto_purchase_runs(guild_id,acquisition_turn,status);
+    `
+  },
+  {
+    version: 27,
+    name: "country_special_unit_unlocks",
+    sql: `
+      CREATE TABLE IF NOT EXISTS country_special_unit_unlocks (
+        country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        unit_type TEXT NOT NULL CHECK (unit_type IN ('legionary','hoplite','horse_archer','camel_cavalry','briton_longbow')),
+        granted_by TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY(country_id,unit_type)
+      );
+      CREATE INDEX IF NOT EXISTS country_special_unit_unlocks_country_idx ON country_special_unit_unlocks(country_id);
+    `
   }] as const;

@@ -1,4 +1,5 @@
 import type { BuildingCategory, BuildingDefinition, CharacterRole, Mobilization } from "./types.js";
+import { SPECIAL_UNITS } from "./special-units.js";
 
 export const BUILDING_CATEGORIES: Record<BuildingCategory, { label: string; costs: Record<number, number> }> = {
   PUBLIC_INFRASTRUCTURE: { label: "Kamu ve Altyapı", costs: { 1: 1_000, 2: 2_000, 3: 3_000 } },
@@ -103,6 +104,7 @@ export const UNITS = {
   heavy_infantry: { name: "Ağır Piyade", price: 4_000, upkeep: 400 },
   light_cavalry: { name: "Hafif Süvari", price: 3_500, upkeep: 350 },
   heavy_cavalry: { name: "Ağır Süvari", price: 5_000, upkeep: 500 },
+  ...SPECIAL_UNITS,
   observer: { name: "Gözcü Birliği", price: 500, upkeep: 100 },
   militia: { name: "Milis", price: 0, upkeep: 100 }
 } as const;

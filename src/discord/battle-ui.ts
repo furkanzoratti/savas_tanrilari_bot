@@ -191,7 +191,10 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
         light_infantry: interaction.options.getInteger("hafif-piyade", true), slinger: interaction.options.getInteger("sapanci", true),
         spear: interaction.options.getInteger("mizrakli", true), archer: interaction.options.getInteger("okcu", true),
         heavy_infantry: interaction.options.getInteger("agir-piyade", true), light_cavalry: interaction.options.getInteger("hafif-suvari", true),
-        heavy_cavalry: interaction.options.getInteger("agir-suvari", true), militia: interaction.options.getInteger("milis") ?? 0
+        heavy_cavalry: interaction.options.getInteger("agir-suvari", true), militia: interaction.options.getInteger("milis") ?? 0,
+        legionary: interaction.options.getInteger("lejyoner") ?? 0, hoplite: interaction.options.getInteger("hoplit") ?? 0,
+        horse_archer: interaction.options.getInteger("atli-okcu") ?? 0, camel_cavalry: interaction.options.getInteger("deve-suvarisi") ?? 0,
+        briton_longbow: interaction.options.getInteger("briton-uzun-yayci") ?? 0
       } });
     await interaction.reply({ content: `✅ ${side} tarafının bütün kara kadrosu tek işlemde kaydedildi. Açık toplam: **${number(view.sides[side].initial_total)}**`, ephemeral: true });
   } else if (sub === "gemi-ayarla") {

@@ -11,6 +11,7 @@ import { buildingCostMultiplier, buildingDurationReduction, shipCostMultiplier, 
 import { settlementResourceAccess } from "./resource-service.js";
 import { MERCENARY_COMPANIES, MERCENARY_CONTRACT_LIMITS, importedMercenarySchedule, mercenaryContractSchedule, type MercenaryCompanyKey } from "../domain/mercenaries.js";
 import { cancelActiveGarrisonReplenishment, completeDueGarrisonReplenishments, scheduleAllMissingGarrisons, scheduleMandatoryGarrisonReplenishment, type GarrisonReplenishmentReason } from "./garrison-service.js";
+import { MAX_SPECIAL_UNIT_ARMY_RATIO, MAX_SPECIAL_UNIT_RECRUITMENT_PER_ACQUISITION, SPECIAL_UNIT_TYPES, isSpecialUnitType, type SpecialUnitType } from "../domain/special-units.js";
 
 export class GameError extends Error {}
 
@@ -95,6 +96,13 @@ function policyRecruitmentDiscount(policies: readonly CityPolicyKey[]): number {
   return policies.includes("WAR_PREPARATION") ? 0.05 : 0;
 }
 
+export function unitPurchaseCost(unitType: keyof typeof UNITS, quantity: number, resources: readonly ResourceType[], policies: readonly CityPolicyKey[]): number {
+  const unit = UNITS[unitType];
+  if (!unit) throw new GameError("Birim türü bulunamadı.");
+  const combinedMultiplier = Math.max(0.50, unitCostMultiplier(unitType, resources) - policyRecruitmentDiscount(policies));
+  return Math.ceil((quantity / 1_000) * unit.price * combinedMultiplier);
+}
+
 export function buildingPurchaseTerms(buildingType: string, targetLevel: number, resources: readonly ResourceType[], policies: readonly CityPolicyKey[]): { cost: number; duration: number } {
   const master = policies.includes("MASTER_ARCHITECTURE");
   const accelerated = policies.includes("ACCELERATED_CONSTRUCTION");
@@ -123,6 +131,7 @@ export interface CountryDocument {
   guild: GuildRow;
   country: CountryRow;
   playerIds: string[];
+  specialUnitUnlocks?: SpecialUnitType[];
   characters: CountryCharacter[];
   allies: Array<{ id: string; name: string }>;
   pacts: Array<{ id: string; name: string; purpose: string; founder_name: string }>;
@@ -314,6 +323,21 @@ async function countryManpower(client: DbClient, countryId: string): Promise<{ p
   };
 }
 
+async function countrySpecialUnitManpower(client: DbClient, countryId: string): Promise<number> {
+  const active = await client.query<{ total: number }>(
+    `SELECT COALESCE(SUM(unit.quantity),0)::bigint AS total
+       FROM unit_stacks unit JOIN settlements settlement ON settlement.id=unit.settlement_id
+      WHERE settlement.country_id=$1 AND unit.unit_type=ANY($2::text[])`,
+    [countryId, SPECIAL_UNIT_TYPES]
+  );
+  const pending = await client.query<{ total: number }>(
+    `SELECT COALESCE(SUM(remaining_quantity),0)::bigint AS total
+       FROM recruitment_orders
+      WHERE country_id=$1 AND status='TRAINING' AND unit_type=ANY($2::text[])`,
+    [countryId, SPECIAL_UNIT_TYPES]
+  );
+  return Number(active.rows[0]?.total ?? 0) + Number(pending.rows[0]?.total ?? 0);
+}
 async function settlementManpower(client: DbClient, settlementId: string): Promise<number> {
   const units = await client.query<{ total: number }>("SELECT COALESCE(SUM(quantity),0)::bigint AS total FROM unit_stacks WHERE settlement_id=$1", [settlementId]);
   const pending = await client.query<{ total: number }>("SELECT COALESCE(SUM(remaining_quantity),0)::bigint AS total FROM recruitment_orders WHERE settlement_id=$1 AND status='TRAINING'", [settlementId]);
@@ -444,6 +468,30 @@ export const gameService = {
   async playerIds(countryId: string): Promise<string[]> {
     const result = await pool.query<{ discord_user_id: string }>("SELECT discord_user_id FROM country_members WHERE country_id=$1 ORDER BY discord_user_id", [countryId]);
     return result.rows.map((row) => row.discord_user_id);
+  },
+  async specialUnitUnlocks(countryId: string): Promise<SpecialUnitType[]> {
+    const result = await pool.query<{ unit_type: SpecialUnitType }>(
+      "SELECT unit_type FROM country_special_unit_unlocks WHERE country_id=$1 ORDER BY unit_type",
+      [countryId]
+    );
+    return result.rows.map((row) => row.unit_type);
+  },
+
+  async setSpecialUnitUnlock(input: { guildId: string; actorId: string; countryId: string; unitType: SpecialUnitType; enabled: boolean }): Promise<void> {
+    if (!isSpecialUnitType(input.unitType)) throw new GameError("Geçersiz özel birlik türü.");
+    await withTransaction(async (client) => {
+      const country = await getCountry(client, input.countryId);
+      if (country.guild_id !== input.guildId) throw new GameError("Ülke bu sunucuya ait değil.");
+      if (input.enabled) {
+        await client.query(
+          "INSERT INTO country_special_unit_unlocks(country_id,unit_type,granted_by) VALUES($1,$2,$3) ON CONFLICT DO NOTHING",
+          [country.id, input.unitType, input.actorId]
+        );
+      } else {
+        await client.query("DELETE FROM country_special_unit_unlocks WHERE country_id=$1 AND unit_type=$2", [country.id, input.unitType]);
+      }
+      await audit(client, input.guildId, input.actorId, input.enabled ? "SPECIAL_UNIT_UNLOCK" : "SPECIAL_UNIT_LOCK", "country", country.id, { unitType: input.unitType });
+    });
   },
 
   async createCountry(guildId: string, actorId: string, name: string, treasury: number): Promise<CountryRow> {
@@ -852,6 +900,7 @@ export const gameService = {
       const country = await getCountry(client, countryId);
       const guild = await getGuild(client, country.guild_id);
       const playerIds = (await client.query<{ discord_user_id: string }>("SELECT discord_user_id FROM country_members WHERE country_id=$1 ORDER BY discord_user_id", [countryId])).rows.map((row) => row.discord_user_id);
+      const specialUnitUnlocks = (await client.query<{ unit_type: SpecialUnitType }>("SELECT unit_type FROM country_special_unit_unlocks WHERE country_id=$1 ORDER BY unit_type", [countryId])).rows.map((row) => row.unit_type);
       const settlements = (await client.query<SettlementRow>("SELECT * FROM settlements WHERE country_id = $1 ORDER BY name", [countryId])).rows;
       const displayedCountry = { ...country, treasury: settlements.length ? settlements.reduce((sum, settlement) => sum + Number(settlement.local_treasury), 0) : country.treasury };
       const settlementIds = settlements.map((settlement) => settlement.id);
@@ -1022,6 +1071,7 @@ export const gameService = {
         guild,
         country: displayedCountry,
         playerIds,
+        specialUnitUnlocks,
         characters,
         allies,
         pacts,
@@ -1379,6 +1429,22 @@ export const gameService = {
       if (await countryHasMaintenanceDebt(client, country.id)) throw new GameError("Ödenmemiş bakım açığı giderilmeden yeni asker emri verilemez.");
       const unit = UNITS[input.unitType];
       if (!unit) throw new GameError("Birim türü bulunamadı.");
+      if (isSpecialUnitType(input.unitType)) {
+        const unlocked = await client.query(
+          "SELECT 1 FROM country_special_unit_unlocks WHERE country_id=$1 AND unit_type=$2",
+          [country.id, input.unitType]
+        );
+        if (!unlocked.rowCount) throw new GameError(`${unit.name}, bu ülke için açılmış bir özel birlik değildir.`);
+        const recruited = await client.query<{ total: number }>(
+          `SELECT COALESCE(SUM(total_quantity),0)::bigint AS total FROM recruitment_orders
+            WHERE country_id=$1 AND unit_type=$2 AND ordered_turn=$3 AND status='TRAINING'`,
+          [country.id, input.unitType, guild.current_turn]
+        );
+        const recruitedThisTurn = Number(recruited.rows[0]?.total ?? 0);
+        if (recruitedThisTurn + input.quantity > MAX_SPECIAL_UNIT_RECRUITMENT_PER_ACQUISITION) {
+          throw new GameError(`${unit.name} için bir Alım Turunda en fazla ${MAX_SPECIAL_UNIT_RECRUITMENT_PER_ACQUISITION.toLocaleString("tr-TR")} asker alınabilir. Bu tur kalan hak: ${Math.max(0, MAX_SPECIAL_UNIT_RECRUITMENT_PER_ACQUISITION - recruitedThisTurn).toLocaleString("tr-TR")}.`);
+        }
+      }
 
       const localUsed = await settlementManpower(client, settlement.id);
       const localLimit = settlementMobilizationLimit(settlement.population, country.mobilization);
@@ -1393,11 +1459,17 @@ export const gameService = {
       const limit = militaryLimit(manpower.population, country.mobilization);
       if (manpower.used > limit) throw new GameError("Devlet askerî personel sınırının üzerindeyken yeni asker alamaz.");
       if (manpower.used + input.quantity > limit) throw new GameError(`Askerî personel sınırında yalnızca ${Math.max(0, limit - manpower.used).toLocaleString("tr-TR")} kişilik yer var.`);
+      if (isSpecialUnitType(input.unitType)) {
+        const specialUsed = await countrySpecialUnitManpower(client, country.id);
+        const specialLimit = Math.floor((limit * MAX_SPECIAL_UNIT_ARMY_RATIO) / 1_000) * 1_000;
+        if (specialUsed + input.quantity > specialLimit) {
+          throw new GameError(`Özel birlikler askerî personel sınırının en fazla %20'si olabilir. Özel birlik sınırında ${Math.max(0, specialLimit - specialUsed).toLocaleString("tr-TR")} kişilik yer var.`);
+        }
+      }
 
       const effectiveResources = (await settlementResourceAccess(client, country.id)).get(settlement.id) ?? [settlement.resource_type];
       const activePolicies = activePolicyKeys((await client.query<SettlementPolicyRow>("SELECT * FROM settlement_policies WHERE settlement_id=$1 AND status='ACTIVE'", [settlement.id])).rows);
-      const combinedMultiplier = Math.max(0.50, unitCostMultiplier(input.unitType, effectiveResources) - policyRecruitmentDiscount(activePolicies));
-      const cost = Math.ceil((input.quantity / 1_000) * unit.price * combinedMultiplier);
+      const cost = unitPurchaseCost(input.unitType, input.quantity, effectiveResources, activePolicies);
       if (settlement.local_treasury < cost) throw new GameError("Yerel hazinede yeterli altın yok.");
       const waves = createRecruitmentWaves(input.quantity, country.mobilization, guild.current_turn);
       const order = await client.query<{ id: string }>(

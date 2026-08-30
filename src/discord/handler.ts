@@ -11,11 +11,14 @@ import { garrisonComposition } from "../domain/garrison.js";
 import type { Mobilization, UnitStatus } from "../domain/types.js";
 import { TRADE_ROUTE_LABELS, type TradeRoute } from "../domain/trade.js";
 import { MERCENARY_COMPANIES, type MercenaryCompanyKey } from "../domain/mercenaries.js";
+import { NPC_AUTO_PURCHASE_DOCTRINES, type NpcAutoPurchaseDoctrine } from "../domain/npc-auto-purchase.js";
+import { SPECIAL_UNITS, isSpecialUnitType, type SpecialUnitType } from "../domain/special-units.js";
 import { RESOURCES, shipCostMultiplier, unitCostMultiplier, type ResourceType } from "../domain/resources.js";
 import { buildingPurchaseTerms, gameService, GameError } from "../services/game-service.js";
 import { cityService } from "../services/city-service.js";
 import { commandLogService } from "../services/command-log-service.js";
 import { roleReportService } from "../services/role-report-service.js";
+import { npcAutoPurchaseService, type NpcAutoPurchaseScope, type NpcCountryOverrideStatus } from "../services/npc-auto-purchase-service.js";
 import { DEFAULT_WELCOME_MESSAGE, renderWelcomeMessage, welcomeService } from "../services/welcome-service.js";
 import { tradeService } from "../services/trade-service.js";
 import { assertCountryAccess, isGameMaster, requireGameMaster, resolveCountry } from "./auth.js";
@@ -577,6 +580,125 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
   }
 }
 
+async function handleSpecialUnitAccess(interaction: ChatInputCommandInteraction): Promise<void> {
+  requireGameMaster(interaction);
+  if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
+  const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
+  if (!country) throw new GameError("Ülke bulunamadı.");
+  const sub = interaction.options.getSubcommand();
+  await interaction.deferReply({ ephemeral: true });
+  if (sub === "listele") {
+    const unlocks = await gameService.specialUnitUnlocks(country.id);
+    await interaction.editReply({ embeds: [new EmbedBuilder()
+      .setColor(0xc59b45)
+      .setTitle(`🛡️ ${country.name} • Özel Birlik Erişimi`)
+      .setDescription(unlocks.length
+        ? unlocks.map((unitType) => `• **${SPECIAL_UNITS[unitType].name}** — ${gold(SPECIAL_UNITS[unitType].price)} / 1.000`).join("\n")
+        : "Bu ülkeye açılmış özel birlik bulunmuyor.")] });
+    return;
+  }
+  const unitType = interaction.options.getString("birlik", true) as SpecialUnitType;
+  const enabled = interaction.options.getString("islem", true) === "UNLOCK";
+  await gameService.setSpecialUnitUnlock({ guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id, unitType, enabled });
+  await interaction.editReply(
+    `${enabled ? "✅" : "🔒"} **${SPECIAL_UNITS[unitType].name}** erişimi **${country.name}** için ${enabled ? "açıldı" : "kaldırıldı"}.` +
+    (!enabled ? " Mevcut birlikler silinmedi; yalnızca yeni alım kapatıldı." : "")
+  );
+}
+function npcPlanLine(plan: { countryName: string; doctrine: NpcAutoPurchaseDoctrine; plannedCost: number; buildingActions: Array<{ buildingName: string; targetLevel: number }>; unitActions: Array<{ quantity: number }> }): string {
+  const buildings = plan.buildingActions.length
+    ? plan.buildingActions.map((action) => `${action.buildingName} Sv${action.targetLevel}`).join(", ")
+    : "Bina yok";
+  const personnel = plan.unitActions.reduce((sum, action) => sum + action.quantity, 0);
+  return `• **${plan.countryName}** — ${NPC_AUTO_PURCHASE_DOCTRINES[plan.doctrine].label}\n  🏗️ ${buildings} • ⚔️ ${number(personnel)} asker • 💰 ${gold(plan.plannedCost)}`;
+}
+
+async function sendNpcPages(interaction: ChatInputCommandInteraction, title: string, lines: string[], footer: string): Promise<void> {
+  const pages: string[] = [];
+  let current = "";
+  for (const line of lines.length ? lines : ["Uygun oyuncusuz devlet bulunamadı."]) {
+    if (current && current.length + line.length + 2 > 3_700) {
+      pages.push(current);
+      current = "";
+    }
+    current += `${current ? "\n\n" : ""}${line}`;
+  }
+  if (current) pages.push(current);
+  await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0xc59b45).setTitle(title).setDescription(pages[0]!).setFooter({ text: footer })] });
+  for (let index = 1; index < pages.length; index += 1) {
+    await interaction.followUp({ embeds: [new EmbedBuilder().setColor(0xc59b45).setTitle(`${title} • ${index + 1}/${pages.length}`).setDescription(pages[index]!)], ephemeral: true });
+  }
+}
+
+async function handleNpcAutoPurchase(interaction: ChatInputCommandInteraction): Promise<void> {
+  requireGameMaster(interaction);
+  if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
+  const sub = interaction.options.getSubcommand();
+  await interaction.deferReply({ ephemeral: true });
+  if (sub === "ayarla") {
+    const config = await npcAutoPurchaseService.saveConfig({
+      guildId: interaction.guildId,
+      actorId: interaction.user.id,
+      enabled: interaction.options.getBoolean("aktif", true),
+      doctrine: interaction.options.getString("doktrin", true) as NpcAutoPurchaseDoctrine,
+      budgetPercent: interaction.options.getInteger("butce-yuzdesi", true),
+      targetFillPercent: interaction.options.getInteger("hedef-doluluk", true),
+      minimumReserve: interaction.options.getInteger("asgari-hazine", true),
+      scope: interaction.options.getString("kapsam", true) as NpcAutoPurchaseScope
+    });
+    await interaction.editReply(
+      `✅ NPC otomatik alım sistemi **${config.enabled ? "açıldı" : "kapatıldı"}**.\n` +
+      `🧭 Doktrin: **${NPC_AUTO_PURCHASE_DOCTRINES[config.doctrine].label}**\n` +
+      `💰 Bütçe: **%${config.budgetPercent}**, rezerv: **${gold(config.minimumReserve)}**\n` +
+      `⚔️ Hedef askerî doluluk: **%${config.targetFillPercent}**\n` +
+      `🌐 Kapsam: **${config.scope === "ALL_PLAYERLESS" ? "Tüm oyuncusuz devletler" : "Yalnızca elle dahil edilenler"}**`
+    );
+    return;
+  }
+  if (sub === "ulke-ayarla") {
+    const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
+    if (!country) throw new GameError("Ülke bulunamadı.");
+    const status = interaction.options.getString("durum", true) as NpcCountryOverrideStatus;
+    const doctrine = interaction.options.getString("doktrin") as NpcAutoPurchaseDoctrine | null;
+    await npcAutoPurchaseService.setCountryOverride({ guildId: interaction.guildId, countryId: country.id, status, doctrine, actorId: interaction.user.id });
+    await interaction.editReply(
+      `✅ **${country.name}** için NPC alım ayarı kaydedildi: **${status === "AUTO" ? "Genel ayar" : status === "INCLUDE" ? "Kapsama dahil" : "Kapsam dışı"}**` +
+      `${doctrine ? ` • Doktrin: **${NPC_AUTO_PURCHASE_DOCTRINES[doctrine].label}**` : ""}.`
+    );
+    return;
+  }
+  if (sub === "durum") {
+    const config = await npcAutoPurchaseService.config(interaction.guildId);
+    await interaction.editReply({ embeds: [new EmbedBuilder()
+      .setColor(config.enabled ? 0x57f287 : 0xed4245)
+      .setTitle("🤖 NPC Devlet Otomatik Alım")
+      .setDescription(
+        `Durum: **${config.enabled ? "Aktif" : "Kapalı"}**\n` +
+        `Doktrin: **${NPC_AUTO_PURCHASE_DOCTRINES[config.doctrine].label}**\n` +
+        `${NPC_AUTO_PURCHASE_DOCTRINES[config.doctrine].description}\n\n` +
+        `Bütçe sınırı: **%${config.budgetPercent}**\nAsgari toplam rezerv: **${gold(config.minimumReserve)}**\n` +
+        `Hedef askerî doluluk: **%${config.targetFillPercent}**\n` +
+        `Kapsam: **${config.scope === "ALL_PLAYERLESS" ? "Tüm oyuncusuz devletler" : "Yalnızca elle dahil edilenler"}**\n\n` +
+        "Alımlar tur ilerlerken kendiliğinden yapılmaz; Alım Turu açıldıktan sonra yönetici `calistir` alt komutunu kullanır."
+      )] });
+    return;
+  }
+  if (sub === "onizle") {
+    const plans = await npcAutoPurchaseService.preview(interaction.guildId);
+    await sendNpcPages(interaction, "🔎 NPC Alım Önizlemesi", plans.map(npcPlanLine), `${plans.length} oyuncusuz devlet • Hiçbir ödeme veya emir oluşturulmadı`);
+    return;
+  }
+  const results = await npcAutoPurchaseService.execute(interaction.guildId, interaction.user.id);
+  const lines = results.map((result) => {
+    const icon = result.status === "COMPLETE" ? "✅" : result.status === "PARTIAL" ? "⚠️" : result.status === "SKIPPED" ? "⏭️" : "❌";
+    const base = npcPlanLine(result).replace(/^• /, `${icon} `).replace(gold(result.plannedCost), gold(result.actualCost));
+    return result.errors.length ? `${base}\n  _${result.errors.slice(0, 2).join(" | ")}_` : base;
+  });
+  const completed = results.filter((result) => result.status === "COMPLETE").length;
+  const partial = results.filter((result) => result.status === "PARTIAL").length;
+  const skipped = results.filter((result) => result.status === "SKIPPED").length;
+  await sendNpcPages(interaction, "🤖 NPC Alımları Uygulandı", lines, `${completed} tamamlandı • ${partial} kısmi • ${skipped} daha önce işlendi`);
+}
 async function handleCommand(interaction: ChatInputCommandInteraction): Promise<void> {
   if (await handleWarDeclarationCommand(interaction)) return;
   if (await handleDiplomacyCommand(interaction)) return;
@@ -691,6 +813,10 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     await handleWelcomeCommand(interaction);
   } else if (interaction.commandName === "devlet-rolleri") {
     await handleCountryRoles(interaction);
+  } else if (interaction.commandName === "ozel-birlik-yetkisi") {
+    await handleSpecialUnitAccess(interaction);
+  } else if (interaction.commandName === "npc-devlet-oto-alim") {
+    await handleNpcAutoPurchase(interaction);
   } else if (interaction.commandName === "yonetim") {
     await handleAdmin(interaction);
   }
@@ -735,9 +861,11 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
     await interaction.update({ content: `**${building.name}** alımını onaylıyor musun? Kesin seviye, fiyat ve süre onay anında yeniden kontrol edilir.`, components: [new ActionRowBuilder<ButtonBuilder>().addComponents(new ButtonBuilder().setCustomId(`bx|${countryId}|${settlementIdFromId}|${buildingType}`).setLabel("Satın Al").setStyle(ButtonStyle.Success), new ButtonBuilder().setCustomId("cancel").setLabel("İptal").setStyle(ButtonStyle.Secondary))] });
   } else if (kind === "us") {
     const settlementId = interaction.values[0]!;
-    const settlement = (await gameService.document(countryId)).settlements.find((item) => item.id === settlementId);
+    const document = await gameService.document(countryId);
+    const settlement = document.settlements.find((item) => item.id === settlementId);
     if (!settlement) throw new GameError("Yerleşke bulunamadı.");
-    await interaction.update({ content: `Alınacak birim türünü seç:\n🎖️ Ordu Limiti: **${number(settlement.militaryUsed)}/${number(settlement.militaryLimit)}**\n🏋️ Bu Alım Turu Eğitim Kapasitesi: **${number(settlement.trainingUsed)}/${number(settlement.trainingCapacity)}** • Kalan: **${number(settlement.trainingRemaining)}**`, components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder().setCustomId(`uc|${countryId}|${settlementId}`).setPlaceholder("Birim seç").addOptions(unitChoices.map(([key, unit]) => ({ label: unit.name, description: `${gold(Math.ceil(unit.price * unitCostMultiplier(key, settlement.effectiveResources)))} / 1.000`, value: key }))))] });
+    const availableUnits = unitChoices.filter(([key]) => !isSpecialUnitType(key) || (document.specialUnitUnlocks ?? []).includes(key));
+    await interaction.update({ content: `Alınacak birim türünü seç:\n🎖️ Ordu Limiti: **${number(settlement.militaryUsed)}/${number(settlement.militaryLimit)}**\n🏋️ Bu Alım Turu Eğitim Kapasitesi: **${number(settlement.trainingUsed)}/${number(settlement.trainingCapacity)}** • Kalan: **${number(settlement.trainingRemaining)}**`, components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder().setCustomId(`uc|${countryId}|${settlementId}`).setPlaceholder("Birim seç").addOptions(availableUnits.map(([key, unit]) => ({ label: unit.name, description: `${gold(Math.ceil(unit.price * unitCostMultiplier(key, settlement.effectiveResources)))} / 1.000${isSpecialUnitType(key) ? " • Özel Birlik" : ""}`, value: key }))))] });
   } else if (kind === "uc" && settlementIdFromId) {
     const unitType = interaction.values[0]!;
     const modal = new ModalBuilder().setCustomId(`um|${countryId}|${settlementIdFromId}|${unitType}`).setTitle("Asker Alımı");
@@ -824,7 +952,7 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
     try { kind = interaction.options.getString("tur") ?? "UNIT"; } catch { kind = "UNIT"; }
     const source = kind === "SHIP" ? SHIPS : kind === "ASSET" ? SIEGE_ASSETS : UNITS;
     const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
-    await interaction.respond(Object.entries(source).filter(([key, value]) => !query || key.includes(query) || value.name.toLocaleLowerCase("tr-TR").includes(query)).slice(0, 25).map(([value, item]) => ({ name: item.name, value })));
+    await interaction.respond(Object.entries(source).filter(([key, value]) => (kind !== "UNIT" || !isSpecialUnitType(key)) && (!query || key.includes(query) || value.name.toLocaleLowerCase("tr-TR").includes(query))).slice(0, 25).map(([value, item]) => ({ name: item.name, value })));
     return;
   }
   if (interaction.commandName === "alim-iptal" && focused.name === "siparis") {
