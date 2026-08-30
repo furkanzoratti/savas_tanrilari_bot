@@ -22,12 +22,14 @@ function siegeView(): BattleView {
     sides: {
       A: {
         battle_id: "battle", side_key: "A", country_id: "rome", country_name: "Roma", controller: "PLAYERS",
+        country_ids: ["rome"], country_names: ["Roma"], participants: [{ battle_id: "battle", side_key: "A", country_id: "rome", country_name: "Roma", is_primary: true, composition: { heavy_infantry: 12_000 }, initial_composition: { heavy_infantry: 12_000 } }],
         initial_total: 12_000, current_total: 10_000, total_losses: 2_000, pressure: 1,
         composition: { heavy_infantry: 10_000 }, initial_composition: { heavy_infantry: 12_000 },
         support_assets: { ladder_group: 2, siege_tower: 1 }, support_enhanced: {}, support_targets: { ladder_group: "ASSAULT", siege_tower: "ASSAULT" }, temporary_militia: 0, seal: "ATTACKER"
       },
       B: {
         battle_id: "battle", side_key: "B", country_id: "city", country_name: "Savunucu", controller: "GM",
+        country_ids: ["city"], country_names: ["Savunucu"], participants: [{ battle_id: "battle", side_key: "B", country_id: "city", country_name: "Savunucu", is_primary: true, composition: { spear: 12_345 }, initial_composition: { spear: 12_345 } }],
         initial_total: 12_345, current_total: 8_765, total_losses: 3_580, pressure: 4,
         composition: { spear: 8_765 }, initial_composition: { spear: 12_345 },
         support_assets: {}, support_enhanced: {}, support_targets: {}, temporary_militia: 500, seal: "DEFENDER"

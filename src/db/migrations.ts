@@ -952,4 +952,28 @@ export const migrations = [
       CREATE INDEX IF NOT EXISTS garrison_replenishment_due_idx
         ON garrison_replenishment_orders(completion_turn,status);
     `
+  },
+  {
+    version: 25,
+    name: "battle_side_coalitions",
+    sql: `
+      CREATE TABLE IF NOT EXISTS battle_side_participants (
+        battle_id UUID NOT NULL,
+        side_key TEXT NOT NULL CHECK (side_key IN ('A','B')),
+        country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        is_primary BOOLEAN NOT NULL DEFAULT FALSE,
+        composition JSONB NOT NULL DEFAULT '{}'::jsonb,
+        initial_composition JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY(battle_id,country_id),
+        FOREIGN KEY(battle_id,side_key) REFERENCES battle_sides(battle_id,side_key) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS battle_side_participants_side_idx
+        ON battle_side_participants(battle_id,side_key);
+      CREATE UNIQUE INDEX IF NOT EXISTS battle_side_participants_primary_idx
+        ON battle_side_participants(battle_id,side_key) WHERE is_primary;
+      INSERT INTO battle_side_participants(battle_id,side_key,country_id,is_primary,composition,initial_composition)
+      SELECT battle_id,side_key,country_id,TRUE,composition,initial_composition FROM battle_sides
+      ON CONFLICT(battle_id,country_id) DO NOTHING;
+    `
   }] as const;

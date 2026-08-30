@@ -269,6 +269,7 @@ Her gemi bir bloktur; taraf başına en fazla 30 gemi zar üretir. Üstünlük e
 Savaş sonunda bot kayıpları ülke belgelerine yalnız **bir kez** işler. Kara kayıpları birlik kayıtlarından ve bağlı yerleşke nüfusundan düşer. Gemi mürettebat katsayısı tanımlı olmadığından gemi kaybı nüfusu azaltmaz. DM raporu; hesaplanan, uygulanan ve kayıt yetersizliği yüzünden uygulanamayan miktarı gösterir.
 
 **DM komutları:**
+• `/savas taraf-ulke` — taslakta A veya B tarafına ek ülke ekler/çıkarır; kara ve filo kadrolarındaki isteğe bağlı `ulke` alanı katkıyı seçilen ülkeye yazar.
 • `/savas kadro-ayarla` — bütün kara ordusu
 • `/savas filo-ayarla` — bütün filo
 • `/savas kusatma-aleti-ayarla` — alet/adet/hedef

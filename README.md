@@ -206,12 +206,13 @@ pnpm dev
 
 Savaşlar kanal bazında ve PostgreSQL üzerinde kalıcıdır. Aynı kanalda aynı anda yalnızca bir etkin savaş bulunabilir.
 
-1. DM `/savas baslat` ile ülkeleri, savaş alanını ve iki tarafın zar yetkisini seçer.
-2. DM `/savas kadro-ayarla` veya `/savas filo-ayarla` ile bütün gizli kadroyu tek komutta oluşturur. Tekil düzeltmeler için `/savas birlik-ayarla` ve `/savas gemi-ayarla` kullanılabilir. Komut yanıtı yalnızca DM'e görünür.
-3. DM `/savas yayinla` ile açık savaş kartını gönderir. Kart toplam asker, toplam kayıp, düzen ve zar yetkisini gösterir; tam birlik kompozisyonu gizli kalır.
-4. Botun belirlediği sıradaki ülke oyuncusu veya NPC için DM, `Savaş Zarlarını At` düğmesini kullanır. Çarpışma ve hasar toplamları kanalda açık yayımlanır.
-5. İki zar tamamlanınca DM `/savas tur-oynat` kullanır. Ana çarpışma ordulardan biri dağılana, geri çekilene veya DM savaşı bitirene kadar tekrar eder.
-6. DM tam birim bileşimi ve gizli kalan birlikleri `/savas ordu-detay`, otomatik belge aktarımını `/savas kayip-raporu` ile özel olarak görebilir.
+1. DM `/savas baslat` ile iki tarafın ana ülkelerini, savaş alanını ve zar yetkisini seçer.
+2. Aynı tarafta başka ülkeler varsa DM, yayımlamadan önce `/savas taraf-ulke taraf:A|B islem:Ekle ulke:...` kullanır. Bir ülke yalnızca tek tarafta bulunabilir.
+3. DM `/savas kadro-ayarla` veya `/savas filo-ayarla` ile gizli kadroları girer. Koalisyonlarda `ulke` seçeneği her ülkenin katkısını ayrı kaydeder; seçenek boşsa ana ülke düzenlenir. Tekil düzeltmeler için `/savas birlik-ayarla` ve `/savas gemi-ayarla` kullanılabilir. Komut yanıtı yalnızca DM'e görünür.
+4. DM `/savas yayinla` ile açık savaş kartını gönderir. Kart toplam asker, toplam kayıp, düzen ve zar yetkisini gösterir; tam birlik kompozisyonu gizli kalır.
+5. Botun belirlediği sıradaki ülke oyuncusu veya NPC için DM, `Savaş Zarlarını At` düğmesini kullanır. Çarpışma ve hasar toplamları kanalda açık yayımlanır.
+6. İki zar tamamlanınca DM `/savas tur-oynat` kullanır. Ana çarpışma ordulardan biri dağılana, geri çekilene veya DM savaşı bitirene kadar tekrar eder.
+7. DM tam birim bileşimi ve gizli kalan birlikleri `/savas ordu-detay`, otomatik belge aktarımını `/savas kayip-raporu` ile özel olarak görebilir.
 
 Oyuncu geri çekilmesi kart düğmesiyle yapılır. İlk savaş turu kayıpsızdır; sonraki turlarda savaşın uzaması, rakibin süvari/hafif gemi oranı ve arazi takip kaybı doğurur. DM oyuncu ülkesinin zarını vekâleten atabilir; sonuç açıkça `DM vekili` olarak işaretlenir. NPC taraflar yalnızca DM tarafından oynatılır. On hazır görsel `assets/battlefields` altında bulunur ve Docker imajına otomatik kopyalanır.
 ### Pusu, kuşatma ve deniz savaşı

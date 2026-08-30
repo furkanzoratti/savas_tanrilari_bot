@@ -163,17 +163,30 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
     const rosterCommand = view.battle.terrain === "NAVAL" ? "/savas filo-ayarla" : "/savas kadro-ayarla";
     const supportNote = view.battle.terrain === "SIEGE" ? " Kuşatma aletlerini `/savas kusatma-aleti-ayarla` ile girin." : "";
     await interaction.reply({ content: `✅ Savaş taslağı oluşturuldu. Gizli kadroları \`${rosterCommand}\` ile girin.${supportNote}\nA tarafı ilk turda ${view.battle.first_side === "A" ? "önce" : "sonra"} zar atacak.`, ephemeral: true });
+  } else if (sub === "taraf-ulke") {
+    requireGameMaster(interaction);
+    const side = interaction.options.getString("taraf", true) as BattleSideKey;
+    const action = interaction.options.getString("islem", true) as "ADD" | "REMOVE";
+    const countryName = interaction.options.getString("ulke", true);
+    const view = await battleService.setParticipant({
+      guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id,
+      side, action, countryName
+    });
+    await interaction.reply({
+      content: "✅ **" + countryName + "** " + (action === "ADD" ? "savaş tarafına eklendi" : "savaş tarafından çıkarıldı") + ". **" + side + " tarafı:** " + view.sides[side].country_names.join(", "),
+      ephemeral: true
+    });
   } else if (sub === "birlik-ayarla") {
     requireGameMaster(interaction);
     const view = await battleService.setUnit({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id,
       side: interaction.options.getString("taraf", true) as BattleSideKey, unitType: interaction.options.getString("birim", true) as BattleUnitType,
-      quantity: interaction.options.getInteger("miktar", true) });
+      quantity: interaction.options.getInteger("miktar", true), countryName: interaction.options.getString("ulke") });
     const side = interaction.options.getString("taraf", true) as BattleSideKey;
     await interaction.reply({ content: `✅ ${side} tarafının gizli kadrosu güncellendi. Açık toplam: **${number(view.sides[side].initial_total)}**`, ephemeral: true });
   } else if (sub === "kadro-ayarla") {
     requireGameMaster(interaction);
     const side = interaction.options.getString("taraf", true) as BattleSideKey;
-    const view = await battleService.setRoster({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id, side, naval: false,
+    const view = await battleService.setRoster({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id, side, naval: false, countryName: interaction.options.getString("ulke"),
       composition: {
         light_infantry: interaction.options.getInteger("hafif-piyade", true), slinger: interaction.options.getInteger("sapanci", true),
         spear: interaction.options.getInteger("mizrakli", true), archer: interaction.options.getInteger("okcu", true),
@@ -185,12 +198,12 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
     requireGameMaster(interaction);
     const side = interaction.options.getString("taraf", true) as BattleSideKey;
     const view = await battleService.setUnit({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id,
-      side, unitType: interaction.options.getString("gemi", true) as NavalUnitType, quantity: interaction.options.getInteger("miktar", true) });
+      side, unitType: interaction.options.getString("gemi", true) as NavalUnitType, quantity: interaction.options.getInteger("miktar", true), countryName: interaction.options.getString("ulke") });
     await interaction.reply({ content: `✅ ${side} tarafının gizli filo kadrosu güncellendi. Açık toplam: **${number(view.sides[side].initial_total)} gemi**`, ephemeral: true });
   } else if (sub === "filo-ayarla") {
     requireGameMaster(interaction);
     const side = interaction.options.getString("taraf", true) as BattleSideKey;
-    const view = await battleService.setRoster({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id, side, naval: true,
+    const view = await battleService.setRoster({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id, side, naval: true, countryName: interaction.options.getString("ulke"),
       composition: { kerkouros: interaction.options.getInteger("kerkouros", true), trireme: interaction.options.getInteger("trireme", true), quinquereme: interaction.options.getInteger("quinquereme", true) } });
     await interaction.reply({ content: `✅ ${side} tarafının bütün filosu tek işlemde kaydedildi. Açık toplam: **${number(view.sides[side].initial_total)} gemi**`, ephemeral: true });
   } else if (sub === "kusatma-aleti-ayarla") {

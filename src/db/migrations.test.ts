@@ -63,3 +63,15 @@ describe("yirmi dördüncü migration", () => {
     expect(migration?.sql).toContain("garrison_replenishment_active_settlement_idx");
   });
 });
+
+describe("yirmi beşinci migration", () => {
+  const migration = migrations.find((item) => item.version === 25);
+
+  it("savaş taraflarında birden fazla ülkeyi ve ülke kadrolarını saklar", () => {
+    expect(migration?.name).toBe("battle_side_coalitions");
+    expect(migration?.sql).toContain("CREATE TABLE IF NOT EXISTS battle_side_participants");
+    expect(migration?.sql).toContain("PRIMARY KEY(battle_id,country_id)");
+    expect(migration?.sql).toContain("initial_composition JSONB");
+    expect(migration?.sql).toContain("INSERT INTO battle_side_participants");
+  });
+});

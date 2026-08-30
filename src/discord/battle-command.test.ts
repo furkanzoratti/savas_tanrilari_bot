@@ -5,9 +5,18 @@ describe("savaş komutları", () => {
   it("taslak, gizli kadro, yayın, tur ve özel detay akışını kaydeder", () => {
     const battle = commandBuilders.find((command) => command.name === "savas");
     const names = battle?.options?.map((option) => option.name) ?? [];
-    expect(names).toEqual(expect.arrayContaining(["baslat", "birlik-ayarla", "kadro-ayarla", "gemi-ayarla", "filo-ayarla", "kusatma-aleti-ayarla", "kusatma-asamasi", "bombardiman", "yayinla", "tur-oynat", "ordu-detay", "kayip-raporu", "bitir", "iptal"]));
+    expect(names).toEqual(expect.arrayContaining(["baslat", "taraf-ulke", "birlik-ayarla", "kadro-ayarla", "gemi-ayarla", "filo-ayarla", "kusatma-aleti-ayarla", "kusatma-asamasi", "bombardiman", "yayinla", "tur-oynat", "ordu-detay", "kayip-raporu", "bitir", "iptal"]));
   });
 
+  it("koalisyon ülkesi ve ülke bazlı kadro seçeneklerini sunar", () => {
+    const battle = commandBuilders.find((command) => command.name === "savas");
+    const participant = battle?.options?.find((option) => option.name === "taraf-ulke");
+    expect(participant?.options?.map((option) => option.name)).toEqual(["taraf", "islem", "ulke"]);
+    for (const name of ["birlik-ayarla", "kadro-ayarla", "gemi-ayarla", "filo-ayarla"]) {
+      const command = battle?.options?.find((option) => option.name === name);
+      expect(command?.options?.some((option) => option.name === "ulke")).toBe(true);
+    }
+  });
   it("on savaş alanı hazır ayarını sunar", () => {
     const battle = commandBuilders.find((command) => command.name === "savas");
     const start = battle?.options?.find((option) => option.name === "baslat");
