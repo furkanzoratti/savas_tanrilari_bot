@@ -1,4 +1,5 @@
 import { pool, withTransaction, type DbClient } from "../db/pool.js";
+import { DIPLOMACY_LIMITS } from "../domain/diplomacy.js";
 import type { ResourceType } from "../domain/resources.js";
 import { GameError } from "./game-service.js";
 
@@ -108,6 +109,57 @@ async function lockCountries(client: DbClient, countryIds: string[]): Promise<vo
   }
 }
 
+async function lockPact(client: DbClient, pactId: string): Promise<void> {
+  await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", ["diplomacy-pact:" + pactId]);
+}
+
+async function activeAllianceCount(client: DbClient, countryId: string): Promise<number> {
+  const result = await client.query<{ count: number }>(
+    "SELECT COUNT(*)::integer AS count FROM country_alliances WHERE status='ACTIVE' AND (proposer_country_id=$1 OR receiver_country_id=$1)",
+    [countryId]
+  );
+  return Number(result.rows[0]?.count ?? 0);
+}
+
+async function assertAllianceCapacity(client: DbClient, countryIds: string[]): Promise<void> {
+  for (const countryId of [...new Set(countryIds)]) {
+    const used = await activeAllianceCount(client, countryId);
+    if (used >= DIPLOMACY_LIMITS.alliancesPerCountry) {
+      throw new GameError("Devletin müttefik sınırı dolu (" + used + "/" + DIPLOMACY_LIMITS.alliancesPerCountry + ").");
+    }
+  }
+}
+
+async function countryPactCount(client: DbClient, countryId: string): Promise<number> {
+  const result = await client.query<{ count: number }>(
+    "SELECT COUNT(*)::integer AS count FROM pact_memberships membership JOIN diplomatic_pacts pact ON pact.id=membership.pact_id WHERE membership.country_id=$1",
+    [countryId]
+  );
+  return Number(result.rows[0]?.count ?? 0);
+}
+
+async function assertCountryPactCapacity(client: DbClient, countryId: string): Promise<void> {
+  const used = await countryPactCount(client, countryId);
+  if (used >= DIPLOMACY_LIMITS.pactsPerCountry) {
+    throw new GameError("Devletin pakt üyeliği sınırı dolu (" + used + "/" + DIPLOMACY_LIMITS.pactsPerCountry + ").");
+  }
+}
+
+async function pactMemberCount(client: DbClient, pactId: string): Promise<number> {
+  const result = await client.query<{ count: number }>(
+    "SELECT COUNT(*)::integer AS count FROM pact_memberships membership JOIN countries country ON country.id=membership.country_id WHERE membership.pact_id=$1 AND country.status='ACTIVE'",
+    [pactId]
+  );
+  return Number(result.rows[0]?.count ?? 0);
+}
+
+async function assertPactMemberCapacity(client: DbClient, pactId: string): Promise<void> {
+  const used = await pactMemberCount(client, pactId);
+  if (used >= DIPLOMACY_LIMITS.countriesPerPact) {
+    throw new GameError("Paktın devlet sınırı dolu (" + used + "/" + DIPLOMACY_LIMITS.countriesPerPact + ").");
+  }
+}
+
 async function allianceById(client: DbClient, id: string): Promise<AllianceView | null> {
   return (await client.query<AllianceView>(`${allianceViewSql} WHERE alliance.id=$1`, [id])).rows[0] ?? null;
 }
@@ -201,6 +253,7 @@ export const diplomacyService = {
       await lockCountries(client, [input.proposerCountryId, input.receiverCountryId]);
       await verifyCountry(client, input.guildId, input.proposerCountryId);
       await verifyCountry(client, input.guildId, input.receiverCountryId);
+      await assertAllianceCapacity(client, [input.proposerCountryId, input.receiverCountryId]);
       const existing = await client.query<{ status: string }>(
         `SELECT status FROM country_alliances WHERE guild_id=$1 AND status IN ('PENDING','ACTIVE')
           AND ((proposer_country_id=$2 AND receiver_country_id=$3)
@@ -233,12 +286,18 @@ export const diplomacyService = {
 
   async respondAlliance(input: { guildId: string; actorId: string; receiverCountryId: string; allianceId: string; accept: boolean }): Promise<AllianceView> {
     return withTransaction(async (client) => {
-      const row = (await client.query<{ receiver_country_id: string; status: string }>(
-        "SELECT receiver_country_id,status FROM country_alliances WHERE id=$1 AND guild_id=$2 FOR UPDATE", [input.allianceId, input.guildId]
+      const preview = (await client.query<{ proposer_country_id: string; receiver_country_id: string }>(
+        "SELECT proposer_country_id,receiver_country_id FROM country_alliances WHERE id=$1 AND guild_id=$2", [input.allianceId, input.guildId]
+      )).rows[0];
+      if (!preview) throw new GameError("İttifak daveti bulunamadı.");
+      await lockCountries(client, [preview.proposer_country_id, preview.receiver_country_id]);
+      const row = (await client.query<{ proposer_country_id: string; receiver_country_id: string; status: string }>(
+        "SELECT proposer_country_id,receiver_country_id,status FROM country_alliances WHERE id=$1 AND guild_id=$2 FOR UPDATE", [input.allianceId, input.guildId]
       )).rows[0];
       if (!row) throw new GameError("İttifak daveti bulunamadı.");
       if (row.receiver_country_id !== input.receiverCountryId) throw new GameError("Bu daveti yalnızca hedef devlet yanıtlayabilir.");
       if (row.status !== "PENDING") throw new GameError("Bu ittifak daveti daha önce sonuçlandırılmış.");
+      if (input.accept) await assertAllianceCapacity(client, [row.proposer_country_id, row.receiver_country_id]);
       await client.query(
         "UPDATE country_alliances SET status=$2,responded_by=$3,responded_at=NOW() WHERE id=$1",
         [input.allianceId, input.accept ? "ACTIVE" : "REJECTED", input.actorId]
@@ -279,7 +338,9 @@ export const diplomacyService = {
     const description = input.description.trim();
     if (name.length < 2 || purpose.length < 2 || description.length < 2) throw new GameError("Pakt adı, amacı ve açıklaması en az iki karakter olmalıdır.");
     return withTransaction(async (client) => {
+      await lockCountries(client, [input.founderCountryId]);
       await verifyCountry(client, input.guildId, input.founderCountryId);
+      await assertCountryPactCapacity(client, input.founderCountryId);
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`pact-name:${input.guildId}:${name.toLocaleLowerCase("tr-TR")}`]);
       const existing = await client.query("SELECT 1 FROM diplomatic_pacts WHERE guild_id=$1 AND LOWER(name)=LOWER($2)", [input.guildId, name]);
       if (existing.rowCount) throw new GameError("Bu isimle oluşturulmuş bir pakt zaten bulunuyor.");
@@ -319,6 +380,7 @@ export const diplomacyService = {
     if (input.inviterCountryId === input.receiverCountryId) throw new GameError("Bir devlet kendisini pakta davet edemez.");
     return withTransaction(async (client) => {
       await lockCountries(client, [input.inviterCountryId, input.receiverCountryId]);
+      await lockPact(client, input.pactId);
       await verifyCountry(client, input.guildId, input.inviterCountryId);
       await verifyCountry(client, input.guildId, input.receiverCountryId);
       const pact = (await client.query<{ founder_country_id: string }>(
@@ -326,6 +388,8 @@ export const diplomacyService = {
       )).rows[0];
       if (!pact) throw new GameError("Pakt bulunamadı.");
       if (!input.gameMaster && pact.founder_country_id !== input.inviterCountryId) throw new GameError("Pakta yalnızca kurucu devlet davet gönderebilir.");
+      await assertPactMemberCapacity(client, input.pactId);
+      await assertCountryPactCapacity(client, input.receiverCountryId);
       const membership = await client.query("SELECT 1 FROM pact_memberships WHERE pact_id=$1 AND country_id=$2", [input.pactId, input.receiverCountryId]);
       if (membership.rowCount) throw new GameError("Bu devlet zaten paktın üyesi.");
       const pending = await client.query("SELECT 1 FROM pact_invitations WHERE pact_id=$1 AND receiver_country_id=$2 AND status='PENDING'", [input.pactId, input.receiverCountryId]);
@@ -354,6 +418,12 @@ export const diplomacyService = {
 
   async respondPactInvitation(input: { guildId: string; actorId: string; receiverCountryId: string; invitationId: string; accept: boolean }): Promise<PactInvitationView> {
     return withTransaction(async (client) => {
+      const preview = (await client.query<{ pact_id: string; receiver_country_id: string }>(
+        "SELECT pact_id,receiver_country_id FROM pact_invitations WHERE id=$1 AND guild_id=$2", [input.invitationId, input.guildId]
+      )).rows[0];
+      if (!preview) throw new GameError("Pakt daveti bulunamadı.");
+      await lockCountries(client, [preview.receiver_country_id]);
+      await lockPact(client, preview.pact_id);
       const invitation = (await client.query<{ pact_id: string; receiver_country_id: string; status: string }>(
         "SELECT pact_id,receiver_country_id,status FROM pact_invitations WHERE id=$1 AND guild_id=$2 FOR UPDATE", [input.invitationId, input.guildId]
       )).rows[0];
@@ -361,6 +431,8 @@ export const diplomacyService = {
       if (invitation.receiver_country_id !== input.receiverCountryId) throw new GameError("Bu daveti yalnızca hedef devlet yanıtlayabilir.");
       if (invitation.status !== "PENDING") throw new GameError("Bu pakt daveti daha önce sonuçlandırılmış.");
       if (input.accept) {
+        await assertPactMemberCapacity(client, invitation.pact_id);
+        await assertCountryPactCapacity(client, input.receiverCountryId);
         await client.query("INSERT INTO pact_memberships(pact_id,country_id) VALUES($1,$2) ON CONFLICT DO NOTHING", [invitation.pact_id, input.receiverCountryId]);
       }
       await client.query("UPDATE pact_invitations SET status=$2,responded_by=$3,responded_at=NOW() WHERE id=$1", [input.invitationId, input.accept ? "ACCEPTED" : "REJECTED", input.actorId]);

@@ -30,4 +30,13 @@ describe("ticaret ve rol raporu komutları", () => {
     expect(loss?.options?.find((option) => option.name === "miktar")).toMatchObject({ required: true, min_value: 1 });
     expect(loss?.options?.find((option) => option.name === "kalem")?.choices).toHaveLength(7);
   });
+
+  it("oyuncu hazine taşıma komutunda ülke istemez ve iki şehri menüden seçtirir", () => {
+    const command = commandBuilders.find((item) => item.name === "hazine-tasi");
+    expect(command?.options?.map((option) => option.name)).toEqual(["kaynak-sehir", "hedef-sehir", "miktar"]);
+    expect(command?.options?.find((option) => option.name === "kaynak-sehir")).toMatchObject({ required: true, autocomplete: true });
+    expect(command?.options?.find((option) => option.name === "hedef-sehir")).toMatchObject({ required: true, autocomplete: true });
+    expect(command?.options?.find((option) => option.name === "miktar")).toMatchObject({ required: true, min_value: 1 });
+    expect(command?.options?.some((option) => option.name === "ulke")).toBe(false);
+  });
 });

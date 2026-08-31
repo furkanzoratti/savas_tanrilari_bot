@@ -5,9 +5,12 @@ import { attachInteractionHandler } from "./discord/handler.js";
 import { startHealthServer } from "./http.js";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
+import { currentGreatPowerReportDate } from "./domain/great-power.js";
 import { gameService } from "./services/game-service.js";
+import { greatPowerService } from "./services/great-power-service.js";
 import { completedRoleReportRanges, roleReportService, type RoleReportPeriod } from "./services/role-report-service.js";
 import { renderWelcomeMessage, welcomeService } from "./services/welcome-service.js";
+import { publishGreatPowerRanking } from "./discord/great-power-ui.js";
 
 function countWords(content: string): number {
   const cleaned = content
@@ -88,10 +91,27 @@ async function sendCompletedRoleReports(now = new Date()): Promise<void> {
   }
 }
 
+async function sendScheduledGreatPowerRanking(now = new Date()): Promise<void> {
+  if (!client.isReady()) return;
+  const date = currentGreatPowerReportDate(now, config.TURN_TIMEZONE);
+  if (!date) return;
+  for (const target of await greatPowerService.targets()) {
+    const eventKey = `GREAT_POWER_DAILY:${date}`;
+    if (!(await greatPowerService.claim(target.guildId, eventKey))) continue;
+    try {
+      await publishGreatPowerRanking(client, target.guildId, target.channelId, date);
+    } catch (error) {
+      await greatPowerService.release(target.guildId, eventKey);
+      logger.error({ error, guildId: target.guildId, channelId: target.channelId, date }, "Büyük Güçler sıralaması gönderilemedi");
+    }
+  }
+}
+
 client.once("clientReady", async (readyClient) => {
   logger.info({ user: readyClient.user.tag, guilds: readyClient.guilds.cache.size }, "Discord botu hazır");
   for (const guild of readyClient.guilds.cache.values()) await gameService.ensureGuild(guild.id);
   await sendCompletedRoleReports();
+  await sendScheduledGreatPowerRanking();
 });
 
 // 23:59:50 sonrası kapanış raporunu yakalar; 00:00'dan itibaren komutlar yeni
@@ -100,12 +120,17 @@ const roleReportTimer = setInterval(() => {
   void sendCompletedRoleReports().catch((error) => logger.error(error, "Rol raporu görevi başarısız"));
 }, 10_000);
 roleReportTimer.unref();
+const greatPowerTimer = setInterval(() => {
+  void sendScheduledGreatPowerRanking().catch((error) => logger.error(error, "Büyük Güçler zamanlayıcısı başarısız"));
+}, 30_000);
+greatPowerTimer.unref();
 const healthServer = startHealthServer(client);
 await client.login(config.DISCORD_TOKEN);
 
 async function shutdown(signal: string) {
   logger.info({ signal }, "Bot kapatılıyor");
   clearInterval(roleReportTimer);
+  clearInterval(greatPowerTimer);
   healthServer.close();
   client.destroy();
   await pool.end();

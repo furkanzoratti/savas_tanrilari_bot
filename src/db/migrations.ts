@@ -1078,4 +1078,24 @@ export const migrations = [
       );
       CREATE INDEX IF NOT EXISTS country_formations_country_idx ON country_formations(country_id,created_at DESC);
     `
+  },
+  {
+    version: 32,
+    name: "daily_great_power_rankings",
+    sql: `
+      ALTER TABLE guilds ADD COLUMN IF NOT EXISTS great_power_channel_id TEXT;
+      CREATE TABLE IF NOT EXISTS great_power_snapshots (
+        guild_id TEXT NOT NULL REFERENCES guilds(discord_id) ON DELETE CASCADE,
+        snapshot_date DATE NOT NULL,
+        country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        rank SMALLINT NOT NULL CHECK (rank BETWEEN 1 AND 10),
+        secret_score BIGINT NOT NULL CHECK (secret_score >= 0),
+        breakdown JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY(guild_id,snapshot_date,country_id),
+        UNIQUE(guild_id,snapshot_date,rank)
+      );
+      CREATE INDEX IF NOT EXISTS great_power_snapshots_recent_idx
+        ON great_power_snapshots(guild_id,snapshot_date DESC,rank);
+    `
   }] as const;

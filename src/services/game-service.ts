@@ -542,6 +542,60 @@ export const gameService = {
     return result.rows;
   },
 
+  async transferSettlementTreasury(input: {
+    guildId: string; actorId: string; countryId: string;
+    sourceSettlementId: string; targetSettlementId: string; amount: number;
+  }): Promise<{
+    sourceName: string; targetName: string; amount: number;
+    sourceBalance: number; targetBalance: number; countryTreasury: number;
+  }> {
+    if (!Number.isSafeInteger(input.amount) || input.amount <= 0) {
+      throw new GameError("Taşınacak altın miktarı pozitif bir tam sayı olmalıdır.");
+    }
+    if (input.sourceSettlementId === input.targetSettlementId) {
+      throw new GameError("Kaynak ve hedef şehir aynı olamaz.");
+    }
+    return withTransaction(async (client) => {
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", ["country:" + input.countryId]);
+      const guild = await getGuild(client, input.guildId);
+      const country = await getCountry(client, input.countryId);
+      if (country.guild_id !== input.guildId) throw new GameError("Ülke bu sunucuya ait değil.");
+      const settlements = (await client.query<SettlementRow>(
+        "SELECT * FROM settlements WHERE id::text=ANY($1::text[]) ORDER BY id FOR UPDATE",
+        [[input.sourceSettlementId, input.targetSettlementId]]
+      )).rows;
+      const source = settlements.find((settlement) => settlement.id === input.sourceSettlementId);
+      const target = settlements.find((settlement) => settlement.id === input.targetSettlementId);
+      if (!source || !target || source.country_id !== country.id || target.country_id !== country.id) {
+        throw new GameError("Kaynak ve hedef şehirlerin ikisi de kendi ülkenize ait olmalıdır.");
+      }
+      const sourceTreasury = Number(source.local_treasury);
+      const targetTreasury = Number(target.local_treasury);
+      const maximum = Math.max(0, Math.floor(sourceTreasury * 0.50));
+      if (input.amount > maximum) {
+        throw new GameError("Kaynak şehrin mevcut hazinesinin en fazla %50'si taşınabilir. Güncel sınır: " + maximum.toLocaleString("tr-TR") + " Altın.");
+      }
+      const sourceBalance = sourceTreasury - input.amount;
+      const targetBalance = targetTreasury + input.amount;
+      await client.query("UPDATE settlements SET local_treasury=$1 WHERE id=$2", [sourceBalance, source.id]);
+      await client.query("UPDATE settlements SET local_treasury=$1 WHERE id=$2", [targetBalance, target.id]);
+      const countryTreasury = await syncCountryTreasury(client, country.id);
+      await client.query(
+        "INSERT INTO transactions(country_id,turn,kind,amount,description) VALUES ($1,$2,'SETTLEMENT_TRANSFER_OUT',$3,$4),($1,$2,'SETTLEMENT_TRANSFER_IN',$5,$6)",
+        [country.id, guild.current_turn, -input.amount, source.name + " -> " + target.name, input.amount, source.name + " -> " + target.name]
+      );
+      await audit(client, input.guildId, input.actorId, "SETTLEMENT_TREASURY_TRANSFER", "country", country.id, {
+        sourceSettlementId: source.id,
+        targetSettlementId: target.id,
+        amount: input.amount,
+        maximum,
+        sourceBalance,
+        targetBalance
+      });
+      return { sourceName: source.name, targetName: target.name, amount: input.amount, sourceBalance, targetBalance, countryTreasury };
+    });
+  },
+
   async playerIds(countryId: string): Promise<string[]> {
     const result = await pool.query<{ discord_user_id: string }>("SELECT discord_user_id FROM country_members WHERE country_id=$1 ORDER BY discord_user_id", [countryId]);
     return result.rows.map((row) => row.discord_user_id);
@@ -741,6 +795,14 @@ export const gameService = {
     const client = await pool.connect();
     try { return await loadMercenaryContracts(client, countryId); }
     finally { client.release(); }
+  },
+
+  async availableMercenaryCompanyKeys(guildId: string): Promise<MercenaryCompanyKey[]> {
+    const unavailable = new Set((await pool.query<{ company_key: MercenaryCompanyKey }>(
+      "SELECT DISTINCT company_key FROM mercenary_contracts WHERE guild_id=$1 AND status IN ('PENDING','ACTIVE','UNPAID')",
+      [guildId]
+    )).rows.map((row) => row.company_key));
+    return (Object.keys(MERCENARY_COMPANIES) as MercenaryCompanyKey[]).filter((companyKey) => !unavailable.has(companyKey));
   },
 
   async hireMercenary(input: { guildId: string; actorId: string; countryId: string; settlementId: string; companyKey: MercenaryCompanyKey }): Promise<{ contract: MercenaryContractDocument; cost: number }> {

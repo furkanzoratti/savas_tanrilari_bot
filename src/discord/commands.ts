@@ -158,6 +158,11 @@ export const commandBuilders = [
       .addChoices(...Object.entries(MOBILIZATION_RULES).map(([value, rule]) => ({ name: rule.label, value }))))
     .addStringOption(countryOption),
   new SlashCommandBuilder()
+    .setName("hazine-tasi").setDescription("Kendi şehirleriniz arasında yerel hazine aktarır")
+    .addStringOption((option) => option.setName("kaynak-sehir").setDescription("Altının alınacağı şehir").setRequired(true).setAutocomplete(true))
+    .addStringOption((option) => option.setName("hedef-sehir").setDescription("Altının gönderileceği şehir").setRequired(true).setAutocomplete(true))
+    .addIntegerOption((option) => option.setName("miktar").setDescription("Taşınacak altın; kaynak hazinenin en fazla %50'si").setMinValue(1).setRequired(true)),
+  new SlashCommandBuilder()
     .setName("ticaret").setDescription("Ülkeler arası hammadde ticaretini yönetir")
     .addSubcommand((sub) => sub.setName("teklif").setDescription("Bir ülkenin yerleşkesine kaynak ticareti teklif eder")
       .addStringOption((o) => o.setName("hedef-ulke").setDescription("Teklif gönderilecek ülke").setRequired(true))
@@ -479,7 +484,13 @@ export const commandBuilders = [
       .addChannelOption((o) => o.setName("kanal").setDescription("Günlük rapor kanalı").addChannelTypes(ChannelType.GuildText)))
     .addSubcommand((sub) => sub.setName("rol-kanali").setDescription("Kelime sayılacak rol kanalını ekler veya kaldırır")
       .addStringOption((o) => o.setName("islem").setDescription("İşlem").setRequired(true).addChoices({ name: "Ekle", value: "add" }, { name: "Kaldır", value: "remove" }))
-      .addChannelOption((o) => o.setName("kanal").setDescription("Rol kanalı").addChannelTypes(ChannelType.GuildText).setRequired(true)))
+      .addChannelOption((o) => o.setName("kanal").setDescription("Rol kanalı").addChannelTypes(ChannelType.GuildText).setRequired(true))),
+  new SlashCommandBuilder()
+    .setName("buyuk-gucler").setDescription("Yalnızca yönetici: Büyük Güçler sıralamasını yönetir")
+    .addSubcommand((sub) => sub.setName("kanal").setDescription("Günlük Büyük Güçler paylaşım kanalını ayarlar")
+      .addStringOption((o) => o.setName("islem").setDescription("İşlem").setRequired(true).addChoices({ name: "Ayarla", value: "set" }, { name: "Kapat", value: "clear" }))
+      .addChannelOption((o) => o.setName("kanal").setDescription("Her gün 17.00'da sıralamanın gönderileceği kanal").addChannelTypes(ChannelType.GuildText)))
+    .addSubcommand((sub) => sub.setName("paylas").setDescription("Güncel hesabı yapar ve sıralamayı ayarlı kanalda hemen paylaşır"))
 ].map((builder) => builder.toJSON());
 
 export const buildingChoices = Object.values(BUILDINGS);

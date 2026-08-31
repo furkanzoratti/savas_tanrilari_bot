@@ -9,6 +9,7 @@ import { BUILDING_CATEGORIES, BUILDINGS, CITY_POLICIES, MOBILIZATION_RULES, SHIP
 import { gold, number } from "../domain/format.js";
 import { CULTURE_GROUPS, type CultureGroup } from "../domain/cultures.js";
 import { garrisonComposition } from "../domain/garrison.js";
+import { currentLocalDate } from "../domain/great-power.js";
 import type { Mobilization, UnitStatus } from "../domain/types.js";
 import { TRADE_ROUTE_LABELS, type TradeRoute } from "../domain/trade.js";
 import { MERCENARY_COMPANIES, type MercenaryCompanyKey } from "../domain/mercenaries.js";
@@ -19,6 +20,7 @@ import { RESOURCES, shipCostMultiplier, type ResourceType } from "../domain/reso
 import { buildingPurchaseTerms, unitPurchaseCost, gameService, GameError } from "../services/game-service.js";
 import { cityService } from "../services/city-service.js";
 import { commandLogService } from "../services/command-log-service.js";
+import { greatPowerService } from "../services/great-power-service.js";
 import { roleReportService, type RoleReportPeriod } from "../services/role-report-service.js";
 import { npcAutoPurchaseService, type NpcAutoPurchaseScope, type NpcCountryOverrideStatus } from "../services/npc-auto-purchase-service.js";
 import { warDeclarationService } from "../services/war-declaration-service.js";
@@ -27,6 +29,7 @@ import { tradeService } from "../services/trade-service.js";
 import { assertCountryAccess, isGameMaster, requireGameMaster, resolveCountry } from "./auth.js";
 import { buildingChoices, shipChoices, unitChoices } from "./commands.js";
 import { batchDocumentEmbeds, renderDocument } from "./document.js";
+import { publishGreatPowerRanking } from "./great-power-ui.js";
 import { BRAND_BANNER_PATH, BRAND_BANNER_NAME, TEMPLE_BANNER_PATH, TEMPLE_BANNER_NAME } from "./assets.js";
 import { turnAnnouncement } from "./turn-announcements.js";
 import { handleBattleButton, handleBattleCommand, refreshActiveBattleCards } from "./battle-ui.js";
@@ -705,11 +708,37 @@ async function handleNpcAutoPurchase(interaction: ChatInputCommandInteraction): 
   const spent = results.reduce((sum, result) => sum + result.actualCost, 0);
   await sendNpcPages(interaction, "🤖 NPC Alımları Uygulandı", lines, `${completed} tamamlandı • ${partial} kısmi • ${failed} başarısız • Toplam ${gold(spent)}`);
 }
+
+async function handleGreatPowerCommand(interaction: ChatInputCommandInteraction): Promise<void> {
+  requireGameMaster(interaction);
+  if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
+  const subcommand = interaction.options.getSubcommand();
+  await interaction.deferReply({ ephemeral: true });
+
+  if (subcommand === "kanal") {
+    const operation = interaction.options.getString("islem", true);
+    const channel = interaction.options.getChannel("kanal");
+    if (operation === "set" && !channel) throw new GameError("Büyük Güçler kanalını ayarlamak için bir metin kanalı seçmelisiniz.");
+    await greatPowerService.setChannel(interaction.guildId, operation === "set" ? channel!.id : null);
+    await interaction.editReply(operation === "set"
+      ? `✅ Büyük Güçler sıralaması her gün saat **17.00**'da ${channel} kanalında yayımlanacak.`
+      : "✅ Otomatik Büyük Güçler paylaşımı kapatıldı.");
+    return;
+  }
+
+  const channelId = await greatPowerService.channel(interaction.guildId);
+  if (!channelId) throw new GameError("Önce /buyuk-gucler kanal komutuyla paylaşım kanalını ayarlamalısınız.");
+  const date = currentLocalDate(new Date(), config.TURN_TIMEZONE);
+  const snapshot = await publishGreatPowerRanking(interaction.client, interaction.guildId, channelId, date);
+  await interaction.editReply(`✅ Güncel **${snapshot.rows.length} devletlik Büyük Güçler sıralaması** <#${channelId}> kanalında paylaşıldı.`);
+}
 async function handleCommand(interaction: ChatInputCommandInteraction): Promise<void> {
   if (await handleWarDeclarationCommand(interaction)) return;
   if (await handleDiplomacyCommand(interaction)) return;
   if (await handleCityCommand(interaction)) return;
-  if (interaction.commandName === "parali-bakim-topla") {
+  if (interaction.commandName === "buyuk-gucler") {
+    await handleGreatPowerCommand(interaction);
+  } else if (interaction.commandName === "parali-bakim-topla") {
     requireGameMaster(interaction);
     if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
     await interaction.deferReply({ ephemeral: true });
@@ -747,6 +776,22 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
   } else if (interaction.commandName === "belge") {
     const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
     await sendDocument(interaction, country.id);
+  } else if (interaction.commandName === "hazine-tasi") {
+    const country = await resolveCountry(interaction);
+    const result = await gameService.transferSettlementTreasury({
+      guildId: interaction.guildId!,
+      actorId: interaction.user.id,
+      countryId: country.id,
+      sourceSettlementId: interaction.options.getString("kaynak-sehir", true),
+      targetSettlementId: interaction.options.getString("hedef-sehir", true),
+      amount: interaction.options.getInteger("miktar", true)
+    });
+    await interaction.reply({
+      content:
+        "✅ **" + gold(result.amount) + "**, **" + result.sourceName + "** şehrinden **" + result.targetName + "** şehrine taşındı.\n" +
+        "Kaynak hazine: **" + gold(result.sourceBalance) + "** • Hedef hazine: **" + gold(result.targetBalance) + "**",
+      ephemeral: true
+    });
   } else if (interaction.commandName === "alim-iptal") {
     requireGameMaster(interaction);
     if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
@@ -981,6 +1026,23 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
 
 async function handleAutocomplete(interaction: AutocompleteInteraction): Promise<void> {
   const focused = interaction.options.getFocused(true);
+  if (interaction.commandName === "hazine-tasi" && ["kaynak-sehir", "hedef-sehir"].includes(focused.name)) {
+    if (!interaction.guildId) { await interaction.respond([]); return; }
+    const country = await gameService.countryForUser(interaction.guildId, interaction.user.id);
+    if (!country) { await interaction.respond([]); return; }
+    const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
+    const sourceId = focused.name === "hedef-sehir" ? interaction.options.getString("kaynak-sehir") : null;
+    const settlements = await gameService.listSettlements(country.id);
+    await interaction.respond(settlements
+      .filter((settlement) => settlement.id !== sourceId)
+      .filter((settlement) => !query || settlement.name.toLocaleLowerCase("tr-TR").includes(query))
+      .slice(0, 25)
+      .map((settlement) => ({
+        name: (settlement.name + " • Hazine " + gold(Number(settlement.local_treasury))).slice(0, 100),
+        value: settlement.id
+      })));
+    return;
+  }
   if (interaction.commandName === "ulke-formla" && focused.name === "formlanan-ulke") {
     if (!interaction.guildId || !isGameMaster(interaction)) { await interaction.respond([]); return; }
     const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
@@ -1017,7 +1079,14 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
   if ((interaction.commandName === "parali-asker" || interaction.commandName === "savas") && focused.name === "sirket") {
     if (!isGameMaster(interaction)) { await interaction.respond([]); return; }
     const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
-    await interaction.respond(Object.entries(MERCENARY_COMPANIES)
+    let companies = Object.entries(MERCENARY_COMPANIES) as Array<[MercenaryCompanyKey, (typeof MERCENARY_COMPANIES)[MercenaryCompanyKey]]>;
+    let subcommand = "";
+    try { subcommand = interaction.options.getSubcommand(false) ?? ""; } catch { subcommand = ""; }
+    if (interaction.commandName === "parali-asker" && ["kirala", "ucretsiz-ekle"].includes(subcommand) && interaction.guildId) {
+      const available = new Set(await gameService.availableMercenaryCompanyKeys(interaction.guildId));
+      companies = companies.filter(([companyKey]) => available.has(companyKey));
+    }
+    await interaction.respond(companies
       .filter(([key, company]) => !query || key.includes(query) || company.name.toLocaleLowerCase("tr-TR").includes(query))
       .slice(0, 25).map(([value, company]) => ({ name: `${company.name} • ${gold(company.hireCost)} / bakım ${gold(company.turnUpkeep)}`.slice(0, 100), value })));
     return;
