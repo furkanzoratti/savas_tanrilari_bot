@@ -63,3 +63,20 @@ export function mercenaryContractSchedule(hiredTurn: number): { arrivalTurn: num
 export function importedMercenarySchedule(currentTurn: number): { hiredTurn: number; arrivalTurn: number; endTurn: number; lastUpkeepTurn: number; firstUpkeepTurn: number } {
   return { hiredTurn: currentTurn - 1, arrivalTurn: currentTurn, endTurn: currentTurn + 2, lastUpkeepTurn: currentTurn, firstUpkeepTurn: currentTurn + 1 };
 }
+
+export function mercenaryTerminationUpkeep(input: {
+  turnUpkeep: number;
+  hiredTurn: number;
+  currentTurn: number;
+  acquisitionInterval: number;
+  lastUpkeepTurn: number | null;
+  unpaid: boolean;
+}): { amount: number; chargedTurns: number } {
+  if (input.unpaid) return { amount: input.turnUpkeep, chargedTurns: input.acquisitionInterval };
+  if (input.lastUpkeepTurn !== null) return { amount: 0, chargedTurns: 0 };
+  const chargedTurns = Math.min(input.acquisitionInterval, Math.max(0, input.currentTurn - input.hiredTurn));
+  return {
+    amount: Math.ceil(input.turnUpkeep * chargedTurns / input.acquisitionInterval),
+    chargedTurns
+  };
+}

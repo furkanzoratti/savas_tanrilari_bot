@@ -1,9 +1,17 @@
 import { pool, withTransaction } from "../db/pool.js";
+import { currentRolePeriodRange, type RoleReportPeriod } from "../domain/role-periods.js";
+export { completedRoleReportRanges, currentRolePeriodRange, type RoleReportPeriod } from "../domain/role-periods.js";
 
 export interface RoleLeaderboardRow {
   discord_user_id: string;
   words: number;
   messages: number;
+}
+
+function nextDate(date: string): string {
+  const value = new Date(`${date}T12:00:00.000Z`);
+  value.setUTCDate(value.getUTCDate() + 1);
+  return value.toISOString().slice(0, 10);
 }
 
 export const roleReportService = {
@@ -19,26 +27,36 @@ export const roleReportService = {
     return result.rows.map((row) => ({ guildId: row.guild_id, channelId: row.channel_id }));
   },
 
-  async claim(guildId: string, date: string): Promise<boolean> {
+  async claim(guildId: string, eventKey: string): Promise<boolean> {
     const result = await pool.query(
       "INSERT INTO processed_events(guild_id,event_key) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING event_key",
-      [guildId, `ROLE_DAILY_REPORT:${date}`]
+      [guildId, eventKey]
     );
     return Boolean(result.rowCount);
   },
 
-  async release(guildId: string, date: string): Promise<void> {
-    await pool.query("DELETE FROM processed_events WHERE guild_id=$1 AND event_key=$2", [guildId, `ROLE_DAILY_REPORT:${date}`]);
+  async release(guildId: string, eventKey: string): Promise<void> {
+    await pool.query("DELETE FROM processed_events WHERE guild_id=$1 AND event_key=$2", [guildId, eventKey]);
   },
 
   async forDate(guildId: string, date: string): Promise<RoleLeaderboardRow[]> {
+    return this.forRange(guildId, date, nextDate(date));
+  },
+
+  async forRange(guildId: string, startDate: string, endDateExclusive: string, orderBy: "words" | "messages" = "words"): Promise<RoleLeaderboardRow[]> {
+    const ordering = orderBy === "messages" ? "messages DESC, words DESC" : "words DESC, messages DESC";
     const result = await pool.query<RoleLeaderboardRow>(
       `SELECT discord_user_id,SUM(word_count)::integer AS words,COUNT(*)::integer AS messages
-         FROM role_messages WHERE guild_id=$1 AND message_date=$2::date
-        GROUP BY discord_user_id ORDER BY words DESC, messages DESC LIMIT 15`,
-      [guildId, date]
+         FROM role_messages WHERE guild_id=$1 AND message_date >= $2::date AND message_date < $3::date
+        GROUP BY discord_user_id ORDER BY ${ordering} LIMIT 15`,
+      [guildId, startDate, endDateExclusive]
     );
     return result.rows;
+  },
+
+  async currentLeaderboard(guildId: string, period: RoleReportPeriod, timezone: string): Promise<RoleLeaderboardRow[]> {
+    const range = currentRolePeriodRange(period, new Date(), timezone);
+    return this.forRange(guildId, range.startDate, range.endDateExclusive, period === "monthly" ? "messages" : "words");
   },
 
   async recordMessage(input: {

@@ -5,11 +5,12 @@ import { buildingSlotLimit, calculatePopulationGain, calculateShipUpkeep, calcul
 import { addIncomeBreakdowns, applyIncomePenalty, calculateCategorizedIncome, incomeTotal, populationTaxIncome, scaleIncome, type IncomeBreakdown } from "../domain/income.js";
 import { createRecruitmentWaves, isAcquisitionTurn, militaryLimit, settlementMobilizationLimit, settlementTrainingCapacity } from "../domain/mobilization.js";
 import { garrisonComposition, garrisonLevel } from "../domain/garrison.js";
+import { currentRolePeriodRange, type RoleReportPeriod } from "../domain/role-periods.js";
 import type { CultureGroup } from "../domain/cultures.js";
 import type { CharacterRole, ForceType, Mobilization, RuinStage, ShipStatus, UnitStatus } from "../domain/types.js";
 import { buildingCostMultiplier, buildingDurationReduction, shipCostMultiplier, siegeCostMultiplier, unitCostMultiplier, type ResourceType } from "../domain/resources.js";
 import { settlementResourceAccess } from "./resource-service.js";
-import { MERCENARY_COMPANIES, MERCENARY_CONTRACT_LIMITS, importedMercenarySchedule, mercenaryContractSchedule, type MercenaryCompanyKey } from "../domain/mercenaries.js";
+import { MERCENARY_COMPANIES, MERCENARY_CONTRACT_LIMITS, importedMercenarySchedule, mercenaryContractSchedule, mercenaryTerminationUpkeep, type MercenaryCompanyKey } from "../domain/mercenaries.js";
 import { cancelActiveGarrisonReplenishment, completeDueGarrisonReplenishments, scheduleAllMissingGarrisons, scheduleMandatoryGarrisonReplenishment, type GarrisonReplenishmentReason } from "./garrison-service.js";
 import { isSpecialUnitType, type SpecialUnitType } from "../domain/special-units.js";
 import { FORMABLE_COUNTRIES, formableBuildingDiscount, formableModifiers, formableUnitDiscount, isFormableCountryKey, type FormableCountryKey } from "../domain/formable-countries.js";
@@ -872,16 +873,36 @@ export const gameService = {
 
   async endMercenary(input: { guildId: string; actorId: string; countryId: string; companyKey: MercenaryCompanyKey }): Promise<number> {
     return withTransaction(async (client) => {
-      const guild=await getGuild(client,input.guildId);
-      const contract=(await client.query<{id:string;status:MercenaryContractStatus;end_turn:number;turn_upkeep:number}>("SELECT id,status,end_turn,turn_upkeep FROM mercenary_contracts WHERE guild_id=$1 AND country_id=$2 AND company_key=$3 AND status IN ('PENDING','ACTIVE','UNPAID') FOR UPDATE",[input.guildId,input.countryId,input.companyKey])).rows[0];
-      if(!contract)throw new GameError("Etkin sozlesme bulunamadi.");
-      const inBattle=await client.query(`SELECT 1 FROM battle_mercenary_assignments bma JOIN battles b ON b.id=bma.battle_id WHERE bma.contract_id=$1 AND b.status NOT IN ('FINISHED','CANCELLED') LIMIT 1`,[contract.id]);
-      if(inBattle.rowCount)throw new GameError("Etkin savasa katilan sirketin sozlesmesi feshedilemez.");
-      const compensation=guild.current_turn<=contract.end_turn?Number(contract.turn_upkeep):0;
-      if(compensation)await adjustCountryLocalTreasuries(client,input.countryId,-compensation);
-      await client.query("UPDATE mercenary_contracts SET status=$1,updated_at=NOW() WHERE id=$2",[contract.status==="PENDING"?"CANCELLED":"ENDED",contract.id]);
-      if(compensation)await client.query("INSERT INTO transactions(country_id,turn,kind,amount,description) VALUES($1,$2,'MERCENARY_TERMINATION',$3,$4)",[input.countryId,guild.current_turn,-compensation,MERCENARY_COMPANIES[input.companyKey].name]);
-      await audit(client,input.guildId,input.actorId,"MERCENARY_END","mercenary_contract",contract.id,{compensation});
+      const guild = await getGuild(client, input.guildId);
+      const contract = (await client.query<{
+        id: string; status: MercenaryContractStatus; hired_turn: number; end_turn: number;
+        turn_upkeep: number; last_upkeep_turn: number | null;
+      }>(
+        "SELECT id,status,hired_turn,end_turn,turn_upkeep,last_upkeep_turn FROM mercenary_contracts WHERE guild_id=$1 AND country_id=$2 AND company_key=$3 AND status IN ('PENDING','ACTIVE','UNPAID') FOR UPDATE",
+        [input.guildId, input.countryId, input.companyKey]
+      )).rows[0];
+      if (!contract) throw new GameError("Etkin sözleşme bulunamadı.");
+      const inBattle = await client.query(
+        `SELECT 1 FROM battle_mercenary_assignments bma JOIN battles b ON b.id=bma.battle_id
+          WHERE bma.contract_id=$1 AND b.status NOT IN ('FINISHED','CANCELLED') LIMIT 1`,
+        [contract.id]
+      );
+      if (inBattle.rowCount) throw new GameError("Etkin savaşa katılan şirketin sözleşmesi feshedilemez.");
+
+      const prorated = mercenaryTerminationUpkeep({
+        turnUpkeep: Number(contract.turn_upkeep), hiredTurn: contract.hired_turn,
+        currentTurn: guild.current_turn, acquisitionInterval: guild.acquisition_interval,
+        lastUpkeepTurn: contract.last_upkeep_turn, unpaid: contract.status === "UNPAID"
+      });
+      const compensation = guild.current_turn <= contract.end_turn ? prorated.amount : 0;
+      const chargedTurns = compensation ? prorated.chargedTurns : 0;
+      if (compensation) await adjustCountryLocalTreasuries(client, input.countryId, -compensation);
+      await client.query("UPDATE mercenary_contracts SET status=$1,updated_at=NOW() WHERE id=$2", [contract.status === "PENDING" ? "CANCELLED" : "ENDED", contract.id]);
+      if (compensation) await client.query(
+        "INSERT INTO transactions(country_id,turn,kind,amount,description) VALUES($1,$2,'MERCENARY_TERMINATION',$3,$4)",
+        [input.countryId, guild.current_turn, -compensation, `${MERCENARY_COMPANIES[input.companyKey].name} • ${chargedTurns}/${guild.acquisition_interval} tur bakım`]
+      );
+      await audit(client, input.guildId, input.actorId, "MERCENARY_END", "mercenary_contract", contract.id, { compensation, chargedTurns, acquisitionInterval: guild.acquisition_interval });
       return compensation;
     });
   },
@@ -1868,6 +1889,7 @@ export const gameService = {
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`turn:${guildId}`]);
       const guild = await getGuild(client, guildId);
       const newTurn = guild.current_turn + 1;
+      const acquisition = isAcquisitionTurn(newTurn, guild.acquisition_interval);
       const eventKey = `TURN_ADVANCE:${newTurn}`;
       const claimed = await client.query("INSERT INTO processed_events(guild_id,event_key) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING event_key", [guildId, eventKey]);
       if (!claimed.rowCount) throw new GameError("Bu tur daha önce işlenmiş.");
@@ -1880,8 +1902,8 @@ export const gameService = {
       const unpaidExpired = await client.query<{ country_name: string; company_key: MercenaryCompanyKey }>(
         `UPDATE mercenary_contracts mc SET status='ENDED',updated_at=NOW()
           FROM countries c
-         WHERE mc.country_id=c.id AND mc.guild_id=$1 AND mc.status='UNPAID' AND mc.unpaid_since_turn<$2
-         RETURNING c.name AS country_name,mc.company_key`, [guildId,newTurn]
+         WHERE mc.country_id=c.id AND mc.guild_id=$1 AND mc.status='UNPAID' AND $3::boolean AND mc.unpaid_since_turn<$2
+         RETURNING c.name AS country_name,mc.company_key`, [guildId,newTurn,acquisition]
       );
       for (const row of unpaidExpired.rows) mercenaryEndedDetails.push({
         countryName: row.country_name, companyName: MERCENARY_COMPANIES[row.company_key]?.name ?? row.company_key,
@@ -2017,7 +2039,6 @@ export const gameService = {
       const unrestDetails: Array<{ settlementName: string; chance: number; roll: number }> = [];
       const pantheonLoanDetails: Array<{ settlementName: string; amount: number; remaining: number }> = [];
       const incomePenaltyDetails: Array<{ settlementName: string; percent: number; deductedAmount: number; remainingAcquisitionTurns: number; reason: string }> = [];
-      const acquisition = isAcquisitionTurn(newTurn, guild.acquisition_interval);
       const manpowerCountries = (await client.query<CountryRow>("SELECT * FROM countries WHERE guild_id=$1 AND status='ACTIVE' FOR UPDATE", [guildId])).rows;
       for (const country of manpowerCountries) {
         const manpower = await countryManpower(client, country.id);
@@ -2209,12 +2230,13 @@ export const gameService = {
     );
   },
 
-  async leaderboard(guildId: string, period: "daily" | "weekly"): Promise<Array<{ discord_user_id: string; words: number; messages: number }>> {
-    const interval = period === "daily" ? "1 day" : "7 days";
+  async leaderboard(guildId: string, period: RoleReportPeriod, timezone = "Europe/Istanbul"): Promise<Array<{ discord_user_id: string; words: number; messages: number }>> {
+    const range = currentRolePeriodRange(period, new Date(), timezone);
     const result = await pool.query<{ discord_user_id: string; words: number; messages: number }>(
       `SELECT discord_user_id,SUM(word_count)::integer AS words,COUNT(*)::integer AS messages
-         FROM role_messages WHERE guild_id=$1 AND created_at >= NOW() - $2::interval
-        GROUP BY discord_user_id ORDER BY words DESC LIMIT 15`, [guildId, interval]
+         FROM role_messages WHERE guild_id=$1 AND message_date >= $2::date AND message_date < $3::date
+        GROUP BY discord_user_id ORDER BY words DESC, messages DESC LIMIT 15`,
+      [guildId, range.startDate, range.endDateExclusive]
     );
     return result.rows;
   }

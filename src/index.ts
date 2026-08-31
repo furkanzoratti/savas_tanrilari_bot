@@ -6,7 +6,7 @@ import { startHealthServer } from "./http.js";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
 import { gameService } from "./services/game-service.js";
-import { roleReportService } from "./services/role-report-service.js";
+import { completedRoleReportRanges, roleReportService, type RoleReportPeriod } from "./services/role-report-service.js";
 import { renderWelcomeMessage, welcomeService } from "./services/welcome-service.js";
 
 function countWords(content: string): number {
@@ -52,56 +52,60 @@ client.on("messageCreate", async (message) => {
   }
 });
 
-client.once("clientReady", async (readyClient) => {
-  logger.info({ user: readyClient.user.tag, guilds: readyClient.guilds.cache.size }, "Discord botu hazır");
-  for (const guild of readyClient.guilds.cache.values()) await gameService.ensureGuild(guild.id);
-  await sendDailyRoleReports();
-});
+const roleReportMeta: Record<RoleReportPeriod, { title: string; color: number; label: string }> = {
+  daily: { title: "📖 Günlük Rol Sıralaması", color: 0x8b1e1e, label: "Gün" },
+  weekly: { title: "📚 Haftalık Rol Sıralaması", color: 0xc59b45, label: "Hafta" },
+  monthly: { title: "🏛️ Aylık Rol Sıralaması", color: 0x5865f2, label: "Ay" }
+};
 
-function localDate(date: Date): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: config.TURN_TIMEZONE, year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
-}
-
-function previousLocalDate(): string {
-  const anchor = new Date(`${localDate(new Date())}T12:00:00.000Z`);
-  anchor.setUTCDate(anchor.getUTCDate() - 1);
-  return anchor.toISOString().slice(0, 10);
-}
-
-async function sendDailyRoleReports(): Promise<void> {
+async function sendCompletedRoleReports(now = new Date()): Promise<void> {
   if (!client.isReady()) return;
-  const reportDate = previousLocalDate();
+  const reports = completedRoleReportRanges(now, config.TURN_TIMEZONE);
   for (const target of await roleReportService.targets()) {
-    if (!(await roleReportService.claim(target.guildId, reportDate))) continue;
-    try {
-      const channel = await client.channels.fetch(target.channelId);
-      if (!channel?.isTextBased() || channel.isDMBased()) throw new Error("Rapor kanalı yazı kanalı değil veya bulunamadı");
-      const rows = await roleReportService.forDate(target.guildId, reportDate);
-      const lines = rows.length
-        ? rows.map((row, index) => `**${index + 1}.** <@${row.discord_user_id}> — ${row.words.toLocaleString("tr-TR")} kelime / ${row.messages.toLocaleString("tr-TR")} mesaj`)
-        : ["Seçili rol kanallarında kaydedilmiş rol mesajı bulunmuyor."];
-      await channel.send({ embeds: [new EmbedBuilder()
-        .setColor(0x8b1e1e)
-        .setTitle("📖 Günlük Rol Sıralaması")
-        .setDescription(lines.join("\n"))
-        .setFooter({ text: `${reportDate} • Yalnızca yönetim tarafından seçilen rol kanalları` })] });
-    } catch (error) {
-      await roleReportService.release(target.guildId, reportDate);
-      logger.error({ error, guildId: target.guildId, channelId: target.channelId }, "Günlük rol raporu gönderilemedi");
+    for (const report of reports) {
+      const eventKey = `ROLE_${report.period.toUpperCase()}_REPORT:${report.range.startDate}`;
+      if (!(await roleReportService.claim(target.guildId, eventKey))) continue;
+      try {
+        const channel = await client.channels.fetch(target.channelId);
+        if (!channel?.isTextBased() || channel.isDMBased()) throw new Error("Rapor kanalı yazı kanalı değil veya bulunamadı");
+        const rows = await roleReportService.forRange(target.guildId, report.range.startDate, report.range.endDateExclusive, report.period === "monthly" ? "messages" : "words");
+        const lines = rows.length
+          ? rows.map((row, index) => report.period === "monthly"
+            ? `**${index + 1}.** <@${row.discord_user_id}> — ${row.messages.toLocaleString("tr-TR")} rol`
+            : `**${index + 1}.** <@${row.discord_user_id}> — ${row.words.toLocaleString("tr-TR")} kelime / ${row.messages.toLocaleString("tr-TR")} rol`)
+          : ["Seçili rol kanallarında bu dönem kaydedilmiş rol bulunmuyor."];
+        const meta = roleReportMeta[report.period];
+        await channel.send({ embeds: [new EmbedBuilder()
+          .setColor(meta.color)
+          .setTitle(meta.title)
+          .setDescription(lines.join("\n"))
+          .setFooter({ text: `${meta.label}: ${report.range.startDate} — ${report.range.endDateExclusive} • Takvim dönemi` })] });
+      } catch (error) {
+        await roleReportService.release(target.guildId, eventKey);
+        logger.error({ error, guildId: target.guildId, channelId: target.channelId, period: report.period }, "Rol raporu gönderilemedi");
+      }
     }
   }
 }
 
-const dailyReportTimer = setInterval(() => {
-  void sendDailyRoleReports().catch((error) => logger.error(error, "Günlük rol raporu görevi başarısız"));
-}, 60_000);
-dailyReportTimer.unref();
+client.once("clientReady", async (readyClient) => {
+  logger.info({ user: readyClient.user.tag, guilds: readyClient.guilds.cache.size }, "Discord botu hazır");
+  for (const guild of readyClient.guilds.cache.values()) await gameService.ensureGuild(guild.id);
+  await sendCompletedRoleReports();
+});
+
+// 23:59:50 sonrası kapanış raporunu yakalar; 00:00'dan itibaren komutlar yeni
+// gün/hafta/ay aralığını kullandığı için sayaçlar mantıksal olarak sıfırlanır.
+const roleReportTimer = setInterval(() => {
+  void sendCompletedRoleReports().catch((error) => logger.error(error, "Rol raporu görevi başarısız"));
+}, 10_000);
+roleReportTimer.unref();
 const healthServer = startHealthServer(client);
 await client.login(config.DISCORD_TOKEN);
 
 async function shutdown(signal: string) {
   logger.info({ signal }, "Bot kapatılıyor");
-  clearInterval(dailyReportTimer);
+  clearInterval(roleReportTimer);
   healthServer.close();
   client.destroy();
   await pool.end();

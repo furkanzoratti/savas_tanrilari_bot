@@ -250,7 +250,7 @@ export const commandBuilders = [
   new SlashCommandBuilder()
     .setName("rol-siralama").setDescription("Rol kanallarındaki kelime sıralamasını gösterir")
     .addStringOption((option) => option.setName("donem").setDescription("Sıralama dönemi").setRequired(true)
-      .addChoices({ name: "Son 24 saat", value: "daily" }, { name: "Son 7 gün", value: "weekly" })),
+      .addChoices({ name: "Bugün", value: "daily" }, { name: "Bu hafta", value: "weekly" }, { name: "Bu ay", value: "monthly" })),
   new SlashCommandBuilder()
     .setName("parali-bakim-topla").setDescription("Yalnızca yönetici: bu turun vadesi gelen tüm paralı asker bakımlarını toplar"),
   new SlashCommandBuilder()

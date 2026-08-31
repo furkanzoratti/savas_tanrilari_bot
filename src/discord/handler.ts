@@ -4,6 +4,7 @@ import {
   type AutocompleteInteraction, type ButtonInteraction, type ChatInputCommandInteraction, type Client,
   type Interaction, type ModalSubmitInteraction, type StringSelectMenuInteraction
 } from "discord.js";
+import { config } from "../config.js";
 import { BUILDING_CATEGORIES, BUILDINGS, CITY_POLICIES, MOBILIZATION_RULES, SHIPS, SIEGE_ASSETS, UNITS } from "../domain/catalog.js";
 import { gold, number } from "../domain/format.js";
 import { CULTURE_GROUPS, type CultureGroup } from "../domain/cultures.js";
@@ -18,7 +19,7 @@ import { RESOURCES, shipCostMultiplier, type ResourceType } from "../domain/reso
 import { buildingPurchaseTerms, unitPurchaseCost, gameService, GameError } from "../services/game-service.js";
 import { cityService } from "../services/city-service.js";
 import { commandLogService } from "../services/command-log-service.js";
-import { roleReportService } from "../services/role-report-service.js";
+import { roleReportService, type RoleReportPeriod } from "../services/role-report-service.js";
 import { npcAutoPurchaseService, type NpcAutoPurchaseScope, type NpcCountryOverrideStatus } from "../services/npc-auto-purchase-service.js";
 import { warDeclarationService } from "../services/war-declaration-service.js";
 import { DEFAULT_WELCOME_MESSAGE, renderWelcomeMessage, welcomeService } from "../services/welcome-service.js";
@@ -841,10 +842,13 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     await interaction.reply({ content: `🎲 **${count}d${sides}${bonus ? bonus > 0 ? `+${bonus}` : bonus : ""}** → [${rolls.join(", ")}]${bonus ? ` ${bonus > 0 ? "+" : ""}${bonus}` : ""} = **${total}**`, ephemeral: interaction.options.getBoolean("gizli") ?? false });
   } else if (interaction.commandName === "rol-siralama") {
     if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
-    const period = interaction.options.getString("donem", true) as "daily" | "weekly";
-    const rows = await gameService.leaderboard(interaction.guildId, period);
-    const text = rows.length ? rows.map((row, index) => `**${index + 1}.** <@${row.discord_user_id}> — ${number(row.words)} kelime / ${row.messages} mesaj`).join("\n") : "Bu dönem için kayıt bulunmuyor.";
-    await interaction.reply({ embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle(period === "daily" ? "📊 Günlük Rol Sıralaması" : "📊 Haftalık Rol Sıralaması").setDescription(text)] });
+    const period = interaction.options.getString("donem", true) as RoleReportPeriod;
+    const rows = await roleReportService.currentLeaderboard(interaction.guildId, period, config.TURN_TIMEZONE);
+    const text = rows.length ? rows.map((row, index) => period === "monthly"
+      ? `**${index + 1}.** <@${row.discord_user_id}> — ${number(row.messages)} rol`
+      : `**${index + 1}.** <@${row.discord_user_id}> — ${number(row.words)} kelime / ${row.messages} rol`).join("\n") : "Bu takvim döneminde kayıt bulunmuyor.";
+    const titles: Record<RoleReportPeriod, string> = { daily: "📊 Günlük Rol Sıralaması", weekly: "📚 Haftalık Rol Sıralaması", monthly: "🏛️ Aylık Rol Sıralaması" };
+    await interaction.reply({ embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle(titles[period]).setDescription(text)] });
   } else if (interaction.commandName === "savas") {
     await handleBattleCommand(interaction);
   } else if (interaction.commandName === "hos-geldin") {
