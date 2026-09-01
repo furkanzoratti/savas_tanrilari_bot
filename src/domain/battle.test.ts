@@ -164,6 +164,18 @@ describe("savaş motoru", () => {
     expect(siegeAssaultComposition(army, {}, 0, 1_000)).toEqual(army);
   });
 
+  it("gedik veya açık kapı yokken kaybı yalnız hücuma erişen birliklerden düşer", () => {
+    const army = { heavy_infantry: 3_000, heavy_cavalry: 2_000 };
+    const engaged = siegeAssaultComposition(army, { ladder_group: 3 }, 30_000, 1_000);
+    const result = resolveRound(
+      army, { archer: 1_000 },
+      { clash: 10, damage: 10, detail: {} }, { clash: 10, damage: 20, detail: {} },
+      { casualtyCompositionA: engaged }
+    );
+    expect(result.remainingA.heavy_infantry).toBeLessThan(3_000);
+    expect(result.remainingA.heavy_cavalry).toBe(2_000);
+  });
+
   it("sağlam tahkimat savunana belirgin üstünlük verir", () => {
     expect(siegeDefenseModifiers(30_000, 1_000)).toEqual({ defenderClash: 1.50, defenderDamage: 1.35, attackerDamage: 0.50 });
     expect(siegeDefenseModifiers(0, 1_000)).toEqual({ defenderClash: 1.25, defenderDamage: 1.15, attackerDamage: 0.75 });

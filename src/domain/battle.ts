@@ -285,9 +285,37 @@ function applyLoss(composition: BattleComposition, rawDamage: number, mode: "LAN
   return { remaining: result, loss: totalLoss };
 }
 
+function applyLossWithinComposition(
+  fullComposition: BattleComposition,
+  casualtyComposition: BattleComposition,
+  rawDamage: number,
+  mode: "LAND" | "NAVAL"
+): { remaining: BattleComposition; loss: number } {
+  const keys: BattleForceType[] = mode === "NAVAL" ? navalKeys : unitKeys;
+  const eligible: BattleComposition = {};
+  for (const key of keys) {
+    const quantity = Math.min(Math.max(0, fullComposition[key] ?? 0), Math.max(0, casualtyComposition[key] ?? 0));
+    if (quantity > 0) eligible[key] = quantity;
+  }
+  const applied = applyLoss(eligible, rawDamage, mode);
+  const remaining: BattleComposition = { ...fullComposition };
+  let loss = 0;
+  for (const key of keys) {
+    const deducted = Math.max(0, (eligible[key] ?? 0) - (applied.remaining[key] ?? 0));
+    if (!deducted) continue;
+    remaining[key] = Math.max(0, (fullComposition[key] ?? 0) - deducted);
+    loss += deducted;
+  }
+  return { remaining, loss };
+}
+
 export function resolveRound(
   compositionA: BattleComposition, compositionB: BattleComposition, rollA: BattleRoll, rollB: BattleRoll,
-  options: { mode?: "LAND" | "NAVAL"; damageFactorA?: number; damageFactorB?: number; pressureClashA?: number; pressureClashB?: number } = {}
+  options: {
+    mode?: "LAND" | "NAVAL"; damageFactorA?: number; damageFactorB?: number;
+    pressureClashA?: number; pressureClashB?: number;
+    casualtyCompositionA?: BattleComposition | undefined; casualtyCompositionB?: BattleComposition | undefined;
+  } = {}
 ): RoundResolution {
   const mode = options.mode ?? "LAND";
   const outcome = advantageTier(rollA.clash, rollB.clash);
@@ -298,8 +326,12 @@ export function resolveRound(
   const factorA = (outcome.winner === "A" ? multi.winner : outcome.winner === "B" ? multi.loser : multi.winner) * (options.damageFactorA ?? 1);
   const factorB = (outcome.winner === "B" ? multi.winner : outcome.winner === "A" ? multi.loser : multi.winner) * (options.damageFactorB ?? 1);
   const scale = mode === "NAVAL" ? 0.012 : 20;
-  const againstB = applyLoss(compositionB, rollA.damage * scale * factorA, mode);
-  const againstA = applyLoss(compositionA, rollB.damage * scale * factorB, mode);
+  const againstB = options.casualtyCompositionB
+    ? applyLossWithinComposition(compositionB, options.casualtyCompositionB, rollA.damage * scale * factorA, mode)
+    : applyLoss(compositionB, rollA.damage * scale * factorA, mode);
+  const againstA = options.casualtyCompositionA
+    ? applyLossWithinComposition(compositionA, options.casualtyCompositionA, rollB.damage * scale * factorB, mode)
+    : applyLoss(compositionA, rollB.damage * scale * factorB, mode);
   const pressure = pressureOutcome.tier === "MINOR" ? 1 : pressureOutcome.tier === "CLEAR" ? 2 : pressureOutcome.tier === "CRUSHING" ? 3 : 0;
   return {
     tier: outcome.tier, winner: outcome.winner,

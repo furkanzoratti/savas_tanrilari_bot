@@ -301,7 +301,7 @@ export const commandBuilders = [
   new SlashCommandBuilder()
     .setName("parali-bakim-topla").setDescription("Yalnızca yönetici: bu turun vadesi gelen tüm paralı asker bakımlarını toplar"),
   new SlashCommandBuilder()
-    .setName("parali-asker").setDescription("Yalnızca yönetici: paralı asker sözleşmelerini yönetir")
+    .setName("parali-asker").setDescription("Paralı asker kiralar; yönetici sözleşme işlemlerini yürütür")
     .addSubcommand((sub) => sub.setName("kirala").setDescription("Bir paralı asker grubunu kiralar")
       .addStringOption((o) => o.setName("ulke").setDescription("Sözleşmeyi yapacak ülke").setRequired(true))
       .addStringOption((o) => o.setName("yerleske").setDescription("Birliğin ulaşacağı yerleşke").setRequired(true))

@@ -37,6 +37,7 @@ import { handleCityButton, handleCityCommand, handleCityModal } from "./city-ui.
 import { addCountryRoleToMember, deleteCountryRole, ensureCountryRole, removeCountryRoleFromMember } from "./country-roles.js";
 import { handleDiplomacyButton, handleDiplomacyCommand } from "./diplomacy-ui.js";
 import { handleWarDeclarationButton, handleWarDeclarationCommand, handleWarDeclarationModal } from "./war-declaration-ui.js";
+import { mercenaryCompanyAutocompleteAllowed, mercenarySubcommandRequiresGameMaster } from "./mercenary-access.js";
 
 function settlementSelect(customId: string, settlements: Array<{ id: string; name: string; population: number }>, placeholder: string) {
   if (!settlements.length) throw new GameError("Bu ülkeye ait yerleşke bulunmuyor.");
@@ -70,10 +71,13 @@ async function findSettlement(countryId: string, name: string) {
 }
 
 async function handleMercenaryCommand(interaction: ChatInputCommandInteraction): Promise<void> {
-  requireGameMaster(interaction);
   if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
   const sub = interaction.options.getSubcommand();
-  const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
+  if (mercenarySubcommandRequiresGameMaster(sub)) requireGameMaster(interaction);
+  const requestedCountry = interaction.options.getString("ulke", true);
+  const country = sub === "kirala"
+    ? await resolveCountry(interaction, requestedCountry)
+    : await gameService.countryByName(interaction.guildId, requestedCountry);
   if (!country) throw new GameError("Ülke bulunamadı.");
   await interaction.deferReply({ ephemeral: true });
 
@@ -1090,11 +1094,13 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
     return;
   }
   if ((interaction.commandName === "parali-asker" || interaction.commandName === "savas") && focused.name === "sirket") {
-    if (!isGameMaster(interaction)) { await interaction.respond([]); return; }
-    const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
-    let companies = Object.entries(MERCENARY_COMPANIES) as Array<[MercenaryCompanyKey, (typeof MERCENARY_COMPANIES)[MercenaryCompanyKey]]>;
     let subcommand = "";
     try { subcommand = interaction.options.getSubcommand(false) ?? ""; } catch { subcommand = ""; }
+    const gameMaster = isGameMaster(interaction);
+    if (!mercenaryCompanyAutocompleteAllowed(interaction.commandName, subcommand, gameMaster)) { await interaction.respond([]); return; }
+    if (!gameMaster && (!interaction.guildId || !await gameService.countryForUser(interaction.guildId, interaction.user.id))) { await interaction.respond([]); return; }
+    const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
+    let companies = Object.entries(MERCENARY_COMPANIES) as Array<[MercenaryCompanyKey, (typeof MERCENARY_COMPANIES)[MercenaryCompanyKey]]>;
     if (interaction.commandName === "parali-asker" && ["kirala", "ucretsiz-ekle"].includes(subcommand) && interaction.guildId) {
       const available = new Set(await gameService.availableMercenaryCompanyKeys(interaction.guildId));
       companies = companies.filter(([companyKey]) => available.has(companyKey));

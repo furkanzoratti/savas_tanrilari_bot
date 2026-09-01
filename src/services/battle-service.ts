@@ -843,12 +843,21 @@ export const battleService = {
       const defenderEffectiveClash = Math.ceil(rollB.clash_total * defense.defenderClash);
       const defenderEffectiveDamage = Math.ceil(rollB.damage_total * defense.defenderDamage);
       const mantletDefense = siege ? Math.min(0.50, (view.sides.A.support_assets.mantlet ?? 0) * 0.05) : 0;
+      const attackerCasualtyComposition = siege
+        ? siegeAssaultComposition(
+          view.sides.A.composition, view.sides.A.support_assets,
+          wallAfter ?? 0, gateAfter ?? 0, BATTLE_TERRAINS.SIEGE.frontageA
+        )
+        : undefined;
       const resolution = resolveRound(view.sides.A.composition, view.sides.B.composition,
         { clash: rollA.clash_total, damage: rollA.damage_total, detail: {} },
         { clash: defenderEffectiveClash, damage: defenderEffectiveDamage, detail: {} },
         {
           mode: naval ? "NAVAL" : "LAND", damageFactorA: defense.attackerDamage, damageFactorB: siege ? 1 - mantletDefense : 1,
-          ...(siege ? { pressureClashA: rollA.clash_total, pressureClashB: rollB.clash_total } : {})
+          ...(siege ? {
+            pressureClashA: rollA.clash_total, pressureClashB: rollB.clash_total,
+            casualtyCompositionA: attackerCasualtyComposition
+          } : {})
         });
       let defenderPressureDelta = resolution.pressureDeltaB;
       if (siege && defenderPressureDelta > 0 && !view.battle.defender_pantheon_pressure_used && view.battle.defender_settlement_id) {
