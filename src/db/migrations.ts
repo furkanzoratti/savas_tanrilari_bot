@@ -1152,4 +1152,16 @@ export const migrations = [
       CREATE INDEX IF NOT EXISTS state_war_invitations_country_idx
         ON state_war_invitations(country_id,status,created_at DESC);
     `
+  },
+  {
+    version: 34,
+    name: "battle_phase_reveal_tracking",
+    sql: `
+      ALTER TABLE battles ADD COLUMN IF NOT EXISTS bombardment_revealed BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE battles ADD COLUMN IF NOT EXISTS assault_revealed BOOLEAN NOT NULL DEFAULT FALSE;
+      UPDATE battles SET bombardment_revealed=TRUE
+        WHERE terrain='SIEGE' AND public_message_id IS NOT NULL;
+      UPDATE battles SET assault_revealed=TRUE
+        WHERE terrain='SIEGE' AND public_message_id IS NOT NULL AND siege_phase='ASSAULT';
+    `
   }] as const;

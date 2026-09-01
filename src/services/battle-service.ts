@@ -18,6 +18,17 @@ import { formableModifiers, type FormableCountryKey } from "../domain/formable-c
 export type BattleStatus = "DRAFT" | "WAITING_FIRST_ROLL" | "WAITING_SECOND_ROLL" | "READY_TO_RESOLVE" | "FINISHED" | "CANCELLED";
 export type SiegePhase = "BOMBARDMENT" | "ASSAULT";
 
+export function siegePhaseRevealColumn(phase: SiegePhase): "bombardment_revealed" | "assault_revealed" {
+  return phase === "BOMBARDMENT" ? "bombardment_revealed" : "assault_revealed";
+}
+
+export function siegePhaseShouldReveal(
+  battle: Pick<BattleRow, "bombardment_revealed" | "assault_revealed">,
+  phase: SiegePhase
+): boolean {
+  return !battle[siegePhaseRevealColumn(phase)];
+}
+
 export interface BattleParticipantRow {
   battle_id: string; side_key: BattleSideKey; country_id: string; country_name: string; is_primary: boolean;
   composition: BattleComposition; initial_composition: BattleComposition;
@@ -32,6 +43,7 @@ export interface BattleSideRow {
 
 export interface BattleRow {
   id: string; guild_id: string; channel_id: string; public_message_id: string | null; terrain: BattleTerrain; narrative: string;
+  bombardment_revealed: boolean; assault_revealed: boolean;
   status: BattleStatus; round_number: number; first_side: BattleSideKey; winner_side: BattleSideKey | null; finish_reason: string | null;
   wall_max_hp: number | null; wall_current_hp: number | null; gate_max_hp: number | null; gate_current_hp: number | null;
   siege_phase: SiegePhase | null; bombardment_round: number; defender_settlement_id: string | null;
@@ -657,21 +669,24 @@ export const battleService = {
     });
   },
 
-  async setSiegePhase(input: { guildId: string; channelId: string; actorId: string; phase: SiegePhase }): Promise<BattleView> {
+  async setSiegePhase(input: { guildId: string; channelId: string; actorId: string; phase: SiegePhase }): Promise<{ view: BattleView; shouldReveal: boolean }> {
     return withTransaction(async (client) => {
       const battle = await activeInChannel(client, input.guildId, input.channelId);
       if (!battle || battle.terrain !== "SIEGE") throw new GameError("Bu kanalda etkin bir kuşatma savaşı yok.");
-      if (!["DRAFT", "WAITING_FIRST_ROLL"].includes(battle.status)) throw new GameError("Tur zarları başladıktan sonra kuşatma aşaması değiştirilemez.");
+      if (battle.status !== "WAITING_FIRST_ROLL") throw new GameError("Kuşatma aşaması yalnız savaş kartı yayımlandıktan sonra ve tur zarları başlamadan değiştirilebilir.");
       const view = await loadView(client, battle.id, true);
-      if (!["DRAFT", "WAITING_FIRST_ROLL"].includes(view.battle.status)) throw new GameError("Tur zarları başladıktan sonra kuşatma aşaması değiştirilemez.");
+      if (view.battle.status !== "WAITING_FIRST_ROLL") throw new GameError("Tur zarları başladıktan sonra kuşatma aşaması değiştirilemez.");
       if (view.rolls.length) throw new GameError("Mevcut turun zarları başladıktan sonra kuşatma aşaması değiştirilemez.");
+      if (view.battle.siege_phase === input.phase) throw new GameError(`Kuşatma zaten ${input.phase === "BOMBARDMENT" ? "Bombardıman" : "Hücum"} aşamasında.`);
       if (input.phase === "BOMBARDMENT") {
         const combatStarted = Boolean((await client.query("SELECT 1 FROM battle_rounds WHERE battle_id=$1 LIMIT 1", [battle.id])).rows[0]);
         if (combatStarted) throw new GameError("Ordu hücumu başladıktan sonra yeniden bombardıman aşamasına dönülemez.");
         if ((view.battle.wall_current_hp ?? 0) <= 0) throw new GameError("Sur zaten yıkılmış; artık hücum aşamasına geçilmelidir.");
       }
-      await client.query("UPDATE battles SET siege_phase=$1,updated_at=NOW() WHERE id=$2", [input.phase, battle.id]);
-      return loadView(client, battle.id);
+      const revealColumn = siegePhaseRevealColumn(input.phase);
+      const shouldReveal = siegePhaseShouldReveal(view.battle, input.phase);
+      await client.query(`UPDATE battles SET siege_phase=$1,${revealColumn}=TRUE,updated_at=NOW() WHERE id=$2`, [input.phase, battle.id]);
+      return { view: await loadView(client, battle.id), shouldReveal };
     });
   },
 
@@ -737,7 +752,12 @@ export const battleService = {
       }
       await client.query("UPDATE battle_sides SET initial_composition=composition WHERE battle_id=$1", [battle.id]);
       await client.query("UPDATE battle_side_participants SET initial_composition=composition WHERE battle_id=$1", [battle.id]);
-      await client.query("UPDATE battles SET status='WAITING_FIRST_ROLL',updated_at=NOW() WHERE id=$1", [battle.id]);
+      if (battle.terrain === "SIEGE") {
+        const revealColumn = siegePhaseRevealColumn(battle.siege_phase === "ASSAULT" ? "ASSAULT" : "BOMBARDMENT");
+        await client.query(`UPDATE battles SET status='WAITING_FIRST_ROLL',${revealColumn}=TRUE,updated_at=NOW() WHERE id=$1`, [battle.id]);
+      } else {
+        await client.query("UPDATE battles SET status='WAITING_FIRST_ROLL',updated_at=NOW() WHERE id=$1", [battle.id]);
+      }
       return loadView(client, battle.id);
     });
   },

@@ -134,6 +134,20 @@ function publicPayload(view: BattleView, result?: Parameters<typeof battleEmbed>
   return { embeds: [battleEmbed(view, result)], components: components(view), files: [new AttachmentBuilder(asset.path, { name: asset.name })] };
 }
 
+async function refreshBattleCard(client: Client, view: BattleView): Promise<boolean> {
+  if (!view.battle.public_message_id) return false;
+  try {
+    const channel = await client.channels.fetch(view.battle.channel_id);
+    if (!channel?.isTextBased() || channel.isDMBased() || !("messages" in channel)) return false;
+    const message = await channel.messages.fetch(view.battle.public_message_id);
+    await message.edit(publicPayload(view));
+    return true;
+  } catch (error) {
+    console.error("Savaş kartı güncellenemedi", { battleId: view.battle.id, error });
+    return false;
+  }
+}
+
 function casualtyReportEmbed(view: BattleView, rows: Array<{ side_key: BattleSideKey; force_type: string; calculated_loss: number; applied_loss: number; shortfall: number; mercenary_loss_applied: number; population_loss_applied: number; population_shortfall: number }>): EmbedBuilder {
   const lineFor = (row: typeof rows[number]) => {
     const naval = row.force_type in NAVAL_UNIT_STATS;
@@ -230,16 +244,27 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
       assetType, quantity
     });
     const assetName = SIEGE_ASSET_BATTLE_STATS[assetType].label;
-    await interaction.reply({ content: `🛠️ **${result.view.sides.A.country_name}**, **${result.settlementName}** hazinesinden **${number(result.cost)} Altın** ödeyerek ${quantity} **${assetName}** hazırladı. Alet kuşatma düzenine anında eklendi.`, ...publicPayload(result.view) });
+    await refreshBattleCard(interaction.client, result.view);
+    await interaction.reply({
+      content: `🛠️ **${result.view.sides.A.country_name}**, **${result.settlementName}** hazinesinden **${number(result.cost)} Altın** ödeyerek ${quantity} **${assetName}** hazırladı. Alet kuşatma düzenine anında eklendi; mevcut savaş kartı güncellendi.`,
+      ephemeral: true
+    });
   } else if (sub === "kusatma-asamasi") {
     requireGameMaster(interaction);
-    const view = await battleService.setSiegePhase({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id, phase: interaction.options.getString("asama", true) as SiegePhase });
-    const label = view.battle.siege_phase === "BOMBARDMENT" ? "Bombardıman — ordular temas etmiyor" : "Hücum — savaş zarları açıldı";
-    await interaction.reply({ content: `🏰 Kuşatma durumu **${label}** olarak değiştirildi.`, ...publicPayload(view) });
+    const result = await battleService.setSiegePhase({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id, phase: interaction.options.getString("asama", true) as SiegePhase });
+    const label = result.view.battle.siege_phase === "BOMBARDMENT" ? "Bombardıman — ordular temas etmiyor" : "Hücum — savaş zarları açıldı";
+    if (result.shouldReveal) {
+      const reply = await interaction.reply({ content: `🏰 Kuşatma durumu **${label}** olarak değiştirildi.`, ...publicPayload(result.view), fetchReply: true });
+      await battleService.setPublicMessage(result.view.battle.id, reply.id);
+    } else {
+      await refreshBattleCard(interaction.client, result.view);
+      await interaction.reply({ content: `✅ Kuşatma durumu **${label}** olarak değiştirildi; bu aşama daha önce duyurulduğu için yeni savaş kartı gönderilmedi.`, ephemeral: true });
+    }
   } else if (sub === "bombardiman") {
     requireGameMaster(interaction);
     const result = await battleService.bombard({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id, isGameMaster: true });
-    await interaction.reply({ content: `💥 **${result.catapultCount} Katapult** surları bombardımana tuttu. Sur hasarı: **${number(result.wallDamage)}**. Ordular temas etmedi; asker kaybı ve baskı oluşmadı.`, ...publicPayload(result.view) });
+    await refreshBattleCard(interaction.client, result.view);
+    await interaction.reply({ content: `💥 **${result.catapultCount} Katapult** surları bombardımana tuttu. Sur hasarı: **${number(result.wallDamage)}**. Ordular temas etmedi; asker kaybı ve baskı oluşmadı. Güncel durum mevcut savaş kartına işlendi.` });
   } else if (sub === "yayinla") {
     requireGameMaster(interaction);
     const view = await battleService.publish({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id });
@@ -303,4 +328,3 @@ export async function handleBattleButton(interaction: ButtonInteraction): Promis
   }
   return true;
 }
-
