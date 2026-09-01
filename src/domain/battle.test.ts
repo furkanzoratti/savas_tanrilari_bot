@@ -65,14 +65,15 @@ describe("savaş motoru", () => {
       { ladder_group: "ASSAULT", siege_tower: "ASSAULT", ram: "GATE", ballista: "WALL", catapult: "WALL" },
       () => 0
     );
-    expect(minimum.detail.ladderClash).toBe(1);
+    expect(minimum.detail.ladderClash).toBe(0);
     expect(minimum.detail.towerClash).toBe(2);
     expect(minimum.detail.ballistaWall).toBe(5);
     expect(minimum.detail.catapultWall).toBe(40);
     expect(minimum.gateDamage).toBe(35);
 
     const maximumLadder = rollSiegeSupport({ ladder_group: 1 }, { ladder_group: "ASSAULT" }, (max) => max - 1);
-    expect(maximumLadder.detail.ladderClash).toBe(2);
+    expect(maximumLadder.detail.ladderClash).toBe(0);
+    expect(maximumLadder.clash).toBe(0);
 
     const army = rollSiegeSupport(
       { ballista: 1, catapult: 1 },
