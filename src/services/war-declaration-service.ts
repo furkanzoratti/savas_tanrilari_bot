@@ -8,6 +8,16 @@ export interface OfficialWarView {
   attacker_country_name: string;
   defender_country_id: string;
   defender_country_name: string;
+  war_goal: string;
+  war_type: "COUNTRY" | "PACT" | "FACTION";
+  attacker_pact_id: string | null;
+  attacker_pact_name: string | null;
+  defender_pact_id: string | null;
+  defender_pact_name: string | null;
+  attacker_participant_names: string[];
+  defender_participant_names: string[];
+  attacker_diplomatic_ally_names: string[];
+  defender_diplomatic_ally_names: string[];
   reason: string;
   declaration: string;
   status: "ACTIVE" | "ENDED";
@@ -22,6 +32,32 @@ export interface OfficialWarView {
 }
 
 export type WarEndOutcome = "ATTACKER_VICTORY" | "DEFENDER_VICTORY" | "WHITE_PEACE";
+export type WarSide = "ATTACKER" | "DEFENDER";
+
+export interface WarParticipantView {
+  war_id: string;
+  country_id: string;
+  country_name: string;
+  side: WarSide;
+  join_source: "DECLARATION" | "PACT" | "CALL";
+  joined_turn: number;
+}
+
+export interface WarInvitationView {
+  id: string;
+  guild_id: string;
+  war_id: string;
+  country_id: string;
+  country_name: string;
+  side: WarSide;
+  invited_by_country_id: string;
+  invited_by_country_name: string;
+  status: "PENDING" | "ACCEPTED" | "REJECTED" | "CANCELLED";
+  invited_turn: number;
+  responded_turn: number | null;
+  channel_id: string | null;
+  message_id: string | null;
+}
 
 export interface PeaceOfferView {
   id: string;
@@ -66,14 +102,56 @@ interface TreasuryRow {
 
 const warViewSql = `SELECT war.id,war.guild_id,war.attacker_country_id,
   attacker.name AS attacker_country_name,war.defender_country_id,
-  defender.name AS defender_country_name,war.reason,war.declaration,
+  defender.name AS defender_country_name,war.war_goal,war.war_type,
+  war.attacker_pact_id,attacker_pact.name AS attacker_pact_name,
+  war.defender_pact_id,defender_pact.name AS defender_pact_name,
+  COALESCE((SELECT ARRAY_AGG(country.name ORDER BY country.name)
+    FROM state_war_participants participant JOIN countries country ON country.id=participant.country_id
+    WHERE participant.war_id=war.id AND participant.side='ATTACKER'),ARRAY[attacker.name]) AS attacker_participant_names,
+  COALESCE((SELECT ARRAY_AGG(country.name ORDER BY country.name)
+    FROM state_war_participants participant JOIN countries country ON country.id=participant.country_id
+    WHERE participant.war_id=war.id AND participant.side='DEFENDER'),ARRAY[defender.name]) AS defender_participant_names,
+  ARRAY(SELECT DISTINCT ally.name FROM (
+      SELECT CASE WHEN alliance.proposer_country_id=war.attacker_country_id THEN alliance.receiver_country_id ELSE alliance.proposer_country_id END AS country_id
+        FROM country_alliances alliance WHERE alliance.status='ACTIVE'
+          AND (alliance.proposer_country_id=war.attacker_country_id OR alliance.receiver_country_id=war.attacker_country_id)
+      UNION
+      SELECT shared.country_id FROM pact_memberships own_pact
+        JOIN pact_memberships shared ON shared.pact_id=own_pact.pact_id
+        WHERE own_pact.country_id=war.attacker_country_id AND shared.country_id<>war.attacker_country_id
+    ) relation JOIN countries ally ON ally.id=relation.country_id AND ally.status='ACTIVE'
+    WHERE NOT EXISTS (SELECT 1 FROM state_war_participants joined WHERE joined.war_id=war.id AND joined.country_id=ally.id)
+    ORDER BY ally.name) AS attacker_diplomatic_ally_names,
+  ARRAY(SELECT DISTINCT ally.name FROM (
+      SELECT CASE WHEN alliance.proposer_country_id=war.defender_country_id THEN alliance.receiver_country_id ELSE alliance.proposer_country_id END AS country_id
+        FROM country_alliances alliance WHERE alliance.status='ACTIVE'
+          AND (alliance.proposer_country_id=war.defender_country_id OR alliance.receiver_country_id=war.defender_country_id)
+      UNION
+      SELECT shared.country_id FROM pact_memberships own_pact
+        JOIN pact_memberships shared ON shared.pact_id=own_pact.pact_id
+        WHERE own_pact.country_id=war.defender_country_id AND shared.country_id<>war.defender_country_id
+    ) relation JOIN countries ally ON ally.id=relation.country_id AND ally.status='ACTIVE'
+    WHERE NOT EXISTS (SELECT 1 FROM state_war_participants joined WHERE joined.war_id=war.id AND joined.country_id=ally.id)
+    ORDER BY ally.name) AS defender_diplomatic_ally_names,
+  war.reason,war.declaration,
   war.status,war.started_turn,war.ended_turn,war.winner_country_id,
   winner.name AS winner_country_name,war.end_outcome,war.end_description,
   war.channel_id,war.message_id
   FROM state_wars war
   JOIN countries attacker ON attacker.id=war.attacker_country_id
   JOIN countries defender ON defender.id=war.defender_country_id
+  LEFT JOIN diplomatic_pacts attacker_pact ON attacker_pact.id=war.attacker_pact_id
+  LEFT JOIN diplomatic_pacts defender_pact ON defender_pact.id=war.defender_pact_id
   LEFT JOIN countries winner ON winner.id=war.winner_country_id`;
+
+const warInvitationViewSql = `SELECT invitation.id,invitation.guild_id,invitation.war_id,
+  invitation.country_id,country.name AS country_name,invitation.side,
+  invitation.invited_by_country_id,inviter.name AS invited_by_country_name,
+  invitation.status,invitation.invited_turn,invitation.responded_turn,
+  invitation.channel_id,invitation.message_id
+  FROM state_war_invitations invitation
+  JOIN countries country ON country.id=invitation.country_id
+  JOIN countries inviter ON inviter.id=invitation.invited_by_country_id`;
 
 const offerViewSql = `SELECT offer.id,offer.guild_id,offer.war_id,
   offer.proposer_country_id,proposer.name AS proposer_country_name,
@@ -121,6 +199,45 @@ async function warById(client: DbClient, id: string): Promise<OfficialWarView | 
 
 async function offerById(client: DbClient, id: string): Promise<PeaceOfferView | null> {
   return (await client.query<PeaceOfferView>(`${offerViewSql} WHERE offer.id=$1`, [id])).rows[0] ?? null;
+}
+
+async function warInvitationById(client: DbClient, id: string): Promise<WarInvitationView | null> {
+  return (await client.query<WarInvitationView>(`${warInvitationViewSql} WHERE invitation.id=$1`, [id])).rows[0] ?? null;
+}
+
+async function pactMemberIds(client: DbClient, guildId: string, pactId: string, expectedLeaderId: string): Promise<string[]> {
+  const pact = (await client.query<{ founder_country_id: string }>(
+    "SELECT founder_country_id FROM diplomatic_pacts WHERE id=$1 AND guild_id=$2", [pactId, guildId]
+  )).rows[0];
+  if (!pact) throw new GameError("Belirtilen pakt bulunamadı.");
+  if (pact.founder_country_id !== expectedLeaderId) throw new GameError("Pakt cephesinin lideri, paktın mevcut lider devleti olmalıdır.");
+  return (await client.query<{ country_id: string }>(
+    `SELECT membership.country_id FROM pact_memberships membership
+      JOIN countries country ON country.id=membership.country_id
+      WHERE membership.pact_id=$1 AND country.status='ACTIVE' ORDER BY membership.country_id`, [pactId]
+  )).rows.map((row) => row.country_id);
+}
+
+async function activeConflictBetweenSides(client: DbClient, guildId: string, attackerIds: string[], defenderIds: string[]): Promise<boolean> {
+  const result = await client.query(
+    `SELECT 1 FROM state_wars war
+      JOIN state_war_participants first_side ON first_side.war_id=war.id
+      JOIN state_war_participants second_side ON second_side.war_id=war.id AND second_side.side<>first_side.side
+      WHERE war.guild_id=$1 AND war.status='ACTIVE'
+        AND ((first_side.country_id=ANY($2::uuid[]) AND second_side.country_id=ANY($3::uuid[]))
+          OR (first_side.country_id=ANY($3::uuid[]) AND second_side.country_id=ANY($2::uuid[]))) LIMIT 1`,
+    [guildId, attackerIds, defenderIds]
+  );
+  return Boolean(result.rowCount);
+}
+
+async function refreshWarType(client: DbClient, warId: string): Promise<void> {
+  await client.query(
+    `UPDATE state_wars SET war_type=CASE
+      WHEN attacker_pact_id IS NOT NULL OR defender_pact_id IS NOT NULL THEN 'PACT'
+      WHEN (SELECT COUNT(*) FROM state_war_participants WHERE war_id=$1)>2 THEN 'FACTION'
+      ELSE 'COUNTRY' END WHERE id=$1`, [warId]
+  );
 }
 
 export function proportionalTreasuryAllocation(
@@ -182,8 +299,12 @@ export const warDeclarationService = {
   async activeWarBetween(guildId: string, firstCountryId: string, secondCountryId: string): Promise<OfficialWarView | null> {
     return (await pool.query<OfficialWarView>(
       `${warViewSql} WHERE war.guild_id=$1 AND war.status='ACTIVE'
-        AND ((war.attacker_country_id=$2 AND war.defender_country_id=$3)
-          OR (war.attacker_country_id=$3 AND war.defender_country_id=$2))`,
+        AND EXISTS (SELECT 1 FROM state_war_participants first_participant
+          JOIN state_war_participants second_participant ON second_participant.war_id=first_participant.war_id
+            AND second_participant.side<>first_participant.side
+          WHERE first_participant.war_id=war.id
+            AND ((first_participant.country_id=$2 AND second_participant.country_id=$3)
+              OR (first_participant.country_id=$3 AND second_participant.country_id=$2)))`,
       [guildId, firstCountryId, secondCountryId]
     )).rows[0] ?? null;
   },
@@ -195,32 +316,57 @@ export const warDeclarationService = {
   },
 
   async declareWar(input: {
-    guildId: string; actorId: string; attackerCountryId: string; defenderCountryId: string; reason: string; declaration: string;
+    guildId: string; actorId: string; attackerCountryId: string; defenderCountryId: string;
+    warGoal?: string; reason: string; declaration: string; attackerPactId?: string | null; defenderPactId?: string | null;
   }): Promise<OfficialWarView> {
     if (input.attackerCountryId === input.defenderCountryId) throw new GameError("Bir devlet kendisine savaş ilan edemez.");
     const reason = input.reason.trim();
     const declaration = input.declaration.trim();
-    if (reason.length < 2 || reason.length > 1000 || declaration.length < 2 || declaration.length > 2000) {
-      throw new GameError("Savaş gerekçesi ve ilan metni geçerli uzunlukta olmalıdır.");
+    const warGoal = (input.warGoal ?? input.reason).trim();
+    if (warGoal.length < 2 || warGoal.length > 500 || reason.length < 2 || reason.length > 1000 || declaration.length < 2 || declaration.length > 2000) {
+      throw new GameError("Savaş hedefi, gerekçesi ve ilan metni geçerli uzunlukta olmalıdır.");
     }
     return withTransaction(async (client) => {
-      await lockTurnAndCountries(client, input.guildId, [input.attackerCountryId, input.defenderCountryId]);
-      await verifyCountries(client, input.guildId, [input.attackerCountryId, input.defenderCountryId]);
-      const existing = await client.query(
-        `SELECT 1 FROM state_wars WHERE guild_id=$1 AND status='ACTIVE'
-          AND ((attacker_country_id=$2 AND defender_country_id=$3)
-            OR (attacker_country_id=$3 AND defender_country_id=$2))`,
-        [input.guildId, input.attackerCountryId, input.defenderCountryId]
-      );
-      if (existing.rowCount) throw new GameError("Bu iki devlet arasında zaten devam eden bir savaş bulunuyor.");
+      let attackerIds = input.attackerPactId
+        ? await pactMemberIds(client, input.guildId, input.attackerPactId, input.attackerCountryId)
+        : [input.attackerCountryId];
+      let defenderIds = input.defenderPactId
+        ? await pactMemberIds(client, input.guildId, input.defenderPactId, input.defenderCountryId)
+        : [input.defenderCountryId];
+      attackerIds = [...new Set([input.attackerCountryId, ...attackerIds])];
+      defenderIds = [...new Set([input.defenderCountryId, ...defenderIds])];
+      if (attackerIds.some((id) => defenderIds.includes(id))) throw new GameError("Aynı devlet savaşın iki cephesinde birden yer alamaz.");
+      await lockTurnAndCountries(client, input.guildId, [...attackerIds, ...defenderIds]);
+      await verifyCountries(client, input.guildId, [...attackerIds, ...defenderIds]);
+      if (await activeConflictBetweenSides(client, input.guildId, attackerIds, defenderIds)) {
+        throw new GameError("Bu cephelerdeki devletlerden bazıları arasında zaten devam eden resmî bir savaş bulunuyor.");
+      }
       const turn = await currentTurn(client, input.guildId);
       const created = await client.query<{ id: string }>(
-        `INSERT INTO state_wars(guild_id,attacker_country_id,defender_country_id,reason,declaration,started_turn,declared_by)
-          VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-        [input.guildId, input.attackerCountryId, input.defenderCountryId, reason, declaration, turn, input.actorId]
+        `INSERT INTO state_wars(guild_id,attacker_country_id,defender_country_id,war_goal,war_type,
+          attacker_pact_id,defender_pact_id,reason,declaration,started_turn,declared_by)
+          VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+        [input.guildId, input.attackerCountryId, input.defenderCountryId, warGoal,
+          input.attackerPactId || input.defenderPactId ? "PACT" : "COUNTRY",
+          input.attackerPactId ?? null, input.defenderPactId ?? null, reason, declaration, turn, input.actorId]
       );
       const id = created.rows[0]!.id;
-      await audit(client, input.guildId, input.actorId, "STATE_WAR_DECLARE", "state_war", id, { ...input, reason, declaration, turn });
+      for (const countryId of attackerIds) {
+        await client.query(
+          `INSERT INTO state_war_participants(war_id,country_id,side,join_source,joined_turn,invited_by_country_id,joined_by)
+            VALUES($1,$2,'ATTACKER',$3,$4,$5,$6)`,
+          [id, countryId, input.attackerPactId ? "PACT" : "DECLARATION", turn, input.attackerCountryId, input.actorId]
+        );
+      }
+      for (const countryId of defenderIds) {
+        await client.query(
+          `INSERT INTO state_war_participants(war_id,country_id,side,join_source,joined_turn,invited_by_country_id,joined_by)
+            VALUES($1,$2,'DEFENDER',$3,$4,$5,$6)`,
+          [id, countryId, input.defenderPactId ? "PACT" : "DECLARATION", turn, input.defenderCountryId, input.actorId]
+        );
+      }
+      await audit(client, input.guildId, input.actorId, "STATE_WAR_DECLARE", "state_war", id,
+        { ...input, warGoal, reason, declaration, attackerIds, defenderIds, turn });
       return (await warById(client, id))!;
     });
   },
@@ -231,6 +377,247 @@ export const warDeclarationService = {
 
   async cancelWarDeclaration(guildId: string, id: string): Promise<void> {
     await pool.query("DELETE FROM state_wars WHERE id=$1 AND guild_id=$2 AND status='ACTIVE'", [id, guildId]);
+  },
+
+  async participants(warId: string): Promise<WarParticipantView[]> {
+    return (await pool.query<WarParticipantView>(
+      `SELECT participant.war_id,participant.country_id,country.name AS country_name,
+        participant.side,participant.join_source,participant.joined_turn
+        FROM state_war_participants participant JOIN countries country ON country.id=participant.country_id
+        WHERE participant.war_id=$1 ORDER BY participant.side,country.name`, [warId]
+    )).rows;
+  },
+
+  async setWarGoal(input: { guildId: string; actorId: string; warId: string; warGoal: string }): Promise<OfficialWarView> {
+    const warGoal = input.warGoal.trim();
+    if (warGoal.length < 2 || warGoal.length > 500) throw new GameError("Savaş hedefi 2–500 karakter arasında olmalıdır.");
+    return withTransaction(async (client) => {
+      const updated = await client.query(
+        "UPDATE state_wars SET war_goal=$3 WHERE id=$1 AND guild_id=$2 AND status='ACTIVE' RETURNING id",
+        [input.warId, input.guildId, warGoal]
+      );
+      if (!updated.rowCount) throw new GameError("Düzenlenecek aktif savaş bulunamadı.");
+      await audit(client, input.guildId, input.actorId, "STATE_WAR_GOAL_SET", "state_war", input.warId, { warGoal });
+      return (await warById(client, input.warId))!;
+    });
+  },
+
+  async attachPactToWar(input: { guildId: string; actorId: string; warId: string; side: WarSide; pactId: string }): Promise<OfficialWarView> {
+    return withTransaction(async (client) => {
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`turn:${input.guildId}`]);
+      const war = (await client.query<{
+        attacker_country_id: string; defender_country_id: string; status: string;
+      }>("SELECT attacker_country_id,defender_country_id,status FROM state_wars WHERE id=$1 AND guild_id=$2 FOR UPDATE",
+        [input.warId, input.guildId])).rows[0];
+      if (!war || war.status !== "ACTIVE") throw new GameError("Düzenlenecek aktif savaş bulunamadı.");
+      const pact = (await client.query<{ founder_country_id: string; name: string }>(
+        "SELECT founder_country_id,name FROM diplomatic_pacts WHERE id=$1 AND guild_id=$2", [input.pactId, input.guildId]
+      )).rows[0];
+      if (!pact) throw new GameError("Bağlanacak pakt bulunamadı.");
+      const members = (await client.query<{ country_id: string }>(
+        `SELECT membership.country_id FROM pact_memberships membership
+          JOIN countries country ON country.id=membership.country_id
+          WHERE membership.pact_id=$1 AND country.status='ACTIVE' ORDER BY membership.country_id`, [input.pactId]
+      )).rows.map((row) => row.country_id);
+      const memberIds = [...new Set([pact.founder_country_id, ...members])];
+      await lockTurnAndCountries(client, input.guildId, memberIds);
+      await verifyCountries(client, input.guildId, memberIds);
+      const opposingSide: WarSide = input.side === "ATTACKER" ? "DEFENDER" : "ATTACKER";
+      const conflict = await client.query(
+        "SELECT 1 FROM state_war_participants WHERE war_id=$1 AND side=$2 AND country_id=ANY($3::uuid[]) LIMIT 1",
+        [input.warId, opposingSide, memberIds]
+      );
+      if (conflict.rowCount) throw new GameError("Pakt üyelerinden biri hâlihazırda karşı cephede yer alıyor.");
+      const turn = await currentTurn(client, input.guildId);
+      for (const countryId of memberIds) {
+        await client.query(
+          `INSERT INTO state_war_participants(war_id,country_id,side,join_source,joined_turn,invited_by_country_id,joined_by)
+            VALUES($1,$2,$3,'PACT',$4,$5,$6) ON CONFLICT(war_id,country_id) DO NOTHING`,
+          [input.warId, countryId, input.side, turn, pact.founder_country_id, input.actorId]
+        );
+      }
+      const leaderColumn = input.side === "ATTACKER" ? "attacker_country_id" : "defender_country_id";
+      const pactColumn = input.side === "ATTACKER" ? "attacker_pact_id" : "defender_pact_id";
+      await client.query(`UPDATE state_wars SET ${leaderColumn}=$2,${pactColumn}=$3,war_type='PACT' WHERE id=$1`,
+        [input.warId, pact.founder_country_id, input.pactId]);
+      await client.query(
+        "UPDATE peace_offers SET status='CANCELLED',resolved_turn=$2,resolved_by=$3,resolved_at=NOW() WHERE war_id=$1 AND status='PENDING'",
+        [input.warId, turn, input.actorId]
+      );
+      await audit(client, input.guildId, input.actorId, "STATE_WAR_PACT_ATTACH", "state_war", input.warId,
+        { side: input.side, pactId: input.pactId, pactName: pact.name, leaderCountryId: pact.founder_country_id, memberIds });
+      return (await warById(client, input.warId))!;
+    });
+  },
+
+  async detachPactFromWar(input: { guildId: string; actorId: string; warId: string; side: WarSide }): Promise<OfficialWarView> {
+    return withTransaction(async (client) => {
+      const pactColumn = input.side === "ATTACKER" ? "attacker_pact_id" : "defender_pact_id";
+      const updated = await client.query(
+        `UPDATE state_wars SET ${pactColumn}=NULL WHERE id=$1 AND guild_id=$2 AND status='ACTIVE' AND ${pactColumn} IS NOT NULL RETURNING id`,
+        [input.warId, input.guildId]
+      );
+      if (!updated.rowCount) throw new GameError("Bu cepheye bağlı aktif bir pakt bulunmuyor.");
+      await refreshWarType(client, input.warId);
+      await audit(client, input.guildId, input.actorId, "STATE_WAR_PACT_DETACH", "state_war", input.warId, { side: input.side });
+      return (await warById(client, input.warId))!;
+    });
+  },
+
+  async addWarParticipant(input: {
+    guildId: string; actorId: string; warId: string; side: WarSide; countryId: string;
+  }): Promise<OfficialWarView> {
+    return withTransaction(async (client) => {
+      await lockTurnAndCountries(client, input.guildId, [input.countryId]);
+      await verifyCountries(client, input.guildId, [input.countryId]);
+      const war = (await client.query<{ status: string; attacker_country_id: string; defender_country_id: string }>(
+        "SELECT status,attacker_country_id,defender_country_id FROM state_wars WHERE id=$1 AND guild_id=$2 FOR UPDATE",
+        [input.warId, input.guildId]
+      )).rows[0];
+      if (!war || war.status !== "ACTIVE") throw new GameError("Düzenlenecek aktif savaş bulunamadı.");
+      const existing = await client.query("SELECT side FROM state_war_participants WHERE war_id=$1 AND country_id=$2", [input.warId, input.countryId]);
+      if (existing.rowCount) throw new GameError("Bu devlet zaten savaşın bir cephesinde yer alıyor.");
+      const turn = await currentTurn(client, input.guildId);
+      const leaderId = input.side === "ATTACKER" ? war.attacker_country_id : war.defender_country_id;
+      await client.query(
+        `INSERT INTO state_war_participants(war_id,country_id,side,join_source,joined_turn,invited_by_country_id,joined_by)
+          VALUES($1,$2,$3,'CALL',$4,$5,$6)`, [input.warId, input.countryId, input.side, turn, leaderId, input.actorId]
+      );
+      await refreshWarType(client, input.warId);
+      await audit(client, input.guildId, input.actorId, "STATE_WAR_PARTICIPANT_ADD", "state_war", input.warId,
+        { side: input.side, countryId: input.countryId, turn });
+      return (await warById(client, input.warId))!;
+    });
+  },
+
+  async removeWarParticipant(input: { guildId: string; actorId: string; warId: string; countryId: string }): Promise<OfficialWarView> {
+    return withTransaction(async (client) => {
+      const war = (await client.query<{ attacker_country_id: string; defender_country_id: string; status: string }>(
+        "SELECT attacker_country_id,defender_country_id,status FROM state_wars WHERE id=$1 AND guild_id=$2 FOR UPDATE",
+        [input.warId, input.guildId]
+      )).rows[0];
+      if (!war || war.status !== "ACTIVE") throw new GameError("Düzenlenecek aktif savaş bulunamadı.");
+      if ([war.attacker_country_id, war.defender_country_id].includes(input.countryId)) {
+        throw new GameError("Cephe lideri doğrudan çıkarılamaz; önce lider-degistir işlemini kullanın.");
+      }
+      const removed = await client.query("DELETE FROM state_war_participants WHERE war_id=$1 AND country_id=$2 RETURNING side", [input.warId, input.countryId]);
+      if (!removed.rowCount) throw new GameError("Belirtilen devlet bu savaşın cephelerinde bulunmuyor.");
+      await refreshWarType(client, input.warId);
+      await audit(client, input.guildId, input.actorId, "STATE_WAR_PARTICIPANT_REMOVE", "state_war", input.warId, { countryId: input.countryId });
+      return (await warById(client, input.warId))!;
+    });
+  },
+
+  async changeWarLeader(input: {
+    guildId: string; actorId: string; warId: string; side: WarSide; countryId: string;
+  }): Promise<OfficialWarView> {
+    return withTransaction(async (client) => {
+      const war = (await client.query<{
+        attacker_country_id: string; defender_country_id: string; attacker_pact_id: string | null; defender_pact_id: string | null; status: string;
+      }>(`SELECT attacker_country_id,defender_country_id,attacker_pact_id,defender_pact_id,status
+          FROM state_wars WHERE id=$1 AND guild_id=$2 FOR UPDATE`, [input.warId, input.guildId])).rows[0];
+      if (!war || war.status !== "ACTIVE") throw new GameError("Düzenlenecek aktif savaş bulunamadı.");
+      const attachedPactId = input.side === "ATTACKER" ? war.attacker_pact_id : war.defender_pact_id;
+      if (attachedPactId) {
+        const pact = (await client.query<{ founder_country_id: string }>("SELECT founder_country_id FROM diplomatic_pacts WHERE id=$1", [attachedPactId])).rows[0];
+        if (pact?.founder_country_id !== input.countryId) throw new GameError("Pakta bağlı cephenin lideri yalnızca paktın mevcut lider devleti olabilir. Önce pakt bağını kaldırın.");
+      }
+      const participant = await client.query(
+        "SELECT 1 FROM state_war_participants WHERE war_id=$1 AND country_id=$2 AND side=$3", [input.warId, input.countryId, input.side]
+      );
+      if (!participant.rowCount) throw new GameError("Yeni lider seçilen cephenin mevcut katılımcılarından biri olmalıdır.");
+      const leaderColumn = input.side === "ATTACKER" ? "attacker_country_id" : "defender_country_id";
+      const currentLeaderId = input.side === "ATTACKER" ? war.attacker_country_id : war.defender_country_id;
+      if (currentLeaderId === input.countryId) throw new GameError("Bu devlet zaten seçilen cephenin savaş lideri.");
+      const turn = await currentTurn(client, input.guildId);
+      await client.query(`UPDATE state_wars SET ${leaderColumn}=$2 WHERE id=$1`, [input.warId, input.countryId]);
+      await client.query(
+        "UPDATE peace_offers SET status='CANCELLED',resolved_turn=$2,resolved_by=$3,resolved_at=NOW() WHERE war_id=$1 AND status='PENDING'",
+        [input.warId, turn, input.actorId]
+      );
+      await audit(client, input.guildId, input.actorId, "STATE_WAR_LEADER_CHANGE", "state_war", input.warId,
+        { side: input.side, previousLeaderCountryId: currentLeaderId, countryId: input.countryId, turn });
+      return (await warById(client, input.warId))!;
+    });
+  },
+
+  async createWarInvitation(input: {
+    guildId: string; actorId: string; warId: string; leaderCountryId: string; targetCountryId: string;
+  }): Promise<WarInvitationView> {
+    if (input.leaderCountryId === input.targetCountryId) throw new GameError("Savaş lideri kendisini savaşa çağıramaz.");
+    return withTransaction(async (client) => {
+      await lockTurnAndCountries(client, input.guildId, [input.leaderCountryId, input.targetCountryId]);
+      await verifyCountries(client, input.guildId, [input.leaderCountryId, input.targetCountryId]);
+      const war = (await client.query<{
+        attacker_country_id: string; defender_country_id: string; status: string;
+      }>("SELECT attacker_country_id,defender_country_id,status FROM state_wars WHERE id=$1 AND guild_id=$2 FOR UPDATE",
+        [input.warId, input.guildId])).rows[0];
+      if (!war || war.status !== "ACTIVE") throw new GameError("Savaşa çağrı yapılabilecek aktif savaş bulunamadı.");
+      const side: WarSide | null = input.leaderCountryId === war.attacker_country_id
+        ? "ATTACKER" : input.leaderCountryId === war.defender_country_id ? "DEFENDER" : null;
+      if (!side) throw new GameError("Savaşa yalnızca ilgili cephenin savaş lideri ülke çağırabilir.");
+      const participant = await client.query("SELECT 1 FROM state_war_participants WHERE war_id=$1 AND country_id=$2", [input.warId, input.targetCountryId]);
+      if (participant.rowCount) throw new GameError("Bu devlet zaten savaşın cephelerinden birinde yer alıyor.");
+      const pending = await client.query("SELECT 1 FROM state_war_invitations WHERE war_id=$1 AND country_id=$2 AND status='PENDING'", [input.warId, input.targetCountryId]);
+      if (pending.rowCount) throw new GameError("Bu devlet için zaten yanıt bekleyen bir savaş çağrısı var.");
+      const turn = await currentTurn(client, input.guildId);
+      const created = await client.query<{ id: string }>(
+        `INSERT INTO state_war_invitations(guild_id,war_id,country_id,side,invited_by_country_id,invited_turn,invited_by)
+          VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+        [input.guildId, input.warId, input.targetCountryId, side, input.leaderCountryId, turn, input.actorId]
+      );
+      const id = created.rows[0]!.id;
+      await audit(client, input.guildId, input.actorId, "STATE_WAR_INVITE", "state_war_invitation", id, { ...input, side, turn });
+      return (await warInvitationById(client, id))!;
+    });
+  },
+
+  async getWarInvitation(id: string): Promise<WarInvitationView | null> {
+    return (await pool.query<WarInvitationView>(`${warInvitationViewSql} WHERE invitation.id=$1`, [id])).rows[0] ?? null;
+  },
+
+  async attachWarInvitationMessage(id: string, channelId: string, messageId: string): Promise<void> {
+    await pool.query("UPDATE state_war_invitations SET channel_id=$2,message_id=$3 WHERE id=$1", [id, channelId, messageId]);
+  },
+
+  async cancelWarInvitation(guildId: string, id: string): Promise<void> {
+    await pool.query(
+      "UPDATE state_war_invitations SET status='CANCELLED',resolved_at=NOW() WHERE id=$1 AND guild_id=$2 AND status='PENDING'",
+      [id, guildId]
+    );
+  },
+
+  async respondWarInvitation(input: {
+    guildId: string; actorId: string; invitationId: string; countryId: string; accept: boolean;
+  }): Promise<{ invitation: WarInvitationView; war: OfficialWarView }> {
+    return withTransaction(async (client) => {
+      await lockTurnAndCountries(client, input.guildId, [input.countryId]);
+      const invitation = (await client.query<{
+        war_id: string; country_id: string; side: WarSide; invited_by_country_id: string; status: string;
+      }>(`SELECT war_id,country_id,side,invited_by_country_id,status FROM state_war_invitations
+          WHERE id=$1 AND guild_id=$2 FOR UPDATE`, [input.invitationId, input.guildId])).rows[0];
+      if (!invitation) throw new GameError("Savaş çağrısı bulunamadı.");
+      if (invitation.country_id !== input.countryId) throw new GameError("Bu savaş çağrısını yalnızca davet edilen devlet yanıtlayabilir.");
+      if (invitation.status !== "PENDING") throw new GameError("Bu savaş çağrısı daha önce sonuçlandırılmış.");
+      const war = (await client.query<{ status: string }>("SELECT status FROM state_wars WHERE id=$1 FOR UPDATE", [invitation.war_id])).rows[0];
+      if (!war || war.status !== "ACTIVE") throw new GameError("Bu çağrının bağlı olduğu savaş artık aktif değil.");
+      const turn = await currentTurn(client, input.guildId);
+      if (input.accept) {
+        await client.query(
+          `INSERT INTO state_war_participants(war_id,country_id,side,join_source,joined_turn,invited_by_country_id,joined_by)
+            VALUES($1,$2,$3,'CALL',$4,$5,$6)`,
+          [invitation.war_id, input.countryId, invitation.side, turn, invitation.invited_by_country_id, input.actorId]
+        );
+        await client.query("UPDATE state_wars SET war_type='FACTION' WHERE id=$1 AND war_type='COUNTRY'", [invitation.war_id]);
+      }
+      await client.query(
+        "UPDATE state_war_invitations SET status=$2,responded_turn=$3,responded_by=$4,resolved_at=NOW() WHERE id=$1",
+        [input.invitationId, input.accept ? "ACCEPTED" : "REJECTED", turn, input.actorId]
+      );
+      await audit(client, input.guildId, input.actorId, input.accept ? "STATE_WAR_INVITE_ACCEPT" : "STATE_WAR_INVITE_REJECT",
+        "state_war_invitation", input.invitationId, { ...input, side: invitation.side, turn });
+      return { invitation: (await warInvitationById(client, input.invitationId))!, war: (await warById(client, invitation.war_id))! };
+    });
   },
 
   async createPeaceOffer(input: {
@@ -354,6 +741,10 @@ export const warDeclarationService = {
       if (input.accept) {
         await client.query("UPDATE state_wars SET status='ENDED',ended_turn=$2,ended_by=$3,ended_at=NOW(),winner_country_id=NULL,end_outcome='WHITE_PEACE',end_description=(SELECT terms FROM peace_offers WHERE id=$4) WHERE id=$1",
           [locked.war_id, turn, input.actorId, input.offerId]);
+        await client.query(
+          "UPDATE state_war_invitations SET status='CANCELLED',responded_turn=$2,responded_by=$3,resolved_at=NOW() WHERE war_id=$1 AND status='PENDING'",
+          [locked.war_id, turn, input.actorId]
+        );
       }
       await audit(client, input.guildId, input.actorId, input.accept ? "PEACE_OFFER_ACCEPT" : "PEACE_OFFER_REJECT", "peace_offer", input.offerId,
         { ...input, indemnity: locked.indemnity_amount, deductions, credits, turn });
@@ -388,6 +779,7 @@ export const warDeclarationService = {
         [existing.id, turn, input.actorId, input.winnerCountryId, outcome, description]
       );
       await client.query("UPDATE peace_offers SET status='CANCELLED',resolved_turn=$2,resolved_by=$3,resolved_at=NOW() WHERE war_id=$1 AND status='PENDING'", [existing.id, turn, input.actorId]);
+      await client.query("UPDATE state_war_invitations SET status='CANCELLED',responded_turn=$2,responded_by=$3,resolved_at=NOW() WHERE war_id=$1 AND status='PENDING'", [existing.id, turn, input.actorId]);
       await audit(client, input.guildId, input.actorId, "STATE_WAR_FORCE_END", "state_war", existing.id, { ...input, description, outcome, turn });
       return (await warById(client, existing.id))!;
     });

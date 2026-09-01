@@ -725,7 +725,9 @@ export const gameService = {
       const settlements = Number((await client.query<{ count: number }>("SELECT COUNT(*)::integer AS count FROM settlements WHERE country_id=$1", [country.id])).rows[0]?.count ?? 0);
       if (settlements > 0) throw new GameError(`Ülke yok edilmeden önce kalan ${settlements} yerleşkenin devredilmesi veya silinmesi gerekir.`);
       const activeWars = Number((await client.query<{ count: number }>(
-        "SELECT COUNT(*)::integer AS count FROM state_wars WHERE status='ACTIVE' AND (attacker_country_id=$1 OR defender_country_id=$1)", [country.id]
+        `SELECT COUNT(DISTINCT war.id)::integer AS count FROM state_wars war
+          JOIN state_war_participants participant ON participant.war_id=war.id
+          WHERE war.status='ACTIVE' AND participant.country_id=$1`, [country.id]
       )).rows[0]?.count ?? 0);
       if (activeWars > 0) throw new GameError(`Ülkenin ${activeWars} aktif resmî savaşı var. Önce /savas-sonlandir ile kapatılmalıdır.`);
       const activeBattles = Number((await client.query<{ count: number }>(

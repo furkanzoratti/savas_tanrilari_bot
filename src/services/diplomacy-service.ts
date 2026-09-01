@@ -196,12 +196,12 @@ async function countryPacts(client: DbClient, countryId: string): Promise<Countr
 
 async function countryWars(client: DbClient, countryId: string): Promise<CountryDiplomacyEntry[]> {
   return (await client.query<CountryDiplomacyEntry>(
-    `SELECT opponent.id,opponent.name
-       FROM state_wars war
-       JOIN countries opponent ON opponent.id=CASE WHEN war.attacker_country_id=$1
-         THEN war.defender_country_id ELSE war.attacker_country_id END
-      WHERE war.status='ACTIVE'
-        AND (war.attacker_country_id=$1 OR war.defender_country_id=$1)
+    `SELECT DISTINCT opponent.id,opponent.name
+       FROM state_war_participants own
+       JOIN state_wars war ON war.id=own.war_id AND war.status='ACTIVE'
+       JOIN state_war_participants opposing ON opposing.war_id=own.war_id AND opposing.side<>own.side
+       JOIN countries opponent ON opponent.id=opposing.country_id
+      WHERE own.country_id=$1
       ORDER BY opponent.name`, [countryId]
   )).rows;
 }
@@ -368,6 +368,17 @@ export const diplomacyService = {
       `SELECT country.id,country.name FROM pact_memberships membership
         JOIN countries country ON country.id=membership.country_id
        WHERE membership.pact_id=$1 AND country.status='ACTIVE' ORDER BY country.name`, [pact.id]
+    )).rows;
+    return { ...pact, members };
+  },
+
+  async pactDetailsById(guildId: string, id: string): Promise<PactDetails> {
+    const pact = (await pool.query<PactView>(`${pactViewSql} WHERE pact.guild_id=$1 AND pact.id=$2`, [guildId, id])).rows[0];
+    if (!pact) throw new GameError("Belirtilen pakt bulunamadı.");
+    const members = (await pool.query<CountryDiplomacyEntry>(
+      `SELECT country.id,country.name FROM pact_memberships membership
+        JOIN countries country ON country.id=membership.country_id
+        WHERE membership.pact_id=$1 AND country.status='ACTIVE' ORDER BY country.name`, [id]
     )).rows;
     return { ...pact, members };
   },

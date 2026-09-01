@@ -1026,6 +1026,19 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
 
 async function handleAutocomplete(interaction: AutocompleteInteraction): Promise<void> {
   const focused = interaction.options.getFocused(true);
+  if (interaction.commandName === "savas-cagrisi" && focused.name === "savas") {
+    if (!interaction.guildId) { await interaction.respond([]); return; }
+    const country = await gameService.countryForUser(interaction.guildId, interaction.user.id);
+    if (!country && !isGameMaster(interaction)) { await interaction.respond([]); return; }
+    const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
+    const wars = await warDeclarationService.activeWars(interaction.guildId);
+    await interaction.respond(wars
+      .filter((war) => isGameMaster(interaction) || war.attacker_country_id === country?.id || war.defender_country_id === country?.id)
+      .filter((war) => !query || `${war.attacker_country_name} ${war.defender_country_name} ${war.war_goal}`.toLocaleLowerCase("tr-TR").includes(query))
+      .slice(0, 25)
+      .map((war) => ({ name: `${war.attacker_country_name} — ${war.defender_country_name} • ${war.war_goal}`.slice(0, 100), value: war.id })));
+    return;
+  }
   if (interaction.commandName === "hazine-tasi" && ["kaynak-sehir", "hedef-sehir"].includes(focused.name)) {
     if (!interaction.guildId) { await interaction.respond([]); return; }
     const country = await gameService.countryForUser(interaction.guildId, interaction.user.id);
@@ -1066,7 +1079,7 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
     await interaction.respond(choices.filter((choice) => !query || choice.name.toLocaleLowerCase("tr-TR").includes(query)));
     return;
   }
-  if (interaction.commandName === "savas-sonlandir" && focused.name === "savas") {
+  if (["savas-sonlandir", "savas-yapilandir"].includes(interaction.commandName) && focused.name === "savas") {
     if (!interaction.guildId || !isGameMaster(interaction)) { await interaction.respond([]); return; }
     const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
     const wars = await warDeclarationService.activeWars(interaction.guildId);

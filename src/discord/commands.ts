@@ -58,6 +58,48 @@ export const commandBuilders = [
     .addStringOption((option) => option.setName("hedef-ulke").setDescription("Savaş ilan edilecek devlet").setRequired(true))
     .addStringOption(countryOption),
   new SlashCommandBuilder()
+    .setName("pakt-savasi").setDescription("Lideri olduğunuz pakt adına bir devlete veya başka pakta savaş ilan eder")
+    .addStringOption((option) => option.setName("saldiran-pakt").setDescription("Savaşı başlatacak ve lideri olduğunuz pakt").setRequired(true))
+    .addStringOption((option) => option.setName("hedef-pakt").setDescription("Savaş ilan edilecek pakt; hedef devlet seçildiyse boş bırakın"))
+    .addStringOption((option) => option.setName("hedef-ulke").setDescription("Savaş ilan edilecek devlet; hedef pakt seçildiyse boş bırakın"))
+    .addStringOption(countryOption),
+  new SlashCommandBuilder()
+    .setName("savas-cagrisi").setDescription("Savaş lideri olarak bir devleti kendi cephenize çağırır")
+    .addStringOption((option) => option.setName("savas").setDescription("Ülke çağrılacak aktif savaş").setRequired(true).setAutocomplete(true))
+    .addStringOption((option) => option.setName("hedef-ulke").setDescription("Savaşa çağrılacak devlet").setRequired(true))
+    .addStringOption(countryOption),
+  new SlashCommandBuilder()
+    .setName("savas-yapilandir").setDescription("Yalnızca yönetici: mevcut savaşın cephe yapısını düzenler")
+    .addSubcommand((sub) => sub.setName("hedef-ayarla").setDescription("Savaş hedefini değiştirir")
+      .addStringOption((option) => option.setName("savas").setDescription("Düzenlenecek aktif savaş").setRequired(true).setAutocomplete(true))
+      .addStringOption((option) => option.setName("hedef").setDescription("Yeni savaş hedefi").setRequired(true).setMinLength(2).setMaxLength(500)))
+    .addSubcommand((sub) => sub.setName("pakt-bagla").setDescription("Bir cepheyi pakta bağlar ve aktif pakt üyelerini ekler")
+      .addStringOption((option) => option.setName("savas").setDescription("Düzenlenecek aktif savaş").setRequired(true).setAutocomplete(true))
+      .addStringOption((option) => option.setName("cephe").setDescription("Paktın bağlanacağı cephe").setRequired(true).addChoices(
+        { name: "Saldıran Cephe", value: "ATTACKER" }, { name: "Savunan Cephe", value: "DEFENDER" }
+      ))
+      .addStringOption((option) => option.setName("pakt").setDescription("Bağlanacak paktın tam adı").setRequired(true)))
+    .addSubcommand((sub) => sub.setName("pakt-kaldir").setDescription("Cephenin pakt bağını kaldırır; katılımcıları silmez")
+      .addStringOption((option) => option.setName("savas").setDescription("Düzenlenecek aktif savaş").setRequired(true).setAutocomplete(true))
+      .addStringOption((option) => option.setName("cephe").setDescription("Pakt bağı kaldırılacak cephe").setRequired(true).addChoices(
+        { name: "Saldıran Cephe", value: "ATTACKER" }, { name: "Savunan Cephe", value: "DEFENDER" }
+      )))
+    .addSubcommand((sub) => sub.setName("ulke-ekle").setDescription("Devleti doğrudan seçilen savaş cephesine ekler")
+      .addStringOption((option) => option.setName("savas").setDescription("Düzenlenecek aktif savaş").setRequired(true).setAutocomplete(true))
+      .addStringOption((option) => option.setName("cephe").setDescription("Devletin katılacağı cephe").setRequired(true).addChoices(
+        { name: "Saldıran Cephe", value: "ATTACKER" }, { name: "Savunan Cephe", value: "DEFENDER" }
+      ))
+      .addStringOption((option) => option.setName("ulke").setDescription("Cepheye eklenecek devlet").setRequired(true)))
+    .addSubcommand((sub) => sub.setName("ulke-cikar").setDescription("Lider olmayan devleti savaş cephesinden çıkarır")
+      .addStringOption((option) => option.setName("savas").setDescription("Düzenlenecek aktif savaş").setRequired(true).setAutocomplete(true))
+      .addStringOption((option) => option.setName("ulke").setDescription("Cepheden çıkarılacak devlet").setRequired(true)))
+    .addSubcommand((sub) => sub.setName("lider-degistir").setDescription("Bir cephenin savaş liderini mevcut katılımcılardan biriyle değiştirir")
+      .addStringOption((option) => option.setName("savas").setDescription("Düzenlenecek aktif savaş").setRequired(true).setAutocomplete(true))
+      .addStringOption((option) => option.setName("cephe").setDescription("Lideri değiştirilecek cephe").setRequired(true).addChoices(
+        { name: "Saldıran Cephe", value: "ATTACKER" }, { name: "Savunan Cephe", value: "DEFENDER" }
+      ))
+      .addStringOption((option) => option.setName("ulke").setDescription("Yeni savaş lideri olacak katılımcı devlet").setRequired(true))),
+  new SlashCommandBuilder()
     .setName("baris-teklifi").setDescription("Savaşta olduğunuz devlete şartlı veya tazminatlı barış teklif eder")
     .addStringOption((option) => option.setName("hedef-ulke").setDescription("Barış teklif edilecek savaş tarafı").setRequired(true))
     .addStringOption(countryOption),

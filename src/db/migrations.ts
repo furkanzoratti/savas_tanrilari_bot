@@ -1098,4 +1098,58 @@ export const migrations = [
       CREATE INDEX IF NOT EXISTS great_power_snapshots_recent_idx
         ON great_power_snapshots(guild_id,snapshot_date DESC,rank);
     `
+  },
+  {
+    version: 33,
+    name: "multi_country_war_fronts",
+    sql: `
+      ALTER TABLE state_wars ADD COLUMN IF NOT EXISTS war_goal TEXT NOT NULL DEFAULT 'Belirtilmedi';
+      ALTER TABLE state_wars ADD COLUMN IF NOT EXISTS war_type TEXT NOT NULL DEFAULT 'COUNTRY'
+        CHECK (war_type IN ('COUNTRY','PACT','FACTION'));
+      ALTER TABLE state_wars ADD COLUMN IF NOT EXISTS attacker_pact_id UUID REFERENCES diplomatic_pacts(id) ON DELETE SET NULL;
+      ALTER TABLE state_wars ADD COLUMN IF NOT EXISTS defender_pact_id UUID REFERENCES diplomatic_pacts(id) ON DELETE SET NULL;
+
+      CREATE TABLE IF NOT EXISTS state_war_participants (
+        war_id UUID NOT NULL REFERENCES state_wars(id) ON DELETE CASCADE,
+        country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        side TEXT NOT NULL CHECK (side IN ('ATTACKER','DEFENDER')),
+        join_source TEXT NOT NULL DEFAULT 'DECLARATION' CHECK (join_source IN ('DECLARATION','PACT','CALL')),
+        joined_turn INTEGER NOT NULL CHECK (joined_turn >= 0),
+        invited_by_country_id UUID REFERENCES countries(id) ON DELETE SET NULL,
+        joined_by TEXT NOT NULL,
+        joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY(war_id,country_id)
+      );
+      CREATE INDEX IF NOT EXISTS state_war_participants_country_idx
+        ON state_war_participants(country_id,war_id);
+
+      INSERT INTO state_war_participants(war_id,country_id,side,join_source,joined_turn,joined_by)
+        SELECT id,attacker_country_id,'ATTACKER','DECLARATION',started_turn,declared_by FROM state_wars
+        ON CONFLICT(war_id,country_id) DO NOTHING;
+      INSERT INTO state_war_participants(war_id,country_id,side,join_source,joined_turn,joined_by)
+        SELECT id,defender_country_id,'DEFENDER','DECLARATION',started_turn,declared_by FROM state_wars
+        ON CONFLICT(war_id,country_id) DO NOTHING;
+
+      CREATE TABLE IF NOT EXISTS state_war_invitations (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        guild_id TEXT NOT NULL REFERENCES guilds(discord_id) ON DELETE CASCADE,
+        war_id UUID NOT NULL REFERENCES state_wars(id) ON DELETE CASCADE,
+        country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        side TEXT NOT NULL CHECK (side IN ('ATTACKER','DEFENDER')),
+        invited_by_country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING','ACCEPTED','REJECTED','CANCELLED')),
+        invited_turn INTEGER NOT NULL CHECK (invited_turn >= 0),
+        responded_turn INTEGER,
+        invited_by TEXT NOT NULL,
+        responded_by TEXT,
+        channel_id TEXT,
+        message_id TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        resolved_at TIMESTAMPTZ
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS state_war_invitations_pending_unique
+        ON state_war_invitations(war_id,country_id) WHERE status='PENDING';
+      CREATE INDEX IF NOT EXISTS state_war_invitations_country_idx
+        ON state_war_invitations(country_id,status,created_at DESC);
+    `
   }] as const;
