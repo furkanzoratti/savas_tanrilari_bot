@@ -94,7 +94,7 @@ function renderMercenaryContract(contract: CountryDocument["mercenaries"][number
     .map((row) => `• **${number(row.current_quantity)}** ${SIEGE_ASSETS[row.asset_type]?.name ?? row.asset_type}`);
   const timing = contract.status === "PENDING"
     ? `Ulaşma: **Tur ${contract.arrival_turn}**`
-    : `Sözleşme sonu: **Tur ${contract.end_turn}**${contract.last_upkeep_turn === currentTurn ? " • Bu turun bakımı ödendi" : ""}`;
+    : `Sözleşme: **Feshedilene kadar**${contract.last_upkeep_turn === currentTurn ? " • Bu turun bakımı ödendi" : ""}`;
   return [
     `**${contract.companyName}** • ${mercenaryStatusLabels[contract.status] ?? contract.status}`,
     `${timing} • Bakım: **${gold(contract.turn_upkeep)}**`,

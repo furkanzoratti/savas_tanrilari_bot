@@ -34,7 +34,7 @@ describe("şehir geliştirme ve Akademi komutları", () => {
   it("yöneticiye salgın, iyileşme ve karaborsa olaylarını ayrı komut olarak sunar", () => {
     const events = commandBuilders.find((command) => command.name === "olay");
     expect(events?.options?.map((option) => option.name)).toEqual([
-      "sec", "riskler", "uygula", "sonlandir", "salgin", "salgin-iyilesme", "karaborsa"
+      "sec", "riskler", "uygula", "sonlandir", "aktif", "salgin", "salgin-iyilesme", "karaborsa"
     ]);
     expect(events?.options?.find((option) => option.name === "salgin")?.options?.find((option) => option.name === "baz-risk"))
       .toMatchObject({ required: true, min_value: 0, max_value: 100 });

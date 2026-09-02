@@ -3,15 +3,15 @@ import { MERCENARY_COMPANIES, MERCENARY_CONTRACT_LIMITS, importedMercenarySchedu
 
 describe("paralı asker sözleşmeleri", () => {
   it("ikinci turda yapılan sözleşmenin ilk bakımını üçüncü tura koyar", () => {
-    expect(mercenaryContractSchedule(2)).toEqual({ arrivalTurn: 3, endTurn: 5, firstUpkeepTurn: 3 });
+    expect(mercenaryContractSchedule(2)).toEqual({ arrivalTurn: 3, firstUpkeepTurn: 3 });
   });
 
   it("manuel devralınan şirketten ilk bakımı sonraki turda alır", () => {
-    expect(importedMercenarySchedule(8)).toEqual({ hiredTurn: 7, arrivalTurn: 8, endTurn: 10, lastUpkeepTurn: 8, firstUpkeepTurn: 9 });
+    expect(importedMercenarySchedule(8)).toEqual({ hiredTurn: 7, arrivalTurn: 8, lastUpkeepTurn: 8, firstUpkeepTurn: 9 });
   });
 
-  it("Barış Düzeninde üç sözleşme hakkı verir", () => {
-    expect(MERCENARY_CONTRACT_LIMITS.PEACE).toBe(3);
+  it("her seferberlik düzeyinde tek sözleşme hakkı verir", () => {
+    expect(MERCENARY_CONTRACT_LIMITS).toEqual({ PEACE: 1, PARTIAL: 1, GENERAL: 1 });
   });
 
   it("Alım Turunda kiralanıp iki tur sonra feshedilen şirkete iki bölümlük bakım uygular", () => {

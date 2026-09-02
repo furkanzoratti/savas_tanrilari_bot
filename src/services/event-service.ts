@@ -22,6 +22,17 @@ interface EventSettlementRow extends SettlementEventState {
   besieged: boolean;
 }
 
+
+interface ActiveSettlementRow {
+  id: string;
+  country_id: string;
+  country_name: string;
+  name: string;
+  black_market_active: boolean;
+  epidemic_active: boolean;
+  unrest_active: boolean;
+  rebellion_active: boolean;
+}
 interface EventDrawRow {
   id: string;
   guild_id: string;
@@ -91,6 +102,20 @@ export interface SettlementEventApplication {
   currentTurn: number;
   weight: number;
   drawId: string | null;
+}
+
+export interface ActiveSettlementEvent {
+  type: SettlementEventType;
+  settlementId: string;
+  settlementName: string;
+  countryId: string;
+  countryName: string;
+  startedTurn: number | null;
+}
+
+export interface ActiveSettlementEventReport {
+  currentTurn: number;
+  events: ActiveSettlementEvent[];
 }
 
 async function writeAudit(client: DbClient, guildId: string, actorId: string, action: string, settlementId: string, details: unknown): Promise<void> {
@@ -219,6 +244,50 @@ function convertDraw(row: EventDrawRow): SettlementEventDraw {
 }
 
 export const eventService = {
+  async active(input: { guildId: string }): Promise<ActiveSettlementEventReport> {
+    return withTransaction(async (client) => {
+      const guild = (await client.query<{ current_turn: number }>("SELECT current_turn FROM guilds WHERE discord_id=$1", [input.guildId])).rows[0];
+      if (!guild) throw new GameError("Sunucu oyun ayarları bulunamadı.");
+      const settlements = (await client.query<ActiveSettlementRow>(
+        `SELECT s.id,s.country_id,c.name AS country_name,s.name,
+                s.black_market_active,s.epidemic_active,s.unrest_active,s.rebellion_active
+           FROM settlements s JOIN countries c ON c.id=s.country_id
+          WHERE c.guild_id=$1 AND c.status='ACTIVE'
+            AND (s.black_market_active OR s.epidemic_active OR s.unrest_active OR s.rebellion_active)
+          ORDER BY c.name,s.name,s.id`,
+        [input.guildId]
+      )).rows;
+      if (!settlements.length) return { currentTurn: guild.current_turn, events: [] };
+
+      const history = (await client.query<{ settlement_id: string; event_type: SettlementEventType; started_turn: number }>(
+        `SELECT settlement_id,event_type,MAX(turn)::integer AS started_turn
+           FROM settlement_events
+          WHERE settlement_id=ANY($1::uuid[]) AND triggered=TRUE
+          GROUP BY settlement_id,event_type`,
+        [settlements.map((settlement) => settlement.id)]
+      )).rows;
+      const startedTurns = new Map(history.map((row) => [`${row.settlement_id}:${row.event_type}`, row.started_turn]));
+      const events: ActiveSettlementEvent[] = [];
+      for (const settlement of settlements) {
+        for (const type of Object.keys(SETTLEMENT_EVENT_TYPES) as SettlementEventType[]) {
+          if (!settlement[SETTLEMENT_EVENT_TYPES[type].stateColumn]) continue;
+          events.push({
+            type,
+            settlementId: settlement.id,
+            settlementName: settlement.name,
+            countryId: settlement.country_id,
+            countryName: settlement.country_name,
+            startedTurn: startedTurns.get(`${settlement.id}:${type}`) ?? null
+          });
+        }
+      }
+      events.sort((left, right) => left.countryName.localeCompare(right.countryName, "tr")
+        || left.settlementName.localeCompare(right.settlementName, "tr")
+        || left.type.localeCompare(right.type));
+      return { currentTurn: guild.current_turn, events };
+    });
+  },
+
   async risks(input: { guildId: string; eventType: SettlementEventType; countryId?: string | null }): Promise<SettlementEventRiskReport> {
     return withTransaction((client) => riskReport(client, input.guildId, input.eventType, input.countryId ?? null));
   },

@@ -1208,4 +1208,14 @@ export const migrations = [
       ALTER TABLE country_special_unit_unlocks ADD CONSTRAINT country_special_unit_unlocks_unit_type_check
         CHECK (unit_type IN ('legionary','hoplite','horse_archer','camel_cavalry','briton_longbow','persian_immortal','carthaginian_war_elephant','iberian_caetrati','germanic_shock_warrior'));
     `
+  },
+  {
+    version: 38,
+    name: "indefinite_mercenary_contracts",
+    sql: `
+      ALTER TABLE mercenary_contracts ALTER COLUMN end_turn DROP NOT NULL;
+      UPDATE mercenary_contracts
+         SET end_turn=NULL,updated_at=NOW()
+       WHERE status IN ('PENDING','ACTIVE','UNPAID');
+    `
   }] as const;

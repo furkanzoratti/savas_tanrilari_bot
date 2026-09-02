@@ -35,6 +35,7 @@ import { turnAnnouncement } from "./turn-announcements.js";
 import { handleBattleButton, handleBattleCommand, refreshActiveBattleCards } from "./battle-ui.js";
 import { handleCityButton, handleCityCommand, handleCityModal } from "./city-ui.js";
 import { addCountryRoleToMember, deleteCountryRole, ensureCountryRole, removeCountryRoleFromMember } from "./country-roles.js";
+import { handleSettlementEventSelect } from "./event-ui.js";
 import { handleDiplomacyButton, handleDiplomacyCommand } from "./diplomacy-ui.js";
 import { handleWarDeclarationButton, handleWarDeclarationCommand, handleWarDeclarationModal } from "./war-declaration-ui.js";
 import { mercenaryCompanyAutocompleteAllowed, mercenarySubcommandRequiresGameMaster } from "./mercenary-access.js";
@@ -105,7 +106,7 @@ async function handleMercenaryCommand(interaction: ChatInputCommandInteraction):
   if (sub === "listele") {
     const contracts = await gameService.listMercenaryContracts(country.id);
     const text = contracts.length ? contracts.map((contract) => {
-      const status = contract.status === "PENDING" ? `Yolda • Tur ${contract.arrival_turn}` : contract.status === "UNPAID" ? "Bakımı ödenmedi • hareketsiz" : `Aktif • son Tur ${contract.end_turn}`;
+      const status = contract.status === "PENDING" ? `Yolda • Tur ${contract.arrival_turn}` : contract.status === "UNPAID" ? "Bakımı ödenmedi • hareketsiz" : "Aktif • feshedilene kadar";
       return `• **${contract.companyName}** — ${contract.settlement_name}\n  ${status} • Bakım **${gold(contract.turn_upkeep)}**`;
     }).join("\n") : "Canlı paralı asker sözleşmesi bulunmuyor.";
     await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0xc59b45).setTitle(`🪙 ${country.name} • Paralı Askerler`).setDescription(text)] });
@@ -113,10 +114,7 @@ async function handleMercenaryCommand(interaction: ChatInputCommandInteraction):
   }
 
   const companyKey = interaction.options.getString("sirket", true) as MercenaryCompanyKey;
-  if (sub === "uzat") {
-    const result = await gameService.extendMercenary({ guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id, companyKey });
-    await interaction.editReply(`✅ Sözleşme **Tur ${result.endTurn}** sonuna kadar uzatıldı; **${gold(result.cost)}** ödendi.`);
-  } else if (sub === "bakim-ode") {
+  if (sub === "bakim-ode") {
     const amount = await gameService.payMercenaryUpkeep({ guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id, companyKey });
     await interaction.editReply(`✅ Gecikmiş **${gold(amount)}** bakım ödendi; şirket yeniden etkinleşti.`);
   } else if (sub === "feshet") {
@@ -915,6 +913,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
 }
 
 async function handleSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+  if (await handleSettlementEventSelect(interaction)) return;
   const [kind, countryId, settlementIdFromId] = interaction.customId.split("|");
   if (!countryId) throw new GameError("Etkileşim bilgisi bozuk.");
   await assertCountryAccess(interaction, countryId);

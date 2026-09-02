@@ -56,3 +56,7 @@ describe("yönetim komutları", () => {
     expect(command?.description).toContain("Yalnızca yönetici");
   });
 });
+  it("aktif yerleşke olayları için müdahale paneli komutunu kaydeder", () => {
+    const command = commandBuilders.find((item) => item.name === "olay");
+    expect(command?.options?.some((option) => option.name === "aktif")).toBe(true);
+  });

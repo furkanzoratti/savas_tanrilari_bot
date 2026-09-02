@@ -132,7 +132,7 @@ export function buildingPurchaseTerms(buildingType: string, targetLevel: number,
 export type MercenaryContractStatus = "PENDING" | "ACTIVE" | "UNPAID" | "ENDED" | "CANCELLED" | "DESTROYED";
 export interface MercenaryContractDocument {
   id: string; company_key: MercenaryCompanyKey; companyName: string; country_id: string; settlement_id: string;
-  settlement_name: string; status: MercenaryContractStatus; hired_turn: number; arrival_turn: number; end_turn: number;
+  settlement_name: string; status: MercenaryContractStatus; hired_turn: number; arrival_turn: number; end_turn: number | null;
   hire_cost: number; turn_upkeep: number; last_upkeep_turn: number | null; unpaid_since_turn: number | null;
   units: Array<{ unit_type: keyof typeof UNITS; initial_quantity: number; current_quantity: number }>;
   ships: Array<{ ship_type: keyof typeof SHIPS; initial_quantity: number; current_quantity: number }>;
@@ -290,7 +290,7 @@ async function collectMercenaryUpkeep(client: DbClient, guildId: string, turn: n
     `SELECT mc.id,mc.country_id,c.name AS country_name,mc.company_key,mc.turn_upkeep
        FROM mercenary_contracts mc JOIN countries c ON c.id=mc.country_id
       WHERE mc.guild_id=$1 AND c.status='ACTIVE' AND mc.status IN ('ACTIVE','UNPAID')
-        AND mc.arrival_turn<=$2 AND mc.end_turn>=$2
+        AND mc.arrival_turn<=$2
         AND COALESCE(mc.last_upkeep_turn,-1)<$2
         AND (mc.status='ACTIVE' OR mc.unpaid_since_turn=$2)
       ORDER BY c.name,mc.company_key FOR UPDATE OF mc`,
@@ -822,18 +822,16 @@ export const gameService = {
       const unavailable = await client.query("SELECT 1 FROM mercenary_contracts WHERE guild_id=$1 AND company_key=$2 AND status IN ('PENDING','ACTIVE','UNPAID') FOR UPDATE", [input.guildId, input.companyKey]);
       if (unavailable.rowCount) throw new GameError("Bu parali asker grubu halen baska bir sozlesmeye bagli.");
       const currentContracts = await loadMercenaryContracts(client, country.id);
-      const usedSlots = currentContracts.reduce((sum, contract) => sum + (MERCENARY_COMPANIES[contract.company_key]?.slotCost ?? 1), 0);
-      const slotCost = company.slotCost ?? 1;
       const slotLimit = MERCENARY_CONTRACT_LIMITS[country.mobilization];
-      if (usedSlots + slotCost > slotLimit) throw new GameError(`Sozlesme siniri asiliyor. ${country.mobilization}: ${usedSlots}/${slotLimit} hak kullaniliyor; bu grup ${slotCost} hak ister.`);
+      if (currentContracts.length >= slotLimit) throw new GameError("Her devlet aynı anda en fazla 1 canlı paralı asker sözleşmesine sahip olabilir.");
       const hasGold = Boolean((await client.query("SELECT 1 FROM settlements WHERE country_id=$1 AND resource_type='GOLD' LIMIT 1", [country.id])).rowCount);
       const cost = Math.ceil(company.hireCost * (hasGold ? 0.90 : 1));
       await adjustCountryLocalTreasuries(client, country.id, -cost);
-      const { arrivalTurn, endTurn } = mercenaryContractSchedule(guild.current_turn);
+      const { arrivalTurn } = mercenaryContractSchedule(guild.current_turn);
       const inserted = (await client.query<{ id: string }>(
-        `INSERT INTO mercenary_contracts(guild_id,company_key,country_id,settlement_id,status,hired_turn,arrival_turn,end_turn,hire_cost,turn_upkeep,created_by)
-         VALUES($1,$2,$3,$4,'PENDING',$5,$6,$7,$8,$9,$10) RETURNING id`,
-        [input.guildId,input.companyKey,country.id,settlement.id,guild.current_turn,arrivalTurn,endTurn,cost,company.turnUpkeep,input.actorId]
+        `INSERT INTO mercenary_contracts(guild_id,company_key,country_id,settlement_id,status,hired_turn,arrival_turn,hire_cost,turn_upkeep,created_by)
+         VALUES($1,$2,$3,$4,'PENDING',$5,$6,$7,$8,$9) RETURNING id`,
+        [input.guildId,input.companyKey,country.id,settlement.id,guild.current_turn,arrivalTurn,cost,company.turnUpkeep,input.actorId]
       )).rows[0]!;
       for (const [unitType, quantity] of Object.entries(company.land ?? {})) {
         await client.query("INSERT INTO mercenary_contract_units(contract_id,unit_type,initial_quantity,current_quantity) VALUES($1,$2,$3,$3)", [inserted.id,unitType,quantity]);
@@ -845,7 +843,7 @@ export const gameService = {
         await client.query("INSERT INTO mercenary_contract_assets(contract_id,asset_type,initial_quantity,current_quantity) VALUES($1,$2,$3,$3)", [inserted.id,assetType,quantity]);
       }
       await client.query("INSERT INTO transactions(country_id,turn,kind,amount,description) VALUES($1,$2,'MERCENARY_HIRE',$3,$4)", [country.id,guild.current_turn,-cost,company.name]);
-      await audit(client,input.guildId,input.actorId,"MERCENARY_HIRE","mercenary_contract",inserted.id,{companyKey:input.companyKey,cost,arrivalTurn,endTurn});
+      await audit(client,input.guildId,input.actorId,"MERCENARY_HIRE","mercenary_contract",inserted.id,{companyKey:input.companyKey,cost,arrivalTurn,indefinite:true});
       return { contract: (await loadMercenaryContracts(client,country.id)).find((contract) => contract.id===inserted.id)!, cost };
     });
   },
@@ -864,16 +862,14 @@ export const gameService = {
       const unavailable = await client.query("SELECT 1 FROM mercenary_contracts WHERE guild_id=$1 AND company_key=$2 AND status IN ('PENDING','ACTIVE','UNPAID') FOR UPDATE", [input.guildId, input.companyKey]);
       if (unavailable.rowCount) throw new GameError("Bu paralı asker grubu halen başka bir sözleşmeye bağlı.");
       const currentContracts = await loadMercenaryContracts(client, country.id);
-      const usedSlots = currentContracts.reduce((sum, contract) => sum + (MERCENARY_COMPANIES[contract.company_key]?.slotCost ?? 1), 0);
-      const slotCost = company.slotCost ?? 1;
       const slotLimit = MERCENARY_CONTRACT_LIMITS[country.mobilization];
-      if (usedSlots + slotCost > slotLimit) throw new GameError(`Sözleşme sınırı aşılıyor: ${usedSlots}/${slotLimit} hak kullanımda; bu grup ${slotCost} hak ister.`);
+      if (currentContracts.length >= slotLimit) throw new GameError("Her devlet aynı anda en fazla 1 canlı paralı asker sözleşmesine sahip olabilir.");
 
-      const { hiredTurn, arrivalTurn, endTurn, firstUpkeepTurn } = importedMercenarySchedule(guild.current_turn);
+      const { hiredTurn, arrivalTurn, firstUpkeepTurn } = importedMercenarySchedule(guild.current_turn);
       const inserted = (await client.query<{ id: string }>(
-        `INSERT INTO mercenary_contracts(guild_id,company_key,country_id,settlement_id,status,hired_turn,arrival_turn,end_turn,hire_cost,turn_upkeep,last_upkeep_turn,created_by)
-         VALUES($1,$2,$3,$4,'ACTIVE',$5,$6,$7,0,$8,$6,$9) RETURNING id`,
-        [input.guildId, input.companyKey, country.id, settlement.id, hiredTurn, arrivalTurn, endTurn, company.turnUpkeep, input.actorId]
+        `INSERT INTO mercenary_contracts(guild_id,company_key,country_id,settlement_id,status,hired_turn,arrival_turn,hire_cost,turn_upkeep,last_upkeep_turn,created_by)
+         VALUES($1,$2,$3,$4,'ACTIVE',$5,$6,0,$7,$6,$8) RETURNING id`,
+        [input.guildId, input.companyKey, country.id, settlement.id, hiredTurn, arrivalTurn, company.turnUpkeep, input.actorId]
       )).rows[0]!;
       for (const [unitType, quantity] of Object.entries(company.land ?? {})) {
         await client.query("INSERT INTO mercenary_contract_units(contract_id,unit_type,initial_quantity,current_quantity) VALUES($1,$2,$3,$3)", [inserted.id, unitType, quantity]);
@@ -885,26 +881,12 @@ export const gameService = {
         await client.query("INSERT INTO mercenary_contract_assets(contract_id,asset_type,initial_quantity,current_quantity) VALUES($1,$2,$3,$3)", [inserted.id, assetType, quantity]);
       }
       await audit(client, input.guildId, input.actorId, "MERCENARY_IMPORT", "mercenary_contract", inserted.id, {
-        companyKey: input.companyKey, cost: 0, arrivalTurn, endTurn, firstUpkeepTurn
+        companyKey: input.companyKey, cost: 0, arrivalTurn, indefinite: true, firstUpkeepTurn
       });
       return (await loadMercenaryContracts(client, country.id)).find((contract) => contract.id === inserted.id)!;
     });
   },
 
-  async extendMercenary(input: { guildId: string; actorId: string; countryId: string; companyKey: MercenaryCompanyKey }): Promise<{ cost: number; endTurn: number }> {
-    return withTransaction(async (client) => {
-      const guild=await getGuild(client,input.guildId);
-      const contract=(await client.query<{id:string;hire_cost:number;end_turn:number}>("SELECT id,hire_cost,end_turn FROM mercenary_contracts WHERE guild_id=$1 AND country_id=$2 AND company_key=$3 AND status IN ('PENDING','ACTIVE','UNPAID') FOR UPDATE",[input.guildId,input.countryId,input.companyKey])).rows[0];
-      if(!contract)throw new GameError("Etkin sozlesme bulunamadi.");
-      const cost=Math.ceil(Number(contract.hire_cost)*0.5);
-      await adjustCountryLocalTreasuries(client,input.countryId,-cost);
-      const endTurn=contract.end_turn+3;
-      await client.query("UPDATE mercenary_contracts SET end_turn=$1,updated_at=NOW() WHERE id=$2",[endTurn,contract.id]);
-      await client.query("INSERT INTO transactions(country_id,turn,kind,amount,description) VALUES($1,$2,'MERCENARY_EXTENSION',$3,$4)",[input.countryId,guild.current_turn,-cost,MERCENARY_COMPANIES[input.companyKey].name]);
-      await audit(client,input.guildId,input.actorId,"MERCENARY_EXTEND","mercenary_contract",contract.id,{cost,endTurn});
-      return {cost,endTurn};
-    });
-  },
 
   async collectAllMercenaryUpkeep(input: { guildId: string; actorId: string }): Promise<{ turn: number } & MercenaryUpkeepCollection> {
     return withTransaction(async (client) => {
@@ -926,7 +908,6 @@ export const gameService = {
       const guild=await getGuild(client,input.guildId);
       const contract=(await client.query<{id:string;turn_upkeep:number;unpaid_since_turn:number|null}>("SELECT id,turn_upkeep,unpaid_since_turn FROM mercenary_contracts WHERE guild_id=$1 AND country_id=$2 AND company_key=$3 AND status='UNPAID' FOR UPDATE",[input.guildId,input.countryId,input.companyKey])).rows[0];
       if(!contract)throw new GameError("Odenmemis bakimi bulunan sozlesme yok.");
-      if(contract.unpaid_since_turn!==guild.current_turn)throw new GameError("Bu sozlesmenin odeme suresi dolmus.");
       const amount=Number(contract.turn_upkeep);
       await adjustCountryLocalTreasuries(client,input.countryId,-amount);
       await client.query("UPDATE mercenary_contracts SET status='ACTIVE',last_upkeep_turn=$1,unpaid_since_turn=NULL,updated_at=NOW() WHERE id=$2",[guild.current_turn,contract.id]);
@@ -940,10 +921,10 @@ export const gameService = {
     return withTransaction(async (client) => {
       const guild = await getGuild(client, input.guildId);
       const contract = (await client.query<{
-        id: string; status: MercenaryContractStatus; hired_turn: number; end_turn: number;
+        id: string; status: MercenaryContractStatus; hired_turn: number;
         turn_upkeep: number; last_upkeep_turn: number | null;
       }>(
-        "SELECT id,status,hired_turn,end_turn,turn_upkeep,last_upkeep_turn FROM mercenary_contracts WHERE guild_id=$1 AND country_id=$2 AND company_key=$3 AND status IN ('PENDING','ACTIVE','UNPAID') FOR UPDATE",
+        "SELECT id,status,hired_turn,turn_upkeep,last_upkeep_turn FROM mercenary_contracts WHERE guild_id=$1 AND country_id=$2 AND company_key=$3 AND status IN ('PENDING','ACTIVE','UNPAID') FOR UPDATE",
         [input.guildId, input.countryId, input.companyKey]
       )).rows[0];
       if (!contract) throw new GameError("Etkin sözleşme bulunamadı.");
@@ -959,7 +940,7 @@ export const gameService = {
         currentTurn: guild.current_turn, acquisitionInterval: guild.acquisition_interval,
         lastUpkeepTurn: contract.last_upkeep_turn, unpaid: contract.status === "UNPAID"
       });
-      const compensation = guild.current_turn <= contract.end_turn ? prorated.amount : 0;
+      const compensation = prorated.amount;
       const chargedTurns = compensation ? prorated.chargedTurns : 0;
       if (compensation) await adjustCountryLocalTreasuries(client, input.countryId, -compensation);
       await client.query("UPDATE mercenary_contracts SET status=$1,updated_at=NOW() WHERE id=$2", [contract.status === "PENDING" ? "CANCELLED" : "ENDED", contract.id]);
@@ -1764,7 +1745,7 @@ export const gameService = {
       if (!settlement) throw new GameError("Yerleşke bulunamadı.");
       if (await settlementIsBesieged(client, settlement.id)) throw new GameError("Kuşatma altındaki yerleşke yeni kuşatma aleti üretim emri veremez.");
       if (await countryHasMaintenanceDebt(client, country.id)) throw new GameError("Ödenmemiş bakım açığı giderilmeden kuşatma aleti üretilemez.");
-      const workshop = (await client.query<{ level: number }>("SELECT level FROM buildings WHERE settlement_id=$1 AND building_type='engineering' AND status='ACTIVE'", [settlement.id])).rows[0]?.level ?? 0;
+      const workshop = (await client.query<{ level: number }>("SELECT level FROM buildings WHERE settlement_id=$1 AND building_type='engineering' AND status IN ('ACTIVE','BUILDING')", [settlement.id])).rows[0]?.level ?? 0;
       const asset = SIEGE_ASSETS[input.assetType];
       if (!asset) throw new GameError("Kuşatma aleti bulunamadı.");
       if (workshop < asset.workshop) throw new GameError(`${asset.name} için Mühendislik Atölyesi Sv${asset.workshop} gerekir.`);
@@ -1993,31 +1974,9 @@ export const gameService = {
       const mercenaryUnpaidDetails: Array<{ countryName: string; companyName: string; amount: number }> = [];
       const mercenaryEndedDetails: Array<{ countryName: string; companyName: string; reason: string }> = [];
 
-      const unpaidExpired = await client.query<{ country_name: string; company_key: MercenaryCompanyKey }>(
-        `UPDATE mercenary_contracts mc SET status='ENDED',updated_at=NOW()
-          FROM countries c
-         WHERE mc.country_id=c.id AND mc.guild_id=$1 AND mc.status='UNPAID' AND $3::boolean AND mc.unpaid_since_turn<$2
-         RETURNING c.name AS country_name,mc.company_key`, [guildId,newTurn,acquisition]
-      );
-      for (const row of unpaidExpired.rows) mercenaryEndedDetails.push({
-        countryName: row.country_name, companyName: MERCENARY_COMPANIES[row.company_key]?.name ?? row.company_key,
-        reason: "Onceki turun bakimi odenmedigi icin sozlesme feshedildi."
-      });
-
-      const naturallyEnded = await client.query<{ country_name: string; company_key: MercenaryCompanyKey }>(
-        `UPDATE mercenary_contracts mc SET status='ENDED',updated_at=NOW()
-          FROM countries c
-         WHERE mc.country_id=c.id AND mc.guild_id=$1 AND mc.status='ACTIVE' AND mc.end_turn<$2
-         RETURNING c.name AS country_name,mc.company_key`, [guildId,newTurn]
-      );
-      for (const row of naturallyEnded.rows) mercenaryEndedDetails.push({
-        countryName: row.country_name, companyName: MERCENARY_COMPANIES[row.company_key]?.name ?? row.company_key,
-        reason: "Sozlesme suresi tamamlandi."
-      });
-
       const arrived = await client.query<{ id: string; country_id: string; country_name: string; settlement_name: string; company_key: MercenaryCompanyKey; turn_upkeep: number }>(
         `UPDATE mercenary_contracts mc
-            SET status='ACTIVE',end_turn=GREATEST(mc.end_turn,$2+2),updated_at=NOW()
+            SET status='ACTIVE',updated_at=NOW()
            FROM countries c,settlements s
           WHERE mc.country_id=c.id AND mc.settlement_id=s.id AND mc.guild_id=$1
             AND mc.status='PENDING' AND mc.arrival_turn<=$2

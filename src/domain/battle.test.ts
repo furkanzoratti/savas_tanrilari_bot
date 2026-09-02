@@ -1,7 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { MAX_BOMBARDMENTS_PER_GAME_TURN, activeSiegeAssaultAssets, advantageTier, remainingBombardments, baseRetreatRate, battleEnds, commanderClashBonus, compositionTotal, engagedComposition, orderState, resolveRound, rollBattlePool, rollNavalPool, rollSiegeSupport, siegeAssaultAccess, siegeAssaultComposition, siegeDefenderCaptured, siegeDefenseModifiers, siegeLineBreaks, siegeOrderState, siegePressureAfterRound } from "./battle.js";
+import { MAX_BOMBARDMENTS_PER_GAME_TURN, activeSiegeAssaultAssets, advantageTier, remainingBombardments, baseRetreatRate, battleEnds, commanderClashBonus, compositionTotal, engagedComposition, orderState, resolveRound, rollBattlePool, rollNavalPool, rollSiegeSupport, siegeAssaultAccess, siegeAssaultComposition, siegeDefenderCaptured, siegeDefenderComposition, siegeDefenseModifiers, siegeLineBreaks, siegeOrderState, siegePressureAfterRound } from "./battle.js";
 
 describe("savaş motoru", () => {
+  it("kuşatma savunmasındaki süvarileri yalnız hesap sırasında yaya karşılıklarına dönüştürür", () => {
+    const original = { light_cavalry: 100, heavy_cavalry: 200, horse_archer: 300, camel_cavalry: 400, archer: 50 } as const;
+    expect(siegeDefenderComposition(original)).toEqual({
+      light_infantry: 100,
+      heavy_infantry: 200,
+      archer: 350,
+      spear: 400
+    });
+    expect(original.light_cavalry).toBe(100);
+  });
+
   it("atanmış Komutanın özellik puanını küçük ve sınırlı çarpışma bonusuna çevirir", () => {
     expect(commanderClashBonus(1)).toBe(1);
     expect(commanderClashBonus(2)).toBe(2);

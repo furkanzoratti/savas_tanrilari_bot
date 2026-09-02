@@ -1,10 +1,10 @@
 import {
-  ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder,
-  type ButtonInteraction, type ChatInputCommandInteraction
+  ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, StringSelectMenuBuilder,
+  type ButtonInteraction, type ChatInputCommandInteraction, type StringSelectMenuInteraction
 } from "discord.js";
 import { EVENT_COOLDOWN_TURNS, SETTLEMENT_EVENT_TYPES, type SettlementEventType } from "../domain/events.js";
 import { number } from "../domain/format.js";
-import { eventService, type SettlementEventApplication, type SettlementEventDraw, type SettlementEventRiskReport } from "../services/event-service.js";
+import { eventService, type ActiveSettlementEvent, type SettlementEventApplication, type SettlementEventDraw, type SettlementEventRiskReport } from "../services/event-service.js";
 import { gameService, GameError } from "../services/game-service.js";
 import { isGameMaster } from "./auth.js";
 
@@ -99,11 +99,48 @@ function applicationEmbed(result: SettlementEventApplication, resolved = false):
     ].join("\n"));
 }
 
+function activeEventsPanel(events: ActiveSettlementEvent[], currentTurn: number, page: number, pageCount: number) {
+  const description = events.map((event) => {
+    const definition = SETTLEMENT_EVENT_TYPES[event.type];
+    return `${definition.emoji} **${event.countryName} / ${event.settlementName}** — ${definition.label}${event.startedTurn === null ? "" : ` • Tur ${event.startedTurn}`}`;
+  }).join("\n");
+  const embed = new EmbedBuilder()
+    .setColor(0xa74c40)
+    .setTitle("🗺️ Aktif Yerleşke Olayları")
+    .setDescription(description || "Aktif yerleşke olayı bulunmuyor.")
+    .setFooter({ text: `Oyun Turu ${currentTurn} • Sayfa ${page}/${pageCount}` });
+  if (!events.length) return { embeds: [embed], components: [] };
+  const select = new StringSelectMenuBuilder()
+    .setCustomId("settlement_event_resolve")
+    .setPlaceholder("Sonlandırılacak olayı seç")
+    .addOptions(events.map((event) => ({
+      label: `${event.countryName} / ${event.settlementName}`.slice(0, 100),
+      description: `${SETTLEMENT_EVENT_TYPES[event.type].label}${event.startedTurn === null ? "" : ` • Tur ${event.startedTurn}`}`.slice(0, 100),
+      value: `${event.type}|${event.countryId}|${event.settlementId}`,
+      emoji: SETTLEMENT_EVENT_TYPES[event.type].emoji
+    })));
+  return { embeds: [embed], components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)] };
+}
+
 export async function handleSettlementEventCommand(interaction: ChatInputCommandInteraction): Promise<boolean> {
   if (interaction.commandName !== "olay" || !interaction.guildId) return false;
   const sub = interaction.options.getSubcommand();
-  if (!["sec", "riskler", "uygula", "sonlandir"].includes(sub)) return false;
+  if (!["sec", "riskler", "uygula", "sonlandir", "aktif"].includes(sub)) return false;
   if (!isGameMaster(interaction)) throw new GameError("Bu komut yalnızca oyun yöneticileri tarafından kullanılabilir.");
+
+  if (sub === "aktif") {
+    await interaction.deferReply({ ephemeral: true });
+    const report = await eventService.active({ guildId: interaction.guildId });
+    const pages: ActiveSettlementEvent[][] = [];
+    for (let index = 0; index < report.events.length; index += 25) pages.push(report.events.slice(index, index + 25));
+    if (!pages.length) pages.push([]);
+    await interaction.editReply(activeEventsPanel(pages[0]!, report.currentTurn, 1, pages.length));
+    for (let index = 1; index < pages.length; index += 1) {
+      await interaction.followUp({ ...activeEventsPanel(pages[index]!, report.currentTurn, index + 1, pages.length), ephemeral: true });
+    }
+    return true;
+  }
+
   const type = selectedType(interaction);
   const country = await optionalCountry(interaction);
 
@@ -159,5 +196,22 @@ export async function handleSettlementEventButton(interaction: ButtonInteraction
   const result = await eventService.apply({ guildId: interaction.guildId, actorId: interaction.user.id, drawId });
   await interaction.editReply({ embeds: [applicationEmbed(result)] });
   if (interaction.message.editable) await interaction.message.edit({ components: [] }).catch(() => undefined);
+  return true;
+}
+
+export async function handleSettlementEventSelect(interaction: StringSelectMenuInteraction): Promise<boolean> {
+  if (interaction.customId !== "settlement_event_resolve") return false;
+  if (!interaction.guildId || !isGameMaster(interaction)) throw new GameError("Bu olayı yalnızca oyun yöneticisi sonlandırabilir.");
+  const [typeValue, countryId, settlementId] = interaction.values[0]?.split("|") ?? [];
+  if (!typeValue || !(typeValue in SETTLEMENT_EVENT_TYPES) || !countryId || !settlementId) throw new GameError("Olay seçimi geçersiz.");
+  await interaction.deferUpdate();
+  const result = await eventService.resolve({
+    guildId: interaction.guildId,
+    actorId: interaction.user.id,
+    eventType: typeValue as SettlementEventType,
+    countryId,
+    settlementId
+  });
+  await interaction.editReply({ embeds: [applicationEmbed(result, true)], components: [] });
   return true;
 }

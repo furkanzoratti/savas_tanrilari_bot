@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { DbClient } from "../db/pool.js";
 import { pool, withTransaction } from "../db/pool.js";
 import {
-  BATTLE_TERRAINS, BATTLE_UNIT_STATS, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, activeSiegeAssaultAssets, assaultUnitTotal, baseRetreatRate, battleEnds, commanderClashBonus, compositionTotal, hasAssaultForce, orderState, resolveRound, siegeAssaultAccess, siegeAssaultComposition, siegeDefenderCaptured, siegeDefenseModifiers, siegeLineBreaks, siegeOrderState, siegePressureAfterRound,
+  BATTLE_TERRAINS, BATTLE_UNIT_STATS, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, activeSiegeAssaultAssets, assaultUnitTotal, baseRetreatRate, battleEnds, commanderClashBonus, compositionTotal, hasAssaultForce, orderState, resolveRound, siegeAssaultAccess, siegeAssaultComposition, siegeDefenderCaptured, siegeDefenderComposition, siegeDefenseModifiers, siegeLineBreaks, siegeOrderState, siegePressureAfterRound,
   rollBattlePool, rollNavalPool, rollSiegeSupport,
   type BattleComposition, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain,
   type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeComposition, type SiegeTarget, type SiegeTargets
@@ -656,7 +656,7 @@ export const battleService = {
       const maintenanceDebt = await client.query("SELECT 1 FROM settlements WHERE country_id=$1 AND local_treasury<0 LIMIT 1", [settlement.country_id]);
       if (maintenanceDebt.rowCount) throw new GameError("Ödenmemiş bakım açığı giderilmeden saha kuşatma aleti alınamaz.");
       if (input.assetType === "ram") {
-        const workshop = await client.query("SELECT 1 FROM buildings WHERE settlement_id=$1 AND building_type='engineering' AND status='ACTIVE' AND level>=1", [settlement.id]);
+        const workshop = await client.query("SELECT 1 FROM buildings WHERE settlement_id=$1 AND building_type='engineering' AND status IN ('ACTIVE','BUILDING') AND level>=1", [settlement.id]);
         if (!workshop.rowCount) throw new GameError("Koçbaşı için ödeme yerleşkesinde Mühendislik Atölyesi Sv1 gerekir.");
       }
       const resources = (await settlementResourceAccess(client, settlement.country_id)).get(settlement.id) ?? [settlement.resource_type];
@@ -837,7 +837,7 @@ export const battleService = {
         const gateAfterSupport = Math.max(0, (view.battle.gate_current_hp ?? 0) - gateDamage);
         const rollComposition = side === "A"
           ? siegeAssaultComposition(target.composition, target.support_assets, wallAfterSupport, gateAfterSupport, terrain.frontageA)
-          : target.composition;
+          : siegeDefenderComposition(target.composition);
         const restrictedSiege = wallAfterSupport > 0 && gateAfterSupport > 0;
         roll = rollBattlePool(rollComposition, frontage, undefined, restrictedSiege ? "SIEGE_RESTRICTED" : "FIELD", undefined, compositionEnabled);
         roll.clash += support.clash; roll.damage += support.damage;

@@ -133,7 +133,26 @@ export const CAVALRY_UNIT_TYPES = [
 ] as const satisfies readonly BattleUnitType[];
 
 export function assaultUnitTotal(composition: BattleComposition): number {
+
   return ASSAULT_UNIT_TYPES.reduce((sum, key) => sum + Math.max(0, composition[key] ?? 0), 0);
+}
+
+const SIEGE_DEFENDER_DISMOUNT_MAP = {
+  light_cavalry: "light_infantry",
+  heavy_cavalry: "heavy_infantry",
+  horse_archer: "archer",
+  camel_cavalry: "spear"
+} as const satisfies Partial<Record<BattleUnitType, BattleUnitType>>;
+
+export function siegeDefenderComposition(composition: BattleComposition): BattleComposition {
+  const dismounted: BattleComposition = { ...composition };
+  for (const [mountedType, infantryType] of Object.entries(SIEGE_DEFENDER_DISMOUNT_MAP) as Array<[BattleUnitType, BattleUnitType]>) {
+    const quantity = Math.max(0, composition[mountedType] ?? 0);
+    if (quantity <= 0) continue;
+    dismounted[infantryType] = (dismounted[infantryType] ?? 0) + quantity;
+    delete dismounted[mountedType];
+  }
+  return dismounted;
 }
 
 export function hasAssaultForce(composition: BattleComposition): boolean {

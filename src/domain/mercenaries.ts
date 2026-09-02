@@ -44,7 +44,7 @@ const MERCENARY_COMPANY_DEFINITIONS = {
 
 export type MercenaryCompanyKey = keyof typeof MERCENARY_COMPANY_DEFINITIONS;
 export const MERCENARY_COMPANIES: Record<MercenaryCompanyKey, MercenaryCompany> = MERCENARY_COMPANY_DEFINITIONS;
-export const MERCENARY_CONTRACT_LIMITS = { PEACE: 3, PARTIAL: 3, GENERAL: 4 } as const;
+export const MERCENARY_CONTRACT_LIMITS = { PEACE: 1, PARTIAL: 1, GENERAL: 1 } as const;
 export const MERCENARY_CATEGORY_LABELS: Record<MercenaryCategory, string> = {
   CHEAP: "Ucuz Grup", STANDARD: "Orta Sınıf", ELITE: "Seçkin Grup", SIEGE: "Kuşatma Şirketi", FLEET: "Kiralık Filo"
 };
@@ -55,13 +55,13 @@ export function mercenaryPersonnel(company: MercenaryCompany): number {
   return land + crew;
 }
 
-export function mercenaryContractSchedule(hiredTurn: number): { arrivalTurn: number; endTurn: number; firstUpkeepTurn: number } {
+export function mercenaryContractSchedule(hiredTurn: number): { arrivalTurn: number; firstUpkeepTurn: number } {
   const arrivalTurn = hiredTurn + 1;
-  return { arrivalTurn, endTurn: arrivalTurn + 2, firstUpkeepTurn: arrivalTurn };
+  return { arrivalTurn, firstUpkeepTurn: arrivalTurn };
 }
 
-export function importedMercenarySchedule(currentTurn: number): { hiredTurn: number; arrivalTurn: number; endTurn: number; lastUpkeepTurn: number; firstUpkeepTurn: number } {
-  return { hiredTurn: currentTurn - 1, arrivalTurn: currentTurn, endTurn: currentTurn + 2, lastUpkeepTurn: currentTurn, firstUpkeepTurn: currentTurn + 1 };
+export function importedMercenarySchedule(currentTurn: number): { hiredTurn: number; arrivalTurn: number; lastUpkeepTurn: number; firstUpkeepTurn: number } {
+  return { hiredTurn: currentTurn - 1, arrivalTurn: currentTurn, lastUpkeepTurn: currentTurn, firstUpkeepTurn: currentTurn + 1 };
 }
 
 export function mercenaryTerminationUpkeep(input: {
