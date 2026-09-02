@@ -128,3 +128,15 @@ describe("otuzuncu migration", () => {
     expect(migration?.sql).toContain("DEFAULT 1");
   });
 });
+
+describe("otuz altıncı migration", () => {
+  const migration = migrations.find((item) => item.version === 36);
+
+  it("yeni özel birlikleri ülke erişim kısıtına ekler", () => {
+    expect(migration?.name).toBe("expanded_country_special_unit_unlocks");
+    expect(migration?.sql).toContain("persian_immortal");
+    expect(migration?.sql).toContain("carthaginian_war_elephant");
+    expect(migration?.sql).toContain("iberian_caetrati");
+    expect(migration?.sql).toContain("germanic_shock_warrior");
+  });
+});

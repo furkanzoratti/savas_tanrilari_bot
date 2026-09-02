@@ -150,11 +150,11 @@ export function planCountryPurchases(doc: CountryDocument, config: NpcAutoPurcha
   const baseOrder = [...npcUnitOrder(doctrine, doc.country.id, doc.guild.current_turn)];
   const resolvedDoctrine = resolvedNpcDoctrine(doctrine, doc.country.id, doc.guild.current_turn);
   const preferredSpecials: Record<typeof resolvedDoctrine, readonly SpecialUnitType[]> = {
-    BALANCED: ["legionary", "hoplite", "horse_archer", "camel_cavalry", "briton_longbow"],
-    DEFENSIVE: ["hoplite", "legionary", "briton_longbow"],
-    OFFENSIVE: ["legionary", "horse_archer", "camel_cavalry"],
-    CAVALRY: ["horse_archer", "camel_cavalry"],
-    LIGHT_ARMY: ["briton_longbow", "horse_archer"]
+    BALANCED: ["legionary", "hoplite", "horse_archer", "camel_cavalry", "briton_longbow", "persian_immortal", "iberian_caetrati", "germanic_shock_warrior", "carthaginian_war_elephant"],
+    DEFENSIVE: ["hoplite", "legionary", "briton_longbow", "persian_immortal"],
+    OFFENSIVE: ["legionary", "horse_archer", "camel_cavalry", "germanic_shock_warrior", "carthaginian_war_elephant"],
+    CAVALRY: ["horse_archer", "camel_cavalry", "carthaginian_war_elephant"],
+    LIGHT_ARMY: ["briton_longbow", "horse_archer", "iberian_caetrati", "germanic_shock_warrior"]
   };
   const unlockedSpecials = preferredSpecials[resolvedDoctrine].filter((unitType) => (doc.specialUnitUnlocks ?? []).includes(unitType));
   const order: PurchasableUnitType[] = [];

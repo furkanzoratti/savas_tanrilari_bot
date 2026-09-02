@@ -18,4 +18,14 @@ describe("savaşta paralı asker kayıp kaynağı", () => {
   it("paralı asker yoksa bütün kaybı devlet ordusuna bırakır", () => {
     expect(allocateLossBySource(750, 5_000, [])).toEqual({ state: 750, mercenaries: [] });
   });
+
+  it("eşit mevcutlu iki yerleşkeye kaybı eşit dağıtır", () => {
+    expect(allocateLossBySource(500, 2_000, [
+      { contractId: "city-a", quantity: 1_000 },
+      { contractId: "city-b", quantity: 1_000 }
+    ]).mercenaries).toEqual([
+      { contractId: "city-a", loss: 250 },
+      { contractId: "city-b", loss: 250 }
+    ]);
+  });
 });

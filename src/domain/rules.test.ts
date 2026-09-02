@@ -74,8 +74,8 @@ describe("seferberlik ve bakım", () => {
   });
 
   it("konum bakımını pasif tutup seferberlik bakım çarpanını uygular", () => {
-    expect(calculateUnitUpkeep("heavy_infantry", 2_000, "GARRISON", "PEACE")).toBe(800);
-    expect(calculateUnitUpkeep("heavy_infantry", 2_000, "FIELD_HOSTILE", "GENERAL")).toBe(1_000);
+    expect(calculateUnitUpkeep("heavy_infantry", 2_000, "GARRISON", "PEACE")).toBe(900);
+    expect(calculateUnitUpkeep("heavy_infantry", 2_000, "FIELD_HOSTILE", "GENERAL")).toBe(1_125);
     expect(calculateShipUpkeep("trireme", 3, "ACTIVE", "PARTIAL")).toBe(600);
   });
 

@@ -87,8 +87,8 @@ export function formableModifiers(key: FormableCountryKey | null | undefined): F
   return key ? FORMABLE_COUNTRIES[key]?.modifiers ?? {} : {};
 }
 
-const infantry = new Set(["light_infantry", "slinger", "spear", "archer", "heavy_infantry", "legionary", "hoplite", "briton_longbow"]);
-const cavalry = new Set(["light_cavalry", "heavy_cavalry", "horse_archer", "camel_cavalry"]);
+const infantry = new Set(["light_infantry", "slinger", "spear", "archer", "heavy_infantry", "legionary", "hoplite", "briton_longbow", "persian_immortal", "iberian_caetrati", "germanic_shock_warrior"]);
+const cavalry = new Set(["light_cavalry", "heavy_cavalry", "horse_archer", "camel_cavalry", "carthaginian_war_elephant"]);
 
 export function formableUnitDiscount(key: FormableCountryKey | null | undefined, unitType: string): number {
   const modifier = formableModifiers(key);

@@ -5,7 +5,7 @@ import { settlementTrainingCapacity } from "./mobilization.js";
 
 describe("güncel market ve seferberlik kuralları", () => {
   it("kesinleşen birlik ve gözcü fiyatlarını kullanır", () => {
-    expect(UNITS.heavy_infantry).toEqual(expect.objectContaining({ price: 4_000, upkeep: 400 }));
+    expect(UNITS.heavy_infantry).toEqual(expect.objectContaining({ price: 4_500, upkeep: 450 }));
     expect(UNITS.observer).toEqual(expect.objectContaining({ price: 500, upkeep: 100 }));
   });
 

@@ -72,10 +72,12 @@ ${accessNote}` }
   const rolls = view.rolls.map((roll) => {
     const actor = `<@${roll.roller_user_id}>${roll.is_proxy ? " (DM vekili)" : ""}`;
     const structureDamage = `${roll.wall_damage ? ` • Sur Hasarı **${roll.wall_damage}**` : ""}${roll.gate_damage ? ` • Kapı Hasarı **${roll.gate_damage}**` : ""}`;
+    const counter = roll.detail?.__spear_cavalry;
+    const counterSummary = counter?.matched ? `\n↳ **Mızrak Karşılığı:** ${number(counter.matched)} süvari eşleşti • +${number(counter.clashBonus ?? 0)} Çarpışma • +${number(counter.antiCavalryDamage ?? 0)} süvariye özel Hasar` : "";
     if (view.battle.terrain === "SIEGE" && roll.side_key === "B") {
       return `**${view.sides.B.country_name} — Ham Zar:** Çarpışma **${roll.clash_total}** • Hasar **${roll.damage_total}** • ${actor}\n↳ **Tahkimat Sonrası:** Çarpışma **${Math.ceil(roll.clash_total * activeDefense.defenderClash)}** (×${factor(activeDefense.defenderClash)}) • Hasar **${Math.ceil(roll.damage_total * activeDefense.defenderDamage)}** (×${factor(activeDefense.defenderDamage)})`;
     }
-    return `**${view.sides[roll.side_key].country_name}:** Çarpışma **${roll.clash_total}** • Hasar **${roll.damage_total}**${structureDamage} • ${actor}`;
+    return `**${view.sides[roll.side_key].country_name}:** Çarpışma **${roll.clash_total}** • Hasar **${roll.damage_total}**${structureDamage} • ${actor}${counterSummary}`;
   }).join("\n");
   if (rolls) embed.addFields({ name: "🎲 Açık Zar Kayıtları", value: rolls });
   if (roundResult) {
@@ -208,7 +210,11 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
         heavy_cavalry: interaction.options.getInteger("agir-suvari", true), militia: interaction.options.getInteger("milis") ?? 0,
         legionary: interaction.options.getInteger("lejyoner") ?? 0, hoplite: interaction.options.getInteger("hoplit") ?? 0,
         horse_archer: interaction.options.getInteger("atli-okcu") ?? 0, camel_cavalry: interaction.options.getInteger("deve-suvarisi") ?? 0,
-        briton_longbow: interaction.options.getInteger("briton-uzun-yayci") ?? 0
+        briton_longbow: interaction.options.getInteger("briton-uzun-yayci") ?? 0,
+        persian_immortal: interaction.options.getInteger("pers-olumsuzleri") ?? 0,
+        carthaginian_war_elephant: interaction.options.getInteger("kartaca-savas-fili") ?? 0,
+        iberian_caetrati: interaction.options.getInteger("iber-caetratileri") ?? 0,
+        germanic_shock_warrior: interaction.options.getInteger("cermen-sok-savascisi") ?? 0
       } });
     await interaction.reply({ content: `✅ ${side} tarafının bütün kara kadrosu tek işlemde kaydedildi. Açık toplam: **${number(view.sides[side].initial_total)}**`, ephemeral: true });
   } else if (sub === "gemi-ayarla") {

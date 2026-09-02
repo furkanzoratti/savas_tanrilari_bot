@@ -1164,4 +1164,22 @@ export const migrations = [
       UPDATE battles SET assault_revealed=TRUE
         WHERE terrain='SIEGE' AND public_message_id IS NOT NULL AND siege_phase='ASSAULT';
     `
+  },
+  {
+    version: 35,
+    name: "scheduled_army_composition_activation",
+    sql: `
+      ALTER TABLE guilds ADD COLUMN IF NOT EXISTS army_composition_activation_turn INTEGER;
+      UPDATE guilds SET army_composition_activation_turn=current_turn+3 WHERE army_composition_activation_turn IS NULL;
+      ALTER TABLE guilds ALTER COLUMN army_composition_activation_turn SET DEFAULT 4;
+    `
+  },
+  {
+    version: 36,
+    name: "expanded_country_special_unit_unlocks",
+    sql: `
+      ALTER TABLE country_special_unit_unlocks DROP CONSTRAINT IF EXISTS country_special_unit_unlocks_unit_type_check;
+      ALTER TABLE country_special_unit_unlocks ADD CONSTRAINT country_special_unit_unlocks_unit_type_check
+        CHECK (unit_type IN ('legionary','hoplite','horse_archer','camel_cavalry','briton_longbow','persian_immortal','carthaginian_war_elephant','iberian_caetrati','germanic_shock_warrior'));
+    `
   }] as const;

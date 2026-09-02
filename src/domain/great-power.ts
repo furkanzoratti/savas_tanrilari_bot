@@ -18,7 +18,11 @@ export const UNIT_POWER: Record<keyof typeof UNITS, number> = {
   briton_longbow: 2.60,
   camel_cavalry: 2.80,
   legionary: 3.00,
-  horse_archer: 3.20
+  horse_archer: 3.20,
+  persian_immortal: 3.10,
+  carthaginian_war_elephant: 4.40,
+  iberian_caetrati: 2.10,
+  germanic_shock_warrior: 2.80
 };
 
 export const SHIP_POWER: Record<keyof typeof SHIPS, number> = {

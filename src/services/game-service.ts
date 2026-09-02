@@ -1042,7 +1042,7 @@ export const gameService = {
     });
   },
 
-  async transferSettlement(input: { guildId: string; actorId: string; sourceCountryId: string; targetCountryId: string; settlementId: string }): Promise<{ settlementName: string; sourceName: string; targetName: string; cancelledRecruitmentOrders: number; endedTrades: number; enslavedGarrison: number; newGarrisonPersonnel: number; newGarrisonCost: number; newGarrisonCompletionTurn: number | null }> {
+  async transferSettlement(input: { guildId: string; actorId: string; sourceCountryId: string; targetCountryId: string; settlementId: string }): Promise<{ settlementName: string; sourceName: string; targetName: string; cancelledRecruitmentOrders: number; endedTrades: number; enslavedGarrison: number; removedArmyPersonnel: number; removedShips: number; removedSiegeAssets: number; destroyedMercenaryContracts: number; newGarrisonPersonnel: number; newGarrisonCost: number; newGarrisonCompletionTurn: number | null }> {
     return withTransaction(async (client) => {
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`turn:${input.guildId}`]);
       if (input.sourceCountryId === input.targetCountryId) throw new GameError("Kaynak ve hedef ülke aynı olamaz.");
@@ -1078,20 +1078,47 @@ export const gameService = {
       const remainingGarrison = remainingGarrisonRows.reduce((sum, row) => sum + Number(row.quantity), 0);
       const enslavedExistingGarrison = Math.min(Number(settlement.population), remainingGarrison);
       const enslavedGarrison = enslavedExistingGarrison + cancelledGarrisonTrainees;
-      await client.query("DELETE FROM unit_stacks WHERE settlement_id=$1 AND force_type='GARRISON'", [settlement.id]);
+      const removedStacks = (await client.query<{ quantity: number; force_type: "ARMY" | "GARRISON" }>(
+        "DELETE FROM unit_stacks WHERE settlement_id=$1 RETURNING quantity,force_type", [settlement.id]
+      )).rows;
+      const removedArmyPersonnel = removedStacks
+        .filter((row) => row.force_type === "ARMY")
+        .reduce((sum, row) => sum + Number(row.quantity), 0);
+      const removedShips = (await client.query<{ quantity: number }>(
+        "DELETE FROM naval_units WHERE settlement_id=$1 RETURNING quantity", [settlement.id]
+      )).rows.reduce((sum, row) => sum + Number(row.quantity), 0);
+      const removedSiegeAssets = (await client.query<{ quantity: number }>(
+        "DELETE FROM siege_assets WHERE settlement_id=$1 RETURNING quantity", [settlement.id]
+      )).rows.reduce((sum, row) => sum + Number(row.quantity), 0);
+      const mercenaryContracts = (await client.query<{ id: string }>(
+        "SELECT id FROM mercenary_contracts WHERE settlement_id=$1 AND status IN ('PENDING','ACTIVE','UNPAID') FOR UPDATE", [settlement.id]
+      )).rows;
+      if (mercenaryContracts.length) {
+        const contractIds = mercenaryContracts.map((contract) => contract.id);
+        await client.query("UPDATE mercenary_contract_units SET current_quantity=0 WHERE contract_id=ANY($1::uuid[])", [contractIds]);
+        await client.query("UPDATE mercenary_contract_ships SET current_quantity=0 WHERE contract_id=ANY($1::uuid[])", [contractIds]);
+        await client.query("UPDATE mercenary_contract_assets SET current_quantity=0 WHERE contract_id=ANY($1::uuid[])", [contractIds]);
+        await client.query("UPDATE mercenary_contracts SET status='DESTROYED',updated_at=NOW() WHERE id=ANY($1::uuid[])", [contractIds]);
+      }
       await client.query(
         "UPDATE settlements SET country_id=$1,is_conquered=TRUE,conquered_turn=$2,garrison_level=0,population=GREATEST(0,population-$3),slave_population=slave_population+$4 WHERE id=$5",
         [target.id, guild.current_turn, enslavedExistingGarrison, enslavedGarrison, settlement.id]
       );
-      await client.query("UPDATE siege_assets SET country_id=$1 WHERE settlement_id=$2", [target.id, settlement.id]);
       const newGarrison = await scheduleMandatoryGarrisonReplenishment(client, { settlementId: settlement.id, currentTurn: guild.current_turn, reason: "CONQUEST" });
       await syncCountryTreasury(client, source.id);
       await syncCountryTreasury(client, target.id);
       await audit(client, input.guildId, input.actorId, "SETTLEMENT_TRANSFER", "settlement", settlement.id, {
         fromCountryId: source.id, toCountryId: target.id, cancelledRecruitmentOrders: activeOrders.rows.length, cancelledNavalOrders: cancelledNaval.rowCount ?? 0, cancelledSiegeOrders: cancelledSiege.rowCount ?? 0, endedTrades: trades.rowCount ?? 0, conqueredTurn: guild.current_turn,
-        enslavedGarrison, newGarrisonPersonnel: newGarrison?.personnel ?? 0, newGarrisonCost: newGarrison?.cost ?? 0, newGarrisonCompletionTurn: newGarrison?.completionTurn ?? null
+        enslavedGarrison, removedArmyPersonnel, removedShips, removedSiegeAssets, destroyedMercenaryContracts: mercenaryContracts.length,
+        newGarrisonPersonnel: newGarrison?.personnel ?? 0, newGarrisonCost: newGarrison?.cost ?? 0, newGarrisonCompletionTurn: newGarrison?.completionTurn ?? null
       });
-      return { settlementName: settlement.name, sourceName: source.name, targetName: target.name, cancelledRecruitmentOrders: activeOrders.rows.length, endedTrades: trades.rowCount ?? 0, enslavedGarrison, newGarrisonPersonnel: newGarrison?.personnel ?? 0, newGarrisonCost: newGarrison?.cost ?? 0, newGarrisonCompletionTurn: newGarrison?.completionTurn ?? null };
+      return {
+        settlementName: settlement.name, sourceName: source.name, targetName: target.name,
+        cancelledRecruitmentOrders: activeOrders.rows.length, endedTrades: trades.rowCount ?? 0, enslavedGarrison,
+        removedArmyPersonnel, removedShips, removedSiegeAssets, destroyedMercenaryContracts: mercenaryContracts.length,
+        newGarrisonPersonnel: newGarrison?.personnel ?? 0, newGarrisonCost: newGarrison?.cost ?? 0,
+        newGarrisonCompletionTurn: newGarrison?.completionTurn ?? null
+      };
     });
   },
   async document(countryId: string): Promise<CountryDocument> {
