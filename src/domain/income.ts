@@ -60,6 +60,7 @@ export function calculateCategorizedIncome(input: {
   slavePopulation?: number;
   activePolicies?: readonly CityPolicyKey[];
   assignedMerchant?: boolean;
+  merchantSkillBonus?: number;
   formableKey?: FormableCountryKey | null;
 }): { gross: IncomeBreakdown; payable: IncomeBreakdown; buildingUpkeep: number; buildingBonuses: IncomeBreakdown } {
   const resources = input.resources ?? [];
@@ -96,7 +97,10 @@ export function calculateCategorizedIncome(input: {
       const rates = formable.slaveCampRates ?? [0.15, 0.30, 0.50];
       gross.building += Math.floor(Math.max(0, input.slavePopulation ?? 0) * (rates[building.level - 1] ?? 0));
     }
-    if (building.buildingType === "agora" && building.level >= 2 && input.assignedMerchant) globalIncomePercent += formable.academyMerchantAgoraBonus ?? 0.10;
+    if (building.buildingType === "agora" && building.level >= 2 && input.assignedMerchant) {
+      const skillIncomePercent = Math.max(0, Math.floor(input.merchantSkillBonus ?? 0)) * 0.02;
+      globalIncomePercent += (formable.academyMerchantAgoraBonus ?? 0.10) + skillIncomePercent;
+    }
     if (resources.includes("GLASS") && ["healer", "aqueduct"].includes(building.buildingType)) gross.building += 100;
     if (resources.includes("AMBER") && building.buildingType === "pantheon") gross.building += 300;
   }

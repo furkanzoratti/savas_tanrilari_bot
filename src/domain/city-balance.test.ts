@@ -64,6 +64,19 @@ describe("yerleşke geliştirme ve politika dengesi", () => {
     expect(incomeTotal(result.gross)).toBe(3_300);
   });
 
+  it("Tüccarın her özellik puanını Agora gelirine iki yüzde puan ekler", () => {
+    const result = calculateCategorizedIncome({
+      ...base,
+      taxIncome: 1_000,
+      landTradeIncome: 1_000,
+      buildings: [{ buildingType: "agora", level: 2 }],
+      assignedMerchant: true,
+      merchantSkillBonus: 1
+    });
+    expect(result.gross.building).toBe(1_360);
+    expect(incomeTotal(result.gross)).toBe(3_360);
+  });
+
   it("Tersane Sv3 bonusunu yalnızca deniz ticaretine uygular", () => {
     const result = calculateCategorizedIncome({
       ...base,

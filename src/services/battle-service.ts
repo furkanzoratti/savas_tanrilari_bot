@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { DbClient } from "../db/pool.js";
 import { pool, withTransaction } from "../db/pool.js";
 import {
-  BATTLE_TERRAINS, BATTLE_UNIT_STATS, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, activeSiegeAssaultAssets, assaultUnitTotal, baseRetreatRate, battleEnds, compositionTotal, hasAssaultForce, orderState, resolveRound, siegeAssaultAccess, siegeAssaultComposition, siegeDefenderCaptured, siegeDefenseModifiers, siegeLineBreaks, siegeOrderState, siegePressureAfterRound,
+  BATTLE_TERRAINS, BATTLE_UNIT_STATS, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, activeSiegeAssaultAssets, assaultUnitTotal, baseRetreatRate, battleEnds, commanderClashBonus, compositionTotal, hasAssaultForce, orderState, resolveRound, siegeAssaultAccess, siegeAssaultComposition, siegeDefenderCaptured, siegeDefenseModifiers, siegeLineBreaks, siegeOrderState, siegePressureAfterRound,
   rollBattlePool, rollNavalPool, rollSiegeSupport,
   type BattleComposition, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain,
   type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeComposition, type SiegeTarget, type SiegeTargets
@@ -55,7 +55,7 @@ export interface BattleRow {
 export interface BattleRollRow {
   side_key: BattleSideKey; roller_user_id: string; clash_total: number; damage_total: number;
   is_proxy: boolean; manual: boolean; wall_damage: number; gate_damage: number;
-  detail: { __spear_cavalry?: { antiCavalryDamage?: number; clashBonus?: number; matched?: number } } | null;
+  detail: { __spear_cavalry?: { antiCavalryDamage?: number; clashBonus?: number; matched?: number }; __commander?: { clash?: number } } | null;
 }
 
 export interface CasualtyApplication {
@@ -805,6 +805,16 @@ export const battleService = {
       if (inactiveMercenary.rowCount) throw new GameError("Bu taraftaki bir paralı asker şirketinin bakımı ödenmedi veya sözleşmesi etkin değil; savaş zarı atılamaz.");
       const terrain = BATTLE_TERRAINS[view.battle.terrain];
       const frontage = side === "A" ? terrain.frontageA : terrain.frontageB;
+      const commanderSkill = view.battle.terrain === "NAVAL" ? 0 : Number((await client.query<{ skill_bonus: number }>(
+        `SELECT COALESCE(MAX(cc.skill_bonus),0)::integer AS skill_bonus
+           FROM country_characters cc
+          WHERE cc.role='COMMANDER' AND cc.assignment='CURIA'
+            AND cc.country_id IN (
+              SELECT country_id FROM battle_side_participants WHERE battle_id=$1 AND side_key=$2
+              UNION SELECT country_id FROM battle_sides WHERE battle_id=$1 AND side_key=$2
+            )`, [active.id, side]
+      )).rows[0]?.skill_bonus ?? 0);
+      const commanderBonus = commanderClashBonus(commanderSkill);
       let wallDamage = 0, gateDamage = 0;
       const activationTurn = view.battle.army_composition_activation_turn;
       const compositionEnabled = activationTurn !== null && activationTurn !== undefined && (view.battle.game_turn ?? 0) >= activationTurn;
@@ -846,11 +856,13 @@ export const battleService = {
         if (roll.antiCavalryDamage !== undefined) roll.antiCavalryDamage = Math.ceil(roll.antiCavalryDamage * 1.10);
         if (roll.counter) roll.counter = { ...roll.counter, antiCavalryDamage: roll.antiCavalryDamage ?? 0 };
       }
+      if (commanderBonus > 0) roll.clash += commanderBonus;
       const proxy = input.isGameMaster && target.controller === "PLAYERS" && !member;
       const rollDetail = {
         ...roll.detail,
         ...(roll.composition ? { __composition: roll.composition } : {}),
-        ...(roll.counter ? { __spear_cavalry: roll.counter } : {})
+        ...(roll.counter ? { __spear_cavalry: roll.counter } : {}),
+        ...(commanderBonus > 0 ? { __commander: { engaged: 0, clash: commanderBonus, damage: 0 } } : {})
       };
       await client.query(`INSERT INTO battle_rolls(battle_id,round_number,side_key,roller_user_id,clash_total,damage_total,wall_damage,gate_damage,detail,is_proxy,manual)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,false)`, [active.id, active.round_number, side, input.actorId, roll.clash, roll.damage, wallDamage, gateDamage, JSON.stringify(rollDetail), proxy]);

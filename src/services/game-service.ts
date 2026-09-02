@@ -65,7 +65,7 @@ export interface CountryCharacter {
 }
 export interface AcademyTrainingSession {
   id: string; country_id: string; settlement_id: string; academy_level: number;
-  acquisition_turn: number; roll_sides: 20 | 30; roll_value: number | null;
+  acquisition_turn: number; roll_sides: 20 | 30 | 40; roll_value: number | null;
   excluded_role: CharacterRole | null; selected_role: CharacterRole | null;
   result_role: CharacterRole | null; skill_bonus: number;
   status: "PENDING_ROLL" | "AWAITING_NAME" | "COMPLETED" | "CANCELLED";
@@ -181,6 +181,7 @@ export interface CountryDocument {
     starvationBonus: number;
     temporaryMilitia: number;
     assignedMerchant: boolean;
+    merchantSkillBonus: number;
     policies: SettlementPolicyRow[];
     effectiveResources: ResourceType[];
     buildings: BuildingRow[];
@@ -1209,7 +1210,7 @@ export const gameService = {
           .map((building) => ({ buildingType: building.building_type, level: building.level }));
         const settlementPolicies = policies.filter((policy) => policy.settlement_id === settlement.id);
         const activePolicies = activePolicyKeys(settlementPolicies);
-        const assignedMerchant = characters.some((character) => character.assigned_settlement_id === settlement.id && character.assignment === "AGORA" && character.role === "MERCHANT");
+        const assignedMerchant = characters.find((character) => character.assigned_settlement_id === settlement.id && character.assignment === "AGORA" && character.role === "MERCHANT");
         const agreementBonus = tradeBonuses.get(settlement.id) ?? { land: 0, sea: 0 };
             const effectiveResources = resourceAccess.get(settlement.id) ?? [settlement.resource_type];
         const economy = calculateCategorizedIncome({
@@ -1226,7 +1227,8 @@ export const gameService = {
           resources: effectiveResources,
           slavePopulation: settlement.slave_population,
           activePolicies,
-          assignedMerchant,
+          assignedMerchant: Boolean(assignedMerchant),
+          merchantSkillBonus: assignedMerchant?.skill_bonus ?? 0,
           formableKey: country.active_formable_key
         });
         const incomePenalty = incomePenalties.find((penalty) => penalty.settlement_id === settlement.id) ?? null;
@@ -1280,7 +1282,8 @@ export const gameService = {
           unrestRisk: settlementUnrestChance(activeBuildings, effectiveResources, activePolicies, country.active_formable_key),
           starvationBonus: settlementStarvationBonus(activeBuildings, activePolicies, country.active_formable_key),
           temporaryMilitia: activePolicies.includes("WAR_PREPARATION") ? (formableModifiers(country.active_formable_key).warPreparationMilitia ?? Math.floor(500 * (formableModifiers(country.active_formable_key).policyMilitiaMultiplier ?? 1))) : 0,
-          assignedMerchant,
+          assignedMerchant: Boolean(assignedMerchant),
+          merchantSkillBonus: assignedMerchant?.skill_bonus ?? 0,
           policies: settlementPolicies,
           effectiveResources,
           buildings: settlementBuildings,
@@ -1643,7 +1646,7 @@ export const gameService = {
   async purchaseUnits(input: { guildId: string; actorId: string; countryId: string; settlementId: string; unitType: keyof typeof UNITS; quantity: number }): Promise<{ cost: number; waves: Array<{ dueTurn: number; quantity: number }> }> {
     if (input.unitType === "observer") throw new GameError("Gözcü Birliği için ayrı Gözcü Alımı kullanılmalıdır.");
     if (input.unitType === "militia") throw new GameError("Milis marketten satın alınamaz; yalnızca şehir politikalarıyla oluşturulabilir.");
-    if (input.quantity < 1_000 || input.quantity % 1_000 !== 0) throw new GameError("Asker alımı en az 1.000 kişi ve 1.000'in katları hâlinde yapılmalıdır.");
+    if (input.quantity < 100 || input.quantity % 100 !== 0) throw new GameError("Asker alımı en az 100 kişi ve 100'ün katları hâlinde yapılmalıdır.");
     return withTransaction(async (client) => {
       const guild = await getGuild(client, input.guildId);
       if (!isAcquisitionTurn(guild.current_turn, guild.acquisition_interval)) throw new GameError("Asker alımı yalnızca Alım Turunda yapılabilir.");
@@ -2159,7 +2162,7 @@ export const gameService = {
             const buildings = (await client.query<BuildingRow>("SELECT * FROM buildings WHERE settlement_id=$1", [settlement.id])).rows;
             const active = buildings.filter((b) => b.status === "ACTIVE" && b.level > 0).map((b) => ({ buildingType: b.building_type, level: b.level }));
             const activePolicies = activePolicyKeys((await client.query<SettlementPolicyRow>("SELECT * FROM settlement_policies WHERE settlement_id=$1 AND status='ACTIVE'", [settlement.id])).rows);
-            const assignedMerchant = Boolean((await client.query("SELECT 1 FROM country_characters WHERE assigned_settlement_id=$1 AND assignment='AGORA' AND role='MERCHANT' LIMIT 1", [settlement.id])).rowCount);
+            const assignedMerchant = (await client.query<{ skill_bonus: number }>("SELECT skill_bonus FROM country_characters WHERE assigned_settlement_id=$1 AND assignment='AGORA' AND role='MERCHANT' LIMIT 1", [settlement.id])).rows[0];
             const agreementBonus = tradeBonuses.get(settlement.id) ?? { land: 0, sea: 0 };
             const effectiveResources = resourceAccess.get(settlement.id) ?? [settlement.resource_type];
             const economy = calculateCategorizedIncome({
@@ -2176,7 +2179,8 @@ export const gameService = {
               resources: effectiveResources,
               slavePopulation: settlement.slave_population,
               activePolicies,
-              assignedMerchant,
+              assignedMerchant: Boolean(assignedMerchant),
+              merchantSkillBonus: assignedMerchant?.skill_bonus ?? 0,
               formableKey: country.active_formable_key
             });
             const popGain = applyFormablePopulationModifiers(calculatePopulationGain({ basePopulationGrowth: settlement.base_population_growth, buildings: active, ruinStage: settlement.ruin_stage, mobilization: country.mobilization, resources: effectiveResources }), settlement.ruin_stage, country.active_formable_key);

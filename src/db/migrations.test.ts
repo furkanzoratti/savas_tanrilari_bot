@@ -15,6 +15,17 @@ describe("dokuzuncu migration", () => {
   });
 });
 
+describe("otuz yedinci migration", () => {
+  const migration = migrations.find((item) => item.version === 37);
+
+  it("Diplomat rolünü ve bütün yeni özel birlik izinlerini güvenceye alır", () => {
+    expect(migration?.name).toBe("academy_diplomats_and_special_unit_repair");
+    expect(migration?.sql).toContain("'SPY','MERCHANT','COMMANDER','DIPLOMAT'");
+    expect(migration?.sql).toContain("roll_sides IN (20,30,40)");
+    expect(migration?.sql).toContain("carthaginian_war_elephant");
+  });
+});
+
 describe("on üçüncü migration", () => {
   const migration = migrations.find((item) => item.version === 13);
 

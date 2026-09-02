@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { MAX_BOMBARDMENTS_PER_GAME_TURN, activeSiegeAssaultAssets, advantageTier, remainingBombardments, baseRetreatRate, battleEnds, compositionTotal, engagedComposition, orderState, resolveRound, rollBattlePool, rollNavalPool, rollSiegeSupport, siegeAssaultAccess, siegeAssaultComposition, siegeDefenderCaptured, siegeDefenseModifiers, siegeLineBreaks, siegeOrderState, siegePressureAfterRound } from "./battle.js";
+import { MAX_BOMBARDMENTS_PER_GAME_TURN, activeSiegeAssaultAssets, advantageTier, remainingBombardments, baseRetreatRate, battleEnds, commanderClashBonus, compositionTotal, engagedComposition, orderState, resolveRound, rollBattlePool, rollNavalPool, rollSiegeSupport, siegeAssaultAccess, siegeAssaultComposition, siegeDefenderCaptured, siegeDefenseModifiers, siegeLineBreaks, siegeOrderState, siegePressureAfterRound } from "./battle.js";
 
 describe("savaş motoru", () => {
+  it("atanmış Komutanın özellik puanını küçük ve sınırlı çarpışma bonusuna çevirir", () => {
+    expect(commanderClashBonus(1)).toBe(1);
+    expect(commanderClashBonus(2)).toBe(2);
+    expect(commanderClashBonus(99)).toBe(3);
+  });
+
   it("cephe kapasitesini aşan orduyu gizli olarak ölçekler", () => {
     const engaged = engagedComposition({ heavy_infantry: 20_000, archer: 20_000 }, 30_000);
     expect(compositionTotal(engaged)).toBe(30_000);

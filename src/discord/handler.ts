@@ -960,7 +960,7 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
   } else if (kind === "uc" && settlementIdFromId) {
     const unitType = interaction.values[0]!;
     const modal = new ModalBuilder().setCustomId(`um|${countryId}|${settlementIdFromId}|${unitType}`).setTitle("Asker Alımı");
-    modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("quantity").setLabel("Asker sayısı — 1.000'in katı").setPlaceholder("Örn. 2000").setStyle(TextInputStyle.Short).setRequired(true)));
+    modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("quantity").setLabel("Asker sayısı — 100'ün katı").setPlaceholder("Örn. 500").setStyle(TextInputStyle.Short).setRequired(true)));
     await interaction.showModal(modal);
   } else if (kind === "ss") {
     const settlementId = interaction.values[0]!;

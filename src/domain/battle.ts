@@ -32,6 +32,10 @@ export const SIEGE_ASSAULT_FRONTAGE = 15_000;
 export const LADDER_GROUP_ASSAULT_CAPACITY = 1_000;
 export const SIEGE_TOWER_ASSAULT_CAPACITY = 3_000;
 
+export function commanderClashBonus(skillBonus: number): number {
+  return Math.min(3, Math.max(0, Math.floor(skillBonus)));
+}
+
 export const BATTLE_UNIT_STATS: Record<BattleUnitType, {
   label: string; clashDice: number; clashSides: number; damageDice: number; damageSides: number; durability: 1 | 2 | 3;
 }> = {

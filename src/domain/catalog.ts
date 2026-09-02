@@ -15,7 +15,8 @@ export const MAX_BUILDING_COST_DISCOUNT = 0.30;
 export const CHARACTER_ROLES: Record<CharacterRole, { label: string; emoji: string }> = {
   SPY: { label: "Casus", emoji: "🕵️" },
   MERCHANT: { label: "Tüccar", emoji: "💰" },
-  COMMANDER: { label: "Komutan", emoji: "⚔️" }
+  COMMANDER: { label: "Komutan", emoji: "⚔️" },
+  DIPLOMAT: { label: "Diplomat", emoji: "🤝" }
 };
 
 export const CITY_POLICIES = {

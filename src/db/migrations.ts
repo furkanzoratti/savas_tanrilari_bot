@@ -1182,4 +1182,30 @@ export const migrations = [
       ALTER TABLE country_special_unit_unlocks ADD CONSTRAINT country_special_unit_unlocks_unit_type_check
         CHECK (unit_type IN ('legionary','hoplite','horse_archer','camel_cavalry','briton_longbow','persian_immortal','carthaginian_war_elephant','iberian_caetrati','germanic_shock_warrior'));
     `
+  },
+  {
+    version: 37,
+    name: "academy_diplomats_and_special_unit_repair",
+    sql: `
+      ALTER TABLE country_characters DROP CONSTRAINT IF EXISTS country_characters_role_check;
+      ALTER TABLE country_characters ADD CONSTRAINT country_characters_role_check
+        CHECK (role IN ('SPY','MERCHANT','COMMANDER','DIPLOMAT'));
+
+      ALTER TABLE academy_training_sessions DROP CONSTRAINT IF EXISTS academy_training_sessions_roll_sides_check;
+      ALTER TABLE academy_training_sessions ADD CONSTRAINT academy_training_sessions_roll_sides_check
+        CHECK (roll_sides IN (20,30,40));
+      ALTER TABLE academy_training_sessions DROP CONSTRAINT IF EXISTS academy_training_sessions_excluded_role_check;
+      ALTER TABLE academy_training_sessions ADD CONSTRAINT academy_training_sessions_excluded_role_check
+        CHECK (excluded_role IN ('SPY','MERCHANT','COMMANDER','DIPLOMAT'));
+      ALTER TABLE academy_training_sessions DROP CONSTRAINT IF EXISTS academy_training_sessions_selected_role_check;
+      ALTER TABLE academy_training_sessions ADD CONSTRAINT academy_training_sessions_selected_role_check
+        CHECK (selected_role IN ('SPY','MERCHANT','COMMANDER','DIPLOMAT'));
+      ALTER TABLE academy_training_sessions DROP CONSTRAINT IF EXISTS academy_training_sessions_result_role_check;
+      ALTER TABLE academy_training_sessions ADD CONSTRAINT academy_training_sessions_result_role_check
+        CHECK (result_role IN ('SPY','MERCHANT','COMMANDER','DIPLOMAT'));
+
+      ALTER TABLE country_special_unit_unlocks DROP CONSTRAINT IF EXISTS country_special_unit_unlocks_unit_type_check;
+      ALTER TABLE country_special_unit_unlocks ADD CONSTRAINT country_special_unit_unlocks_unit_type_check
+        CHECK (unit_type IN ('legionary','hoplite','horse_archer','camel_cavalry','briton_longbow','persian_immortal','carthaginian_war_elephant','iberian_caetrati','germanic_shock_warrior'));
+    `
   }] as const;

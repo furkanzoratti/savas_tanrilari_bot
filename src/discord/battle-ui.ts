@@ -74,10 +74,12 @@ ${accessNote}` }
     const structureDamage = `${roll.wall_damage ? ` • Sur Hasarı **${roll.wall_damage}**` : ""}${roll.gate_damage ? ` • Kapı Hasarı **${roll.gate_damage}**` : ""}`;
     const counter = roll.detail?.__spear_cavalry;
     const counterSummary = counter?.matched ? `\n↳ **Mızrak Karşılığı:** ${number(counter.matched)} süvari eşleşti • +${number(counter.clashBonus ?? 0)} Çarpışma • +${number(counter.antiCavalryDamage ?? 0)} süvariye özel Hasar` : "";
+    const commander = roll.detail?.__commander;
+    const commanderSummary = commander?.clash ? `\n↳ **Komutan Bonusu:** +${number(commander.clash)} Çarpışma` : "";
     if (view.battle.terrain === "SIEGE" && roll.side_key === "B") {
-      return `**${view.sides.B.country_name} — Ham Zar:** Çarpışma **${roll.clash_total}** • Hasar **${roll.damage_total}** • ${actor}\n↳ **Tahkimat Sonrası:** Çarpışma **${Math.ceil(roll.clash_total * activeDefense.defenderClash)}** (×${factor(activeDefense.defenderClash)}) • Hasar **${Math.ceil(roll.damage_total * activeDefense.defenderDamage)}** (×${factor(activeDefense.defenderDamage)})`;
+      return `**${view.sides.B.country_name} — Ham Zar:** Çarpışma **${roll.clash_total}** • Hasar **${roll.damage_total}** • ${actor}${commanderSummary}\n↳ **Tahkimat Sonrası:** Çarpışma **${Math.ceil(roll.clash_total * activeDefense.defenderClash)}** (×${factor(activeDefense.defenderClash)}) • Hasar **${Math.ceil(roll.damage_total * activeDefense.defenderDamage)}** (×${factor(activeDefense.defenderDamage)})`;
     }
-    return `**${view.sides[roll.side_key].country_name}:** Çarpışma **${roll.clash_total}** • Hasar **${roll.damage_total}**${structureDamage} • ${actor}${counterSummary}`;
+    return `**${view.sides[roll.side_key].country_name}:** Çarpışma **${roll.clash_total}** • Hasar **${roll.damage_total}**${structureDamage} • ${actor}${counterSummary}${commanderSummary}`;
   }).join("\n");
   if (rolls) embed.addFields({ name: "🎲 Açık Zar Kayıtları", value: rolls });
   if (roundResult) {

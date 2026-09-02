@@ -2,6 +2,7 @@ import { randomInt } from "node:crypto";
 import type { DbClient } from "../db/pool.js";
 import { pool, withTransaction } from "../db/pool.js";
 import { CHARACTER_ROLES, CITY_POLICIES, type CityPolicyKey } from "../domain/catalog.js";
+import { academyRoleForRoll, academyRollSides } from "../domain/academy.js";
 import { isAcquisitionTurn } from "../domain/mobilization.js";
 import type { CharacterRole } from "../domain/types.js";
 import { formableModifiers, type FormableCountryKey } from "../domain/formable-countries.js";
@@ -14,8 +15,6 @@ interface SettlementRow {
   id: string; country_id: string; name: string; population: number; local_treasury: number;
   last_acquisition_income: number; curia_guard_granted: boolean;
 }
-
-const ROLE_ORDER: CharacterRole[] = ["SPY", "MERCHANT", "COMMANDER"];
 
 async function getCountry(client: DbClient, guildId: string, countryId: string): Promise<CountryRow> {
   const country = (await client.query<CountryRow>("SELECT id,guild_id,name,active_formable_key FROM countries WHERE id=$1 AND guild_id=$2 AND status='ACTIVE'", [countryId, guildId])).rows[0];
@@ -142,7 +141,7 @@ export const cityService = {
       const result = await client.query<AcademyTrainingSession>(
         `INSERT INTO academy_training_sessions(country_id,settlement_id,academy_level,acquisition_turn,roll_sides,excluded_role,selected_role,skill_bonus,initiated_by)
          VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-        [input.countryId, settlement.id, level, guild.current_turn, level === 1 ? 30 : 20, excludedRole, selectedRole, skillBonus, input.actorId]
+        [input.countryId, settlement.id, level, guild.current_turn, academyRollSides(level), excludedRole, selectedRole, skillBonus, input.actorId]
       );
       await audit(client, input.guildId, input.actorId, "ACADEMY_TRAINING_BEGIN", "settlement", settlement.id, { level, excludedRole, selectedRole });
       return result.rows[0]!;
@@ -160,12 +159,7 @@ export const cityService = {
       if (!session) throw new GameError("Akademi eğitim oturumu bulunamadı.");
       if (session.status !== "PENDING_ROLL") throw new GameError("Bu Akademi eğitiminin zarı zaten atılmış.");
       const roll = randomInt(1, session.roll_sides + 1);
-      let role: CharacterRole;
-      if (session.academy_level === 1) role = ROLE_ORDER[Math.min(2, Math.floor((roll - 1) / 10))]!;
-      else if (session.academy_level === 2) {
-        const available = ROLE_ORDER.filter((item) => item !== session.excluded_role);
-        role = available[roll <= 10 ? 0 : 1]!;
-      } else role = session.selected_role!;
+      const role = academyRoleForRoll(session.academy_level, roll, session.excluded_role, session.selected_role);
       const skillBonus = session.skill_bonus + (formableModifiers(country.active_formable_key).academyRoleSkillBonus?.[role] ?? 0);
       const updated = await client.query<AcademyTrainingSession>("UPDATE academy_training_sessions SET roll_value=$1,result_role=$2,skill_bonus=$3,status='AWAITING_NAME' WHERE id=$4 RETURNING *", [roll, role, skillBonus, session.id]);
       await audit(client, input.guildId, input.actorId, "ACADEMY_TRAINING_ROLL", "academy_training", session.id, { roll, sides: session.roll_sides, role });
