@@ -38,6 +38,7 @@ import { addCountryRoleToMember, deleteCountryRole, ensureCountryRole, removeCou
 import { handleDiplomacyButton, handleDiplomacyCommand } from "./diplomacy-ui.js";
 import { handleWarDeclarationButton, handleWarDeclarationCommand, handleWarDeclarationModal } from "./war-declaration-ui.js";
 import { mercenaryCompanyAutocompleteAllowed, mercenarySubcommandRequiresGameMaster } from "./mercenary-access.js";
+import { decodeUnitTypeFromCustomId, encodeUnitTypeForCustomId } from "./unit-custom-id.js";
 
 function settlementSelect(customId: string, settlements: Array<{ id: string; name: string; population: number }>, placeholder: string) {
   if (!settlements.length) throw new GameError("Bu ülkeye ait yerleşke bulunmuyor.");
@@ -959,7 +960,7 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
     await interaction.update({ content: `Alınacak birim türünü seç:\n🎖️ Ordu Limiti: **${number(settlement.militaryUsed)}/${number(settlement.militaryLimit)}**\n🏋️ Bu Alım Turu Eğitim Kapasitesi: **${number(settlement.trainingUsed)}/${number(settlement.trainingCapacity)}** • Kalan: **${number(settlement.trainingRemaining)}**`, components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder().setCustomId(`uc|${countryId}|${settlementId}`).setPlaceholder("Birim seç").addOptions(availableUnits.map(([key, unit]) => ({ label: unit.name, description: `${gold(unitPurchaseCost(key as keyof typeof UNITS, 1_000, settlement.effectiveResources, settlement.policies.filter((policy) => policy.status === "ACTIVE").map((policy) => policy.policy_key), document.country.active_formable_key))} / 1.000${isSpecialUnitType(key) ? " • Özel Birlik" : ""}`, value: key }))))] });
   } else if (kind === "uc" && settlementIdFromId) {
     const unitType = interaction.values[0]!;
-    const modal = new ModalBuilder().setCustomId(`um|${countryId}|${settlementIdFromId}|${unitType}`).setTitle("Asker Alımı");
+    const modal = new ModalBuilder().setCustomId(`um|${countryId}|${settlementIdFromId}|${encodeUnitTypeForCustomId(unitType as keyof typeof UNITS)}`).setTitle("Asker Alımı");
     modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("quantity").setLabel("Asker sayısı — 100'ün katı").setPlaceholder("Örn. 500").setStyle(TextInputStyle.Short).setRequired(true)));
     await interaction.showModal(modal);
   } else if (kind === "ss") {
@@ -1020,8 +1021,10 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
   if (!Number.isSafeInteger(quantity)) throw new GameError("Geçerli bir tam sayı girilmelidir.");
   await interaction.deferReply({ ephemeral: true });
   if (kind === "um") {
-    const result = await gameService.purchaseUnits({ guildId: interaction.guildId, actorId: interaction.user.id, countryId, settlementId, unitType: itemType as keyof typeof UNITS, quantity });
-    await interaction.editReply(`✅ ${number(quantity)} **${UNITS[itemType as keyof typeof UNITS].name}** için ${gold(result.cost)} ödendi.\n${result.waves.map((wave) => `• Tur ${wave.dueTurn}: ${number(wave.quantity)}`).join("\n")}`);
+    const unitType = decodeUnitTypeFromCustomId(itemType);
+    if (!unitType) throw new GameError("Asker alım formundaki birlik türü geçersiz.");
+    const result = await gameService.purchaseUnits({ guildId: interaction.guildId, actorId: interaction.user.id, countryId, settlementId, unitType, quantity });
+    await interaction.editReply(`✅ ${number(quantity)} **${UNITS[unitType].name}** için ${gold(result.cost)} ödendi.\n${result.waves.map((wave) => `• Tur ${wave.dueTurn}: ${number(wave.quantity)}`).join("\n")}`);
   } else if (kind === "sm") {
     const result = await gameService.purchaseShips({ guildId: interaction.guildId, actorId: interaction.user.id, countryId, settlementId, shipType: itemType as keyof typeof SHIPS, quantity });
     await interaction.editReply(`✅ ${quantity} **${SHIPS[itemType as keyof typeof SHIPS].name}** için ${gold(result.cost)} ödendi. **Tur ${result.completionTurn}** tamamlanacak.`);
