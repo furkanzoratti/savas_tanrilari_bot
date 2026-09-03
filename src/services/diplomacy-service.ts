@@ -25,6 +25,18 @@ export interface AllianceView {
   message_id: string | null;
 }
 
+export interface VassalageView {
+  id: string;
+  guild_id: string;
+  overlord_country_id: string;
+  overlord_country_name: string;
+  vassal_country_id: string;
+  vassal_country_name: string;
+  status: "ACTIVE" | "ENDED";
+  started_turn: number;
+  ended_turn: number | null;
+}
+
 export interface PactView {
   id: string;
   guild_id: string;
@@ -66,6 +78,7 @@ export interface PublicCountryProfile {
   allies: CountryDiplomacyEntry[];
   pacts: CountryPactEntry[];
   wars: CountryDiplomacyEntry[];
+  vassals: CountryDiplomacyEntry[];
 }
 
 const allianceViewSql = `SELECT alliance.id,alliance.guild_id,alliance.proposer_country_id,
@@ -90,6 +103,13 @@ const invitationViewSql = `SELECT invitation.id,invitation.guild_id,invitation.p
   JOIN diplomatic_pacts pact ON pact.id=invitation.pact_id
   JOIN countries inviter ON inviter.id=invitation.inviter_country_id
   JOIN countries receiver ON receiver.id=invitation.receiver_country_id`;
+
+const vassalageViewSql = `SELECT relation.id,relation.guild_id,relation.overlord_country_id,
+  overlord.name AS overlord_country_name,relation.vassal_country_id,
+  vassal.name AS vassal_country_name,relation.status,relation.started_turn,relation.ended_turn
+  FROM country_vassalages relation
+  JOIN countries overlord ON overlord.id=relation.overlord_country_id
+  JOIN countries vassal ON vassal.id=relation.vassal_country_id`;
 
 async function audit(client: DbClient, guildId: string, actorId: string, action: string, entityType: string, entityId: string | null, details: unknown): Promise<void> {
   await client.query(
@@ -206,11 +226,22 @@ async function countryWars(client: DbClient, countryId: string): Promise<Country
   )).rows;
 }
 
-export async function loadCountryDiplomacy(client: DbClient, countryId: string): Promise<{ allies: CountryDiplomacyEntry[]; pacts: CountryPactEntry[]; wars: CountryDiplomacyEntry[] }> {
+async function countryVassals(client: DbClient, countryId: string): Promise<CountryDiplomacyEntry[]> {
+  return (await client.query<CountryDiplomacyEntry>(
+    `SELECT vassal.id,vassal.name
+       FROM country_vassalages relation
+       JOIN countries vassal ON vassal.id=relation.vassal_country_id
+      WHERE relation.overlord_country_id=$1 AND relation.status='ACTIVE' AND vassal.status='ACTIVE'
+      ORDER BY vassal.name`, [countryId]
+  )).rows;
+}
+
+export async function loadCountryDiplomacy(client: DbClient, countryId: string): Promise<{ allies: CountryDiplomacyEntry[]; pacts: CountryPactEntry[]; wars: CountryDiplomacyEntry[]; vassals: CountryDiplomacyEntry[] }> {
   return {
     allies: await countryAllies(client, countryId),
     pacts: await countryPacts(client, countryId),
-    wars: await countryWars(client, countryId)
+    wars: await countryWars(client, countryId),
+    vassals: await countryVassals(client, countryId)
   };
 }
 
@@ -227,6 +258,70 @@ export const diplomacyService = {
       await client.query("INSERT INTO guilds(discord_id) VALUES($1) ON CONFLICT DO NOTHING", [input.guildId]);
       await client.query("UPDATE guilds SET diplomacy_channel_id=$2,updated_at=NOW() WHERE discord_id=$1", [input.guildId, input.channelId]);
       await audit(client, input.guildId, input.actorId, "DIPLOMACY_CHANNEL_SET", "guild", input.guildId, { channelId: input.channelId });
+    });
+  },
+
+  async setVassalage(input: { guildId: string; actorId: string; overlordCountryId: string; vassalCountryId: string }): Promise<VassalageView> {
+    if (input.overlordCountryId === input.vassalCountryId) throw new GameError("Bir devlet kendisinin vassalı olamaz.");
+    return withTransaction(async (client) => {
+      await lockCountries(client, [input.overlordCountryId, input.vassalCountryId]);
+      await verifyCountry(client, input.guildId, input.overlordCountryId);
+      await verifyCountry(client, input.guildId, input.vassalCountryId);
+      const guild = (await client.query<{ current_turn: number }>(
+        "SELECT current_turn FROM guilds WHERE discord_id=$1 FOR UPDATE", [input.guildId]
+      )).rows[0];
+      if (!guild) throw new GameError("Sunucu oyun kaydı bulunamadı.");
+      const current = (await client.query<{ overlord_country_id: string; overlord_name: string }>(
+        `SELECT relation.overlord_country_id,overlord.name AS overlord_name
+           FROM country_vassalages relation
+           JOIN countries overlord ON overlord.id=relation.overlord_country_id
+          WHERE relation.vassal_country_id=$1 AND relation.status='ACTIVE' FOR UPDATE OF relation`,
+        [input.vassalCountryId]
+      )).rows[0];
+      if (current) {
+        if (current.overlord_country_id === input.overlordCountryId) throw new GameError("Bu vassallık ilişkisi zaten etkin.");
+        throw new GameError(`Seçilen devlet zaten **${current.overlord_name}** devletinin vassalı. Önce mevcut ilişki kaldırılmalıdır.`);
+      }
+      const createsCycle = await client.query(
+        `WITH RECURSIVE descendants(country_id) AS (
+           SELECT vassal_country_id FROM country_vassalages
+            WHERE overlord_country_id=$1 AND status='ACTIVE'
+           UNION
+           SELECT relation.vassal_country_id
+             FROM country_vassalages relation
+             JOIN descendants parent ON relation.overlord_country_id=parent.country_id
+            WHERE relation.status='ACTIVE'
+         ) SELECT 1 FROM descendants WHERE country_id=$2 LIMIT 1`,
+        [input.vassalCountryId, input.overlordCountryId]
+      );
+      if (createsCycle.rowCount) throw new GameError("Bu işlem döngüsel bir vassallık zinciri oluşturur.");
+      const created = (await client.query<{ id: string }>(
+        `INSERT INTO country_vassalages(guild_id,overlord_country_id,vassal_country_id,started_turn,created_by)
+         VALUES($1,$2,$3,$4,$5) RETURNING id`,
+        [input.guildId, input.overlordCountryId, input.vassalCountryId, guild.current_turn, input.actorId]
+      )).rows[0]!;
+      await audit(client, input.guildId, input.actorId, "VASSALAGE_SET", "country_vassalage", created.id, input);
+      return (await client.query<VassalageView>(`${vassalageViewSql} WHERE relation.id=$1`, [created.id])).rows[0]!;
+    });
+  },
+
+  async endVassalage(input: { guildId: string; actorId: string; overlordCountryId: string; vassalCountryId: string }): Promise<VassalageView> {
+    return withTransaction(async (client) => {
+      await lockCountries(client, [input.overlordCountryId, input.vassalCountryId]);
+      const guild = (await client.query<{ current_turn: number }>(
+        "SELECT current_turn FROM guilds WHERE discord_id=$1 FOR UPDATE", [input.guildId]
+      )).rows[0];
+      if (!guild) throw new GameError("Sunucu oyun kaydı bulunamadı.");
+      const relation = (await client.query<{ id: string }>(
+        `UPDATE country_vassalages
+            SET status='ENDED',ended_turn=$4,ended_by=$5,ended_at=NOW()
+          WHERE guild_id=$1 AND overlord_country_id=$2 AND vassal_country_id=$3 AND status='ACTIVE'
+          RETURNING id`,
+        [input.guildId, input.overlordCountryId, input.vassalCountryId, guild.current_turn, input.actorId]
+      )).rows[0];
+      if (!relation) throw new GameError("Bu iki devlet arasında etkin vassallık ilişkisi bulunmuyor.");
+      await audit(client, input.guildId, input.actorId, "VASSALAGE_END", "country_vassalage", relation.id, input);
+      return (await client.query<VassalageView>(`${vassalageViewSql} WHERE relation.id=$1`, [relation.id])).rows[0]!;
     });
   },
 

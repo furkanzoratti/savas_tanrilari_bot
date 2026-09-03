@@ -417,8 +417,12 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
     const target = await gameService.countryByName(interaction.guildId, interaction.options.getString("hedef-ulke", true));
     if (!source || !target) throw new GameError("Kaynak veya hedef ülke bulunamadı.");
     const settlement = await findSettlement(source.id, interaction.options.getString("yerleske", true));
-    const result = await gameService.transferSettlement({ guildId: interaction.guildId, actorId: interaction.user.id, sourceCountryId: source.id, targetCountryId: target.id, settlementId: settlement.id });
-    await interaction.editReply(`🏳️ **${result.settlementName}**, **${result.sourceName}** devletinden **${result.targetName}** devletine aktarıldı ve **Fethedilmiş** olarak işaretlendi.\n⛓️ Köleleştirilen eski garnizon: **${number(result.enslavedGarrison)}**\n🧹 Silinen eski askerî varlıklar: **${number(result.removedArmyPersonnel)} asker** • **${number(result.removedShips)} gemi** • **${number(result.removedSiegeAssets)} kuşatma aleti** • **${result.destroyedMercenaryContracts} paralı asker sözleşmesi**\n🛡️ Yeni garnizon emri: **${number(result.newGarrisonPersonnel)} asker** • **${number(result.newGarrisonCost)} Altın**${result.newGarrisonCompletionTurn ? ` • Tur **${result.newGarrisonCompletionTurn}**` : ""}\n⚔️ İptal edilen aktif asker alımı: **${result.cancelledRecruitmentOrders}**\n🤝 Feshedilen/bekleyen ticaret: **${result.endedTrades}**`);
+    const result = await gameService.transferSettlement({
+      guildId: interaction.guildId, actorId: interaction.user.id,
+      sourceCountryId: source.id, targetCountryId: target.id, settlementId: settlement.id,
+      conqueredTurn: interaction.options.getInteger("fetih-turu")
+    });
+    await interaction.editReply(`🏳️ **${result.settlementName}**, **${result.sourceName}** devletinden **${result.targetName}** devletine aktarıldı ve **Tur ${result.conqueredTurn} fethi** olarak işaretlendi.\n⛓️ Köleleştirilen eski garnizon: **${number(result.enslavedGarrison)}**\n🧹 Silinen eski askerî varlıklar: **${number(result.removedArmyPersonnel)} asker** • **${number(result.removedShips)} gemi** • **${number(result.removedSiegeAssets)} kuşatma aleti** • **${result.destroyedMercenaryContracts} paralı asker sözleşmesi**\n🛡️ Yeni garnizon emri: **${number(result.newGarrisonPersonnel)} asker** • **${number(result.newGarrisonCost)} Altın**${result.newGarrisonCompletionTurn ? ` • Tur **${result.newGarrisonCompletionTurn}**` : ""}\n⚔️ İptal edilen aktif asker alımı: **${result.cancelledRecruitmentOrders}**\n🤝 Feshedilen/bekleyen ticaret: **${result.endedTrades}**`);
   } else if (sub === "oyuncu-ata") {
     const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
     if (!country) throw new GameError("Ülke bulunamadı.");
@@ -739,7 +743,39 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
   if (await handleWarDeclarationCommand(interaction)) return;
   if (await handleDiplomacyCommand(interaction)) return;
   if (await handleCityCommand(interaction)) return;
-  if (interaction.commandName === "buyuk-gucler") {
+  if (interaction.commandName === "yok-edilen-devletler") {
+    requireGameMaster(interaction);
+    if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
+    const action = interaction.options.getSubcommand();
+    await interaction.deferReply({ ephemeral: true });
+    if (action === "listele") {
+      const countries = await gameService.listDestroyedCountries(interaction.guildId);
+      if (!countries.length) {
+        await interaction.editReply("YOK EDİLDİ durumunda devlet bulunmuyor.");
+      } else {
+        const rows = countries.map((country) => `• **${country.name}**${country.destroyed_turn === null ? "" : ` — Tur ${country.destroyed_turn}`}\n↳ ${country.destroyed_reason ?? "Yok edilme nedeni belirtilmemiş."}`);
+        const pages: string[] = [];
+        for (let index = 0; index < rows.length; index += 15) pages.push(rows.slice(index, index + 15).join("\n"));
+        await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x4b4d52).setTitle(`🏴 Yok Edilmiş Devletler — ${countries.length}`).setDescription(pages[0]!)] });
+        for (let index = 1; index < pages.length; index += 1) {
+          await interaction.followUp({ embeds: [new EmbedBuilder().setColor(0x4b4d52).setTitle(`🏴 Yok Edilmiş Devletler — Devam ${index + 1}`).setDescription(pages[index]!)], ephemeral: true });
+        }
+      }
+    } else {
+      if (interaction.options.getString("onay", true) !== "GERI_GETIR") throw new GameError("İşlem iptal edildi. Onay alanına tam olarak **GERI_GETIR** yazmalısınız.");
+      const restored = await gameService.restoreCountry({ guildId: interaction.guildId, actorId: interaction.user.id, countryName: interaction.options.getString("ulke", true) });
+      let roleNote = "";
+      if (interaction.guild) {
+        try {
+          const ensured = await ensureCountryRole(interaction.guild, restored, interaction.user.id);
+          roleNote = `\n🏛️ ${ensured.role} devlet rolü hazırlandı.`;
+        } catch {
+          roleNote = "\n⚠️ Discord rolü hazırlanamadı; /devlet-rolleri ile yeniden deneyebilirsiniz.";
+        }
+      }
+      await interaction.editReply(`✅ **${restored.name}** yeniden **AKTİF** devlet durumuna alındı.${roleNote}`);
+    }
+  } else if (interaction.commandName === "buyuk-gucler") {
     await handleGreatPowerCommand(interaction);
   } else if (interaction.commandName === "parali-bakim-topla") {
     requireGameMaster(interaction);
@@ -1032,6 +1068,22 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
 
 async function handleAutocomplete(interaction: AutocompleteInteraction): Promise<void> {
   const focused = interaction.options.getFocused(true);
+  if (interaction.commandName === "yok-edilen-devletler" && focused.name === "ulke") {
+    if (!interaction.guildId || !isGameMaster(interaction)) {
+      await interaction.respond([]);
+      return;
+    }
+    const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
+    const countries = await gameService.listDestroyedCountries(interaction.guildId);
+    await interaction.respond(countries
+      .filter((country) => !query || country.name.toLocaleLowerCase("tr-TR").includes(query))
+      .slice(0, 25)
+      .map((country) => ({
+        name: `${country.name}${country.destroyed_turn === null ? "" : ` • Tur ${country.destroyed_turn}`}`.slice(0, 100),
+        value: country.id
+      })));
+    return;
+  }
   if (interaction.commandName === "savas-cagrisi" && focused.name === "savas") {
     if (!interaction.guildId) { await interaction.respond([]); return; }
     const country = await gameService.countryForUser(interaction.guildId, interaction.user.id);

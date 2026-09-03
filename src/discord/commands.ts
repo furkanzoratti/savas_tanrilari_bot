@@ -38,6 +38,20 @@ export const commandBuilders = [
   new SlashCommandBuilder()
     .setName("devlet-rolleri").setDescription("Yalnızca yönetici: eksik devlet rollerini oluşturur ve üyelikleri eşitler"),
   new SlashCommandBuilder()
+    .setName("yok-edilen-devletler").setDescription("Yalnızca yönetici: yok edilmiş devletleri listeler veya oyuna geri getirir")
+    .addSubcommand((sub) => sub.setName("listele").setDescription("YOK EDİLDİ durumundaki devletleri listeler"))
+    .addSubcommand((sub) => sub.setName("geri-getir").setDescription("Yok edilmiş bir devleti yeniden aktif duruma alır")
+      .addStringOption((option) => option.setName("ulke").setDescription("Geri getirilecek yok edilmiş devlet").setRequired(true).setAutocomplete(true))
+      .addStringOption((option) => option.setName("onay").setDescription("Onaylamak için GERI_GETIR yazın").setRequired(true))),
+  new SlashCommandBuilder()
+    .setName("vassallik").setDescription("Yalnızca yönetici: devletler arasındaki vassallık ilişkisini yönetir")
+    .addSubcommand((sub) => sub.setName("ayarla").setDescription("Bir devleti başka bir devletin vassalı yapar")
+      .addStringOption((option) => option.setName("hakim-ulke").setDescription("Vassalın bağlı olacağı hâkim devlet").setRequired(true))
+      .addStringOption((option) => option.setName("vassal-ulke").setDescription("Vassal olarak kaydedilecek devlet").setRequired(true)))
+    .addSubcommand((sub) => sub.setName("kaldir").setDescription("Etkin vassallık ilişkisini sona erdirir")
+      .addStringOption((option) => option.setName("hakim-ulke").setDescription("Mevcut hâkim devlet").setRequired(true))
+      .addStringOption((option) => option.setName("vassal-ulke").setDescription("Bağı kaldırılacak vassal devlet").setRequired(true))),
+  new SlashCommandBuilder()
     .setName("ulke-formla").setDescription("Yalnızca yönetici: devleti kurulabilir ülkeye dönüştürür ve bonuslarını açar")
     .addStringOption((option) => option.setName("mevcut-ulke").setDescription("Formlanacak mevcut devletin tam adı").setRequired(true))
     .addStringOption((option) => option.setName("formlanan-ulke").setDescription("Kurulacak ülkeyi yazmaya başlayarak seçin").setRequired(true).setAutocomplete(true)),
@@ -200,7 +214,7 @@ export const commandBuilders = [
       .addChoices(...Object.entries(MOBILIZATION_RULES).map(([value, rule]) => ({ name: rule.label, value }))))
     .addStringOption(countryOption),
   new SlashCommandBuilder()
-    .setName("hazine-tasi").setDescription("Kendi şehirleriniz arasında yerel hazine aktarır")
+    .setName("hazine-tasi").setDescription("Turda bir kez, kendi şehirleriniz arasında yerel hazine aktarır")
     .addStringOption((option) => option.setName("kaynak-sehir").setDescription("Altının alınacağı şehir").setRequired(true).setAutocomplete(true))
     .addStringOption((option) => option.setName("hedef-sehir").setDescription("Altının gönderileceği şehir").setRequired(true).setAutocomplete(true))
     .addIntegerOption((option) => option.setName("miktar").setDescription("Taşınacak altın; kaynak hazinenin en fazla %50'si").setMinValue(1).setRequired(true)),
@@ -465,7 +479,8 @@ export const commandBuilders = [
     .addSubcommand((sub) => sub.setName("yerleske-devret").setDescription("Bir yerleşkeyi fethedilmiş olarak başka devlete aktarır")
       .addStringOption((o) => o.setName("kaynak-ulke").setDescription("Yerleşkenin mevcut sahibi").setRequired(true))
       .addStringOption((o) => o.setName("yerleske").setDescription("Aktarılacak yerleşke").setRequired(true))
-      .addStringOption((o) => o.setName("hedef-ulke").setDescription("Yerleşkenin yeni sahibi").setRequired(true)))
+      .addStringOption((o) => o.setName("hedef-ulke").setDescription("Yerleşkenin yeni sahibi").setRequired(true))
+      .addIntegerOption((o) => o.setName("fetih-turu").setDescription("Gecikmeli kayıt için gerçek fetih turu; boşsa mevcut tur").setMinValue(0)))
     .addSubcommand((sub) => sub.setName("oyuncu-ata").setDescription("Oyuncuyu ülkeye atar")
       .addStringOption((o) => o.setName("ulke").setDescription("Ülke adı").setRequired(true))
       .addUserOption((o) => o.setName("oyuncu").setDescription("Oyuncu").setRequired(true)))

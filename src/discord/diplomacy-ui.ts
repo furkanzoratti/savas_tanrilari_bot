@@ -38,6 +38,9 @@ export function renderPublicCountryProfile(profile: PublicCountryProfile): Embed
     ? profile.wars.map((opponent) => `• **${opponent.name}**`).join("\n")
     : "Devlet herhangi bir savaşta bulunmuyor.";
 
+  const vassals = profile.vassals.length
+    ? profile.vassals.map((vassal) => `• **${vassal.name}**`).join("\n")
+    : "Devlete bağlı vassal bulunmuyor.";
   const destroyed = profile.status === "YOK_EDİLDİ";
   const status = destroyed
     ? `**YOK EDİLDİ**${profile.destroyed_turn === null ? "" : ` • Tur ${profile.destroyed_turn}`}\n${profile.destroyed_reason ?? "Açıklama belirtilmemiş."}`
@@ -50,6 +53,7 @@ export function renderPublicCountryProfile(profile: PublicCountryProfile): Embed
       { name: "📌 Devlet Durumu", value: embedValue(status) },
       { name: "🗺️ Yerleşkeler ve Hammaddeler", value: embedValue(settlements) },
       { name: "🤝 Müttefikler", value: embedValue(allies) },
+      { name: "👑 Vassal Devletler", value: embedValue(vassals) },
       { name: "🏛️ Üye Olunan Paktlar", value: embedValue(pacts) },
       { name: "⚔️ Savaşta Olduğu Devletler", value: embedValue(wars) }
     );
@@ -277,8 +281,31 @@ async function handlePact(interaction: ChatInputCommandInteraction): Promise<voi
 }
 
 export async function handleDiplomacyCommand(interaction: ChatInputCommandInteraction): Promise<boolean> {
-  if (!["diplomasi-kanali", "devlet-bilgisi", "ittifak", "pakt"].includes(interaction.commandName)) return false;
+  if (!["diplomasi-kanali", "devlet-bilgisi", "ittifak", "pakt", "vassallik"].includes(interaction.commandName)) return false;
   if (!interaction.guildId) throw new GameError("Bu işlem yalnızca bir Discord sunucusunda kullanılabilir.");
+
+  if (interaction.commandName === "vassallik") {
+    requireGameMaster(interaction);
+    const action = interaction.options.getSubcommand();
+    const overlord = await gameService.countryByName(interaction.guildId, interaction.options.getString("hakim-ulke", true));
+    const vassal = await gameService.countryByName(interaction.guildId, interaction.options.getString("vassal-ulke", true));
+    if (!overlord || !vassal) throw new GameError("Hâkim veya vassal devlet bulunamadı.");
+    await interaction.deferReply({ ephemeral: true });
+    if (action === "ayarla") {
+      const relation = await diplomacyService.setVassalage({
+        guildId: interaction.guildId, actorId: interaction.user.id,
+        overlordCountryId: overlord.id, vassalCountryId: vassal.id
+      });
+      await interaction.editReply(`✅ **${relation.vassal_country_name}**, Tur **${relation.started_turn}** itibarıyla **${relation.overlord_country_name}** devletinin vassalı olarak kaydedildi.`);
+    } else {
+      const relation = await diplomacyService.endVassalage({
+        guildId: interaction.guildId, actorId: interaction.user.id,
+        overlordCountryId: overlord.id, vassalCountryId: vassal.id
+      });
+      await interaction.editReply(`✅ **${relation.vassal_country_name}** ile **${relation.overlord_country_name}** arasındaki vassallık ilişkisi sona erdirildi.`);
+    }
+    return true;
+  }
 
   if (interaction.commandName === "diplomasi-kanali") {
     requireGameMaster(interaction);

@@ -1218,4 +1218,45 @@ export const migrations = [
          SET end_turn=NULL,updated_at=NOW()
        WHERE status IN ('PENDING','ACTIVE','UNPAID');
     `
+  },
+  {
+    version: 39,
+    name: "treasury_transfer_limits_and_vassalages",
+    sql: `
+      CREATE TABLE IF NOT EXISTS settlement_treasury_transfers (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        guild_id TEXT NOT NULL REFERENCES guilds(discord_id) ON DELETE CASCADE,
+        country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        turn INTEGER NOT NULL CHECK (turn >= 0),
+        source_settlement_id UUID NOT NULL REFERENCES settlements(id) ON DELETE CASCADE,
+        target_settlement_id UUID NOT NULL REFERENCES settlements(id) ON DELETE CASCADE,
+        amount BIGINT NOT NULL CHECK (amount > 0),
+        actor_user_id TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE(guild_id,country_id,turn)
+      );
+      CREATE INDEX IF NOT EXISTS settlement_treasury_transfers_country_idx
+        ON settlement_treasury_transfers(country_id,turn DESC);
+
+      CREATE TABLE IF NOT EXISTS country_vassalages (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        guild_id TEXT NOT NULL REFERENCES guilds(discord_id) ON DELETE CASCADE,
+        overlord_country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        vassal_country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','ENDED')),
+        started_turn INTEGER NOT NULL CHECK (started_turn >= 0),
+        created_by TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        ended_turn INTEGER,
+        ended_by TEXT,
+        ended_at TIMESTAMPTZ,
+        CHECK (overlord_country_id <> vassal_country_id)
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS country_vassalages_active_vassal_unique
+        ON country_vassalages(vassal_country_id) WHERE status='ACTIVE';
+      CREATE UNIQUE INDEX IF NOT EXISTS country_vassalages_active_pair_unique
+        ON country_vassalages(overlord_country_id,vassal_country_id) WHERE status='ACTIVE';
+      CREATE INDEX IF NOT EXISTS country_vassalages_overlord_idx
+        ON country_vassalages(overlord_country_id,status);
+    `
   }] as const;

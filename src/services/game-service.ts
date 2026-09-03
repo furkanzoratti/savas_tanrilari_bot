@@ -500,6 +500,39 @@ export const gameService = {
     return result.rows;
   },
 
+  async listDestroyedCountries(guildId: string): Promise<CountryRow[]> {
+    const result = await pool.query<CountryRow>(
+      "SELECT * FROM countries WHERE guild_id=$1 AND status='YOK_EDİLDİ' ORDER BY destroyed_turn DESC NULLS LAST,name",
+      [guildId]
+    );
+    return result.rows;
+  },
+
+  async restoreCountry(input: { guildId: string; actorId: string; countryName: string }): Promise<CountryRow> {
+    return withTransaction(async (client) => {
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`turn:${input.guildId}`]);
+      const guild = await getGuild(client, input.guildId);
+      const country = (await client.query<CountryRow>(
+        "SELECT * FROM countries WHERE guild_id=$1 AND status='YOK_EDİLDİ' AND (id::text=$2 OR lower(name)=lower($2)) FOR UPDATE",
+        [input.guildId, input.countryName.trim()]
+      )).rows[0];
+      if (!country) throw new GameError("YOK EDİLDİ durumunda belirtilen ülke bulunamadı.");
+      const restored = (await client.query<CountryRow>(
+        `UPDATE countries
+            SET status='ACTIVE',destroyed_turn=NULL,destroyed_reason=NULL,destroyed_by=NULL,destroyed_at=NULL,discord_role_id=NULL
+          WHERE id=$1 RETURNING *`,
+        [country.id]
+      )).rows[0]!;
+      await audit(client, input.guildId, input.actorId, "COUNTRY_RESTORE", "country", country.id, {
+        name: country.name,
+        restoredTurn: guild.current_turn,
+        previousDestroyedTurn: country.destroyed_turn,
+        previousDestroyedReason: country.destroyed_reason
+      });
+      return restored;
+    });
+  },
+
   async formCountry(input: { guildId: string; actorId: string; currentCountryName: string; formableKeyInput: string }): Promise<{ countryId: string; previousName: string; formedName: string; formableKey: FormableCountryKey; discordRoleId: string | null; buffs: readonly string[] }> {
     if (!isFormableCountryKey(input.formableKeyInput)) throw new GameError("Geçersiz kurulabilir ülke seçimi.");
     const formableKey: FormableCountryKey = input.formableKeyInput;
@@ -575,6 +608,16 @@ export const gameService = {
       const maximum = Math.max(0, Math.floor(sourceTreasury * 0.50));
       if (input.amount > maximum) {
         throw new GameError("Kaynak şehrin mevcut hazinesinin en fazla %50'si taşınabilir. Güncel sınır: " + maximum.toLocaleString("tr-TR") + " Altın.");
+      }
+      const transferClaim = await client.query(
+        `INSERT INTO settlement_treasury_transfers(
+           guild_id,country_id,turn,source_settlement_id,target_settlement_id,amount,actor_user_id
+         ) VALUES($1,$2,$3,$4,$5,$6,$7)
+         ON CONFLICT(guild_id,country_id,turn) DO NOTHING RETURNING id`,
+        [input.guildId, country.id, guild.current_turn, source.id, target.id, input.amount, input.actorId]
+      );
+      if (!transferClaim.rowCount) {
+        throw new GameError(`Bu devlet Tur ${guild.current_turn} içinde hazine taşıma hakkını zaten kullandı. Her devlet bu komutu tur başına yalnızca bir kez kullanabilir.`);
       }
       const sourceBalance = sourceTreasury - input.amount;
       const targetBalance = targetTreasury + input.amount;
@@ -750,6 +793,7 @@ export const gameService = {
       await client.query("UPDATE country_alliances SET status=CASE WHEN status='ACTIVE' THEN 'ENDED' ELSE 'CANCELLED' END,ended_at=NOW() WHERE status IN ('PENDING','ACTIVE') AND (proposer_country_id=$1 OR receiver_country_id=$1)", [country.id]);
       await client.query("UPDATE pact_invitations SET status='CANCELLED',responded_by=$2,responded_at=NOW() WHERE status='PENDING' AND (inviter_country_id=$1 OR receiver_country_id=$1)", [country.id, input.actorId]);
       await client.query("UPDATE trade_agreements SET status='ENDED',ended_at=NOW() WHERE status IN ('PENDING','ACTIVE') AND (proposer_country_id=$1 OR receiver_country_id=$1)", [country.id]);
+      await client.query("UPDATE country_vassalages SET status='ENDED',ended_turn=$2,ended_by=$3,ended_at=NOW() WHERE status='ACTIVE' AND (overlord_country_id=$1 OR vassal_country_id=$1)", [country.id, guild.current_turn, input.actorId]);
       await client.query("DELETE FROM country_members WHERE country_id=$1", [country.id]);
       await client.query(
         "UPDATE countries SET status='YOK_EDİLDİ',destroyed_turn=$2,destroyed_reason=$3,destroyed_by=$4,destroyed_at=NOW(),discord_role_id=NULL WHERE id=$1",
@@ -1024,7 +1068,7 @@ export const gameService = {
     });
   },
 
-  async transferSettlement(input: { guildId: string; actorId: string; sourceCountryId: string; targetCountryId: string; settlementId: string }): Promise<{ settlementName: string; sourceName: string; targetName: string; cancelledRecruitmentOrders: number; endedTrades: number; enslavedGarrison: number; removedArmyPersonnel: number; removedShips: number; removedSiegeAssets: number; destroyedMercenaryContracts: number; newGarrisonPersonnel: number; newGarrisonCost: number; newGarrisonCompletionTurn: number | null }> {
+  async transferSettlement(input: { guildId: string; actorId: string; sourceCountryId: string; targetCountryId: string; settlementId: string; conqueredTurn?: number | null }): Promise<{ settlementName: string; sourceName: string; targetName: string; conqueredTurn: number; cancelledRecruitmentOrders: number; endedTrades: number; enslavedGarrison: number; removedArmyPersonnel: number; removedShips: number; removedSiegeAssets: number; destroyedMercenaryContracts: number; newGarrisonPersonnel: number; newGarrisonCost: number; newGarrisonCompletionTurn: number | null }> {
     return withTransaction(async (client) => {
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`turn:${input.guildId}`]);
       if (input.sourceCountryId === input.targetCountryId) throw new GameError("Kaynak ve hedef ülke aynı olamaz.");
@@ -1048,6 +1092,10 @@ export const gameService = {
       const trades = await client.query("UPDATE trade_agreements SET status='ENDED',ended_at=NOW() WHERE status IN ('PENDING','ACTIVE') AND (proposer_settlement_id=$1 OR receiver_settlement_id=$1) RETURNING id", [settlement.id]);
       const guild = await getGuild(client, input.guildId);
       const cancelledNaval = await client.query("UPDATE naval_orders SET status='CANCELLED' WHERE settlement_id=$1 AND status='BUILDING' RETURNING id", [settlement.id]);
+      const conqueredTurn = input.conqueredTurn ?? guild.current_turn;
+      if (!Number.isInteger(conqueredTurn) || conqueredTurn < 0 || conqueredTurn > guild.current_turn) {
+        throw new GameError(`Fetih turu 0 ile mevcut Tur ${guild.current_turn} arasında bir tam sayı olmalıdır.`);
+      }
       const cancelledSiege = await client.query("UPDATE siege_orders SET status='CANCELLED' WHERE settlement_id=$1 AND status='BUILDING' RETURNING id", [settlement.id]);
       await client.query("DELETE FROM settlement_policies WHERE settlement_id=$1", [settlement.id]);
       await client.query("UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL WHERE assigned_settlement_id=$1", [settlement.id]);
@@ -1084,19 +1132,20 @@ export const gameService = {
       }
       await client.query(
         "UPDATE settlements SET country_id=$1,is_conquered=TRUE,conquered_turn=$2,garrison_level=0,population=GREATEST(0,population-$3),slave_population=slave_population+$4 WHERE id=$5",
-        [target.id, guild.current_turn, enslavedExistingGarrison, enslavedGarrison, settlement.id]
+        [target.id, conqueredTurn, enslavedExistingGarrison, enslavedGarrison, settlement.id]
       );
       const newGarrison = await scheduleMandatoryGarrisonReplenishment(client, { settlementId: settlement.id, currentTurn: guild.current_turn, reason: "CONQUEST" });
       await syncCountryTreasury(client, source.id);
       await syncCountryTreasury(client, target.id);
       await audit(client, input.guildId, input.actorId, "SETTLEMENT_TRANSFER", "settlement", settlement.id, {
-        fromCountryId: source.id, toCountryId: target.id, cancelledRecruitmentOrders: activeOrders.rows.length, cancelledNavalOrders: cancelledNaval.rowCount ?? 0, cancelledSiegeOrders: cancelledSiege.rowCount ?? 0, endedTrades: trades.rowCount ?? 0, conqueredTurn: guild.current_turn,
+        fromCountryId: source.id, toCountryId: target.id, cancelledRecruitmentOrders: activeOrders.rows.length, cancelledNavalOrders: cancelledNaval.rowCount ?? 0, cancelledSiegeOrders: cancelledSiege.rowCount ?? 0, endedTrades: trades.rowCount ?? 0, conqueredTurn,
         enslavedGarrison, removedArmyPersonnel, removedShips, removedSiegeAssets, destroyedMercenaryContracts: mercenaryContracts.length,
         newGarrisonPersonnel: newGarrison?.personnel ?? 0, newGarrisonCost: newGarrison?.cost ?? 0, newGarrisonCompletionTurn: newGarrison?.completionTurn ?? null
       });
       return {
         settlementName: settlement.name, sourceName: source.name, targetName: target.name,
         cancelledRecruitmentOrders: activeOrders.rows.length, endedTrades: trades.rowCount ?? 0, enslavedGarrison,
+        conqueredTurn,
         removedArmyPersonnel, removedShips, removedSiegeAssets, destroyedMercenaryContracts: mercenaryContracts.length,
         newGarrisonPersonnel: newGarrison?.personnel ?? 0, newGarrisonCost: newGarrison?.cost ?? 0,
         newGarrisonCompletionTurn: newGarrison?.completionTurn ?? null

@@ -151,3 +151,16 @@ describe("otuz altıncı migration", () => {
     expect(migration?.sql).toContain("germanic_shock_warrior");
   });
 });
+
+describe("otuz dokuzuncu migration", () => {
+  const migration = migrations.find((item) => item.version === 39);
+
+  it("tur başına hazine taşıma hakkını ve vassallık tarihçesini saklar", () => {
+    expect(migration?.name).toBe("treasury_transfer_limits_and_vassalages");
+    expect(migration?.sql).toContain("settlement_treasury_transfers");
+    expect(migration?.sql).toContain("UNIQUE(guild_id,country_id,turn)");
+    expect(migration?.sql).toContain("country_vassalages");
+    expect(migration?.sql).toContain("country_vassalages_active_vassal_unique");
+    expect(migration?.sql).toContain("overlord_country_id <> vassal_country_id");
+  });
+});

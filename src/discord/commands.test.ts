@@ -23,6 +23,20 @@ describe("yönetim komutları", () => {
     expect(admin?.options?.find((option) => option.name === "ulke-yok-et")?.options?.find((option) => option.name === "neden")).toMatchObject({ required: true });
   });
 
+  it("yok edilmiş devletleri listeleme, geri getirme ve vassallık yönetimini kaydeder", () => {
+    const destroyed = commandBuilders.find((command) => command.name === "yok-edilen-devletler");
+    expect(destroyed?.options?.map((option) => option.name)).toEqual(["listele", "geri-getir"]);
+    expect(destroyed?.options?.find((option) => option.name === "geri-getir")?.options?.find((option) => option.name === "ulke")).toMatchObject({ required: true, autocomplete: true });
+    const vassalage = commandBuilders.find((command) => command.name === "vassallik");
+    expect(vassalage?.options?.map((option) => option.name)).toEqual(["ayarla", "kaldir"]);
+  });
+
+  it("hazine taşımayı turda bir hak olarak tanımlar ve gecikmeli fetih turunu destekler", () => {
+    expect(commandBuilders.find((command) => command.name === "hazine-tasi")?.description).toContain("Turda bir kez");
+    const transfer = commandBuilders.find((command) => command.name === "yonetim")?.options?.find((option) => option.name === "yerleske-devret");
+    expect(transfer?.options?.find((option) => option.name === "fetih-turu")).toBeDefined();
+  });
+
   it("gözcü, atölye, saha aleti ve asimilasyon komutlarını kaydeder", () => {
     expect(commandBuilders.some((command) => command.name === "gozcu-alimi")).toBe(true);
     expect(commandBuilders.some((command) => command.name === "kusatma-uretimi")).toBe(true);

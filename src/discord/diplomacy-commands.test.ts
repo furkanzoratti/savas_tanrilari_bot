@@ -37,19 +37,21 @@ describe("ittifak, pakt ve herkese açık devlet profili", () => {
       status: "ACTIVE", destroyed_turn: null, destroyed_reason: null,
       settlements: [{ name: "Roma", resource_type: "IRON" }, { name: "Neapolis", resource_type: "GRAIN" }],
       allies: [{ id: "kartaca", name: "Kartaca" }],
+      vassals: [{ id: "numidya", name: "Numidya" }],
       pacts: [{ id: "pakt", name: "Akdeniz Birliği", purpose: "Deniz güvenliği", founder_name: "Roma" }],
       wars: [{ id: "makedonya", name: "Makedonya" }]
     }).toJSON();
     const fields = embed.fields ?? [];
     const combined = JSON.stringify(embed);
     expect(fields.map((field) => field.name)).toEqual([
-      "📌 Devlet Durumu", "🗺️ Yerleşkeler ve Hammaddeler", "🤝 Müttefikler", "🏛️ Üye Olunan Paktlar", "⚔️ Savaşta Olduğu Devletler"
+      "📌 Devlet Durumu", "🗺️ Yerleşkeler ve Hammaddeler", "🤝 Müttefikler", "👑 Vassal Devletler", "🏛️ Üye Olunan Paktlar", "⚔️ Savaşta Olduğu Devletler"
     ]);
     expect(combined).toContain("Demir");
     expect(combined).toContain("Tahıl");
     expect(combined).toContain("Kartaca");
     expect(combined).toContain("Akdeniz Birliği");
     expect(combined).toContain("Makedonya");
+    expect(combined).toContain("Numidya");
     expect(combined).not.toMatch(/Hazine|Nüfus|Ordu|Gelir|Bakım|Asker/i);
     expect(embed.image?.url).toBe(STATE_PROFILE_BANNER_URL);
     expect(existsSync(STATE_PROFILE_BANNER_PATH)).toBe(true);
@@ -58,7 +60,7 @@ describe("ittifak, pakt ve herkese açık devlet profili", () => {
   it("yok edilen devletin kaydını ve yok edilme açıklamasını kamu kartında korur", () => {
     const embed = renderPublicCountryProfile({
       id: "eski", name: "Eski Krallık", status: "YOK_EDİLDİ", destroyed_turn: 12, destroyed_reason: "Son yerleşkesini kaybetti.",
-      settlements: [], allies: [], pacts: [], wars: []
+      settlements: [], allies: [], pacts: [], wars: [], vassals: []
     }).toJSON();
     expect(embed.title).toContain("🏴");
     expect(JSON.stringify(embed)).toContain("YOK EDİLDİ");
