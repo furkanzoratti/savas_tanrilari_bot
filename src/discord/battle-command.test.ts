@@ -16,6 +16,12 @@ describe("savaş komutları", () => {
       const command = battle?.options?.find((option) => option.name === name);
       expect(command?.options?.some((option) => option.name === "ulke")).toBe(true);
     }
+    const roster = battle?.options?.find((option) => option.name === "kadro-ayarla");
+    const settlement = roster?.options?.find((option) => option.name === "yerleske");
+    expect(settlement).toMatchObject({
+      required: false,
+      autocomplete: true
+    });
   });
   it("on savaş alanı hazır ayarını sunar", () => {
     const battle = commandBuilders.find((command) => command.name === "savas");

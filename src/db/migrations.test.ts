@@ -164,3 +164,25 @@ describe("otuz dokuzuncu migration", () => {
     expect(migration?.sql).toContain("overlord_country_id <> vassal_country_id");
   });
 });
+
+describe("kırkıncı migration", () => {
+  const migration = migrations.find((item) => item.version === 40);
+
+  it("açık kuşatmaların erzak dayanıklılığını üçten altı temel tura taşır", () => {
+    expect(migration?.name).toBe("six_turn_siege_starvation");
+    expect(migration?.sql).toContain("starvation_capacity=starvation_capacity+3");
+    expect(migration?.sql).toContain("starvation_remaining=starvation_remaining+3");
+    expect(migration?.sql).toContain("status NOT IN ('FINISHED','CANCELLED')");
+  });
+});
+
+describe("kırk birinci migration", () => {
+  const migration = migrations.find((item) => item.version === 41);
+
+  it("savaş katılımcısının isteğe bağlı kaynak yerleşkesini saklar", () => {
+    expect(migration?.name).toBe("battle_participant_source_settlement");
+    expect(migration?.sql).toContain("source_settlement_id UUID");
+    expect(migration?.sql).toContain("REFERENCES settlements(id) ON DELETE SET NULL");
+    expect(migration?.sql).toContain("battle_side_participants_source_settlement_idx");
+  });
+});

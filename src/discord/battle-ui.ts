@@ -204,7 +204,9 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
   } else if (sub === "kadro-ayarla") {
     requireGameMaster(interaction);
     const side = interaction.options.getString("taraf", true) as BattleSideKey;
-    const view = await battleService.setRoster({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id, side, naval: false, countryName: interaction.options.getString("ulke"),
+    const countryName = interaction.options.getString("ulke");
+    const sourceSettlement = interaction.options.getString("yerleske");
+    const view = await battleService.setRoster({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id, side, naval: false, countryName, sourceSettlement,
       composition: {
         light_infantry: interaction.options.getInteger("hafif-piyade", true), slinger: interaction.options.getInteger("sapanci", true),
         spear: interaction.options.getInteger("mizrakli", true), archer: interaction.options.getInteger("okcu", true),
@@ -218,7 +220,13 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
         iberian_caetrati: interaction.options.getInteger("iber-caetratileri") ?? 0,
         germanic_shock_warrior: interaction.options.getInteger("cermen-sok-savascisi") ?? 0
       } });
-    await interaction.reply({ content: `✅ ${side} tarafının bütün kara kadrosu tek işlemde kaydedildi. Açık toplam: **${number(view.sides[side].initial_total)}**`, ephemeral: true });
+    const participant = countryName?.trim()
+      ? view.sides[side].participants.find((item) => item.country_name.toLocaleLowerCase("tr-TR") === countryName.trim().toLocaleLowerCase("tr-TR"))
+      : view.sides[side].participants.find((item) => item.is_primary);
+    const lossSource = participant?.source_settlement_name
+      ? `**${participant.source_settlement_name}**; kayıplar yalnızca bu yerleşkeden düşülecek.`
+      : "**Ülke geneli**; kayıplar mevcut oransal dağıtımla düşülecek.";
+    await interaction.reply({ content: `✅ ${side} tarafının bütün kara kadrosu tek işlemde kaydedildi. Açık toplam: **${number(view.sides[side].initial_total)}**\n📍 Kayıp kaynağı: ${lossSource}`, ephemeral: true });
   } else if (sub === "gemi-ayarla") {
     requireGameMaster(interaction);
     const side = interaction.options.getString("taraf", true) as BattleSideKey;

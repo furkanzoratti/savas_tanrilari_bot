@@ -5,6 +5,7 @@ import {
   type Interaction, type ModalSubmitInteraction, type StringSelectMenuInteraction
 } from "discord.js";
 import { config } from "../config.js";
+import type { BattleSideKey } from "../domain/battle.js";
 import { BUILDING_CATEGORIES, BUILDINGS, CITY_POLICIES, MOBILIZATION_RULES, SHIPS, SIEGE_ASSETS, UNITS } from "../domain/catalog.js";
 import { gold, number } from "../domain/format.js";
 import { CULTURE_GROUPS, type CultureGroup } from "../domain/cultures.js";
@@ -18,6 +19,7 @@ import { SPECIAL_UNITS, isSpecialUnitType, type SpecialUnitType } from "../domai
 import { FORMABLE_COUNTRIES, formableModifiers } from "../domain/formable-countries.js";
 import { RESOURCES, shipCostMultiplier, type ResourceType } from "../domain/resources.js";
 import { buildingPurchaseTerms, unitPurchaseCost, gameService, GameError } from "../services/game-service.js";
+import { battleService } from "../services/battle-service.js";
 import { cityService } from "../services/city-service.js";
 import { commandLogService } from "../services/command-log-service.js";
 import { greatPowerService } from "../services/great-power-service.js";
@@ -1068,6 +1070,30 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
 
 async function handleAutocomplete(interaction: AutocompleteInteraction): Promise<void> {
   const focused = interaction.options.getFocused(true);
+  if (interaction.commandName === "savas" && focused.name === "yerleske") {
+    if (!interaction.guildId || !isGameMaster(interaction)) { await interaction.respond([]); return; }
+    let subcommand = "";
+    try { subcommand = interaction.options.getSubcommand(false) ?? ""; } catch { subcommand = ""; }
+    if (subcommand !== "kadro-ayarla") { await interaction.respond([]); return; }
+    const side = interaction.options.getString("taraf") as BattleSideKey | null;
+    if (!side) { await interaction.respond([]); return; }
+    const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
+    const settlements = await battleService.listParticipantSettlements({
+      guildId: interaction.guildId,
+      channelId: interaction.channelId,
+      side,
+      countryName: interaction.options.getString("ulke")
+    });
+    await interaction.respond(settlements
+      .filter((settlement) => !query || settlement.name.toLocaleLowerCase("tr-TR").includes(query))
+      .slice(0, 25)
+      .map((settlement) => ({
+        name: `${settlement.name} • Ordu ${number(settlement.army_total)}${settlement.garrison_total > 0 ? ` • Garnizon ${number(settlement.garrison_total)}` : ""}`.slice(0, 100),
+        value: settlement.id
+      })));
+    return;
+  }
+
   if (interaction.commandName === "yok-edilen-devletler" && focused.name === "ulke") {
     if (!interaction.guildId || !isGameMaster(interaction)) {
       await interaction.respond([]);

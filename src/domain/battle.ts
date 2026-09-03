@@ -27,6 +27,7 @@ export type SiegeTargets = Partial<Record<SiegeAssetType, SiegeTarget>>;
 export type BattleOrder = "ORDERED" | "WORN" | "SHAKEN" | "CRITICAL" | "BROKEN";
 
 export const MAX_BOMBARDMENTS_PER_GAME_TURN = 4;
+export const BASE_SIEGE_STARVATION_TURNS = 6;
 export const remainingBombardments = (used: number): number => Math.max(0, MAX_BOMBARDMENTS_PER_GAME_TURN - Math.max(0, Math.floor(used)));
 export const SIEGE_ASSAULT_FRONTAGE = 15_000;
 export const LADDER_GROUP_ASSAULT_CAPACITY = 1_000;

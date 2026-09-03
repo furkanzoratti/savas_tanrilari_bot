@@ -1259,4 +1259,22 @@ export const migrations = [
       CREATE INDEX IF NOT EXISTS country_vassalages_overlord_idx
         ON country_vassalages(overlord_country_id,status);
     `
+  },
+  {
+    version: 40,
+    name: "six_turn_siege_starvation",
+    sql: `
+      UPDATE battles SET starvation_capacity=starvation_capacity+3,starvation_remaining=starvation_remaining+3
+       WHERE terrain='SIEGE' AND status NOT IN ('FINISHED','CANCELLED')
+         AND starvation_capacity IS NOT NULL AND starvation_remaining IS NOT NULL;
+    `
+  },
+  {
+    version: 41,
+    name: "battle_participant_source_settlement",
+    sql: `
+      ALTER TABLE battle_side_participants ADD COLUMN IF NOT EXISTS source_settlement_id UUID REFERENCES settlements(id) ON DELETE SET NULL;
+      CREATE INDEX IF NOT EXISTS battle_side_participants_source_settlement_idx
+        ON battle_side_participants(source_settlement_id);
+    `
   }] as const;
