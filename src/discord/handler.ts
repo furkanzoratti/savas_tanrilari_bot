@@ -5,7 +5,7 @@ import {
   type Interaction, type ModalSubmitInteraction, type StringSelectMenuInteraction
 } from "discord.js";
 import { config } from "../config.js";
-import type { BattleSideKey } from "../domain/battle.js";
+import { BATTLE_UNIT_STATS, type BattleSideKey, type BattleUnitType } from "../domain/battle.js";
 import { BUILDING_CATEGORIES, BUILDINGS, CITY_POLICIES, MOBILIZATION_RULES, SHIPS, SIEGE_ASSETS, UNITS } from "../domain/catalog.js";
 import { gold, number } from "../domain/format.js";
 import { CULTURE_GROUPS, type CultureGroup } from "../domain/cultures.js";
@@ -1091,8 +1091,36 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
         .slice(0, 25).map((commander) => ({ name: `${commander.name} • Komutan +${commander.skill_bonus}${commander.army_name ? ` • ${commander.army_name}` : ""}`.slice(0, 100), value: commander.id })));
       return;
     }
+    if (focused.name === "birim") {
+      const sub = interaction.options.getSubcommand(false) ?? "";
+      const settlementValue = interaction.options.getString("yerleske");
+      if (!settlementValue || !["asker-ekle", "asker-cikar"].includes(sub)) { await interaction.respond([]); return; }
+      let units: Array<{ unit_type: BattleUnitType; quantity: number }>;
+      if (sub === "asker-cikar") {
+        const armyValue = interaction.options.getString("ordu");
+        if (!armyValue) { await interaction.respond([]); return; }
+        const army = await armyService.get(country.id, armyValue);
+        units = army.units
+          .filter((unit) => unit.settlement_id === settlementValue || unit.settlement_name.toLocaleLowerCase("tr-TR") === settlementValue.toLocaleLowerCase("tr-TR"))
+          .map((unit) => ({ unit_type: unit.unit_type, quantity: unit.quantity }));
+      } else {
+        units = (await armyService.availableSettlementUnits(country.id, settlementValue))
+          .map((unit) => ({ unit_type: unit.unit_type, quantity: unit.available }));
+      }
+      await interaction.respond(units
+        .filter((unit) => {
+          const label = BATTLE_UNIT_STATS[unit.unit_type]?.label ?? UNITS[unit.unit_type]?.name ?? unit.unit_type;
+          return !query || label.toLocaleLowerCase("tr-TR").includes(query);
+        })
+        .slice(0, 25)
+        .map((unit) => ({
+          name: `${BATTLE_UNIT_STATS[unit.unit_type]?.label ?? UNITS[unit.unit_type]?.name ?? unit.unit_type} • ${number(unit.quantity)} ${sub === "asker-cikar" ? "orduda" : "müsait"}`.slice(0, 100),
+          value: unit.unit_type
+        })));
+      return;
+    }
     if (focused.name === "yerleske") {
-      const sub = interaction.options.getSubcommand(false);
+      const sub = interaction.options.getSubcommand(false) ?? "";
       const armyId = interaction.options.getString("ordu");
       if (sub === "asker-cikar" && armyId) {
         const army = await armyService.get(country.id, armyId);

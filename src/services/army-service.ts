@@ -110,6 +110,30 @@ export const armyService = {
     finally { client.release(); }
   },
 
+  async availableSettlementUnits(countryId: string, settlementValue: string): Promise<Array<{ unit_type: BattleUnitType; available: number }>> {
+    const rows = (await pool.query<{ unit_type: BattleUnitType; available: number }>(
+      `SELECT stock.unit_type,
+              GREATEST(0,stock.quantity-COALESCE(allocated.quantity,0))::integer AS available
+         FROM (
+           SELECT u.unit_type,COALESCE(SUM(u.quantity),0)::integer AS quantity
+             FROM unit_stacks u JOIN settlements s ON s.id=u.settlement_id
+            WHERE s.country_id=$1 AND (s.id::text=$2 OR lower(s.name)=lower($2)) AND u.force_type='ARMY'
+            GROUP BY u.unit_type
+         ) stock
+         LEFT JOIN (
+           SELECT au.unit_type,COALESCE(SUM(au.quantity),0)::integer AS quantity
+             FROM army_units au JOIN settlements s ON s.id=au.settlement_id
+            WHERE s.country_id=$1 AND (s.id::text=$2 OR lower(s.name)=lower($2))
+            GROUP BY au.unit_type
+         ) allocated ON allocated.unit_type=stock.unit_type
+        ORDER BY stock.unit_type`,
+      [countryId, settlementValue.trim()]
+    )).rows;
+    return rows
+      .map((row) => ({ unit_type: row.unit_type, available: Number(row.available) }))
+      .filter((row) => row.available > 0 && row.unit_type !== "militia" && Boolean(BATTLE_UNIT_STATS[row.unit_type]));
+  },
+
   async listBattleCountry(guildId: string, countryId: string, battleId: string): Promise<ArmyView[]> {
     const client = await pool.connect();
     try {
