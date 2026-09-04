@@ -2,9 +2,11 @@ import { ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedB
 import { BATTLE_TERRAINS, BATTLE_UNIT_STATS, LADDER_GROUP_ASSAULT_CAPACITY, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, SIEGE_ASSET_BATTLE_STATS, SIEGE_ASSAULT_FRONTAGE, SIEGE_TOWER_ASSAULT_CAPACITY, orderState, remainingBombardments, siegeAssaultAccess, siegeDefenseModifiers, siegeOrderState, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain, type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeTarget } from "../domain/battle.js";
 import { number } from "../domain/format.js";
 import { battleService, type BattleRoundResult, type BattleView, type SiegePhase } from "../services/battle-service.js";
-import { GameError } from "../services/game-service.js";
+import { gameService, GameError } from "../services/game-service.js";
+import { armyService } from "../services/army-service.js";
 import { isGameMaster, requireGameMaster } from "./auth.js";
 import { battlefieldAsset } from "./assets.js";
+import { renderArmyEmbed } from "./army-embed.js";
 
 const statusLabels: Record<string, string> = {
   DRAFT: "Taslak", WAITING_FIRST_ROLL: "İlk tarafın zarı bekleniyor", WAITING_SECOND_ROLL: "İkinci tarafın zarı bekleniyor",
@@ -98,7 +100,10 @@ ${accessNote}` }
 }
 
 function components(view: BattleView) {
-  if (["FINISHED", "CANCELLED", "DRAFT"].includes(view.battle.status)) return [];
+  if (view.battle.status === "FINISHED") return [new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(`battle_armies|${view.battle.id}`).setLabel("Ordularımın Son Durumunu Gör").setEmoji("⚔️").setStyle(ButtonStyle.Secondary)
+  )];
+  if (["CANCELLED", "DRAFT"].includes(view.battle.status)) return [];
   const expected = expectedSide(view);
   if (view.battle.terrain === "SIEGE" && view.battle.siege_phase === "BOMBARDMENT") return [new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(`battle_bombard|${view.battle.id}`).setLabel(((view.battle.bombardments_this_turn ?? 0) >= MAX_BOMBARDMENTS_PER_GAME_TURN ? "Bombardıman Hakkı Doldu" : `${view.sides.A.country_name} Katapult Bombardımanı Yap`).slice(0, 80)).setEmoji("💥").setStyle(ButtonStyle.Primary).setDisabled((view.battle.bombardments_this_turn ?? 0) >= MAX_BOMBARDMENTS_PER_GAME_TURN),
@@ -192,6 +197,18 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
     });
     await interaction.reply({
       content: "✅ **" + countryName + "** " + (action === "ADD" ? "savaş tarafına eklendi" : "savaş tarafından çıkarıldı") + ". **" + side + " tarafı:** " + view.sides[side].country_names.join(", "),
+      ephemeral: true
+    });
+  } else if (sub === "ordu-ekle") {
+    requireGameMaster(interaction);
+    const side = interaction.options.getString("taraf", true) as BattleSideKey;
+    const action = interaction.options.getString("islem", true) as "ADD" | "REMOVE";
+    const result = await battleService.setArmyAssignment({
+      guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id,
+      side, action, armyId: interaction.options.getString("ordu", true)
+    });
+    await interaction.reply({
+      content: `✅ **${result.countryName} • ${result.armyName}** savaş taslağ${action === "ADD" ? "ına eklendi" : "ından çıkarıldı"}. **${side} tarafının güncel toplamı:** ${number(result.view.sides[side].initial_total)}`,
       ephemeral: true
     });
   } else if (sub === "birlik-ayarla") {
@@ -327,7 +344,14 @@ export async function handleBattleButton(interaction: ButtonInteraction): Promis
   if (!interaction.guildId || !interaction.channelId) throw new GameError("Sunucu veya kanal bulunamadı.");
   const battleId = interaction.customId.split("|")[1];
   if (!battleId) throw new GameError("Savaş düğmesi bozuk.");
-  if (interaction.customId.startsWith("battle_roll|")) {
+  if (interaction.customId.startsWith("battle_armies|")) {
+    await interaction.deferReply({ ephemeral: true });
+    const country = await gameService.countryForUser(interaction.guildId, interaction.user.id);
+    if (!country) throw new GameError("Discord hesabına atanmış bir ülke bulunamadı.");
+    const armies = await armyService.listBattleCountry(interaction.guildId, country.id, battleId);
+    if (!armies.length) throw new GameError("Bu savaşta devletinize ait kalıcı bir ordu bulunmuyor.");
+    await interaction.editReply({ content: "⚔️ Savaş kayıpları işlendi. Bu savaşa katılan ordularınızın ve kompozisyonlarının güncel hâli:", embeds: armies.slice(0, 10).map(renderArmyEmbed) });
+  } else if (interaction.customId.startsWith("battle_roll|")) {
     await interaction.deferReply();
     const result = await battleService.roll({ guildId: interaction.guildId, channelId: interaction.channelId, battleId, actorId: interaction.user.id, isGameMaster: isGameMaster(interaction) });
     const roll = result.view.rolls.find((r) => r.side_key === result.side)!;

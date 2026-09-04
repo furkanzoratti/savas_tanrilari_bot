@@ -7,6 +7,7 @@ export interface FormableModifiers {
   archerSlingerDiscount?: number;
   archerSlingerLightDiscount?: number;
   shipDiscount?: number;
+  shipTransportMultiplier?: number;
   buildingDiscount?: number;
   buildingDiscountTypes?: readonly string[];
   buildingDurationReduction?: number;
@@ -45,7 +46,7 @@ export const FORMABLE_COUNTRIES = {
   ITALY: { name: "İtalya", emoji: "🦅", buffs: ["İtalya içindeki hareket %25 hızlıdır.", "Bütün asker alımları %5 ucuzdur.", "Bina yapım süresi 1 tur kısalır.", "Curia politikası Alım Turu beklemeden değiştirilebilir."], modifiers: { unitDiscount: 0.05, buildingDurationReduction: 1 } },
   ALPINE_UNION: { name: "Alp Birliği", emoji: "🏔️", buffs: ["Gözcüler dağ cezasını yok sayar.", "Yerleşkeler açlığa +2 tur dayanır.", "Mühendislik Atölyesi ve savaş aletleri %10 ucuzdur."], modifiers: { starvationBonus: 2, buildingDiscount: 0.10, buildingDiscountTypes: ["engineering"], siegeAssetDiscount: 0.10 } },
   PANNONIA: { name: "Pannonia", emoji: "🐎", buffs: ["Gözcü için gerekli süvari 100'e düşer.", "Süvari alımı %5 ucuzdur.", "Savaş Hazırlığı milisi 750 olur."], modifiers: { observerManpower: 100, cavalryDiscount: 0.05, warPreparationMilitia: 750 } },
-  ILLYRIA: { name: "İllirya", emoji: "🌊", buffs: ["Her Tersane kapasitesine +2 Kerkouros ekler.", "Kıyı yağması zarlarına +1.", "Gemi taşıma kapasitesi %10 artar."], modifiers: { shipyardPointBonus: { kerkouros: 2 } } },
+  ILLYRIA: { name: "İllirya", emoji: "🌊", buffs: ["Her Tersane kapasitesine +2 Kerkouros ekler.", "Kıyı yağması zarlarına +1.", "Gemi taşıma kapasitesi %10 artar."], modifiers: { shipyardPointBonus: { kerkouros: 2 }, shipTransportMultiplier: 1.10 } },
   DACIA: { name: "Dakya", emoji: "🐺", buffs: ["Köle Kampı isyan ihtimali 5 puan azalır.", "Köle Kampı gelir oranları %20/%35/%55 olur.", "Çiftlik geliri %10 artar."], modifiers: { slaveCampRates: [0.20, 0.35, 0.55], buildingIncomePercent: { farm: 0.10 } } },
   THRACE: { name: "Trakya", emoji: "🗡️", buffs: ["Kara birlikleri %5 ucuzdur.", "Kara yağması zarlarına +1.", "Savaş Hazırlığı 250 ek milis verir."], modifiers: { unitDiscount: 0.05, warPreparationMilitia: 750 } },
   MACEDONIA: { name: "Makedonya", emoji: "☀️", buffs: ["Süvari alımı %5 ucuzdur.", "Akademiden yetişen Komutanlar +1 ek özellik puanı alır."], modifiers: { cavalryDiscount: 0.05, academyRoleSkillBonus: { COMMANDER: 1 } } },

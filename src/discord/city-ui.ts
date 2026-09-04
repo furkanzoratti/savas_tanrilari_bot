@@ -103,7 +103,13 @@ export async function handleCityCommand(interaction: ChatInputCommandInteraction
       const document = await gameService.document(country.id);
       const rows = document.characters.map((character) => {
         const role = CHARACTER_ROLES[character.role];
-        const duty = character.assignment === "NONE" ? "Görev bekliyor" : character.assignment === "AGORA" ? "Agora / Forum" : "Curia";
+        const duty = character.assignment === "NONE"
+          ? "Görev bekliyor"
+          : character.assignment === "AGORA"
+            ? "Agora / Forum"
+            : character.assignment === "ARMY"
+              ? `Ordu komutanı${character.assigned_army_name ? ` • ${character.assigned_army_name}` : ""}`
+              : "Curia";
         return `${role.emoji} **${character.name}** — ${role.label} (+${character.skill_bonus})\n↳ ${duty}`;
       });
       await interaction.reply({ embeds: [new EmbedBuilder().setColor(0xc59b45).setTitle(`🎓 ${country.name} • Devlet Karakterleri`).setDescription((rows.join("\n\n") || "Henüz yetiştirilmiş karakter bulunmuyor.").slice(0, 4_000))], ephemeral: true });

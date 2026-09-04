@@ -1277,4 +1277,50 @@ export const migrations = [
       CREATE INDEX IF NOT EXISTS battle_side_participants_source_settlement_idx
         ON battle_side_participants(source_settlement_id);
     `
+  },
+  {
+    version: 42,
+    name: "persistent_player_armies",
+    sql: `
+      ALTER TABLE country_characters DROP CONSTRAINT IF EXISTS country_characters_assignment_check;
+      ALTER TABLE country_characters ADD CONSTRAINT country_characters_assignment_check
+        CHECK (assignment IN ('NONE','CURIA','AGORA','ARMY'));
+
+      CREATE TABLE IF NOT EXISTS armies (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        guild_id TEXT NOT NULL REFERENCES guilds(discord_id) ON DELETE CASCADE,
+        country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        name TEXT NOT NULL CHECK (char_length(trim(name)) BETWEEN 2 AND 60),
+        commander_character_id UUID UNIQUE REFERENCES country_characters(id) ON DELETE SET NULL,
+        created_turn INTEGER NOT NULL CHECK (created_turn >= 0),
+        created_by TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS armies_country_name_unique ON armies(country_id,lower(name));
+      CREATE INDEX IF NOT EXISTS armies_country_idx ON armies(country_id,created_at);
+
+      CREATE TABLE IF NOT EXISTS army_units (
+        army_id UUID NOT NULL REFERENCES armies(id) ON DELETE CASCADE,
+        settlement_id UUID NOT NULL REFERENCES settlements(id) ON DELETE CASCADE,
+        unit_type TEXT NOT NULL,
+        quantity INTEGER NOT NULL CHECK (quantity > 0),
+        PRIMARY KEY(army_id,settlement_id,unit_type)
+      );
+      CREATE INDEX IF NOT EXISTS army_units_settlement_idx ON army_units(settlement_id,unit_type);
+
+      CREATE TABLE IF NOT EXISTS battle_army_assignments (
+        battle_id UUID NOT NULL REFERENCES battles(id) ON DELETE CASCADE,
+        side_key TEXT NOT NULL CHECK (side_key IN ('A','B')),
+        army_id UUID NOT NULL REFERENCES armies(id) ON DELETE CASCADE,
+        country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        initial_composition JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY(battle_id,army_id)
+      );
+      CREATE INDEX IF NOT EXISTS battle_army_assignments_country_idx
+        ON battle_army_assignments(battle_id,side_key,country_id);
+      CREATE INDEX IF NOT EXISTS battle_army_assignments_army_idx
+        ON battle_army_assignments(army_id,battle_id);
+    `
   }] as const;

@@ -78,6 +78,10 @@ export interface BattleSourceSettlement {
   id: string; name: string; army_total: number; garrison_total: number;
 }
 
+export interface BattleArmyChoice {
+  id: string; name: string; country_id: string; country_name: string; total: number; assigned: boolean;
+}
+
 const sealFor = (composition: Record<string, number | undefined>): string => createHash("sha256")
   .update(JSON.stringify(Object.keys(composition).sort().map((key) => [key, composition[key] ?? 0])))
   .digest("hex").slice(0, 12).toUpperCase();
@@ -105,6 +109,47 @@ async function resolveParticipant(client: DbClient, battleId: string, side: Batt
   return participant;
 }
 
+async function validateParticipantAvailability(
+  client: DbClient,
+  battle: BattleRow,
+  participant: BattleParticipantRow,
+  composition: BattleComposition,
+  sourceSettlementId: string | null,
+  sourceLabel = "Devlet ordusu"
+): Promise<void> {
+  const includeDefenderGarrison = battle.terrain === "SIEGE"
+    && participant.side_key === "B"
+    && participant.is_primary
+    && Boolean(battle.defender_settlement_id)
+    && (!sourceSettlementId || battle.defender_settlement_id === sourceSettlementId);
+  const stocks = (await client.query<{ unit_type: string; quantity: number }>(
+    `SELECT u.unit_type,COALESCE(SUM(u.quantity),0)::integer AS quantity
+       FROM unit_stacks u JOIN settlements s ON s.id=u.settlement_id
+      WHERE s.country_id=$1
+        AND ($2::uuid IS NULL OR u.settlement_id=$2)
+        AND (u.force_type='ARMY' OR ($3::boolean AND u.force_type='GARRISON' AND u.settlement_id=$4))
+      GROUP BY u.unit_type`,
+    [participant.country_id, sourceSettlementId, includeDefenderGarrison, battle.defender_settlement_id]
+  )).rows;
+  const allocations = (await client.query<{ unit_type: string; quantity: number }>(
+    `SELECT au.unit_type,COALESCE(SUM(au.quantity),0)::integer AS quantity
+       FROM army_units au JOIN armies a ON a.id=au.army_id
+      WHERE a.country_id=$1 AND ($2::uuid IS NULL OR au.settlement_id=$2)
+      GROUP BY au.unit_type`,
+    [participant.country_id, sourceSettlementId]
+  )).rows;
+  const allocated = new Map(allocations.map((row) => [row.unit_type, Number(row.quantity)]));
+  const available = new Map(stocks.map((row) => [row.unit_type, Math.max(0, Number(row.quantity) - (allocated.get(row.unit_type) ?? 0))]));
+  for (const [forceType, quantity] of Object.entries(composition)) {
+    const requested = Number(quantity ?? 0);
+    const stock = available.get(forceType) ?? 0;
+    if (requested > stock) {
+      const label = BATTLE_UNIT_STATS[forceType as BattleUnitType]?.label ?? forceType;
+      throw new GameError(`**${sourceLabel}** için ordulara tahsis edilmemiş ${label} mevcudu ${stock}; istenen ${requested}.`);
+    }
+  }
+}
+
 async function validateSourceSettlement(
   client: DbClient,
   battle: BattleRow,
@@ -118,26 +163,7 @@ async function validateSourceSettlement(
     [participant.country_id, sourceValue.trim()]
   )).rows[0];
   if (!source) throw new GameError("Seçilen yerleşke, kadrosu düzenlenen ülkeye ait değil.");
-  const includeGarrison = battle.terrain === "SIEGE"
-    && participant.side_key === "B"
-    && participant.is_primary
-    && battle.defender_settlement_id === source.id;
-  const stocks = (await client.query<{ unit_type: string; quantity: number }>(
-    `SELECT unit_type,COALESCE(SUM(quantity),0)::integer AS quantity
-       FROM unit_stacks
-      WHERE settlement_id=$1 AND (force_type='ARMY' OR ($2::boolean AND force_type='GARRISON'))
-      GROUP BY unit_type`,
-    [source.id, includeGarrison]
-  )).rows;
-  const available = new Map(stocks.map((row) => [row.unit_type, Number(row.quantity)]));
-  for (const [forceType, quantity] of Object.entries(composition)) {
-    const requested = Number(quantity ?? 0);
-    const stock = available.get(forceType) ?? 0;
-    if (requested > stock) {
-      const label = BATTLE_UNIT_STATS[forceType as BattleUnitType]?.label ?? forceType;
-      throw new GameError(`**${source.name}** yerleşkesinde ${requested} ${label} bulunmuyor. Mevcut: ${stock}.`);
-    }
-  }
+  await validateParticipantAvailability(client, battle, participant, composition, source.id, source.name);
   return source;
 }
 
@@ -162,6 +188,23 @@ async function rebuildDraftSide(client: DbClient, battleId: string, side: Battle
     "UPDATE battle_sides SET composition=$1::jsonb,initial_total=$2,current_total=$2,total_losses=0,seal=$3 WHERE battle_id=$4 AND side_key=$5",
     [JSON.stringify(composition), total, sealFor({ ...composition, ...support }), battleId, side]
   );
+}
+
+async function rebuildParticipantFromArmies(client: DbClient, battleId: string, countryId: string): Promise<void> {
+  const assignments = (await client.query<{ initial_composition: BattleComposition }>(
+    "SELECT initial_composition FROM battle_army_assignments WHERE battle_id=$1 AND country_id=$2 ORDER BY army_id",
+    [battleId, countryId]
+  )).rows;
+  const composition: BattleComposition = {};
+  for (const assignment of assignments) mergeComposition(composition, assignment.initial_composition);
+  await client.query(
+    "UPDATE battle_side_participants SET composition=$1::jsonb,source_settlement_id=NULL WHERE battle_id=$2 AND country_id=$3",
+    [JSON.stringify(composition), battleId, countryId]
+  );
+}
+
+async function participantUsesArmies(client: DbClient, battleId: string, countryId: string): Promise<boolean> {
+  return Boolean((await client.query("SELECT 1 FROM battle_army_assignments WHERE battle_id=$1 AND country_id=$2 LIMIT 1", [battleId, countryId])).rowCount);
 }
 
 async function isSideMember(client: DbClient, battleId: string, side: BattleSideKey, discordUserId: string): Promise<boolean> {
@@ -357,6 +400,68 @@ async function applyLossesToDocuments(client: DbClient, battleId: string, guildI
       for (const share of participantShares) {
         const participant = sideParticipants.find((item) => item.country_id === share.contractId);
         if (!participant) continue;
+        const armyAssignments = !naval ? (await client.query<{ army_id: string; initial_composition: BattleComposition }>(
+          "SELECT army_id,initial_composition FROM battle_army_assignments WHERE battle_id=$1 AND country_id=$2 ORDER BY army_id",
+          [battleId, participant.country_id]
+        )).rows : [];
+        if (armyAssignments.length) {
+          const armySources = armyAssignments.map((assignment) => ({
+            contractId: assignment.army_id,
+            quantity: Number(assignment.initial_composition?.[forceType as BattleForceType] ?? 0)
+          })).filter((source) => source.quantity > 0);
+          const armyTotal = armySources.reduce((sum, source) => sum + source.quantity, 0);
+          const armyShares = armyTotal > 0
+            ? allocateLossBySource(Math.min(share.loss, armyTotal), armyTotal, armySources).mercenaries
+            : [];
+          for (const armyShare of armyShares) {
+            const allocations = (await client.query<{ settlement_id: string; quantity: number }>(
+              "SELECT settlement_id,quantity FROM army_units WHERE army_id=$1 AND unit_type=$2 ORDER BY settlement_id FOR UPDATE",
+              [armyShare.contractId, forceType]
+            )).rows;
+            const allocationTotal = allocations.reduce((sum, row) => sum + Number(row.quantity), 0);
+            const sourceShares = allocationTotal > 0
+              ? allocateLossBySource(Math.min(armyShare.loss, allocationTotal), allocationTotal,
+                  allocations.map((row) => ({ contractId: row.settlement_id, quantity: Number(row.quantity) }))).mercenaries
+              : [];
+            for (const sourceShare of sourceShares) {
+              const allocation = allocations.find((row) => row.settlement_id === sourceShare.contractId);
+              if (!allocation) continue;
+              const stackRows = (await client.query<{ id: string; quantity: number }>(
+                `SELECT id,quantity FROM unit_stacks
+                  WHERE settlement_id=$1 AND unit_type=$2 AND force_type='ARMY'
+                  ORDER BY CASE status WHEN 'FIELD_HOSTILE' THEN 0 WHEN 'FIELD_FRIENDLY' THEN 1 ELSE 2 END,id FOR UPDATE`,
+                [allocation.settlement_id, forceType]
+              )).rows;
+              const stackTotal = stackRows.reduce((sum, row) => sum + Number(row.quantity), 0);
+              const stackShares = stackTotal > 0
+                ? allocateLossBySource(Math.min(sourceShare.loss, stackTotal), stackTotal,
+                    stackRows.map((row) => ({ contractId: row.id, quantity: Number(row.quantity) }))).mercenaries
+                : [];
+              let sourceApplied = 0;
+              for (const stackShare of stackShares) {
+                const stack = stackRows.find((row) => row.id === stackShare.contractId);
+                if (!stack) continue;
+                const deducted = Math.min(Number(stack.quantity), stackShare.loss);
+                if (!deducted) continue;
+                const nextStack = Number(stack.quantity) - deducted;
+                if (nextStack === 0) await client.query("DELETE FROM unit_stacks WHERE id=$1", [stack.id]);
+                else await client.query("UPDATE unit_stacks SET quantity=$1 WHERE id=$2", [nextStack, stack.id]);
+                sourceApplied += deducted;
+              }
+              if (!sourceApplied) continue;
+              const nextAllocation = Number(allocation.quantity) - sourceApplied;
+              if (nextAllocation <= 0) await client.query("DELETE FROM army_units WHERE army_id=$1 AND settlement_id=$2 AND unit_type=$3", [armyShare.contractId, allocation.settlement_id, forceType]);
+              else await client.query("UPDATE army_units SET quantity=$1 WHERE army_id=$2 AND settlement_id=$3 AND unit_type=$4", [nextAllocation, armyShare.contractId, allocation.settlement_id, forceType]);
+              await client.query("UPDATE armies SET updated_at=NOW() WHERE id=$1", [armyShare.contractId]);
+              const population = Number((await client.query<{ population: number }>("SELECT population FROM settlements WHERE id=$1 FOR UPDATE", [allocation.settlement_id])).rows[0]?.population ?? 0);
+              const populationLoss = Math.min(population, sourceApplied);
+              if (populationLoss > 0) await client.query("UPDATE settlements SET population=population-$1 WHERE id=$2", [populationLoss, allocation.settlement_id]);
+              populationApplied += populationLoss;
+              stateApplied += sourceApplied;
+            }
+          }
+          continue;
+        }
         const selectedSourceId = participant.source_settlement_id;
         const selectedSourceUsesGarrison = Boolean(selectedSourceId
           && battle.terrain === "SIEGE"
@@ -391,15 +496,33 @@ async function applyLossesToDocuments(client: DbClient, battleId: string, guildI
                   ORDER BY CASE u.status WHEN 'FIELD_HOSTILE' THEN 0 WHEN 'FIELD_FRIENDLY' THEN 1 ELSE 2 END,u.id FOR UPDATE OF u`,
                 [participant.country_id, forceType]
               )).rows;
-        const availableTotal = rows.reduce((sum, row) => sum + Number(row.quantity), 0);
+        const allocatedBySettlement = naval ? new Map<string, number>() : new Map(
+          (await client.query<{ settlement_id: string; quantity: number }>(
+            `SELECT au.settlement_id,COALESCE(SUM(au.quantity),0)::integer AS quantity
+               FROM army_units au JOIN armies a ON a.id=au.army_id
+              WHERE a.country_id=$1 AND au.unit_type=$2 GROUP BY au.settlement_id`,
+            [participant.country_id, forceType]
+          )).rows.map((row) => [row.settlement_id, Number(row.quantity)] as const)
+        );
+        const deductibleRows = rows.map((row) => {
+          let availableQuantity = Number(row.quantity);
+          if (!naval && (row as { force_type?: string }).force_type === "ARMY") {
+            const reserved = allocatedBySettlement.get(row.settlement_id) ?? 0;
+            const protectedHere = Math.min(availableQuantity, reserved);
+            availableQuantity -= protectedHere;
+            allocatedBySettlement.set(row.settlement_id, reserved - protectedHere);
+          }
+          return { ...row, available_quantity: availableQuantity };
+        }).filter((row) => row.available_quantity > 0);
+        const availableTotal = deductibleRows.reduce((sum, row) => sum + row.available_quantity, 0);
         const rowShares = availableTotal > 0
           ? allocateLossBySource(
               Math.min(share.loss, availableTotal), availableTotal,
-              rows.map((row) => ({ contractId: row.id, quantity: Number(row.quantity) }))
+              deductibleRows.map((row) => ({ contractId: row.id, quantity: row.available_quantity }))
             ).mercenaries
           : [];
         for (const rowShare of rowShares) {
-          const row = rows.find((candidate) => candidate.id === rowShare.contractId);
+          const row = deductibleRows.find((candidate) => candidate.id === rowShare.contractId);
           if (!row) continue;
           const deducted = Math.min(row.quantity, rowShare.loss);
           const next = row.quantity - deducted;
@@ -453,7 +576,7 @@ async function applyLossesToDocuments(client: DbClient, battleId: string, guildI
   await client.query("UPDATE battles SET losses_applied_at=NOW() WHERE id=$1", [battleId]);
   await client.query(
     "INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'battle.casualties.apply','battle',$3,$4::jsonb)",
-    [guildId, actorId, battleId, JSON.stringify({ automatic: true, coalitionAware: true })]
+    [guildId, actorId, battleId, JSON.stringify({ automatic: true, coalitionAware: true, persistentArmies: true })]
   );
   return casualtyRows(client, battleId);
 }
@@ -552,6 +675,7 @@ export const battleService = {
           [battle.id, input.side, country.id]
         );
         if (hasMercenary.rowCount) throw new GameError("Ülkeyi çıkarmadan önce bu ülkeye ait paralı asker şirketlerini savaş taslağından çıkarın.");
+        if (await participantUsesArmies(client, battle.id, country.id)) throw new GameError("Ülkeyi çıkarmadan önce bu ülkeye ait kalıcı orduları savaş taslağından çıkarın.");
         await client.query("DELETE FROM battle_side_participants WHERE battle_id=$1 AND country_id=$2", [battle.id, country.id]);
       }
       await rebuildDraftSide(client, battle.id, input.side);
@@ -562,6 +686,67 @@ export const battleService = {
       return loadView(client, battle.id);
     });
   },
+  async listParticipantArmies(input: { guildId: string; channelId: string; side: BattleSideKey }): Promise<BattleArmyChoice[]> {
+    const battle = (await pool.query<BattleRow>(
+      "SELECT * FROM battles WHERE guild_id=$1 AND channel_id=$2 AND status='DRAFT' ORDER BY created_at DESC LIMIT 1",
+      [input.guildId, input.channelId]
+    )).rows[0];
+    if (!battle || battle.terrain === "NAVAL") return [];
+    return (await pool.query<BattleArmyChoice>(
+      `SELECT a.id,a.name,a.country_id,c.name AS country_name,COALESCE(SUM(au.quantity),0)::integer AS total,
+              EXISTS(SELECT 1 FROM battle_army_assignments own WHERE own.battle_id=$1 AND own.army_id=a.id) AS assigned
+         FROM battle_side_participants bsp JOIN armies a ON a.country_id=bsp.country_id
+         JOIN countries c ON c.id=a.country_id LEFT JOIN army_units au ON au.army_id=a.id
+        WHERE bsp.battle_id=$1 AND bsp.side_key=$2
+        GROUP BY a.id,a.name,a.country_id,c.name ORDER BY c.name,a.name`, [battle.id, input.side]
+    )).rows.map((row) => ({ ...row, total: Number(row.total) }));
+  },
+
+  async setArmyAssignment(input: { guildId: string; channelId: string; actorId: string; side: BattleSideKey; armyId: string; action: "ADD" | "REMOVE" }): Promise<{ view: BattleView; armyName: string; countryName: string; total: number }> {
+    return withTransaction(async (client) => {
+      const battle = await activeInChannel(client, input.guildId, input.channelId);
+      if (!battle || battle.status !== "DRAFT") throw new GameError("Bu kanalda düzenlenebilir bir savaş taslağı yok.");
+      if (battle.terrain === "NAVAL") throw new GameError("Kalıcı kara orduları deniz savaşı kadrosuna eklenemez.");
+      const army = (await client.query<{ id: string; name: string; country_id: string; country_name: string }>(
+        `SELECT a.id,a.name,a.country_id,c.name AS country_name FROM armies a JOIN countries c ON c.id=a.country_id
+          JOIN battle_side_participants bsp ON bsp.country_id=a.country_id
+         WHERE a.id=$1 AND a.guild_id=$2 AND bsp.battle_id=$3 AND bsp.side_key=$4 FOR UPDATE OF a`,
+        [input.armyId, input.guildId, battle.id, input.side]
+      )).rows[0];
+      if (!army) throw new GameError("Ordu bulunamadı veya seçilen savaş tarafındaki bir devlete ait değil.");
+      if (input.action === "REMOVE") {
+        const removed = await client.query("DELETE FROM battle_army_assignments WHERE battle_id=$1 AND army_id=$2 RETURNING army_id", [battle.id, army.id]);
+        if (!removed.rowCount) throw new GameError("Bu ordu savaş taslağına ekli değil.");
+        await rebuildParticipantFromArmies(client, battle.id, army.country_id);
+        await rebuildDraftSide(client, battle.id, input.side);
+        const view = await loadView(client, battle.id);
+        await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'battle.army.remove','battle',$3,$4::jsonb)", [input.guildId,input.actorId,battle.id,JSON.stringify({ side: input.side, armyId: army.id, armyName: army.name })]);
+        return { view, armyName: army.name, countryName: army.country_name, total: 0 };
+      }
+      const inOtherBattle = await client.query(
+        `SELECT 1 FROM battle_army_assignments baa JOIN battles b ON b.id=baa.battle_id
+          WHERE baa.army_id=$1 AND b.id<>$2 AND b.status NOT IN ('FINISHED','CANCELLED') LIMIT 1`, [army.id,battle.id]
+      );
+      if (inOtherBattle.rowCount) throw new GameError("Bu ordu başka bir etkin savaşa bağlı.");
+      if ((await client.query("SELECT 1 FROM battle_army_assignments WHERE battle_id=$1 AND army_id=$2", [battle.id,army.id])).rowCount) throw new GameError("Bu ordu zaten savaş taslağına ekli.");
+      const participant = await resolveParticipant(client,battle.id,input.side,army.country_name);
+      const existingArmyUse = await participantUsesArmies(client,battle.id,army.country_id);
+      if (!existingArmyUse && compositionTotal(participant.composition) > 0) throw new GameError("Bu ülkenin manuel savaş kadrosu zaten girilmiş. Kalıcı ordu kullanmak için önce manuel kadroyu temizleyin.");
+      const composition = Object.fromEntries((await client.query<{ unit_type: string; quantity: number }>(
+        "SELECT unit_type,COALESCE(SUM(quantity),0)::integer AS quantity FROM army_units WHERE army_id=$1 GROUP BY unit_type HAVING SUM(quantity)>0",
+        [army.id]
+      )).rows.map((row) => [row.unit_type,Number(row.quantity)])) as BattleComposition;
+      const total = compositionTotal(composition);
+      if (!total) throw new GameError("Bu orduda savaşa eklenebilecek asker bulunmuyor.");
+      await client.query("INSERT INTO battle_army_assignments(battle_id,side_key,army_id,country_id,initial_composition) VALUES($1,$2,$3,$4,$5::jsonb)", [battle.id,input.side,army.id,army.country_id,JSON.stringify(composition)]);
+      await rebuildParticipantFromArmies(client,battle.id,army.country_id);
+      await rebuildDraftSide(client,battle.id,input.side);
+      const view = await loadView(client,battle.id);
+      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'battle.army.add','battle',$3,$4::jsonb)", [input.guildId,input.actorId,battle.id,JSON.stringify({ side: input.side, armyId: army.id, armyName: army.name, total })]);
+      return { view, armyName: army.name, countryName: army.country_name, total };
+    });
+  },
+
   async setMercenaryAssignment(input: { guildId: string; channelId: string; actorId: string; side: BattleSideKey; companyKey: string; action: "ADD" | "REMOVE" }): Promise<BattleView> {
     return withTransaction(async (client) => {
       const battle = await activeInChannel(client, input.guildId, input.channelId);
@@ -626,9 +811,11 @@ export const battleService = {
       if (!naval && !(input.unitType in BATTLE_UNIT_STATS)) throw new GameError("Bu savaş türüne yalnızca kara birlikleri eklenebilir.");
       if (!Number.isSafeInteger(input.quantity) || input.quantity < 0) throw new GameError("Birim miktarı negatif olmayan tam sayı olmalıdır.");
       const participant = await resolveParticipant(client, battle.id, input.side, input.countryName);
+      if (await participantUsesArmies(client, battle.id, participant.country_id)) throw new GameError("Bu ülke savaşa kalıcı orduyla eklenmiş. Manuel kadro düzenlemek için önce orduları taslaktan çıkarın.");
       const composition: BattleComposition = { ...participant.composition, [input.unitType]: input.quantity };
       if (input.quantity === 0) delete composition[input.unitType];
       if (participant.source_settlement_id) await validateSourceSettlement(client, battle, participant, participant.source_settlement_id, composition);
+      else if (!naval) await validateParticipantAvailability(client, battle, participant, composition, null);
       await client.query(
         "UPDATE battle_side_participants SET composition=$1::jsonb WHERE battle_id=$2 AND country_id=$3",
         [JSON.stringify(composition), battle.id, participant.country_id]
@@ -679,9 +866,11 @@ export const battleService = {
       }
       if (!compositionTotal(clean)) throw new GameError("Kadroda en az bir birlik veya gemi bulunmalıdır.");
       const participant = await resolveParticipant(client, battle.id, input.side, input.countryName);
+      if (await participantUsesArmies(client, battle.id, participant.country_id)) throw new GameError("Bu ülke savaşa kalıcı orduyla eklenmiş. Manuel kadro düzenlemek için önce orduları taslaktan çıkarın.");
       let sourceSettlementId: string | null = participant.source_settlement_id;
       if (!input.naval) {
         sourceSettlementId = input.sourceSettlement?.trim() ? (await validateSourceSettlement(client, battle, participant, input.sourceSettlement, clean)).id : null;
+        if (!sourceSettlementId) await validateParticipantAvailability(client, battle, participant, clean, null);
       }
       await client.query(
         "UPDATE battle_side_participants SET composition=$1::jsonb,source_settlement_id=$2 WHERE battle_id=$3 AND country_id=$4",
@@ -898,10 +1087,16 @@ export const battleService = {
       const commanderSkill = view.battle.terrain === "NAVAL" ? 0 : Number((await client.query<{ skill_bonus: number }>(
         `SELECT COALESCE(MAX(cc.skill_bonus),0)::integer AS skill_bonus
            FROM country_characters cc
-          WHERE cc.role='COMMANDER' AND cc.assignment='CURIA'
-            AND cc.country_id IN (
-              SELECT country_id FROM battle_side_participants WHERE battle_id=$1 AND side_key=$2
-              UNION SELECT country_id FROM battle_sides WHERE battle_id=$1 AND side_key=$2
+          WHERE cc.role='COMMANDER'
+            AND (
+              (cc.assignment='CURIA' AND cc.country_id IN (
+                SELECT country_id FROM battle_side_participants WHERE battle_id=$1 AND side_key=$2
+                UNION SELECT country_id FROM battle_sides WHERE battle_id=$1 AND side_key=$2
+              ))
+              OR EXISTS (
+                SELECT 1 FROM battle_army_assignments baa JOIN armies a ON a.id=baa.army_id
+                 WHERE baa.battle_id=$1 AND baa.side_key=$2 AND a.commander_character_id=cc.id
+              )
             )`, [active.id, side]
       )).rows[0]?.skill_bonus ?? 0);
       const commanderBonus = commanderClashBonus(commanderSkill);

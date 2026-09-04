@@ -21,7 +21,7 @@ describe("güncel market ve seferberlik kuralları", () => {
     expect(calculateUnitUpkeep("observer", 200, "GARRISON", "PEACE" )).toBe(100);
     expect(calculateUnitUpkeep("observer", 100, "GARRISON", "PEACE" )).toBe(100);
     expect(calculateUnitUpkeep("light_infantry", 1_000, "FIELD_HOSTILE", "GENERAL", [], true)).toBe(157);
-    expect(calculateShipUpkeep("trireme", 1, "RESERVE", "GENERAL", true)).toBe(313);
+    expect(calculateShipUpkeep("trireme", 1, "RESERVE", "GENERAL", true)).toBe(235);
   });
 
   it("gemi mürettebatı ve kuşatma yapım sürelerini doğru tutar", () => {

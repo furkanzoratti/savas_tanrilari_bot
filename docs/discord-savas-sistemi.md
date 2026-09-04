@@ -1,281 +1,387 @@
 # ⚔️ SAVAŞ TANRILARI ROLE PLAY — SAVAŞ SİSTEMİ
 
-> Aşağıdaki blokların her biri Discord'a ayrı mesaj olarak gönderilebilir. Formüllerdeki bütün küsuratlar, aksi belirtilmedikçe bot tarafından en yakın tam sayıya yuvarlanır.
+> Bu metin güncel resmî savaş ve muharebe kurallarını esas alır. Her “MESAJ” bölümü Discord’a ayrı gönderilebilir. Aksi belirtilmedikçe sonuçlar bot tarafından en yakın tam sayıya yuvarlanır.
 
-## MESAJ 1/12 — SAVAŞIN TEMEL AKIŞI
+## MESAJ 1/20 — 📜 RESMÎ SAVAŞ İLANI VE CEPHELER
 
-Savaşlar sabit üç turda bitmez. Taraflardan biri dağılana, geri çekilene veya savaş türüne özel zafer şartı oluşana kadar **savaş turları** tekrar eder.
+Bir muharebenin açılabilmesi için devletler arasında resmî savaş bulunmalıdır. Savaş ilanı gizli form üzerinden hazırlanır; tamamlandığında savaş hedefi, gerekçesi, resmî ilan metni, liderler ve taraflar **Savaşlar kanalında herkese açık** duyurulur.
 
-1. DM; tarafları, araziyi, açıklamayı ve tarafların oyuncu/NPC kontrolünü seçerek savaşı açar.
-2. Kara ordusu veya filo bileşimleri sisteme gizli girilir.
-3. Bot ilk zar tarafını belirler. Yetkili oyuncu düğmeyle; NPC adına DM açık zar atar. DM gerektiğinde oyuncu adına da vekâleten atabilir.
-4. Her taraf için iki havuz oluşur: **Çarpışma** ve **Hasar**.
-5. İki açık zar kaydedilince DM turu çözer. Bot üstünlüğü, kayıpları, baskıyı ve düzen seviyesini hesaplar.
-6. Savaş bitmediyse tur numarası artar ve ilk zar sırası diğer tarafa geçer.
+• Bir devlet başka bir devlete savaş ilan edebilir.
+• Bir pakt, başka bir pakta veya devlete savaş ilan edebilir.
+• Birden fazla devletin bulunduğu taraf **cephe** sayılır.
+• Normal savaşta ilanı yapan devlet saldıran cephe lideridir; hedef devlet savunan cephe lideridir.
+• Pakt savaşında ilgili paktın lider devleti cephe lideri olur ve aktif pakt üyeleri o cepheye katılır.
+• Bağımsız müttefikler otomatik katılmaz. Cephe lideri savaş sürerken bir devleti kendi tarafına çağırabilir; çağrıyı yalnız hedef ülkenin oyuncusu kabul veya reddedebilir.
+• Savaşa çağrı ve verilen yanıt herkese açık yayımlanır.
+• Aynı devlet aynı savaşta iki karşı cephede bulunamaz.
+
+Savaş ilan edildiği oyun turunda yalnız diplomatik ve askerî hazırlık yapılabilir. **Fiilî saldırı en erken takip eden oyun turunda** başlatılır. Örneğin Tur 5’te ilan edilen savaşta ilk saldırı Tur 6’da yapılabilir. Bu bekleme süresi DM tarafından takip edilir.
+
+Oyuncu komutları: `/savas-ilani`, `/pakt-savasi`, `/savas-cagrisi`, `/aktif-savaslar`.
+
+## MESAJ 2/20 — 🕊️ SAVAŞ LİDERLİĞİ, BARIŞ VE TAZMİNAT
+
+Savaşa katılan her devlet ayrı ayrı savaş veya barış ilan etmez. Bütün cephe adına diplomatik yetki **savaş liderindedir**.
+
+• Barış teklifini yalnız iki karşı cephe liderinden biri gönderebilir ve teklif karşı cephenin liderine gider.
+• Aynı savaşta yalnız bir adet yanıt bekleyen barış teklifi bulunabilir.
+• Teklife 2–2.000 karakterlik barış şartları ve isteğe bağlı tam sayı Altın tazminatı eklenebilir.
+• Tazminatı teklif eden veya hedef cephe lideri ödeyebilir; ödeme yapacak devlet teklifte açıkça belirtilir.
+• Teklif kabul edildiğinde bot, tazminatı ödeyen devletin yerleşke hazinelerinden mevcut hazine payları oranında keser. Altın, alan devletin yerleşkelerine nüfusları oranında dağıtılır.
+• Ödeyen tarafın toplam yerel hazinesi yetersizse teklif kabul edilemez.
+• Kabul, savaşın bütün cepheleri için savaşı bitirir ve sonucu herkese açık duyurur. Ret hâlinde savaş devam eder.
+• Yerleşke devri ve benzeri büyük barış hükümleri bot tarafından otomatik uygulanmaz; DM tarafından yürütülür.
+• DM, devam eden bir savaşı kazanan taraf veya beyaz barış seçerek bitiş açıklamasıyla doğrudan sonlandırabilir.
+
+Oyuncu komutu: `/baris-teklifi`. DM komutları: `/savas-yapilandir`, `/savas-sonlandir`.
+
+## MESAJ 3/20 — ⚔️ SAVAŞIN TEMEL AKIŞI
+
+Savaşlar sabit bir tur sayısında bitmez. Taraflardan biri dağılana, geri çekilene veya savaş türüne özel zafer şartı oluşana kadar **savaş turları** devam eder.
+
+1. DM; ana ülkeleri, araziyi, tarafların oyuncu/NPC kontrolünü ve savaş anlatımını seçerek taslak oluşturur.
+2. Gerekirse iki tarafa da başka ülkeler ve etkin paralı asker şirketleri eklenir.
+3. Her ülkenin kara ordusu veya filosu sisteme gizli olarak girilir.
+4. Taslak bir kez yayımlanır ve bot ilk zar tarafını belirler. Pusuda ilk taraf daima A’dır; diğer savaşlarda başlangıç tarafı rastgele seçilir.
+5. Yetkili oyuncu düğmeyle zar atar. NPC adına DM zar atar; gerektiğinde oyuncu tarafına da vekâlet edebilir.
+6. Her taraf için **Çarpışma** ve **Hasar** havuzu oluşur.
+7. İki tarafın zarı tamamlanınca DM turu çözer. Bot üstünlüğü, kayıpları, baskıyı ve düzeni hesaplar.
+8. Savaş bitmediyse tur yükselir ve ilk zar hakkı diğer tarafa geçer.
 
 **Kavramlar:**
-• Çarpışma, o turun üstün tarafını belirler.
-• Hasar, rakibe uygulanacak kaybın temelidir; doğrudan ölü sayısı değildir.
-• Baskı yüzde değil, biriken **puan** değeridir.
-• Kayıp yüzdesi, başlangıç kuvvetine göre ayrıca hesaplanır.
+• Çarpışma, turun üstün tarafını belirler.
+• Hasar, kayıp hesabının temelidir; doğrudan ölü sayısı değildir.
+• Baskı yüzde değil, biriken puandır.
+• Savaş turu ile genel oyun/rol turu farklıdır.
 
-## MESAJ 2/12 — CEPHEYE GİREN ASKER VE ZAR ÜRETİMİ
+## MESAJ 4/20 — 🤝 ÇOK ÜLKELİ TARAFLAR VE KADRO KAYDI
 
-Arazi bir **cephe kapasitesi** belirler. Toplam kuvvet kapasiteyi aşmıyorsa herkes; aşıyorsa birlik türleri ordudaki oranları korunarak cepheye girer.
+Bir savaşın A ve B tarafında birden fazla ülke bulunabilir. Savaşı başlatırken seçilen ülke tarafın ana ülkesidir; eklenen ülkeler koalisyon katılımcısıdır.
+
+• Her katılımcı ülkenin kadrosu ayrı girilir, fakat taraf tek birleşik zar havuzu üretir.
+• Oyuncu kontrollü tarafta, o taraftaki katılımcı ülkelerden herhangi birinin oyuncusu zar atabilir.
+• Kayıplar önce devlet birlikleri ile atanmış paralı askerler, ardından katılımcı ülkeler arasında başlangıç katkıları oranında paylaştırılır.
+• Yalnız etkin ve bakımı ödenmiş paralı asker şirketleri savaşa katılabilir.
+• Savaşa atanmış bir paralı asker şirketi aynı anda başka etkin savaşta kullanılamaz.
+• Atanmış şirket sonradan bakımsız veya etkisiz hâle gelirse ödeme düzeltilene kadar o taraf zar atamaz.
+
+Kara kadrosunda **kaynak yerleşke** seçmek isteğe bağlıdır. Seçilirse bot kadronun o yerleşkede bulunduğunu doğrular ve savaş sonu devlet kayıplarını yalnız oradan düşer. Seçilmezse kayıp, ülkenin savaşa uygun ordu kayıtlarına mevcutları oranında dağıtılır.
+
+Garnizonlar normal savaş kadrosuna katılamaz. Kuşatmada yalnız savunulan yerleşkenin garnizonu, ana savunucu ülkenin kadrosuna dâhil edilebilir.
+
+## MESAJ 5/20 — 📐 CEPHEYE GİREN ASKER VE ZAR ÜRETİMİ
+
+Her arazi bir **cephe kapasitesi** belirler. Toplam kuvvet kapasiteyi aşmıyorsa herkes; aşıyorsa birlik türleri ordudaki oranları korunarak cepheye girer.
 
 **Cephe oranı = Cephe kapasitesi ÷ Toplam mevcut kuvvet**
+
 **Bir türün cephedeki sayısı = Türün mevcut sayısı × Cephe oranı**
 
-İlk sonuçlar aşağı yuvarlanır. Yuvarlamadan kalan birkaç kişilik kapasite, mevcut birim sırasına göre doldurulur. Cephe dışındaki askerler yedektir; o tur zar üretmez. Kayıplarla yer açıldıkça sonraki turlarda cepheye girer.
+İlk değerler aşağı yuvarlanır. Boş kalan birkaç kişilik kapasite, botun sabit birim sırasına göre doldurulur. Cephe dışındaki askerler yedektir; o tur zar üretmez. Kayıplarla yer açıldıkça sonraki turlarda cepheye girer.
 
-**Örnek:** 20.000 Hafif Piyade ve 20.000 Ağır Piyadeden oluşan 40.000 kişilik ordu, 30.000 kişilik ovada %75 oranla savaşır: 15.000 Hafif + 15.000 Ağır cepheye girer.
+**Örnek:** 20.000 Hafif ve 20.000 Ağır Piyadeden oluşan 40.000 kişilik ordu, 30.000 kişilik ovada 15.000 Hafif + 15.000 Ağır Piyade ile savaşır.
 
-Kara savaşında her tam **1.000 asker**, türünün Çarpışma ve Hasar zarlarını bir kez üretir. Eksik birlik de zar atar; sonuç mevcuduna oranlanır.
+Kara savaşında her tam **1.000 asker**, türünün zarlarını bir kez üretir. Eksik birlik de zar atar ve sonuç asker oranına göre küçültülür.
 
-**Örnek:** 500 Okçu 1d8 Çarpışma atıp 6 bulursa 6 × 500/1.000 = **3** Çarpışma üretir. Orantılı sonuç en az 1'dir.
+**Örnek:** 500 Okçu 1d8 Çarpışmadan 6 atarsa 6 × 500/1.000 = **3 Çarpışma** üretir. Eksik birliğin orantılı sonucu en az 1’dir.
 
-Denizde blok büyüklüğü 1 gemidir. Filo 30 gemiyi aşarsa her türün etkin adedi = tür adedi × 30/toplam filo olur ve aşağı yuvarlanır; yuvarlamayla boş kalan filo yuvası yeniden doldurulmaz. Etkin her gemi kendi zarlarını üretir.
-
-## MESAJ 3/12 — BİRİM ZARLARI VE DAYANIKLILIK
+## MESAJ 6/20 — 🎲 STANDART BİRLİK ZARLARI
 
 **Birim — Çarpışma / Hasar — Dayanıklılık**
-• Hafif Piyade/Ciritçi: 1d6 / 1d6 — Düşük
-• Sapancı: 1d6 / 1d8 — Düşük
-• Mızraklı Piyade: 1d8 / 1d6 — Orta
-• Okçu: 1d8 / 1d10 — Düşük
-• Ağır Piyade: 2d8 / 2d8 — Yüksek
-• Hafif Süvari: 2d6 / 1d8 — Orta
-• Ağır Süvari: 2d10 / 2d10 — Yüksek
 
-**Dayanıklılık katsayısı:**
+• Hafif Piyade/Ciritçi: **1d4 / 1d6 — Düşük**
+• Milis: **1d4 / 1d4 — Düşük**
+• Sapancı: **1d6 / 1d8 — Düşük**
+• Mızraklı Piyade: **1d8 / 1d6 — Orta**
+• Okçu: **1d8 / 1d10 — Düşük**
+• Ağır Piyade: **2d8 / 2d8 — Yüksek**
+• Hafif Süvari: **2d6 / 1d8 — Orta**
+• Ağır Süvari: **2d10 / 2d10 — Yüksek**
+
+**Dayanıklılık katsayıları:**
 • Düşük: **1,00**
 • Orta: **0,85**
 • Yüksek: **0,70**
 
-Pahalı birliklerin iki avantajı vardır: daha güçlü zar havuzu ve aynı ham hasar karşısında daha düşük kayıp. Dayanıklılık, zar toplamını değiştirmez; hasarın birlik türlerine dağıtılması ve ölü sayısına çevrilmesi sırasında uygulanır.
+Dayanıklılık zar toplamını değiştirmez. Rakibin ham hasarı birlik türlerine dağıtılırken ve kayba çevrilirken kullanılır. Yüksek dayanıklılığa sahip birlikler aynı hasardan daha az kayıp verir.
 
-Her birim türünün zarları ayrı atılır ve toplanır:
-**Taraf Çarpışması = Cephedeki bütün türlerin Çarpışma sonuçları toplamı**
-**Taraf Hasarı = Cephedeki bütün türlerin Hasar sonuçları toplamı**
+## MESAJ 7/20 — 🏛️ ÖZEL BİRLİK ZARLARI
 
-Kuşatma aleti desteği varsa ilgili Çarpışma veya ordu Hasarı daha sonra bu toplamlara eklenir.
+**Birim — Çarpışma / Hasar — Dayanıklılık**
 
-## MESAJ 4/12 — ÇARPIŞMA ÜSTÜNLÜĞÜ NASIL BULUNUR?
+• Lejyoner: **2d10 / 2d8 — Yüksek**
+• Hoplit: **2d8 / 1d10 — Yüksek**
+• Atlı Okçu: **2d8 / 2d8 — Orta**
+• Deve Süvarisi: **2d8 / 1d10 — Orta**
+• Briton Uzun Yaycıları: **1d10 / 2d10 — Düşük**
+• Pers Ölümsüzleri: **2d8 / 2d10 — Yüksek**
+• Kartaca Savaş Filleri: **3d8 / 2d10 — Yüksek**
+• İber Caetratileri: **2d6 / 2d8 — Düşük**
+• Cermen Şok Savaşçıları: **2d10 / 2d8 — Düşük**
 
-İki tarafın Çarpışma toplamları karşılaştırılır. Fark, yüksek sonuca değil **düşük sonuca** bölünür:
+Özel birliklerin savaş zarları standart birliklerle aynı hesap akışına girer. Bir ülke, yalnız DM tarafından kendisine açılmış özel birlikleri satın alabilir; fakat savaş kadrosuna kayıtlı mevcudunun tamamını koyabilir.
 
-**Üstünlük yüzdesi = (Yüksek Çarpışma − Düşük Çarpışma) ÷ Düşük Çarpışma × 100**
+## MESAJ 8/20 — 🧩 ORDU KOMPOZİSYONU
 
-• Eşit sonuç veya %0–9,99 fark: **Dengeli** — kazanan yok
+Kompozisyon, ordunun tamamından değil **o tur cepheye giren birliklerden** hesaplanır. Yedekler cepheye girene kadar değerlendirmeyi etkilemez.
+
+**Roller:**
+• Hat: Hafif Piyade, Milis, Ağır Piyade, Lejyoner, Pers Ölümsüzleri, İber Caetratileri, Cermen Şok Savaşçıları
+• Mızrak: Mızraklı %100; Hoplit %50 Mızrak + %50 Hat
+• Menzilli: Sapancı, Okçu, Briton Uzun Yaycıları; Atlı Okçu %50 Menzilli + %50 Hareketli
+• Hareketli: Hafif/Ağır/Deve Süvarisi ve Kartaca Savaş Filleri; Atlı Okçu %50 Hareketli
+
+**Tekdüze Ordu:** Tek tür en az %80 → Çarpışma ×0,85; Hasar ×0,90
+
+**Sınırlı Kompozisyon:** Üst seviyeleri karşılamayan ordu → Çarpışma ×0,90; Hasar ×0,95
+
+**Standart Kompozisyon:** En büyük tür en fazla %60; en az üç türün her biri en az %20; en az üç askerî rolün payı %10+ → ×1,00 / ×1,00
+
+**Dengeli Karma:** Hat %40–65; Menzilli %10+; Hareketli %10+; Mızrak %10+; tek tür en fazla %60 → ×1,10 / ×1,05
+
+**Mükemmel:** Hat %40–55; Menzilli %15–25; Hareketli %15–25; Mızrak %10–20 → ×1,15 / ×1,08
+
+**Geçiş kuralı:** Kompozisyon çarpanları, sunucuya tanımlanmış etkinleşme oyun turuna kadar ×1,00 tutulur. Bot sınıfı yine hesaplar. Etkinleşme turu geldiğinde otomatik çalışır. Mızrak–Süvari kuralı bu geçişten etkilenmez ve aktif kalır.
+
+## MESAJ 9/20 — 🏰 KUŞATMA KOMPOZİSYONU
+
+Sur ve kapı birlikte sağlamken kuşatma cephesinde hareketli birlik rolü zorunlu değildir.
+
+**Dengeli Kuşatma:**
+• Hat %45–75
+• Menzilli en az %10
+• Mızrak en az %10
+• Tek bir tür en fazla %60
+• Çarpışma ×1,10; Hasar ×1,05
+
+**Mükemmel Kuşatma:**
+• Hat %50–65
+• Menzilli %20–35
+• Mızrak %15–25
+• Çarpışma ×1,15; Hasar ×1,08
+
+Sur veya kapı kırıldığı anda değerlendirme normal meydan kompozisyonuna döner. Kompozisyon sistemi geçici olarak pasifse kuşatma sınıfı gösterilse bile çarpanlar etkinleşme turuna kadar ×1,00 uygulanır.
+
+## MESAJ 10/20 — 🔱 MIZRAKLI–SÜVARİ KARŞILAŞMASI
+
+Bu kural yalnız **kuşatma dışındaki kara savaşlarında** uygulanır.
+
+**Mızrak Gücü:**
+• 1 Mızraklı = 1
+• 1 Hoplit = 0,5
+
+**Süvari Gücü:**
+• 1 Hafif, Ağır veya Deve Süvarisi = 1
+• 1 Kartaca Savaş Fili = 1
+• 1 Atlı Okçu = 0,5
+
+Bot iki tarafın cephedeki kuvvetlerini karşılaştırır. Mızrak Gücü ile düşman Süvari Gücünden düşük olan değer **eşleşen kuvvettir**. Yalnız eşleşen mızrak payı bonus kazanır:
+
+• Eşleşen mızrak zarlarına **%30 Çarpışma**
+• Eşleşen mızrak zarlarına **%15 Hasar**
+
+%15 ek hasar yalnız düşmanın süvari türlerine dağıtılır. Düşmanda 1.000 süvari, sizde 5.000 mızraklı varsa yalnız mızraklıların beşte biri bonus alır. Düşmanda süvari yoksa bonus oluşmaz.
+
+## MESAJ 11/20 — 📊 ÇARPIŞMA ÜSTÜNLÜĞÜ
+
+İki tarafın nihai Çarpışma toplamları karşılaştırılır:
+
+**Üstünlük = (Yüksek − Düşük) ÷ Düşük × 100**
+
+• Eşit veya %0–9,99 fark: **Dengeli**
 • %10–24,99: **Hafif Üstünlük**
 • %25–49,99: **Belirgin Üstünlük**
-• %50 ve üzeri: **Ezici Üstünlük**
-• Düşük taraf 0 ise: **Ezici Üstünlük**
+• %50+: **Ezici Üstünlük**
+• Düşük sonuç 0: **Ezici Üstünlük**
 
-**Örnek 1:** A=120, B=100 → (120−100)/100 = **%20** → A Hafif Üstün.
-**Örnek 2:** A=108, B=100 → **%8** → Dengeli; A daha yüksek atsa da tur galibi sayılmaz.
-**Örnek 3:** A=150, B=100 → **%50** → A Ezici Üstün.
+**Hasar çarpanları:**
+• Dengeli: iki taraf ×0,80
+• Hafif: kazanan ×1,00 / kaybeden ×0,70
+• Belirgin: kazanan ×1,15 / kaybeden ×0,50
+• Ezici: kazanan ×1,30 / kaybeden ×0,30
 
-Bu sınıf iki şeyi belirler:
-1. Her tarafın Hasar çarpanı.
-2. Kaybeden tarafın kazanacağı baskı puanı.
+Kaybeden çarpanı, kaybedenin rakibine vereceği hasarı azaltır; alacağı hasarı doğrudan azaltmaz veya artırmaz. Çarpışma sonucu Hasar zarını yeniden attırmaz.
 
-Çarpışma sonucu, Hasar zarını yeniden attırmaz. İki taraf da kendi önceden attığı Hasar toplamını, turun üstünlük sınıfına ait çarpanla kullanır.
+## MESAJ 12/20 — 💥 HASAR VE KAYIP HESABI
 
-## MESAJ 5/12 — HASARIN KAYBA ÇEVRİLMESİ
+**Kara Ham Hasarı = Hasar toplamı × 20 × Üstünlük çarpanı × Özel savaş çarpanı**
 
-Önce her tarafın rakibe uyguladığı **ham hasar** bulunur:
+**Deniz Ham Hasarı = Hasar toplamı × 0,012 × Üstünlük çarpanı × Özel savaş çarpanı**
 
-**Kara Ham Hasarı = Hasar zarı toplamı × 20 × Üstünlük çarpanı × Özel savaş çarpanı**
-**Deniz Ham Hasarı = Hasar zarı toplamı × 0,012 × Üstünlük çarpanı × Özel savaş çarpanı**
+Ham hasar hedef birliklere dayanıklılık ağırlığıyla dağıtılır:
 
-**Üstünlük çarpanları:**
-• Dengeli: iki taraf **0,80**
-• Hafif: kazanan **1,00** / kaybeden **0,70**
-• Belirgin: kazanan **1,15** / kaybeden **0,50**
-• Ezici: kazanan **1,30** / kaybeden **0,30**
+1. Tür ağırlığı = Mevcut × Dayanıklılık katsayısı
+2. Türe ayrılan hasar = Ham hasar × Tür ağırlığı ÷ Toplam ağırlık
+3. Tür kaybı = Türe ayrılan hasar × Dayanıklılık katsayısı
+4. Sonuç yuvarlanır ve mevcut sayıyı aşamaz.
 
-“Kaybeden çarpanı”, kaybeden tarafın rakibine vereceği hasarı azaltır. Alacağı hasarı doğrudan çarpmaz.
+**Örnek:** 1.000 Hafif + 1.000 Ağır Piyadeye 800 ham hasar gelirse ağırlıklar 1.000 ve 700 olur. Yaklaşık 471 Hafif, 231 Ağır Piyade kaybedilir; toplam kayıp 702’dir.
 
-**Örnek:** A Çarpışma 120, B 100 olduğundan A Hafif Üstündür. A Hasar 40, B Hasar 30 attıysa:
-• A'nın B'ye ham hasarı: 40 × 20 × 1,00 = **800**
-• B'nin A'ya ham hasarı: 30 × 20 × 0,70 = **420**
+Mızrak karşılaşmasının hedefli ek hasarı genel hasardan ayrılır ve yalnız uygun süvari birliklerinden düşülür.
 
-Bunlar henüz kesin ölü sayıları değildir. Sonraki adımda hedef ordunun birim dağılımı ve dayanıklılığı uygulanır. Kuşatma ve pusu gibi özel çarpanlar da ham hasar formülündeki son çarpana girer.
+## MESAJ 13/20 — 🧠 BASKI, KAYIP YÜZDESİ VE DÜZEN
 
-## MESAJ 6/12 — HASARIN BİRİMLERE DAĞITILMASI
+Normal meydan, pusu ve deniz savaşlarında:
 
-Ham hasar, hedef ordunun o anki bütün birim türlerine dayanıklılık ağırlığıyla dağıtılır.
+• Dengeli tur: Baskı değişmez
+• Hafif üstünlük: Kaybeden +1
+• Belirgin üstünlük: Kaybeden +2
+• Ezici üstünlük: Kaybeden +3
+• Tur galibi: Kendi baskısından −1; 0’ın altına inmez
 
-1. **Tür ağırlığı = Mevcut asker × Dayanıklılık katsayısı**
-2. **Türe ayrılan hasar = Ham hasar × Tür ağırlığı ÷ Bütün tür ağırlıkları toplamı**
-3. **Tür kaybı = Türe ayrılan hasar × Dayanıklılık katsayısı**
-4. Sonuç en yakın tam sayıya yuvarlanır ve o türün mevcut sayısını aşamaz.
+**Kayıp yüzdesi = (Başlangıç − Mevcut) ÷ Başlangıç × 100**
 
-**Örnek:** Hedefte 1.000 Hafif ve 1.000 Ağır Piyade; gelen ham hasar 800 olsun.
-• Hafif ağırlık: 1.000×1,00=1.000
-• Ağır ağırlık: 1.000×0,70=700
-• Toplam ağırlık: 1.700
-• Hafife ayrılan: 800×1.000/1.700≈471 → **471 kayıp**
-• Ağıra ayrılan: 800×700/1.700≈329,41; 329,41×0,70≈230,59 → **231 kayıp**
+Bot gerçekleşen en ağır eşiği uygular:
+• Düzenli: Baskı 0–1 ve kayıp %10’dan az
+• Yıpranmış: Baskı 2–3 veya kayıp %10+
+• Sarsılmış: Baskı 4–5 veya kayıp %30+
+• Dağılmış: Baskı 6+, kayıp %40+ veya kuvvet 0
 
-Toplam **702 kayıp** oluşur. Böylece yüksek dayanıklılık, ağır birliğin hem hasardan daha küçük pay almasını hem de ayrılan hasarı daha düşük kayba çevirmesini sağlar.
+Bu savaş türlerinde bir taraf Dağılmış olduğunda savaş biter. İki taraf aynı turda dağılırsa daha fazla kuvveti kalan kazanır; eşitse galip çıkmaz.
 
-Bir turun toplam kaybı, bütün birim türlerinin hesaplanan kayıplarının toplamıdır.
+## MESAJ 14/20 — 🗺️ ARAZİ, CEPHE, PUSU VE KOMUTAN
 
-## MESAJ 7/12 — BASKI, KAYIP YÜZDESİ VE DÜZEN
-
-**Normal savaşlarda baskı:** Baskı yüzde değil, 0'dan başlayan bir puandır.
-
-• Dengeli: değişiklik yok
-• Hafif üstünlük: kaybeden +1
-• Belirgin üstünlük: kaybeden +2
-• Ezici üstünlük: kaybeden +3
-• Tur galibi: mevcut baskısından −1
-
-Meydan, pusu ve deniz savaşlarında kayıp yüzdesi de düzene katılır:
-
-• **Düzenli:** Baskı 0–1 ve kayıp %10'dan az
-• **Yıpranmış:** Baskı 2–3 veya kayıp en az %10
-• **Sarsılmış:** Baskı 4–5 veya kayıp en az %30
-• **Dağılmış:** Baskı 6+, kayıp en az %40 veya kuvvet 0
-
-Normal meydan, pusu ve deniz savaşında bir taraf Dağılmış olunca savaş biter.
-
-**Kuşatmada özel baskı:** Tahkimat çarpanları baskıya eklenmez. Baskı, saldıran ve savunan tarafın ham Çarpışma zarları karşılaştırılarak hesaplanır.
-
-• 0–2: Düzenli
-• 3–4: Baskı Altında
-• 5–6: Sarsılmış
-• 7–8: Kritik Hat
-
-Kuşatma baskısı en fazla 8 olur. Bir tarafın ilk kez 8 baskıya ulaşması savaşı bitirmez.
-
-Tur kayıplarından sonra cephe dışında kalan yedekler baskıyı azaltır:
-
-• En az yarım cephe büyüklüğünde yedek: −1 baskı
-• En az bir tam cephe büyüklüğünde yedek: −2 baskı
-
-Yedek = mevcut toplam kuvvet − cephe kapasitesi. Savunucunun toplamı ve yedek sayısı açık edilmez; bot hesabı gizli yürütür.
-
-## MESAJ 8/12 — ARAZİ, CEPHE VE PUSU
-
-**Aynı turda etkin savaşabilecek azami kuvvet:**
+**Cephe kapasiteleri:**
 • Açık Ova: 30.000 / 30.000
 • Çöl: 35.000 / 35.000
 • Orman: 15.000 / 15.000
 • Bataklık: 10.000 / 10.000
 • Dağlık: 12.000 / 12.000
 • Dağ Geçidi: 6.000 / 6.000
-• Nehir Geçişi: saldıran 10.000 / savunan 20.000
-• Pusu: pusu kuran 15.000 / pusuya düşen 8.000
-• Kuşatma: saldıran 15.000 / savunan 18.000
-• Deniz: taraf başına 30 gemi
+• Nehir Geçişi: Saldıran 10.000 / Savunan 20.000
+• Pusu: Pusu Kuran 15.000 / Pusuya Düşen 8.000
+• Kuşatma: Saldıran 15.000 / Savunan 18.000
+• Deniz: Taraf başına 30 gemi
 
-İlk değer A, ikinci değer B tarafıdır. Cephe kapasitesi doğrudan saldırı/hasar bonusu vermez; yalnızca o tur zar üretecek asker veya gemi miktarını sınırlar.
+Cephe kapasitesi tek başına güç bonusu vermez; yalnız zar üretecek kuvveti sınırlar.
 
-**Pusu:** A tarafı pusuyu kurar ve ilk zarı atar. Yalnız 1. savaş turunda:
-• A'nın nihai Çarpışma toplamı × **1,25**
-• A'nın nihai Hasar toplamı × **1,10**
+**Pusu:** A tarafı ilk zarı atar. Yalnız ilk savaş turunda A Çarpışması ×1,25 ve A Hasarı ×1,10 olur. Sonraki turlarda bu bonus kalkar; pusu cephesi ve geri çekilme cezası sürer.
 
-Sonuçlar yukarı yuvarlanır. İkinci turdan itibaren bu çarpanlar kalkar; ancak savaş Pusu arazisi olarak sürdüğü için 15.000/8.000 cephe sınırı ve geri çekilme cezası devam eder.
+**Komutan:** Curia’ya atanmış Komutanın özellik puanı, tarafın Çarpışma sonucuna düz bonus verir. Birleşik tarafta en yüksek Komutan kullanılır; bonuslar toplanmaz. Komutan bonusu en fazla **+3 Çarpışma**dır ve deniz savaşlarında uygulanmaz.
 
-## MESAJ 9/12 — KUŞATMA, SAVUNMA VE ŞEHİR DÜŞMESİ
+## MESAJ 15/20 — 🏰 KUŞATMA AŞAMALARI VE TAHKİMAT
 
-Kuşatmada A saldıran, B savunandır. Saldıran cephesi **15.000**, savunan cephesi **18.000** askerdir. Sur **30.000 HP**, kapı **1.000 HP** ile başlar.
+Kuşatmada A saldıran, B savunandır. Sur **30.000 HP**, kapı **1.000 HP** ile başlar.
 
-**Bombardıman:** Ordular temas etmez; asker kaybı ve baskı oluşmaz, savaş turu ilerlemez. Yalnız Sur hedefli Katapultlar atış yapar. En fazla 25 Katapult etkindir. Her kuşatma bir oyun turunda en fazla **4 kez** bombalanabilir. Yeni oyun turunda dört hak otomatik yenilenir. Hücuma geçildikten sonra bombardımana dönülemez.
-
-**Savunucunun savaş kartındaki zarları iki satırdır:**
-
-• **Ham Zar:** Oyuncunun veya DM'in attığı gerçek Çarpışma ve Hasar.
-• **Tahkimat Sonrası:** Kayıp hesabında kullanılan çarpanlı Çarpışma ve Hasar.
+**Bombardıman:** Ordular temas etmez; asker kaybı, baskı ve savaş turu ilerlemesi oluşmaz. Yalnız sur hedefli Katapultlar çalışır. Bir kuşatma aynı oyun turunda en fazla **4 kez** bombalanabilir; haklar yeni oyun turunda yenilenir. Hücuma geçildikten sonra bombardımana dönülemez.
 
 **Tahkimat çarpanları:**
+• Sur ve kapı sağlam: B Çarpışma ×1,50; B Hasar ×1,35; A Hasar ×0,50
+• Yalnız biri sağlam: B Çarpışma ×1,25; B Hasar ×1,15; A Hasar ×0,75
+• İkisi de yıkılmış: B Çarpışma ×1,10; diğer Hasarlar ×1,00
 
-• Sur ve kapı >0: B Çarpışma ×1,50; B Hasar ×1,35; A Hasar ×0,50
-• Yalnız biri >0: B Çarpışma ×1,25; B Hasar ×1,15; A Hasar ×0,75
-• İkisi de 0: B Çarpışma ×1,10; diğer Hasarlar ×1,00
+Tahkimat kademesi turun başındaki HP’ye göre belirlenir. Aynı tur kırılan sur veya kapı hücum erişimini hemen açabilir; fakat düşük tahkimat çarpanı sonraki savaş turunda uygulanır.
 
-Tahkimat sonrası Çarpışma, **kayıp hesabındaki üstünlüğü** belirler. Kuşatma baskısı ise iki tarafın **ham Çarpışma** zarlarından belirlenir. Bu yüzden bot bu iki üstünlüğü savaş kartında ayrı gösterir.
+Bot savunucunun **Ham Zar** ve **Tahkimat Sonrası Zar** sonuçlarını ayrı gösterir. Kayıp üstünlüğü çarpanlı sonuçtan, kuşatma baskısı ise tarafların ham Çarpışma sonuçlarından hesaplanır.
 
-**Saldıranın zorunlu geri çekilmesi için:**
+## MESAJ 16/20 — 🪜 HÜCUM ERİŞİMİ VE KUŞATMA BİRLİKLERİ
 
-• Önceki turdan beri 8 baskıda olması,
-• Yeni turu da baskı hesabında kaybetmesi,
-• En az yarım cephe büyüklüğünde kullanılabilir yedeğinin kalmaması
+Sur ve kapı birlikte sağlamken bütün saldıran ordu doğrudan savaşamaz:
 
-şartlarının tamamı gerekir. İlk kez 8 baskıya ulaşmak geri çekilme oluşturmaz.
+• 1 Merdiven Grubu, en fazla **1.000 Hücum Birliğine** erişim sağlar.
+• 1 Kuşatma Kulesi, en fazla **3.000 Hücum Birliğine** erişim sağlar.
+• Toplam hücum erişimi saldıranın 15.000 kişilik cephesini aşamaz.
+• Kuleler kapasite hesabında önce, merdivenler kalan alanda değerlendirilir.
+• Sur veya kapı kırılırsa saldıranın normal 15.000 kişilik cephesi açılır.
 
-**Savunucunun şehri baskı yüzünden kaybetmesi için önce erişim gerekir:** Sur=0, Kapı=0 veya saldıranda etkin Merdiven/Kuşatma Kulesi bulunmalıdır.
+**Hücum Birlikleri:** Hafif Piyade, Milis, Mızraklı, Ağır Piyade, Lejyoner, Hoplit, Pers Ölümsüzleri, İber Caetratileri ve Cermen Şok Savaşçılarıdır.
 
-Erişimle birlikte şu şartların tamamı aranır:
+Sadece menzilli veya atlı birliklerden oluşan ordu şehir alamaz. Hücum Birliği kalmazsa kuşatan taraf otomatik geri çekilir. Sur ve kapı sağlamken saldıran süvariler cepheye ve kayıp havuzuna girmez; Atlı Okçular menzilli destek verebilir. Sur veya kapı kırılınca normal cepheye geçilir.
 
-• Savunucu önceki turdan beri 8 baskıda olmalı,
-• Yeni turu da baskı hesabında kaybetmeli,
-• Kalan kuvvet başlangıcın %30'u veya altında olmalı,
-• Kalan kuvvet 9.000 veya altında olmalıdır.
+Savunucu süvariler kuşatma boyunca attan inerek savaşır:
+• Hafif Süvari → Hafif Piyade zarları
+• Ağır Süvari → Ağır Piyade zarları
+• Atlı Okçu → Okçu zarları
+• Deve Süvarisi → Mızraklı Piyade zarları
 
-Şehirde 10.000 asker veya kullanılabilir büyük bir yedek kuvvet varken yalnızca baskı nedeniyle otomatik teslim yaşanmaz. Savunucu kuvveti 0'a düşmüş ve şehre erişim sağlanmışsa şehir doğrudan düşer. Açlık ve gönüllü teslim ayrı kurallardır.
+Kayıplar belgede özgün birlik adından düşülür.
 
-## MESAJ 10/12 — KUŞATMA ALETLERİNİN HESABI
+## MESAJ 17/20 — 🚨 KUŞATMA BASKISI, AÇLIK VE ŞEHRİN DÜŞMESİ
 
-Bir alet türünün aynı turda en fazla **25** adedi etkindir. Alet eklenirken hedef seçilir.
+Kuşatma baskısı 0–8 arasındadır:
+• 0–2 Düzenli
+• 3–4 Baskı Altında
+• 5–6 Sarsılmış
+• 7–8 Kritik Hat
 
-• **Merdiven — Hücum:** Adet başına 1d2 Çarpışma; erişim sağlar.
-• **Koçbaşı — Kapı:** Her kuşatmada en fazla 1 adet alınabilir; üst üste birikmez ve 1d8×35 Kapı Hasarı verir.
-• **Mantlet — Hücum:** Adet başına 1d4 Çarpışma; her biri B'nin A'ya Hasarını %5 azaltır, üst sınır %50.
+Tur kaybından sonra kullanılabilir yedek baskıyı azaltır:
+• En az yarım cephe yedeği: −1
+• En az tam cephe yedeği: −2
+
+Savunucudaki Panteon Sv3, kuşatma boyunca ilk olumlu baskı artışını 1 puan azaltır.
+
+**Saldıranın baskıyla çekilmesi için:** Önceki turdan beri 8 baskıda olmalı, yeni ham baskı turunu kaybetmeli ve en az yarım cephe kullanılabilir yedeği kalmamalıdır. Hücum Birliğinin tamamen tükenmesi ayrıca doğrudan geri çekilme sebebidir.
+
+**Savunucunun baskıyla şehri kaybetmesi için şartların tamamı gerekir:**
+• Sur=0, Kapı=0 veya etkin merdiven/kule erişimi bulunmalı
+• Önceki turdan beri 8 baskıda olmalı
+• Yeni ham baskı turunu kaybetmeli
+• Kalan kuvvet başlangıcın en fazla %30’u olmalı
+• Kalan kuvvet en fazla 9.000 olmalı
+
+Savunucu kuvvet 0 ve erişim açık ise şehir doğrudan düşer.
+
+**Açlık:** Temel erzak dayanıklılığı **6 oyun turudur**. Çiftlik Sv2 +1, Sv3 +3; Su Kemeri Sv2+ +2; Garnizon Güçlendirme +1 ve ülke bonusları eklenir. Toplam ek bina/politika/ülke bonusu en fazla +8’dir. Erzak 0 olduğunda bot otomatik teslim vermez; sonucu DM belirler.
+
+## MESAJ 18/20 — 🛠️ KUŞATMA ALETLERİ
+
+• **Merdiven Grubu:** Çarpışma veya Hasar üretmez; 1.000 Hücum Birliğine erişim sağlar.
+• **Koçbaşı:** Her kuşatmada en fazla 1; birikmez. 1d8×35 Kapı Hasarı.
+• **Mantlet:** Adet başına 1d4 Çarpışma; savunanın saldırana Hasarını adet başına %5 azaltır, üst sınır %50.
 • **Balista — Sur:** Adet başına 1d10×5 Sur Hasarı.
-• **Balista — Ordu:** Adet başına 1d10, A Hasar toplamına eklenir.
+• **Balista — Ordu:** Adet başına 1d10 saldıran Hasarı.
 • **Katapult — Sur:** Adet başına 2d20×20 Sur Hasarı.
-• **Katapult — Ordu:** Adet başına 1d20, A Hasar toplamına eklenir.
-• **Kuşatma Kulesi — Hücum:** Adet başına 2d20 Çarpışma + 1d6 Ordu Hasarı; erişim sağlar.
-• **Hafif Sur Balistası — Ordu:** B'ye özeldir; adet başına 2d8, B Hasarına eklenir.
+• **Katapult — Ordu:** Adet başına 1d20 saldıran Hasarı.
+• **Kuşatma Kulesi:** Adet başına 2d20 Çarpışma + 1d6 Hasar; 3.000 Hücum Birliğine erişim.
+• **Hafif Sur Balistası:** Savunmaya özgü; adet başına 2d8 savunma Hasarı.
 
-Yapı Hasarı ordu kaybına dönüşmez. Ordu hedefli alet zarları tarafın Hasar havuzuna girer ve normal üstünlük, kuşatma, mantlet ve dayanıklılık hesaplarından geçer.
+Bir alet türünden aynı savaş turunda en fazla 25 adet etkindir; Koçbaşı 1 ile, kule ve merdivenler ayrıca 15.000 erişim cephesiyle sınırlıdır.
 
-Koçbaşı yalnız kapıya; Sur hedefli Balista/Katapult yalnız sura vurur. Bombardıman aşamasında Balista ve diğer aletler çalışmaz; yalnız Sur hedefli Katapult kullanılır.
+Yapı Hasarı asker kaybına dönüşmez. Ordu hedefli aletler normal üstünlük, tahkimat, mantlet ve dayanıklılık hesaplarından geçer. Bombardımanda yalnız sur hedefli Katapult çalışır.
 
-## MESAJ 11/12 — DENİZ SAVAŞI VE GERİ ÇEKİLME
+Mühendislik Atölyesi Sv3’te geliştirilmiş olarak üretilen kayıtlı Balista ve Katapultların ilgili hasar zarlarına +1 uygulanır. Merdiven ve Koçbaşı kuşatma başladıktan sonra, zarlar başlamadan önce anlık satın alınabilir; saha aleti alımı yeni bir savaş formu yayımlamaz.
 
-**Gemi — Çarpışma / Hasar — Dayanıklılık**
-• Kerkouros: 1d6 / 1d6 — Düşük
-• Trireme: 2d8 / 2d8 — Orta
-• Quinquereme: 3d10 / 3d10 — Yüksek
+## MESAJ 19/20 — 🚢 DENİZ SAVAŞI VE GERİ ÇEKİLME
 
-Her gemi bir bloktur; taraf başına en fazla 30 gemi zar üretir. Üstünlük eşikleri kara savaşıyla aynıdır. Ham Hasar ölçeği **0,012** olup sonuç gemi dayanıklılığıyla dağıtılır.
+**Gemi — Fiyat / Bakım — Çarpışma / Hasar — Dayanıklılık — Mürettebat / Taşıma**
+• Kerkouros: 750 / 75 — 1d6 / 1d6 — Düşük — 50 / 200
+• Trireme: 1.500 / 150 — 2d8 / 2d8 — Orta — 100 / 500
+• Quinquereme: 3.000 / 300 — 3d10 / 3d10 — Yüksek — 150 / 800
 
-**Geri çekilme temel oranı:**
-• 1. savaş turu: %0
-• 2. tur: %5
-• 3. tur: %8
-• 4. tur: %11
-• 5. ve sonrası: %14
+Her gemi bir zar bloğudur. En fazla 30 gemi cepheye girer. Filo 30’u aşarsa türlerin etkin adedi filo oranıyla aşağı yuvarlanır; boş kalan yuvalar tekrar doldurulmaz. İllirya’nın toplam taşıma kapasitesi %10 fazladır.
 
-2. turdan sonra ek takip:
-• Kara: rakip süvari oranı ×%20; Orman/Bataklık/Dağda bu ek yarıya iner.
-• Deniz: rakip Kerkouros oranı ×%15.
-• Pusu veya Dağ Geçidi: +5 yüzde puan.
-• Kuşatma savunucusu: +5 yüzde puan.
+**Geri çekilme temel kaybı:** 1. tur %0; 2. tur %5; 3. tur %8; 4. tur %11; 5+ tur %14.
 
-**Geri çekilme kaybı = Mevcut kuvvet × Toplam oran**, en yakın tam sayıya yuvarlanır. Toplam oran en fazla %25'tir. 1. turdaki %0 kuralında hiçbir ek ceza uygulanmaz. Bombardıman savaş turu sayılmadığından geri çekilme basamağını yükseltmez. Çekilen taraf savaşı kaybeder.
+İkinci turdan itibaren takip ekleri:
+• Kara: Rakibin Hafif+Ağır Süvari oranı ×%20; Orman, Bataklık ve Dağlıkta yarısı
+• Deniz: Rakibin Kerkouros oranı ×%15
+• Pusu veya Dağ Geçidi: +5 yüzde puanı
+• Kuşatma savunucusu: +5 yüzde puanı
 
-## MESAJ 12/12 — AÇIK/GİZLİ BİLGİLER, KAYIT VE KOMUTLAR
+Toplam geri çekilme kaybı mevcut kuvvetin en fazla %25’i olabilir. İlk turda hiçbir ek takip cezası uygulanmaz. Bombardıman savaş turu sayılmaz. Geri çekilen taraf savaşı kaybeder.
 
-**Açık:** anlatı, arazi, zar sırası ve sonuçları, üstünlük, tur kayıpları, toplam kayıplar, baskı, düzen, meydan/denizde toplam kuvvet, kuşatmada saldıran toplamı, sur/kapı HP.
+## MESAJ 20/20 — 📜 AÇIK BİLGİ, KAYIP KAYDI VE KOMUTLAR
 
-**Gizli:** tam birlik/filo kompozisyonu, kuşatma savunucusunun toplamı, kuşatma aleti dökümü ve hedefleri. Kuşatmada yalnız savunucunun toplamı gizlenir; kayıpları açık kalır.
+**Açık bilgiler:** Anlatı, arazi, zar sırası, açık zar sonuçları, üstünlük, tur ve toplam kayıplar, baskı, düzen, meydan/deniz toplam kuvvetleri, kuşatan toplamı, sur/kapı HP ve erzak.
 
-Savaş sonunda bot kayıpları ülke belgelerine yalnız **bir kez** işler. Kara kayıpları birlik kayıtlarından ve bağlı yerleşke nüfusundan düşer. Gemi mürettebat katsayısı tanımlı olmadığından gemi kaybı nüfusu azaltmaz. DM raporu; hesaplanan, uygulanan ve kayıt yetersizliği yüzünden uygulanamayan miktarı gösterir.
+**Gizli bilgiler:** Tam birlik/filo kompozisyonları, kuşatma savunucusunun toplam kuvveti, yedekleri, kuşatma aleti dökümü ve hedefleri. Savunucunun gerçekleşmiş kayıpları açık kalır.
 
-**DM komutları:**
-• `/savas taraf-ulke` — taslakta A veya B tarafına ek ülke ekler/çıkarır; kara ve filo kadrolarındaki isteğe bağlı `ulke` alanı katkıyı seçilen ülkeye yazar.
-• `/savas kadro-ayarla` — bütün kara ordusu
-• `/savas filo-ayarla` — bütün filo
-• `/savas kusatma-aleti-ayarla` — alet/adet/hedef
-• `/savas kusatma-asamasi` — Bombardıman/Hücum
-• `/savas bombardiman` — DM yedek bombardımanı
-• `/savas ordu-detay` — gizli tam döküm
-• `/savas kayip-raporu` — özel mutabakat raporu
+Bot savaş sonu kayıplarını belgelere yalnız bir kez işler:
+• Devlet asker kayıpları bağlı özgür nüfustan da düşer.
+• Kayıplar katılımcı ülkeler ve uygun kayıtlar arasında başlangıç katkısı/mevcut oranıyla dağıtılır.
+• Kaynak yerleşke seçilmişse o ülkenin kaybı yalnız seçilen yerleşkeden düşer.
+• Savunulan şehrin garnizon kaybı yalnız o garnizondan düşer ve zorunlu yenileme süreci başlar.
+• Paralı asker kaybı şirket mevcudundan düşer, devlet nüfusunu azaltmaz. Kara ve gemi mevcudu tamamen biten şirket yok olmuş sayılır.
+• Devlet gemisi kaybında bağlı yerleşke nüfusundan Kerkouros için 50, Trireme için 100, Quinquereme için 150 mürettebat düşer.
+• Kayıt yetersizliği varsa DM raporu hesaplanan, uygulanan ve eksik kalan miktarı gösterir.
 
-Tekil düzeltmelerde `/savas birlik-ayarla` ve `/savas gemi-ayarla` kullanılabilir. Formüllerin uygulanması bot tarafından otomatik yapılır; oyuncu veya DM elle çarpan giremez.
+**Temel DM komutları:**
+• `/savas baslat`, `/savas taraf-ulke`
+• `/savas kadro-ayarla`, `/savas filo-ayarla`
+• `/savas parali-asker-ayarla`
+• `/savas kusatma-aleti-ayarla`, `/savas saha-aleti-al`, `/savas kusatma-asamasi`, `/savas bombardiman`
+• `/savas yayinla`, `/savas tur-oynat`
+• `/savas ordu-detay`, `/savas kayip-raporu`
+• `/savas bitir`, `/savas iptal`
+
+Tekil düzeltmeler için `/savas birlik-ayarla` ve `/savas gemi-ayarla` kullanılabilir. Formülleri bot uygular; oyuncular veya DM savaş çarpanlarını elle giremez.

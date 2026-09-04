@@ -110,14 +110,29 @@ export const UNITS = {
   militia: { name: "Milis", price: 0, upkeep: 100 }
 } as const;
 
+export const PORT_SHIP_CAPACITY = 30;
+
 export const SHIPS = {
-  kerkouros: { name: "Kerkouros", price: 1_000, upkeep: 100, manpower: 50, buildTurns: 2 },
-  trireme: { name: "Trireme", price: 2_000, upkeep: 200, manpower: 100, buildTurns: 3 },
-  quinquereme: { name: "Quinquereme", price: 4_000, upkeep: 400, manpower: 150, buildTurns: 4 }
+  kerkouros: { name: "Kerkouros", price: 750, upkeep: 75, manpower: 50, buildTurns: 2, transportCapacity: 200, productionPoints: 1, harborPoints: 1 },
+  trireme: { name: "Trireme", price: 1_500, upkeep: 150, manpower: 100, buildTurns: 3, transportCapacity: 500, productionPoints: 2, harborPoints: 2 },
+  quinquereme: { name: "Quinquereme", price: 3_000, upkeep: 300, manpower: 150, buildTurns: 4, transportCapacity: 800, productionPoints: 4, harborPoints: 4 }
 } as const;
 
 export function shipCrewRequirement(shipType: keyof typeof SHIPS, quantity: number): number {
   return Math.max(0, Math.floor(quantity)) * SHIPS[shipType].manpower;
+}
+
+export function shipHarborRequirement(shipType: keyof typeof SHIPS, quantity: number): number {
+  return Math.max(0, Math.floor(quantity)) * SHIPS[shipType].harborPoints;
+}
+
+export function fleetTransportCapacity(
+  fleet: Partial<Record<keyof typeof SHIPS, number>>,
+  multiplier = 1
+): number {
+  const baseCapacity = (Object.entries(fleet) as Array<[keyof typeof SHIPS, number | undefined]>)
+    .reduce((sum, [shipType, quantity]) => sum + Math.max(0, Math.floor(quantity ?? 0)) * SHIPS[shipType].transportCapacity, 0);
+  return Math.floor(baseCapacity * Math.max(0, multiplier));
 }
 
 export const SIEGE_ASSETS = {

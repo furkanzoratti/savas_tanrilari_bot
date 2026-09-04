@@ -1,15 +1,16 @@
 import { EmbedBuilder } from "discord.js";
-import { BUILDINGS, CHARACTER_ROLES, CITY_POLICIES, MOBILIZATION_RULES, SHIPS, SIEGE_ASSETS, UNITS } from "../domain/catalog.js";
+import { BUILDINGS, CHARACTER_ROLES, CITY_POLICIES, MOBILIZATION_RULES, PORT_SHIP_CAPACITY, SHIPS, SIEGE_ASSETS, UNITS, fleetTransportCapacity, shipHarborRequirement } from "../domain/catalog.js";
 import { CULTURE_GROUPS } from "../domain/cultures.js";
 import { calculateShipUpkeep, calculateUnitUpkeep } from "../domain/economy.js";
 import { SETTLEMENT_EVENT_TYPES, type SettlementEventType } from "../domain/events.js";
 import { gold, number } from "../domain/format.js";
 import { RESOURCES } from "../domain/resources.js";
 import { SPECIAL_UNITS } from "../domain/special-units.js";
-import { FORMABLE_COUNTRIES } from "../domain/formable-countries.js";
+import { FORMABLE_COUNTRIES, formableModifiers } from "../domain/formable-countries.js";
 import { TRADE_ROUTE_LABELS } from "../domain/trade.js";
 import type { CountryDocument } from "../services/game-service.js";
 import { TEMPLE_BANNER_URL } from "./assets.js";
+import { renderArmyEmbed } from "./army-embed.js";
 
 const ruinLabels = ["Normal", "Harap • sonraki Alım Turu %0", "Toparlanıyor • sonraki Alım Turu %50"];
 const phaseLabels: Record<string, string> = { OPEN: "Hareketler Açık", CLOSED: "Hareketler Kapalı", RESOLVING: "Olaylar Çözülüyor" };
@@ -112,7 +113,7 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
   const characterSummary = (document.characters ?? []).length
     ? (document.characters ?? []).map((character) => {
         const role = CHARACTER_ROLES[character.role];
-        const assignment = character.assignment === "NONE" ? "Görev bekliyor" : character.assignment === "AGORA" ? "Agora / Forum" : "Curia";
+        const assignment = character.assignment === "NONE" ? "Görev bekliyor" : character.assignment === "AGORA" ? "Agora / Forum" : character.assignment === "ARMY" ? `Ordu komutanı${character.assigned_army_name ? ` • ${character.assigned_army_name}` : ""}` : "Curia";
         return `${role.emoji} **${character.name}** — ${role.label} (+${character.skill_bonus})\n↳ ${assignment}`;
       }).join("\n\n")
     : "Henüz yetiştirilmiş devlet görevlisi yok.";
@@ -269,7 +270,25 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
     if (settlement.ships.length) {
       const ships = settlement.ships.map((ship) => `• **${ship.quantity}** ${SHIPS[ship.ship_type]?.name ?? ship.ship_type}`).join("\n");
       const crew = settlement.ships.reduce((sum, ship) => sum + SHIPS[ship.ship_type].manpower * ship.quantity, 0);
-      embed.addFields({ name: "🚢 Donanma", value: spacedSection(`${ships}\n**Mürettebat: ${number(crew)}**`), inline: true });
+      const fleet = settlement.ships.reduce<Partial<Record<keyof typeof SHIPS, number>>>((result, ship) => {
+        result[ship.ship_type] = (result[ship.ship_type] ?? 0) + ship.quantity;
+        return result;
+      }, {});
+      const transportMultiplier = formableModifiers(document.country.active_formable_key).shipTransportMultiplier ?? 1;
+      const transport = fleetTransportCapacity(fleet, transportMultiplier);
+      embed.addFields({ name: "🚢 Donanma", value: spacedSection(`${ships}\n**Mürettebat: ${number(crew)}**\n**Asker Taşıma: ${number(transport)}**`), inline: true });
+    }
+    if (hasActivePort) {
+      const reserveHarbor = settlement.ships
+        .filter((ship) => ship.status === "RESERVE")
+        .reduce((sum, ship) => sum + shipHarborRequirement(ship.ship_type, ship.quantity), 0);
+      const productionHarbor = settlement.pendingShips
+        .reduce((sum, ship) => sum + shipHarborRequirement(ship.ship_type, ship.quantity), 0);
+      embed.addFields({
+        name: "⚓ Liman Kapasitesi",
+        value: spacedSection(`Kullanım: **${number(reserveHarbor + productionHarbor)}/${number(PORT_SHIP_CAPACITY)} rıhtım puanı**\nRezerv: ${number(reserveHarbor)} • Üretim: ${number(productionHarbor)}`),
+        inline: true
+      });
     }
     if (settlement.siegeAssets.length) {
       const assets = settlement.siegeAssets.map((asset) => `• **${asset.quantity}** ${SIEGE_ASSETS[asset.asset_type as keyof typeof SIEGE_ASSETS]?.name ?? asset.asset_type}`).join("\n");
@@ -288,5 +307,7 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
     return embed;
   });
 
-  return [summary, ...settlementEmbeds];
+  const armyEmbeds = (document.armies ?? []).map(renderArmyEmbed);
+
+  return [summary, ...settlementEmbeds, ...armyEmbeds];
 }
