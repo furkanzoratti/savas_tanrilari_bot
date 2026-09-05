@@ -19,7 +19,7 @@ const config: NpcAutoPurchaseConfig = {
   scope: "ALL_PLAYERLESS"
 };
 
-function document(input: { treasury: number; militaryUsed: number; trainingRemaining: number; buildingStarted?: boolean; units?: Array<{ unit_type: string; quantity: number; status: string; force_type: string }>; levelOneBuildings?: string[]; naval?: boolean; besieged?: boolean }): CountryDocument {
+function document(input: { treasury: number; militaryUsed: number; trainingRemaining: number; buildingStarted?: boolean; units?: Array<{ unit_type: string; quantity: number; status: string; force_type: string }>; levelOneBuildings?: string[]; naval?: boolean; besieged?: boolean; conquered?: boolean }): CountryDocument {
   return {
     guild: { current_turn: 3 },
     country: { id: "country" },
@@ -30,7 +30,7 @@ function document(input: { treasury: number; militaryUsed: number; trainingRemai
       id: "settlement",
       name: "Test Şehri",
       local_treasury: input.treasury,
-      is_conquered: false,
+      is_conquered: input.conquered ?? false,
       isBesieged: input.besieged ?? false,
       is_coastal: input.naval ?? false,
       effectiveResources: ["GRAIN"],
@@ -96,5 +96,12 @@ describe("NPC ek alım planlaması", () => {
     expect(plan.buildingActions).toHaveLength(0);
     expect(plan.shipActions).toHaveLength(0);
     expect(plan.unitActions).toHaveLength(0);
+  });
+
+  it("asimile edilmemiş fethedilmiş yerleşkede bina planlar fakat asker planlamaz", () => {
+    const plan = planCountryPurchases(document({ treasury: 10_000, militaryUsed: 0, trainingRemaining: 10_000, conquered: true }), { ...config, budgetPercent: 100 }, "FULL_BUILDING_ARMY");
+    expect(plan.buildingActions.length).toBeGreaterThan(0);
+    expect(plan.unitActions).toHaveLength(0);
+    expect(plan.shipActions).toHaveLength(0);
   });
 });

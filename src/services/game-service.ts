@@ -1822,7 +1822,6 @@ export const gameService = {
       const settlementResult = await client.query<SettlementRow>("SELECT * FROM settlements WHERE id=$1 AND country_id=$2 FOR UPDATE", [input.settlementId, input.countryId]);
       const settlement = settlementResult.rows[0];
       if (!settlement) throw new GameError("Yerleşke bulunamadı.");
-      if (settlement.is_conquered) throw new GameError("Fethedilmiş yerleşke asimile edilmeden bina inşa edemez.");
       if (await settlementIsBesieged(client, settlement.id)) throw new GameError("Savunan konumunda aktif kuşatma bulunan yerleşke yeni bina emri veremez.");
       const definition = BUILDINGS[input.buildingType];
       if (!definition) throw new GameError("Bina türü bulunamadı.");

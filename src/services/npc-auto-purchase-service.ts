@@ -99,7 +99,7 @@ function validBuildingCandidates(doc: CountryDocument, doctrine: NpcAutoPurchase
   const developmentOnly = npcDevelopmentOnly(doctrine);
   const candidates: BuildingCandidate[] = [];
   for (const settlement of doc.settlements) {
-    if (settlement.is_conquered || settlement.isBesieged) continue;
+    if (settlement.isBesieged) continue;
     const activeConstruction = settlement.buildings.filter((building) => building.status === "BUILDING").length;
     if (activeConstruction >= settlement.constructionLimit) continue;
     const occupiedSlots = settlement.buildings.filter((building) => building.level > 0 || building.status === "BUILDING").length;
