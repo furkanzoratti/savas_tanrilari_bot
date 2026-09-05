@@ -40,6 +40,8 @@ import { handleArmyCommand } from "./army-ui.js";
 import { handleCityButton, handleCityCommand, handleCityModal } from "./city-ui.js";
 import { addCountryRoleToMember, deleteCountryRole, ensureCountryRole, removeCountryRoleFromMember } from "./country-roles.js";
 import { handleSettlementEventSelect } from "./event-ui.js";
+import { handleEspionageAutocomplete, handleEspionageCommand, publishPendingEspionageLogs } from "./espionage-ui.js";
+import { resolveDueEspionageOperations } from "../services/espionage-service.js";
 import { handleDiplomacyButton, handleDiplomacyCommand } from "./diplomacy-ui.js";
 import { handleWarDeclarationButton, handleWarDeclarationCommand, handleWarDeclarationModal } from "./war-declaration-ui.js";
 import { mercenaryCompanyAutocompleteAllowed, mercenarySubcommandRequiresGameMaster } from "./mercenary-access.js";
@@ -53,6 +55,14 @@ function settlementSelect(customId: string, settlements: Array<{ id: string; nam
   );
 }
 
+async function processEspionageTurn(client: Client, guildId: string, turn: number): Promise<void> {
+  try {
+    await resolveDueEspionageOperations(guildId, turn);
+    await publishPendingEspionageLogs(client, guildId);
+  } catch (error) {
+    console.error("Casusluk tur otomasyonu tamamlanamadı", error);
+  }
+}
 async function sendDocument(interaction: ChatInputCommandInteraction, countryId: string): Promise<void> {
   await interaction.deferReply({ ephemeral: true });
   const embeds = renderDocument(await gameService.document(countryId));
@@ -81,7 +91,7 @@ async function handleMercenaryCommand(interaction: ChatInputCommandInteraction):
   const sub = interaction.options.getSubcommand();
   if (mercenarySubcommandRequiresGameMaster(sub)) requireGameMaster(interaction);
   const requestedCountry = interaction.options.getString("ulke", true);
-  const country = sub === "kirala"
+  const country = ["kirala", "feshet"].includes(sub)
     ? await resolveCountry(interaction, requestedCountry)
     : await gameService.countryByName(interaction.guildId, requestedCountry);
   if (!country) throw new GameError("Ülke bulunamadı.");
@@ -235,6 +245,7 @@ async function handleTurn(interaction: ChatInputCommandInteraction): Promise<voi
   let embed: EmbedBuilder;
   if (sub === "atla") {
     const result = await gameService.advanceTurn(interaction.guildId, interaction.user.id);
+    await processEspionageTurn(interaction.client, interaction.guildId, result.turn);
     await refreshActiveBattleCards(interaction.client, interaction.guildId);
     embed = turnAnnouncement({
       kind: "ADVANCE", turn: result.turn, acquisition: result.acquisition,
@@ -469,7 +480,6 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
       name: interaction.options.getString("ad", true), population: interaction.options.getInteger("nufus", true),
       slaves: interaction.options.getInteger("kole", true),
       totalIncome: interaction.options.getInteger("gelir", true),
-      basePopulationGrowth: interaction.options.getInteger("nufus-artisi", true),
       resourceType: interaction.options.getString("hammadde", true) as ResourceType,
       cultureGroup,
       isCoastal: interaction.options.getBoolean("kiyi") ?? false
@@ -509,6 +519,7 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
     await interaction.editReply(`✅ **${settlement.name}** artık **${RESOURCES[resourceType].label}** üretiyor.`);
   } else if (sub === "tur-ilerlet") {
     const result = await gameService.advanceTurn(interaction.guildId, interaction.user.id);
+    await processEspionageTurn(interaction.client, interaction.guildId, result.turn);
     await refreshActiveBattleCards(interaction.client, interaction.guildId);
     await interaction.editReply({ embeds: [turnAnnouncement({
       kind: "ADVANCE", turn: result.turn, acquisition: result.acquisition,
@@ -623,13 +634,16 @@ async function handleSpecialUnitAccess(interaction: ChatInputCommandInteraction)
     (!enabled ? " Mevcut birlikler silinmedi; yalnızca yeni alım kapatıldı." : "")
   );
 }
-function npcPlanLine(plan: { countryName: string; doctrine: NpcAutoPurchaseDoctrine; plannedCost: number; runNumber?: number; buildingActions: Array<{ buildingName: string; targetLevel: number }>; unitActions: Array<{ quantity: number }> }): string {
+function npcPlanLine(plan: { countryName: string; doctrine: NpcAutoPurchaseDoctrine; plannedCost: number; runNumber?: number; buildingActions: Array<{ buildingName: string; targetLevel: number }>; shipActions: Array<{ shipType: keyof typeof SHIPS; quantity: number }>; unitActions: Array<{ quantity: number }> }): string {
   const buildings = plan.buildingActions.length
     ? plan.buildingActions.map((action) => `${action.buildingName} Sv${action.targetLevel}`).join(", ")
     : "Bina yok";
+  const ships = plan.shipActions.length
+    ? plan.shipActions.map((action) => `${action.quantity} ${SHIPS[action.shipType].name}`).join(", ")
+    : "Gemi yok";
   const personnel = plan.unitActions.reduce((sum, action) => sum + action.quantity, 0);
   const attempt = plan.runNumber ? ` • Ek alım #${plan.runNumber}` : "";
-  return `• **${plan.countryName}** — ${NPC_AUTO_PURCHASE_DOCTRINES[plan.doctrine].label}${attempt}\n  🏗️ ${buildings} • ⚔️ ${number(personnel)} asker • 💰 ${gold(plan.plannedCost)}`;
+  return `• **${plan.countryName}** — ${NPC_AUTO_PURCHASE_DOCTRINES[plan.doctrine].label}${attempt}\n  🏗️ ${buildings} • 🚢 ${ships} • ⚔️ ${number(personnel)} asker • 💰 ${gold(plan.plannedCost)}`;
 }
 
 async function sendNpcPages(interaction: ChatInputCommandInteraction, title: string, lines: string[], footer: string): Promise<void> {
@@ -744,6 +758,7 @@ async function handleGreatPowerCommand(interaction: ChatInputCommandInteraction)
   await interaction.editReply(`✅ Güncel **${snapshot.rows.length} devletlik Büyük Güçler sıralaması** <#${channelId}> kanalında paylaşıldı.`);
 }
 async function handleCommand(interaction: ChatInputCommandInteraction): Promise<void> {
+  if (await handleEspionageCommand(interaction)) return;
   if (await handleWarDeclarationCommand(interaction)) return;
   if (await handleDiplomacyCommand(interaction)) return;
   if (await handleCityCommand(interaction)) return;
@@ -949,6 +964,18 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     await handleSpecialUnitAccess(interaction);
   } else if (interaction.commandName === "npc-devlet-oto-alim") {
     await handleNpcAutoPurchase(interaction);
+  } else if (interaction.commandName === "tamamlanmis-bina-ekle") {
+    requireGameMaster(interaction);
+    if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
+    await interaction.deferReply({ ephemeral: true });
+    const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
+    if (!country) throw new GameError("Ülke bulunamadı.");
+    const settlement = await findSettlement(country.id, interaction.options.getString("yerleske", true));
+    const result = await gameService.addCompletedBuilding({
+      guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id, settlementId: settlement.id,
+      buildingType: interaction.options.getString("bina", true), level: interaction.options.getInteger("seviye", true)
+    });
+    await interaction.editReply(`✅ **${settlement.name}** yerleşkesine **${result.buildingName} Sv${result.level}** tamamlanmış olarak eklendi. Bina etkileri anında etkinleştirildi; hazineden ödeme alınmadı.`);
   } else if (interaction.commandName === "yonetim") {
     await handleAdmin(interaction);
   }
@@ -1072,6 +1099,7 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
 }
 
 async function handleAutocomplete(interaction: AutocompleteInteraction): Promise<void> {
+  if (await handleEspionageAutocomplete(interaction)) return;
   const focused = interaction.options.getFocused(true);
   if (interaction.commandName === "ordu") {
     if (!interaction.guildId) { await interaction.respond([]); return; }
@@ -1135,12 +1163,25 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
       return;
     }
   }
+  if (interaction.commandName === "savas" && focused.name === "ulke") {
+    if (!interaction.guildId || !isGameMaster(interaction)) { await interaction.respond([]); return; }
+    let subcommand = "";
+    try { subcommand = interaction.options.getSubcommand(false) ?? ""; } catch { subcommand = ""; }
+    if (!["ordu-ekle", "kadro-ayarla", "parali-asker-ayarla"].includes(subcommand)) { await interaction.respond([]); return; }
+    const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
+    const participants = await battleService.listParticipantCountries({ guildId: interaction.guildId, channelId: interaction.channelId });
+    await interaction.respond(participants
+      .filter((participant) => !query || participant.country_name.toLocaleLowerCase("tr-TR").includes(query))
+      .slice(0, 25)
+      .map((participant) => ({ name: `${participant.country_name} • ${participant.side_key === "A" ? "Birinci Cephe" : "İkinci Cephe"}`.slice(0, 100), value: participant.country_name })));
+    return;
+  }
   if (interaction.commandName === "savas" && focused.name === "ordu") {
     if (!interaction.guildId || !isGameMaster(interaction)) { await interaction.respond([]); return; }
-    const side = interaction.options.getString("taraf") as BattleSideKey | null;
-    if (!side) { await interaction.respond([]); return; }
+    const countryName = interaction.options.getString("ulke");
+    if (!countryName) { await interaction.respond([]); return; }
     const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
-    const armies = await battleService.listParticipantArmies({ guildId: interaction.guildId, channelId: interaction.channelId, side });
+    const armies = await battleService.listParticipantArmies({ guildId: interaction.guildId, channelId: interaction.channelId, countryName });
     await interaction.respond(armies.filter((army) => !query || `${army.country_name} ${army.name}`.toLocaleLowerCase("tr-TR").includes(query)).slice(0, 25)
       .map((army) => ({ name: `${army.country_name} • ${army.name} • ${number(army.total)} asker${army.assigned ? " • Eklendi" : ""}`.slice(0, 100), value: army.id })));
     return;
@@ -1150,14 +1191,15 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
     let subcommand = "";
     try { subcommand = interaction.options.getSubcommand(false) ?? ""; } catch { subcommand = ""; }
     if (subcommand !== "kadro-ayarla") { await interaction.respond([]); return; }
-    const side = interaction.options.getString("taraf") as BattleSideKey | null;
-    if (!side) { await interaction.respond([]); return; }
+    const countryName = interaction.options.getString("ulke");
+    if (!countryName) { await interaction.respond([]); return; }
+    const participant = await battleService.participantByCountry({ guildId: interaction.guildId, channelId: interaction.channelId, countryName });
     const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
     const settlements = await battleService.listParticipantSettlements({
       guildId: interaction.guildId,
       channelId: interaction.channelId,
-      side,
-      countryName: interaction.options.getString("ulke")
+      side: participant.side_key,
+      countryName
     });
     await interaction.respond(settlements
       .filter((settlement) => !query || settlement.name.toLocaleLowerCase("tr-TR").includes(query))
@@ -1256,9 +1298,27 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
     if (!gameMaster && (!interaction.guildId || !await gameService.countryForUser(interaction.guildId, interaction.user.id))) { await interaction.respond([]); return; }
     const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
     let companies = Object.entries(MERCENARY_COMPANIES) as Array<[MercenaryCompanyKey, (typeof MERCENARY_COMPANIES)[MercenaryCompanyKey]]>;
+    if (interaction.commandName === "savas" && subcommand === "parali-asker-ayarla" && interaction.guildId) {
+      const countryName = interaction.options.getString("ulke");
+      if (!countryName) { await interaction.respond([]); return; }
+      const participant = await battleService.participantByCountry({ guildId: interaction.guildId, channelId: interaction.channelId, countryName });
+      const contracts = await gameService.listMercenaryContracts(participant.country_id);
+      const contracted = new Set(contracts.filter((contract) => ["PENDING", "ACTIVE", "UNPAID"].includes(contract.status)).map((contract) => contract.company_key));
+      companies = companies.filter(([companyKey]) => contracted.has(companyKey));
+    }
     if (interaction.commandName === "parali-asker" && ["kirala", "ucretsiz-ekle"].includes(subcommand) && interaction.guildId) {
       const available = new Set(await gameService.availableMercenaryCompanyKeys(interaction.guildId));
       companies = companies.filter(([companyKey]) => available.has(companyKey));
+    }
+    if (interaction.commandName === "parali-asker" && subcommand === "feshet" && interaction.guildId) {
+      const requestedName = interaction.options.getString("ulke");
+      const country = gameMaster && requestedName
+        ? await gameService.countryByName(interaction.guildId, requestedName)
+        : await gameService.countryForUser(interaction.guildId, interaction.user.id);
+      if (!country) { await interaction.respond([]); return; }
+      const contracts = await gameService.listMercenaryContracts(country.id);
+      const live = new Set(contracts.filter((contract) => ["PENDING", "ACTIVE", "UNPAID"].includes(contract.status)).map((contract) => contract.company_key));
+      companies = companies.filter(([companyKey]) => live.has(companyKey));
     }
     await interaction.respond(companies
       .filter(([key, company]) => !query || key.includes(query) || company.name.toLocaleLowerCase("tr-TR").includes(query))

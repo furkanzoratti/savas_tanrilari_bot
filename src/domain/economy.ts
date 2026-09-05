@@ -76,8 +76,17 @@ export function buildingSlotLimit(population: number): number {
   return Math.min(6, 2 + Math.floor(Math.max(0, population - 20_000) / 10_000));
 }
 
+export function naturalPopulationGrowthRate(population: number): number {
+  if (population >= 250_000) return 0.05;
+  if (population >= 200_000) return 0.04;
+  if (population >= 150_000) return 0.03;
+  if (population >= 100_000) return 0.02;
+  if (population >= 50_000) return 0.01;
+  return 0;
+}
+
 export function calculatePopulationGain(input: {
-  basePopulationGrowth: number;
+  population: number;
   buildings: ActiveBuilding[];
   ruinStage: RuinStage;
   mobilization: Mobilization;
@@ -95,7 +104,7 @@ export function calculatePopulationGain(input: {
     if (building.buildingType === "lupanar") lupanarLevel = building.level;
   }
 
-  let rawGrowth = input.basePopulationGrowth + healerGrowth;
+  let rawGrowth = Math.max(0, input.population) * naturalPopulationGrowthRate(input.population) + healerGrowth;
   if (lupanarLevel === 1) rawGrowth = healerGrowth > 0 ? rawGrowth * 0.5 : 0;
   if (lupanarLevel === 2) rawGrowth *= 0.3;
   if (lupanarLevel === 3) rawGrowth = healerGrowth;

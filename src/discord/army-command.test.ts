@@ -16,7 +16,8 @@ describe("kalıcı ordu komutları", () => {
     const battle = commandBuilders.find((command) => command.name === "savas");
     expect(battle?.options?.some((option) => option.name === "kadro-ayarla")).toBe(true);
     const assignment = battle?.options?.find((option) => option.name === "ordu-ekle");
-    expect(assignment?.options?.map((option) => option.name)).toEqual(["taraf", "islem", "ordu"]);
+    expect(assignment?.options?.map((option) => option.name)).toEqual(["ulke", "islem", "ordu"]);
+    expect(assignment?.options?.find((option) => option.name === "ulke")).toMatchObject({ required: true, autocomplete: true });
     expect(assignment?.options?.find((option) => option.name === "ordu")).toMatchObject({ required: true, autocomplete: true });
   });
 });

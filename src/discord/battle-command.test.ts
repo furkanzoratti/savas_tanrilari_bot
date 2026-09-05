@@ -17,6 +17,10 @@ describe("savaş komutları", () => {
       expect(command?.options?.some((option) => option.name === "ulke")).toBe(true);
     }
     const roster = battle?.options?.find((option) => option.name === "kadro-ayarla");
+    expect(roster?.options?.find((option) => option.name === "taraf")).toBeUndefined();
+    expect(roster?.options?.find((option) => option.name === "ulke")).toMatchObject({ required: true, autocomplete: true });
+    const mercenary = battle?.options?.find((option) => option.name === "parali-asker-ayarla");
+    expect(mercenary?.options?.map((option) => option.name)).toEqual(["ulke", "islem", "sirket"]);
     const settlement = roster?.options?.find((option) => option.name === "yerleske");
     expect(settlement).toMatchObject({
       required: false,

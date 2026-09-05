@@ -1,25 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { npcBuildingLimit, npcUnitOrder, resolvedNpcDoctrine } from "./npc-auto-purchase.js";
+import { npcBuildingLimit, npcDevelopmentOnly, npcPrioritizesShips, npcRecruitsUnits } from "./npc-auto-purchase.js";
 
-describe("NPC otomatik alım doktrinleri", () => {
-  it("dengeli doktrinde bir bina, savunmacı ve saldırganda sıfır bina planlar", () => {
-    expect(npcBuildingLimit("BALANCED")).toBe(1);
-    expect(npcBuildingLimit("DEFENSIVE")).toBe(0);
-    expect(npcBuildingLimit("OFFENSIVE")).toBe(0);
+describe("NPC otomatik alım modelleri", () => {
+  it("Full Bina + Asker iki bina ve asker alımına izin verir", () => {
+    expect(npcBuildingLimit("FULL_BUILDING_ARMY")).toBe(2);
+    expect(npcRecruitsUnits("FULL_BUILDING_ARMY")).toBe(true);
+    expect(npcDevelopmentOnly("FULL_BUILDING_ARMY")).toBe(false);
   });
 
-  it("hafif ordu bir bina, süvari doktrini yalnız asker kullanır", () => {
-    expect(npcBuildingLimit("LIGHT_ARMY")).toBe(1);
-    expect(npcBuildingLimit("CAVALRY")).toBe(0);
-    expect(npcUnitOrder("CAVALRY", "country-a", 3).slice(0, 4)).toEqual([
-      "light_cavalry", "heavy_cavalry", "light_cavalry", "heavy_cavalry"
-    ]);
+  it("Sadece Asker bina almaz", () => {
+    expect(npcBuildingLimit("ARMY_ONLY")).toBe(0);
+    expect(npcRecruitsUnits("ARMY_ONLY")).toBe(true);
   });
 
-  it("tarihsel profil aynı ülke ve tur için kararlı sonuç verir", () => {
-    const first = resolvedNpcDoctrine("HISTORICAL", "country-a", 12);
-    const second = resolvedNpcDoctrine("HISTORICAL", "country-a", 12);
-    expect(second).toBe(first);
-    expect(first).not.toBe("HISTORICAL");
+  it("Gelişim asker almaz ve yalnız geliştirme modundadır", () => {
+    expect(npcRecruitsUnits("DEVELOPMENT")).toBe(false);
+    expect(npcDevelopmentOnly("DEVELOPMENT")).toBe(true);
+  });
+
+  it("Gemi Odaklı önce deniz üretimini dener ve kara askeri yedeğini açık tutar", () => {
+    expect(npcPrioritizesShips("NAVAL_FOCUS")).toBe(true);
+    expect(npcRecruitsUnits("NAVAL_FOCUS")).toBe(true);
+    expect(npcBuildingLimit("NAVAL_FOCUS")).toBe(0);
   });
 });

@@ -103,13 +103,18 @@ export async function handleCityCommand(interaction: ChatInputCommandInteraction
       const document = await gameService.document(country.id);
       const rows = document.characters.map((character) => {
         const role = CHARACTER_ROLES[character.role];
-        const duty = character.assignment === "NONE"
-          ? "Görev bekliyor"
-          : character.assignment === "AGORA"
-            ? "Agora / Forum"
-            : character.assignment === "ARMY"
-              ? `Ordu komutanı${character.assigned_army_name ? ` • ${character.assigned_army_name}` : ""}`
-              : "Curia";
+        const location = character.assigned_settlement_name ? `${character.assigned_country_name ?? country.name} • ${character.assigned_settlement_name}` : null;
+        const duty = character.assignment === "NONE" ? "Görev bekliyor"
+          : character.assignment === "AGORA" ? "Agora / Forum"
+          : character.assignment === "ARMY" ? `Ordu komutanı${character.assigned_army_name ? ` • ${character.assigned_army_name}` : ""}`
+          : character.assignment === "CURIA" ? "Curia"
+          : character.assignment === "ESPIONAGE" ? `Casusluk görevi • yolda${location ? ` • ${location}` : ""}`
+          : character.assignment === "ESPIONAGE_RETURNING" ? `Dönüş yolunda${location ? ` • ${location}` : ""}`
+          : character.assignment === "CAPTURED" ? `Yakalandı${location ? ` • ${location}` : ""}`
+          : character.assignment === "COUNTERINTELLIGENCE_TRAVELING_COUNTRY" ? `Ülke karşı casusluğuna gidiyor • ${country.name}`
+          : character.assignment === "COUNTERINTELLIGENCE_TRAVELING_SETTLEMENT" ? `Şehir karşı casusluğuna gidiyor${location ? ` • ${location}` : ""}`
+          : character.assignment === "COUNTERINTELLIGENCE_COUNTRY" ? `Ülke çapında karşı casusluk • ${country.name}`
+          : `Şehir karşı casusluğu${location ? ` • ${location}` : ""}`;
         return `${role.emoji} **${character.name}** — ${role.label} (+${character.skill_bonus})\n↳ ${duty}`;
       });
       await interaction.reply({ embeds: [new EmbedBuilder().setColor(0xc59b45).setTitle(`🎓 ${country.name} • Devlet Karakterleri`).setDescription((rows.join("\n\n") || "Henüz yetiştirilmiş karakter bulunmuyor.").slice(0, 4_000))], ephemeral: true });

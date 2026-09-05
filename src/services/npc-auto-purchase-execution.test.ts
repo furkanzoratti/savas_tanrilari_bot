@@ -8,7 +8,8 @@ const mocks = vi.hoisted(() => ({
   document: vi.fn(),
   guildState: vi.fn(),
   purchaseUnits: vi.fn(),
-  purchaseBuilding: vi.fn()
+  purchaseBuilding: vi.fn(),
+  purchaseShips: vi.fn()
 }));
 
 vi.mock("../db/pool.js", () => ({
@@ -28,6 +29,7 @@ vi.mock("./game-service.js", () => ({
     guildState: mocks.guildState,
     purchaseUnits: mocks.purchaseUnits,
     purchaseBuilding: mocks.purchaseBuilding,
+    purchaseShips: mocks.purchaseShips,
     ensureGuild: vi.fn()
   }
 }));
@@ -57,7 +59,9 @@ function npcDocument(treasury: number, militaryUsed: number, trainingRemaining: 
       militaryUsed,
       buildings: [],
       units: [],
-      pendingRecruitment: []
+      ships: [],
+      pendingRecruitment: [],
+      pendingShips: []
     }]
   };
 }
@@ -70,7 +74,7 @@ describe("NPC otomatik alım tekrar çalıştırma", () => {
     mocks.poolQuery.mockImplementation(async (sql: string) => {
       if (sql.startsWith("SELECT enabled")) return { rows: [{
         enabled: true,
-        doctrine: "DEFENSIVE",
+        doctrine: "ARMY_ONLY",
         budget_percent: 50,
         target_fill_percent: 100,
         minimum_reserve: 1_000,
@@ -90,6 +94,7 @@ describe("NPC otomatik alım tekrar çalıştırma", () => {
       .mockResolvedValueOnce(npcDocument(5_000, 5_000, 5_000));
     mocks.purchaseUnits.mockImplementation(async (input: { quantity: number }) => ({ cost: input.quantity }));
     mocks.purchaseBuilding.mockResolvedValue({ cost: 1_000, targetLevel: 1, completionTurn: 6 });
+    mocks.purchaseShips.mockResolvedValue({ cost: 1_000, completionTurn: 6, harborUsed: 1, harborCapacity: 30 });
   });
 
   it("ikinci kullanımda atlamaz ve kalan hazineyle ek emir oluşturur", async () => {

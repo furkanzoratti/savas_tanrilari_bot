@@ -113,7 +113,20 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
   const characterSummary = (document.characters ?? []).length
     ? (document.characters ?? []).map((character) => {
         const role = CHARACTER_ROLES[character.role];
-        const assignment = character.assignment === "NONE" ? "Görev bekliyor" : character.assignment === "AGORA" ? "Agora / Forum" : character.assignment === "ARMY" ? `Ordu komutanı${character.assigned_army_name ? ` • ${character.assigned_army_name}` : ""}` : "Curia";
+        const location = character.assigned_settlement_name
+          ? `${character.assigned_country_name ?? document.country.name} • ${character.assigned_settlement_name}`
+          : null;
+        const assignment = character.assignment === "NONE" ? "Görev bekliyor"
+          : character.assignment === "AGORA" ? "Agora / Forum"
+          : character.assignment === "ARMY" ? `Ordu komutanı${character.assigned_army_name ? ` • ${character.assigned_army_name}` : ""}`
+          : character.assignment === "CURIA" ? "Curia"
+          : character.assignment === "ESPIONAGE" ? `Casusluk görevi • yolda${location ? ` • ${location}` : ""}`
+          : character.assignment === "ESPIONAGE_RETURNING" ? `Casusluk görevi tamamlandı • dönüş yolunda${location ? ` • ${location}` : ""}`
+          : character.assignment === "CAPTURED" ? `Yakalandı${location ? ` • ${location}` : ""}`
+          : character.assignment === "COUNTERINTELLIGENCE_TRAVELING_COUNTRY" ? `Ülke karşı casusluğuna gidiyor • ${document.country.name}`
+          : character.assignment === "COUNTERINTELLIGENCE_TRAVELING_SETTLEMENT" ? `Şehir karşı casusluğuna gidiyor${location ? ` • ${location}` : ""}`
+          : character.assignment === "COUNTERINTELLIGENCE_COUNTRY" ? `Ülke çapında karşı casusluk • ${document.country.name}`
+          : `Şehir karşı casusluğu${location ? ` • ${location}` : ""}`;
         return `${role.emoji} **${character.name}** — ${role.label} (+${character.skill_bonus})\n↳ ${assignment}`;
       }).join("\n\n")
     : "Henüz yetiştirilmiş devlet görevlisi yok.";
@@ -179,7 +192,9 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
           const name = definition?.name ?? building.building_type;
           return building.status === "BUILDING"
             ? `🏗️ **${name} Sv${building.target_level}** • Tur ${building.completion_turn} • ${Math.max(0, (building.completion_turn ?? 0) - document.guild.current_turn)} tur kaldı`
-            : `• ${name} Sv${building.level}`;
+            : building.status === "SABOTAGED"
+              ? `🕵️ **${name} Sv${building.level}** • Sabotaj nedeniyle geçici olarak devre dışı`
+              : `• ${name} Sv${building.level}`;
         }).join("\n")
       : "Henüz bina bulunmuyor.";
 

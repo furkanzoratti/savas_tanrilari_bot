@@ -1282,6 +1282,7 @@ export const migrations = [
     version: 42,
     name: "persistent_player_armies",
     sql: `
+      ALTER TABLE country_characters ADD COLUMN IF NOT EXISTS assignment_ready_turn INTEGER;
       ALTER TABLE country_characters DROP CONSTRAINT IF EXISTS country_characters_assignment_check;
       ALTER TABLE country_characters ADD CONSTRAINT country_characters_assignment_check
         CHECK (assignment IN ('NONE','CURIA','AGORA','ARMY'));
@@ -1323,4 +1324,130 @@ export const migrations = [
       CREATE INDEX IF NOT EXISTS battle_army_assignments_army_idx
         ON battle_army_assignments(army_id,battle_id);
     `
-  }] as const;
+  },
+  {
+    version: 43,
+    name: "automatic_siege_garrisons",
+    sql: `
+      CREATE TABLE IF NOT EXISTS battle_garrison_assignments (
+        battle_id UUID PRIMARY KEY REFERENCES battles(id) ON DELETE CASCADE,
+        side_key TEXT NOT NULL DEFAULT 'B' CHECK (side_key='B'),
+        country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        settlement_id UUID NOT NULL REFERENCES settlements(id) ON DELETE CASCADE,
+        initial_composition JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS battle_garrison_assignments_country_idx
+        ON battle_garrison_assignments(country_id,settlement_id);
+    `
+  },
+  {
+    version: 44,
+    name: "turn_based_espionage_and_building_sabotage",
+    sql: `
+      ALTER TABLE guilds ADD COLUMN IF NOT EXISTS espionage_log_channel_id TEXT;
+
+      ALTER TABLE buildings ADD COLUMN IF NOT EXISTS sabotaged_until_turn INTEGER;
+      ALTER TABLE buildings DROP CONSTRAINT IF EXISTS buildings_status_check;
+      ALTER TABLE buildings ADD CONSTRAINT buildings_status_check
+        CHECK (status IN ('ACTIVE','BUILDING','SABOTAGED'));
+
+      ALTER TABLE country_characters ADD COLUMN IF NOT EXISTS assignment_ready_turn INTEGER;
+      ALTER TABLE country_characters DROP CONSTRAINT IF EXISTS country_characters_assignment_check;
+      ALTER TABLE country_characters ADD CONSTRAINT country_characters_assignment_check
+        CHECK (assignment IN (
+          'NONE','CURIA','AGORA','ARMY','ESPIONAGE','ESPIONAGE_RETURNING','CAPTURED',
+          'COUNTERINTELLIGENCE_COUNTRY','COUNTERINTELLIGENCE_SETTLEMENT'
+        ));
+
+      CREATE TABLE IF NOT EXISTS espionage_operations (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        guild_id TEXT NOT NULL REFERENCES guilds(discord_id) ON DELETE CASCADE,
+        attacker_country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        target_country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        target_settlement_id UUID NOT NULL REFERENCES settlements(id) ON DELETE CASCADE,
+        spy_character_id UUID NOT NULL REFERENCES country_characters(id) ON DELETE CASCADE,
+        target_type TEXT NOT NULL CHECK (target_type IN ('ECONOMIC','MILITARY','PUBLIC','NAVAL','CONSTRUCTION')),
+        preparation TEXT NOT NULL CHECK (preparation IN ('NONE','CAREFUL','EXTENSIVE','AGGRESSIVE')),
+        preparation_cost INTEGER NOT NULL DEFAULT 0 CHECK (preparation_cost >= 0),
+        started_turn INTEGER NOT NULL CHECK (started_turn >= 0),
+        resolve_turn INTEGER NOT NULL CHECK (resolve_turn > started_turn),
+        return_turn INTEGER NOT NULL CHECK (return_turn > resolve_turn),
+        status TEXT NOT NULL DEFAULT 'TRAVELING' CHECK (status IN ('TRAVELING','RESOLVED','CANCELLED')),
+        target_building_type TEXT,
+        valid_target BOOLEAN,
+        attack_roll SMALLINT,
+        attack_total SMALLINT,
+        defense_roll SMALLINT,
+        defense_total SMALLINT,
+        margin SMALLINT,
+        severity TEXT CHECK (severity IN ('NONE','LIGHT','MEDIUM','HEAVY')),
+        detection_roll SMALLINT,
+        detection_total SMALLINT,
+        detection_level SMALLINT CHECK (detection_level BETWEEN 0 AND 3),
+        captured BOOLEAN NOT NULL DEFAULT FALSE,
+        effect_text TEXT,
+        created_by TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        resolved_at TIMESTAMPTZ,
+        log_posted_at TIMESTAMPTZ,
+        CHECK (attacker_country_id <> target_country_id)
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS espionage_one_live_operation_per_spy
+        ON espionage_operations(spy_character_id) WHERE status='TRAVELING';
+      CREATE INDEX IF NOT EXISTS espionage_due_idx
+        ON espionage_operations(guild_id,status,resolve_turn);
+      CREATE INDEX IF NOT EXISTS espionage_country_idx
+        ON espionage_operations(attacker_country_id,created_at DESC);
+    `
+  },
+  {
+    version: 45,
+    name: "composition_aware_npc_purchase_modes",
+    sql: `
+      ALTER TABLE npc_auto_purchase_configs DROP CONSTRAINT IF EXISTS npc_auto_purchase_configs_doctrine_check;
+      ALTER TABLE npc_auto_purchase_country_overrides DROP CONSTRAINT IF EXISTS npc_auto_purchase_country_overrides_doctrine_check;
+      ALTER TABLE npc_auto_purchase_runs DROP CONSTRAINT IF EXISTS npc_auto_purchase_runs_doctrine_check;
+
+      UPDATE npc_auto_purchase_configs
+         SET doctrine=CASE
+           WHEN doctrine IN ('DEFENSIVE','OFFENSIVE','CAVALRY') THEN 'ARMY_ONLY'
+           ELSE 'FULL_BUILDING_ARMY'
+         END;
+      UPDATE npc_auto_purchase_country_overrides
+         SET doctrine=CASE
+           WHEN doctrine IS NULL THEN NULL
+           WHEN doctrine IN ('DEFENSIVE','OFFENSIVE','CAVALRY') THEN 'ARMY_ONLY'
+           ELSE 'FULL_BUILDING_ARMY'
+         END;
+      UPDATE npc_auto_purchase_runs
+         SET doctrine=CASE
+           WHEN doctrine IN ('DEFENSIVE','OFFENSIVE','CAVALRY') THEN 'ARMY_ONLY'
+           ELSE 'FULL_BUILDING_ARMY'
+         END;
+
+      ALTER TABLE npc_auto_purchase_configs ALTER COLUMN doctrine SET DEFAULT 'FULL_BUILDING_ARMY';
+      ALTER TABLE npc_auto_purchase_configs ADD CONSTRAINT npc_auto_purchase_configs_doctrine_check
+        CHECK (doctrine IN ('FULL_BUILDING_ARMY','ARMY_ONLY','DEVELOPMENT'));
+      ALTER TABLE npc_auto_purchase_country_overrides ADD CONSTRAINT npc_auto_purchase_country_overrides_doctrine_check
+        CHECK (doctrine IS NULL OR doctrine IN ('FULL_BUILDING_ARMY','ARMY_ONLY','DEVELOPMENT'));
+      ALTER TABLE npc_auto_purchase_runs ADD CONSTRAINT npc_auto_purchase_runs_doctrine_check
+        CHECK (doctrine IN ('FULL_BUILDING_ARMY','ARMY_ONLY','DEVELOPMENT'));
+    `
+  },
+  {
+    version: 46,
+    name: "npc_naval_focus_doctrine",
+    sql: `
+      ALTER TABLE npc_auto_purchase_configs DROP CONSTRAINT IF EXISTS npc_auto_purchase_configs_doctrine_check;
+      ALTER TABLE npc_auto_purchase_country_overrides DROP CONSTRAINT IF EXISTS npc_auto_purchase_country_overrides_doctrine_check;
+      ALTER TABLE npc_auto_purchase_runs DROP CONSTRAINT IF EXISTS npc_auto_purchase_runs_doctrine_check;
+      ALTER TABLE npc_auto_purchase_configs ADD CONSTRAINT npc_auto_purchase_configs_doctrine_check
+        CHECK (doctrine IN ('FULL_BUILDING_ARMY','ARMY_ONLY','DEVELOPMENT','NAVAL_FOCUS'));
+      ALTER TABLE npc_auto_purchase_country_overrides ADD CONSTRAINT npc_auto_purchase_country_overrides_doctrine_check
+        CHECK (doctrine IS NULL OR doctrine IN ('FULL_BUILDING_ARMY','ARMY_ONLY','DEVELOPMENT','NAVAL_FOCUS'));
+      ALTER TABLE npc_auto_purchase_runs ADD CONSTRAINT npc_auto_purchase_runs_doctrine_check
+        CHECK (doctrine IN ('FULL_BUILDING_ARMY','ARMY_ONLY','DEVELOPMENT','NAVAL_FOCUS'));
+    `
+  }
+] as const;

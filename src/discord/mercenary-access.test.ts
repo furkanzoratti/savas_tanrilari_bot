@@ -5,6 +5,8 @@ describe("paralı asker komut erişimi", () => {
   it("oyuncuya kiralama şirketlerini gösterir", () => {
     expect(mercenaryCompanyAutocompleteAllowed("parali-asker", "kirala", false)).toBe(true);
     expect(mercenarySubcommandRequiresGameMaster("kirala")).toBe(false);
+    expect(mercenaryCompanyAutocompleteAllowed("parali-asker", "feshet", false)).toBe(true);
+    expect(mercenarySubcommandRequiresGameMaster("feshet")).toBe(false);
   });
 
   it("yönetim ve savaş düzenleme seçeneklerini oyuncuya açmaz", () => {

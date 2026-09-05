@@ -51,6 +51,17 @@ describe("yönetici kontrollü ağırlıklı yerleşke olayları", () => {
     expect(unrest.weight).toBeGreaterThan(0);
   });
 
+  it("Birleşik Taç huzursuzluk ve isyan ağırlığını 10 puan azaltır", () => {
+    const unrestBase = assessSettlementEventRisk("UNREST", settlement({ buildings: { lupanar: 2 } }));
+    const unrestProtected = assessSettlementEventRisk("UNREST", settlement({ buildings: { lupanar: 2 }, stabilityRiskReduction: 10 }));
+    expect(unrestProtected.weight).toBe(unrestBase.weight - 10);
+    expect(unrestProtected.factors).toContainEqual({ label: "Birleşik Taç", adjustment: -10 });
+    const state = { black_market_active: false, epidemic_active: false, unrest_active: true, rebellion_active: false };
+    const rebellionBase = assessSettlementEventRisk("REBELLION", settlement({ state }));
+    const rebellionProtected = assessSettlementEventRisk("REBELLION", settlement({ state, stabilityRiskReduction: 10 }));
+    expect(rebellionProtected.weight).toBe(rebellionBase.weight - 10);
+  });
+
   it("aktif olayı ve aynı olayın bekleme süresini havuzdan çıkarır", () => {
     const active = assessSettlementEventRisk("EPIDEMIC", settlement({ state: { black_market_active: false, epidemic_active: true, unrest_active: false, rebellion_active: false } }));
     expect(active.weight).toBe(0);

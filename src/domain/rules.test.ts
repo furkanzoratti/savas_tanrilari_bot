@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildingSlotLimit, calculatePopulationGain, calculateSettlementEconomy,
+  buildingSlotLimit, calculatePopulationGain, calculateSettlementEconomy, naturalPopulationGrowthRate,
   calculateShipUpkeep, calculateUnitUpkeep, nextRuinStage
 } from "./economy.js";
 import { createRecruitmentWaves, isAcquisitionTurn, militaryLimit } from "./mobilization.js";
@@ -41,7 +41,7 @@ describe("yerleşke ekonomisi", () => {
 
   it("lupanar, şifacı, su kemeri, haraplık ve seferberliği birlikte uygular", () => {
     expect(calculatePopulationGain({
-      basePopulationGrowth: 1_000,
+      population: 100_000,
       buildings: [
         { buildingType: "healer", level: 2 },
         { buildingType: "lupanar", level: 2 },
@@ -49,7 +49,21 @@ describe("yerleşke ekonomisi", () => {
       ],
       ruinStage: 2,
       mobilization: "PARTIAL"
-    })).toBe(900);
+    })).toBe(1_125);
+  });
+
+  it("doğal nüfus artışını güncel nüfus dilimine göre hesaplar", () => {
+    expect(naturalPopulationGrowthRate(49_999)).toBe(0);
+    expect(naturalPopulationGrowthRate(50_000)).toBe(0.01);
+    expect(naturalPopulationGrowthRate(99_999)).toBe(0.01);
+    expect(naturalPopulationGrowthRate(100_000)).toBe(0.02);
+    expect(naturalPopulationGrowthRate(149_999)).toBe(0.02);
+    expect(naturalPopulationGrowthRate(150_000)).toBe(0.03);
+    expect(naturalPopulationGrowthRate(199_999)).toBe(0.03);
+    expect(naturalPopulationGrowthRate(200_000)).toBe(0.04);
+    expect(naturalPopulationGrowthRate(249_999)).toBe(0.04);
+    expect(naturalPopulationGrowthRate(250_000)).toBe(0.05);
+    expect(naturalPopulationGrowthRate(1_000_000)).toBe(0.05);
   });
 });
 

@@ -32,6 +32,7 @@ export interface EventRiskInput {
   state: SettlementEventState;
   currentTurn: number;
   lastTriggeredTurn: number | null;
+  stabilityRiskReduction?: number;
 }
 
 export interface EventRiskFactor {
@@ -135,6 +136,10 @@ export function assessSettlementEventRisk(type: SettlementEventType, input: Even
     addFactor(factors, "Curia yönetimi", -level("curia") * 2);
     addFactor(factors, "Şarap", has("WINE") ? -10 : 0);
     addFactor(factors, "Kehribar", has("AMBER") ? -10 : 0);
+  }
+
+  if (["UNREST", "REBELLION"].includes(type)) {
+    addFactor(factors, "Birleşik Taç", -Math.max(0, Math.floor(input.stabilityRiskReduction ?? 0)));
   }
 
   const weight = Math.max(0, Math.min(100, factors.reduce((sum, factor) => sum + factor.adjustment, 0)));

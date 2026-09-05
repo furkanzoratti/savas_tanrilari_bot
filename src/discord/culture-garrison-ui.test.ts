@@ -20,7 +20,8 @@ describe("kültür ve yerleşke kartı", () => {
       playerIds: ["123"], freePopulation: 100_000, militaryUsed: 2_000, militaryLimit: 7_500,
       characters: [
         { name: "Aurelius", role: "COMMANDER", skill_bonus: 0, assignment: "CURIA", assigned_settlement_name: "Ordusal" },
-        { name: "Lycinia", role: "MERCHANT", skill_bonus: 1, assignment: "AGORA", assigned_settlement_name: "Ordusal" }
+        { name: "Lycinia", role: "MERCHANT", skill_bonus: 1, assignment: "AGORA", assigned_settlement_name: "Ordusal" },
+        { name: "Cassia", role: "SPY", skill_bonus: 2, assignment: "ESPIONAGE", assigned_country_name: "Kartaca", assigned_settlement_name: "Kartaca" }
       ],
       totalGrossIncome: 1_000, totalPayableIncome: 1_000, totalIncomeBreakdown: emptyIncome,
       totalUpkeep: 100, netIncome: 900, tradeAgreements: [],
@@ -68,6 +69,7 @@ describe("kültür ve yerleşke kartı", () => {
     expect(officials).toContain("↳ Curia");
     expect(officials).toContain("↳ Agora / Forum");
     expect(officials).not.toContain("Ordusal");
+    expect(officials).toContain("Casusluk görevi • yolda • Kartaca • Kartaca");
     expect(fields.find((field) => field.name === "👥 Nüfus")?.value).not.toContain("Sonraki Alım");
     expect(fields.find((field) => field.name === "💰 Gelir Kalemleri")?.value).toContain("Toplam:");
     expect(fields.find((field) => field.name === "💰 Gelir Kalemleri")?.value).not.toContain("Tahsil edilecek");

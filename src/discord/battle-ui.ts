@@ -28,7 +28,7 @@ export function battleEmbed(view: BattleView, roundResult?: BattleRoundResult): 
       ? siegeOrderState(side.pressure, side.current_total)
       : orderState(side.pressure, side.initial_total, side.current_total);
     const control = side.controller === "GM" ? "Oyun Yöneticisi (NPC)" : "Ülke Oyuncuları";
-    if (view.battle.terrain === "SIEGE" && key === "B") return `**Toplam Asker:** Gizli\n**Toplam Kayıp:** ${number(side.total_losses)}\n**Baskı:** ${number(side.pressure)} puan\n**Düzen:** ${orderLabels[order]}\n**Zar Yetkisi:** ${control}`;
+    if (view.battle.terrain === "SIEGE" && key === "B") return `**Toplam Asker:** Gizli\n**Otomatik Garnizon:** Dahil\n**Toplam Kayıp:** ${number(side.total_losses)}\n**Baskı:** ${number(side.pressure)} puan\n**Düzen:** ${orderLabels[order]}\n**Zar Yetkisi:** ${control}`;
     return `**Başlangıç:** ${number(side.initial_total)}\n**Mevcut:** ${number(side.current_total)}\n**Toplam Kayıp:** ${number(side.total_losses)}\n**Baskı:** ${number(side.pressure)} puan\n**Düzen:** ${orderLabels[order]}\n**Zar Yetkisi:** ${control}`;
   };
   const frontage = view.battle.terrain === "NAVAL"
@@ -185,7 +185,7 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
       defenderSettlementName: interaction.options.getString("savunulan-yerleske") });
     const rosterCommand = view.battle.terrain === "NAVAL" ? "/savas filo-ayarla" : "/savas kadro-ayarla";
     const supportNote = view.battle.terrain === "SIEGE" ? " Kuşatma aletlerini `/savas kusatma-aleti-ayarla` ile girin." : "";
-    await interaction.reply({ content: `✅ Savaş taslağı oluşturuldu. Gizli kadroları \`${rosterCommand}\` ile girin.${supportNote}\nA tarafı ilk turda ${view.battle.first_side === "A" ? "önce" : "sonra"} zar atacak.`, ephemeral: true });
+    await interaction.reply({ content: `✅ **${view.sides.A.country_name} — ${view.sides.B.country_name}** savaş taslağı oluşturuldu. Gizli kadroları \`${rosterCommand}\` ile girin.${supportNote}\nİlk zar sırası: **${view.sides[view.battle.first_side].country_name}**.`, ephemeral: true });
   } else if (sub === "taraf-ulke") {
     requireGameMaster(interaction);
     const side = interaction.options.getString("taraf", true) as BattleSideKey;
@@ -201,14 +201,15 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
     });
   } else if (sub === "ordu-ekle") {
     requireGameMaster(interaction);
-    const side = interaction.options.getString("taraf", true) as BattleSideKey;
+    const countryName = interaction.options.getString("ulke", true);
+    const side = (await battleService.participantByCountry({ guildId: interaction.guildId, channelId: interaction.channelId, countryName })).side_key;
     const action = interaction.options.getString("islem", true) as "ADD" | "REMOVE";
     const result = await battleService.setArmyAssignment({
       guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id,
       side, action, armyId: interaction.options.getString("ordu", true)
     });
     await interaction.reply({
-      content: `✅ **${result.countryName} • ${result.armyName}** savaş taslağ${action === "ADD" ? "ına eklendi" : "ından çıkarıldı"}. **${side} tarafının güncel toplamı:** ${number(result.view.sides[side].initial_total)}`,
+      content: `✅ **${result.countryName} • ${result.armyName}** savaş taslağ${action === "ADD" ? "ına eklendi" : "ından çıkarıldı"}. **${countryName} tarafının bulunduğu cephenin güncel toplamı:** ${number(result.view.sides[side].initial_total)}`,
       ephemeral: true
     });
   } else if (sub === "birlik-ayarla") {
@@ -220,8 +221,8 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
     await interaction.reply({ content: `✅ ${side} tarafının gizli kadrosu güncellendi. Açık toplam: **${number(view.sides[side].initial_total)}**`, ephemeral: true });
   } else if (sub === "kadro-ayarla") {
     requireGameMaster(interaction);
-    const side = interaction.options.getString("taraf", true) as BattleSideKey;
-    const countryName = interaction.options.getString("ulke");
+    const countryName = interaction.options.getString("ulke", true);
+    const side = (await battleService.participantByCountry({ guildId: interaction.guildId, channelId: interaction.channelId, countryName })).side_key;
     const sourceSettlement = interaction.options.getString("yerleske");
     const view = await battleService.setRoster({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id, side, naval: false, countryName, sourceSettlement,
       composition: {
@@ -243,7 +244,7 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
     const lossSource = participant?.source_settlement_name
       ? `**${participant.source_settlement_name}**; kayıplar yalnızca bu yerleşkeden düşülecek.`
       : "**Ülke geneli**; kayıplar mevcut oransal dağıtımla düşülecek.";
-    await interaction.reply({ content: `✅ ${side} tarafının bütün kara kadrosu tek işlemde kaydedildi. Açık toplam: **${number(view.sides[side].initial_total)}**\n📍 Kayıp kaynağı: ${lossSource}`, ephemeral: true });
+    await interaction.reply({ content: `✅ **${countryName}** ülkesinin bütün kara kadrosu tek işlemde kaydedildi. Açık toplam: **${number(view.sides[side].initial_total)}**\n📍 Kayıp kaynağı: ${lossSource}`, ephemeral: true });
   } else if (sub === "gemi-ayarla") {
     requireGameMaster(interaction);
     const side = interaction.options.getString("taraf", true) as BattleSideKey;
@@ -264,10 +265,11 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
     await interaction.reply({ content: `✅ ${side} tarafının gizli kuşatma desteği güncellendi. Hedef: **${interaction.options.getString("hedef", true)}**`, ephemeral: true });
   } else if (sub === "parali-asker-ayarla") {
     requireGameMaster(interaction);
-    const side = interaction.options.getString("taraf", true) as BattleSideKey;
+    const countryName = interaction.options.getString("ulke", true);
+    const side = (await battleService.participantByCountry({ guildId: interaction.guildId, channelId: interaction.channelId, countryName })).side_key;
     const action = interaction.options.getString("islem", true) as "ADD" | "REMOVE";
-    const view = await battleService.setMercenaryAssignment({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id, side, action, companyKey: interaction.options.getString("sirket", true) });
-    await interaction.reply({ content: `✅ Paralı asker şirketi ${action === "ADD" ? "savaş taslağına eklendi" : "savaş taslağından çıkarıldı"}. ${side} tarafının açık toplamı: **${number(view.sides[side].initial_total)}**`, ephemeral: true });
+    const view = await battleService.setMercenaryAssignment({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id, side, countryName, action, companyKey: interaction.options.getString("sirket", true) });
+    await interaction.reply({ content: `✅ Paralı asker şirketi ${action === "ADD" ? "savaş taslağına eklendi" : "savaş taslağından çıkarıldı"}. **${countryName}** ülkesinin bulunduğu cephenin açık toplamı: **${number(view.sides[side].initial_total)}**`, ephemeral: true });
   } else if (sub === "saha-aleti-al") {
     const assetType = interaction.options.getString("alet", true) as "ladder_group" | "ram";
     const quantity = interaction.options.getInteger("miktar", true);

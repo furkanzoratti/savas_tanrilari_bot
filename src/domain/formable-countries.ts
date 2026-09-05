@@ -7,7 +7,11 @@ export interface FormableModifiers {
   archerSlingerDiscount?: number;
   archerSlingerLightDiscount?: number;
   shipDiscount?: number;
+  shipUpkeepDiscount?: number;
   shipTransportMultiplier?: number;
+  navalClashBonus?: number;
+  britonLongbowDamageBonusPerThousand?: number;
+  stabilityRiskReduction?: number;
   buildingDiscount?: number;
   buildingDiscountTypes?: readonly string[];
   buildingDurationReduction?: number;
@@ -38,7 +42,43 @@ export interface FormableCountryDefinition {
 }
 
 export const FORMABLE_COUNTRIES = {
-  BRITANNIA: { name: "Britanya", emoji: "🏴", buffs: ["Britanya'da düşman keşif sonuçları doğal 20 dışında dar tahmin aralığı verir.", "Savaş Hazırlığı milisi 1.000 olur.", "Her Tersane üretim kapasitesine +2 Trireme ekler.", "Okçu ve Sapancı alımı %5 ucuzdur."], modifiers: { archerSlingerDiscount: 0.05, warPreparationMilitia: 1_000, shipyardPointBonus: { trireme: 2 } } },
+  BRITANNIA: {
+    name: "Britanya",
+    emoji: "🏴",
+    buffs: [
+      "Gemi alım maliyeti ve gemi bakımı %30 azalır.",
+      "Briton Uzun Yaycıları, Okçu ve Sapancı alım maliyeti %10 azalır.",
+      "Liman geliri %20 artar."
+    ],
+    modifiers: {
+      archerSlingerDiscount: 0.10,
+      shipDiscount: 0.30,
+      shipUpkeepDiscount: 0.30,
+      buildingIncomePercent: { port: 0.20 }
+    }
+  },
+  GREAT_BRITAIN: {
+    name: "Büyük Britanya",
+    emoji: "👑",
+    buffs: [
+      "Gemi alım maliyeti ve gemi bakımı %30 azalır.",
+      "Briton Uzun Yaycıları, Okçu ve Sapancı alım maliyeti %10 azalır.",
+      "Liman geliri %20 artar.",
+      "Kraliyet Donanması gemi taşıma kapasitesini %20 artırır ve deniz savaşı çarpışma sonucuna +1 verir.",
+      "Briton Uzun Yaycıları her 1.000 muharip için hasar sonucuna +1 kazandırır.",
+      "Büyük Britanya yerleşkelerinin huzursuzluk ve isyan ihtimali 10 puan azalır."
+    ],
+    modifiers: {
+      archerSlingerDiscount: 0.10,
+      shipDiscount: 0.30,
+      shipUpkeepDiscount: 0.30,
+      buildingIncomePercent: { port: 0.20 },
+      shipTransportMultiplier: 1.20,
+      navalClashBonus: 1,
+      britonLongbowDamageBonusPerThousand: 1,
+      stabilityRiskReduction: 10
+    }
+  },
   GALLIC_CONFEDERATION: { name: "Galya Konfederasyonu", emoji: "🐗", buffs: ["Piyade alımı %10 ucuzdur.", "Galya içindeki ordu hareketi %25 hızlıdır.", "Kuşatmadaki Curia Sv2+ yerleşke 500 geçici milis kazanır.", "Çiftlik ve Agora gelirleri %5 artar."], modifiers: { infantryDiscount: 0.10, buildingIncomePercent: { farm: 0.05, agora: 0.05 } } },
   BELGIAN_UNION: { name: "Belçika Birliği", emoji: "🛡️", buffs: ["Yıkılan sur ve kapı 1 turda onarılır.", "Politika ve olaylardan gelen milis %20 artar.", "Bölgedeki yağma nüfus ve gelir kaybı %25 azalır."], modifiers: { policyMilitiaMultiplier: 1.20 } },
   GERMANIC_UNION: { name: "Cermenya Birliği", emoji: "⚔️", buffs: ["Gözcüler orman cezasını yok sayar.", "Piyade alımı %10 ucuzdur.", "Cermen yağmalarındaki nüfus ve köle kaybı %25 azalır.", "Zorunlu Askerlik 5.000 milis için 4.000 nüfus harcar."], modifiers: { infantryDiscount: 0.10 } },
@@ -86,6 +126,11 @@ export function isFormableCountryKey(value: string): value is FormableCountryKey
 
 export function formableModifiers(key: FormableCountryKey | null | undefined): FormableModifiers {
   return key ? FORMABLE_COUNTRIES[key]?.modifiers ?? {} : {};
+}
+
+export function applyFormableShipUpkeepDiscount(baseUpkeep: number, key: FormableCountryKey | null | undefined): number {
+  const discount = Math.max(0, Math.min(1, formableModifiers(key).shipUpkeepDiscount ?? 0));
+  return Math.ceil(Math.max(0, baseUpkeep) * (1 - discount));
 }
 
 const infantry = new Set(["light_infantry", "slinger", "spear", "archer", "heavy_infantry", "legionary", "hoplite", "briton_longbow", "persian_immortal", "iberian_caetrati", "germanic_shock_warrior"]);

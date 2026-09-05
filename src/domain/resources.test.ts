@@ -17,8 +17,8 @@ describe("hammadde etkileri", () => {
   it("Tahıl bakım ve nüfus etkisini uygular", () => {
     expect(calculateUnitUpkeep("heavy_infantry", 1_000, "FIELD_FRIENDLY", "PEACE", ["GRAIN"])).toBe(405);
     expect(calculatePopulationGain({
-      basePopulationGrowth: 1_000, buildings: [], ruinStage: 0, mobilization: "PEACE", resources: ["GRAIN"]
-    })).toBe(1_100);
+      population: 100_000, buildings: [], ruinStage: 0, mobilization: "PEACE", resources: ["GRAIN"]
+    })).toBe(2_200);
   });
 
   it("Altın ve Baharat toplam geliri artırır", () => {

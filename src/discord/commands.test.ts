@@ -63,6 +63,15 @@ describe("yönetim komutları", () => {
   it("NPC alımını aynı Alım Turunda çalıştırma ve ek alım olarak tekrar sunar", () => {
     const command = commandBuilders.find((item) => item.name === "npc-devlet-oto-alim");
     expect(command?.options?.map((option) => option.name)).toEqual(expect.arrayContaining(["calistir", "ek-alim"]));
+    const configure = command?.options?.find((option) => option.name === "ayarla");
+    const doctrine = configure?.options?.find((option) => option.name === "doktrin");
+    expect(doctrine?.choices?.some((choice) => choice.value === "NAVAL_FOCUS")).toBe(true);
+  });
+
+  it("yöneticiye tamamlanmış bina ekleme komutunu sunar", () => {
+    const command = commandBuilders.find((item) => item.name === "tamamlanmis-bina-ekle");
+    expect(command?.description).toContain("Yalnızca yönetici");
+    expect(command?.options?.map((option) => option.name)).toEqual(["ulke", "yerleske", "bina", "seviye"]);
   });
 
   it("bu Alım Turunun paralı asker bakımlarını tek seferlik toplu tahsil eder", () => {
