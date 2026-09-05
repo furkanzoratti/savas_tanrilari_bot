@@ -753,6 +753,22 @@ async function handleGreatPowerCommand(interaction: ChatInputCommandInteraction)
     return;
   }
 
+  if (subcommand === "puanlar") {
+    const ranking = await greatPowerService.calculateRanking(interaction.guildId);
+    const lines = ranking.map((row) =>
+      `**${row.rank}. ${row.countryName} — ${number(row.score)} puan**\n` +
+      `↳ Kara: ${number(row.breakdown.land)} • Ekonomi: ${number(row.breakdown.economy)} • ` +
+      `Şehir: ${number(row.breakdown.settlements)} • Donanma: ${number(row.breakdown.navy)} • Bina: ${number(row.breakdown.buildings)}`
+    );
+    await sendNpcPages(
+      interaction,
+      "🔒 Kesin Devlet Güç Puanları",
+      lines.length ? lines : ["Aktif devlet bulunmuyor."],
+      `${ranking.length} aktif devlet • Yalnızca oyun yöneticisine görünür`
+    );
+    return;
+  }
+
   const channelId = await greatPowerService.channel(interaction.guildId);
   if (!channelId) throw new GameError("Önce /buyuk-gucler kanal komutuyla paylaşım kanalını ayarlamalısınız.");
   const date = currentLocalDate(new Date(), config.TURN_TIMEZONE);

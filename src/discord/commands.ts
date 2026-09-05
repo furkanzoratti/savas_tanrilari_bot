@@ -618,6 +618,7 @@ export const commandBuilders = [
       .addStringOption((o) => o.setName("islem").setDescription("İşlem").setRequired(true).addChoices({ name: "Ayarla", value: "set" }, { name: "Kapat", value: "clear" }))
       .addChannelOption((o) => o.setName("kanal").setDescription("Her gün 17.00'da sıralamanın gönderileceği kanal").addChannelTypes(ChannelType.GuildText)))
     .addSubcommand((sub) => sub.setName("paylas").setDescription("Güncel hesabı yapar ve sıralamayı ayarlı kanalda hemen paylaşır"))
+    .addSubcommand((sub) => sub.setName("puanlar").setDescription("Tüm devletlerin kesin güç puanlarını yalnızca sana gösterir"))
 ].map((builder) => builder.toJSON());
 
 export const buildingChoices = Object.values(BUILDINGS);

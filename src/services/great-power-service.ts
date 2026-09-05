@@ -21,6 +21,14 @@ export interface GreatPowerSnapshot {
   rows: GreatPowerRankingRow[];
 }
 
+export interface GreatPowerScoreRow {
+  countryId: string;
+  countryName: string;
+  rank: number;
+  score: number;
+  breakdown: GreatPowerBreakdown;
+}
+
 function scoreDocument(document: CountryDocument): GreatPowerBreakdown {
   return calculateGreatPower({
     payableIncome: document.totalPayableIncome,
@@ -46,6 +54,22 @@ function assertDate(date: string): void {
 }
 
 export const greatPowerService = {
+  async calculateRanking(guildId: string): Promise<GreatPowerScoreRow[]> {
+    const countries = await gameService.listCountries(guildId);
+    const scored: Array<Omit<GreatPowerScoreRow, "rank" | "score">> = [];
+    for (const country of countries) {
+      const document = await gameService.document(country.id);
+      scored.push({ countryId: country.id, countryName: country.name, breakdown: scoreDocument(document) });
+    }
+    scored.sort((left, right) =>
+      right.breakdown.total - left.breakdown.total
+      || right.breakdown.settlements - left.breakdown.settlements
+      || right.breakdown.economy - left.breakdown.economy
+      || left.countryName.localeCompare(right.countryName, "tr-TR")
+    );
+    return scored.map((country, index) => ({ ...country, rank: index + 1, score: country.breakdown.total }));
+  },
+
   async setChannel(guildId: string, channelId: string | null): Promise<void> {
     await pool.query("INSERT INTO guilds(discord_id) VALUES($1) ON CONFLICT DO NOTHING", [guildId]);
     await pool.query("UPDATE guilds SET great_power_channel_id=$1,updated_at=NOW() WHERE discord_id=$2", [channelId, guildId]);
@@ -68,19 +92,7 @@ export const greatPowerService = {
 
   async createSnapshot(guildId: string, date: string): Promise<GreatPowerSnapshot> {
     assertDate(date);
-    const countries = await gameService.listCountries(guildId);
-    const scored: Array<{ countryId: string; countryName: string; breakdown: GreatPowerBreakdown }> = [];
-    for (const country of countries) {
-      const document = await gameService.document(country.id);
-      scored.push({ countryId: country.id, countryName: country.name, breakdown: scoreDocument(document) });
-    }
-    scored.sort((left, right) =>
-      right.breakdown.total - left.breakdown.total
-      || right.breakdown.settlements - left.breakdown.settlements
-      || right.breakdown.economy - left.breakdown.economy
-      || left.countryName.localeCompare(right.countryName, "tr-TR")
-    );
-    const top = scored.slice(0, GREAT_POWER_LIMIT);
+    const top = (await this.calculateRanking(guildId)).slice(0, GREAT_POWER_LIMIT);
 
     const previous = await pool.query<{ snapshot_date: string; country_id: string; rank: number }>(
       `SELECT snapshot_date::text,country_id,rank FROM great_power_snapshots
