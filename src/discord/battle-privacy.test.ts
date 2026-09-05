@@ -5,7 +5,7 @@ vi.hoisted(() => {
   process.env.DISCORD_CLIENT_ID = "test-client";
   process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
 });
-import { battleEmbed } from "./battle-ui.js";
+import { battleEmbed, battleRollEmbed } from "./battle-ui.js";
 import type { BattleView } from "../services/battle-service.js";
 
 function siegeView(): BattleView {
@@ -62,19 +62,20 @@ describe("kuşatma bilgi gizliliği", () => {
     expect(json).not.toContain("B cephesi");
   });
 
-  it("savunucunun ham ve tahkimat sonrası zarlarını ayrı gösterir", () => {
+  it("zar kaydını ana formdan çıkarıp küçük zar kutusunda ham ve tahkimat sonrası değerlerle gösterir", () => {
     const view = siegeView();
     view.rolls = [{
       side_key: "B", roller_user_id: "gm", clash_total: 100, damage_total: 80,
       is_proxy: false, manual: false, wall_damage: 0, gate_damage: 0
     }];
-    const json = JSON.stringify(battleEmbed(view).toJSON());
-    expect(json).toContain("Savunucu — Ham Zar");
-    expect(json).toContain("Çarpışma **100**");
-    expect(json).toContain("Hasar **80**");
-    expect(json).toContain("Tahkimat Sonrası");
-    expect(json).toContain("Çarpışma **150**");
-    expect(json).toContain("Hasar **108**");
+    const mainJson = JSON.stringify(battleEmbed(view).toJSON());
+    const rollJson = JSON.stringify(battleRollEmbed(view, "B").toJSON());
+    expect(mainJson).not.toContain("Açık Zar Kayıtları");
+    expect(mainJson).not.toContain("Ham Çarpışma");
+    expect(rollJson).toContain("Ham Çarpışma: **100**");
+    expect(rollJson).toContain("Ham Hasar: **80**");
+    expect(rollJson).toContain("Tahkimat Sonrası Çarpışma: **150**");
+    expect(rollJson).toContain("Tahkimat Sonrası Hasar: **108**");
   });
 
   it("şehir ele geçirilmeden savunucuyu dağılmış göstermez ve baskıyı açıklar", () => {

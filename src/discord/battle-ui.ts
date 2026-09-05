@@ -69,21 +69,7 @@ ${accessNote}` }
     );
   }
   embed.setImage(`attachment://${terrain.preset}`).setFooter({ text: "Tam birlik kompozisyonu yalnızca oyun yöneticisine görünür." }).setTimestamp();
-  const activeDefense = siegeDefenseModifiers(view.battle.wall_current_hp ?? 0, view.battle.gate_current_hp ?? 0);
   const factor = (value: number) => value.toFixed(2).replace(".", ",");
-  const rolls = view.rolls.map((roll) => {
-    const actor = `<@${roll.roller_user_id}>${roll.is_proxy ? " (DM vekili)" : ""}`;
-    const structureDamage = `${roll.wall_damage ? ` • Sur Hasarı **${roll.wall_damage}**` : ""}${roll.gate_damage ? ` • Kapı Hasarı **${roll.gate_damage}**` : ""}`;
-    const counter = roll.detail?.__spear_cavalry;
-    const counterSummary = counter?.matched ? `\n↳ **Mızrak Karşılığı:** ${number(counter.matched)} süvari eşleşti • +${number(counter.clashBonus ?? 0)} Çarpışma • +${number(counter.antiCavalryDamage ?? 0)} süvariye özel Hasar` : "";
-    const commander = roll.detail?.__commander;
-    const commanderSummary = commander?.clash ? `\n↳ **Komutan Bonusu:** +${number(commander.clash)} Çarpışma` : "";
-    if (view.battle.terrain === "SIEGE" && roll.side_key === "B") {
-      return `**${view.sides.B.country_name} — Ham Zar:** Çarpışma **${roll.clash_total}** • Hasar **${roll.damage_total}** • ${actor}${commanderSummary}\n↳ **Tahkimat Sonrası:** Çarpışma **${Math.ceil(roll.clash_total * activeDefense.defenderClash)}** (×${factor(activeDefense.defenderClash)}) • Hasar **${Math.ceil(roll.damage_total * activeDefense.defenderDamage)}** (×${factor(activeDefense.defenderDamage)})`;
-    }
-    return `**${view.sides[roll.side_key].country_name}:** Çarpışma **${roll.clash_total}** • Hasar **${roll.damage_total}**${structureDamage} • ${actor}${counterSummary}${commanderSummary}`;
-  }).join("\n");
-  if (rolls) embed.addFields({ name: "🎲 Açık Zar Kayıtları", value: rolls });
   if (roundResult) {
     const winner = roundResult.winner ? view.sides[roundResult.winner].country_name : "Yok";
     const pressureWinner = roundResult.pressureWinner ? view.sides[roundResult.pressureWinner].country_name : "Yok";
@@ -140,22 +126,41 @@ export async function refreshActiveBattleCards(client: Client, guildId: string):
 }
 function publicPayload(view: BattleView, result?: Parameters<typeof battleEmbed>[1]) {
   const asset = battlefieldAsset(view.battle.terrain);
-  return { embeds: [battleEmbed(view, result)], components: components(view), files: [new AttachmentBuilder(asset.path, { name: asset.name })] };
+  return { embeds: [battleEmbed(view, result)], components: view.rolls.length ? [] : components(view), files: [new AttachmentBuilder(asset.path, { name: asset.name })] };
 }
 
-function battleRollEmbed(view: BattleView, side: BattleSideKey): EmbedBuilder {
+export function battleRollEmbed(view: BattleView, side: BattleSideKey): EmbedBuilder {
   const roll = view.rolls.find((item) => item.side_key === side)!;
+  const factor = (value: number) => value.toFixed(2).replace(".", ",");
   const structureDamage = [
     roll.wall_damage ? `Sur Hasarı: **${number(roll.wall_damage)}**` : null,
     roll.gate_damage ? `Kapı Hasarı: **${number(roll.gate_damage)}**` : null
   ].filter(Boolean).join(" • ");
+  const counter = roll.detail?.__spear_cavalry;
+  const commander = roll.detail?.__commander;
+  const details = view.battle.terrain === "SIEGE" && side === "B"
+    ? (() => {
+        const defense = siegeDefenseModifiers(view.battle.wall_current_hp ?? 0, view.battle.gate_current_hp ?? 0);
+        return [
+          `Ham Çarpışma: **${number(roll.clash_total)}**`,
+          `Ham Hasar: **${number(roll.damage_total)}**`,
+          `Tahkimat Sonrası Çarpışma: **${number(Math.ceil(roll.clash_total * defense.defenderClash))}** (×${factor(defense.defenderClash)})`,
+          `Tahkimat Sonrası Hasar: **${number(Math.ceil(roll.damage_total * defense.defenderDamage))}** (×${factor(defense.defenderDamage)})`
+        ];
+      })()
+    : [
+        `Çarpışma: **${number(roll.clash_total)}**`,
+        `Hasar: **${number(roll.damage_total)}**`
+      ];
   return new EmbedBuilder()
     .setColor(side === "A" ? 0xc94b55 : 0x4fa3d1)
     .setTitle(`🎲 Savaş Turu ${view.battle.round_number} • ${view.sides[side].country_name}`)
     .setDescription([
-      `Çarpışma: **${number(roll.clash_total)}**`,
-      `Hasar: **${number(roll.damage_total)}**`,
-      structureDamage || null
+      ...details,
+      structureDamage || null,
+      counter?.matched ? `**Mızrak Karşılığı:** ${number(counter.matched)} süvari eşleşti • +${number(counter.clashBonus ?? 0)} Çarpışma • +${number(counter.antiCavalryDamage ?? 0)} süvariye özel Hasar` : null,
+      commander?.clash ? `**Komutan Bonusu:** +${number(commander.clash)} Çarpışma` : null,
+      `Zarı atan: <@${roll.roller_user_id}>${roll.is_proxy ? " • DM vekili" : ""}`
     ].filter(Boolean).join("\n"))
     .setFooter({ text: `${view.rolls.length}/2 taraf zarını tamamladı${roll.is_proxy ? " • DM vekili" : ""}` });
 }
@@ -390,7 +395,10 @@ export async function handleBattleButton(interaction: ButtonInteraction): Promis
     await interaction.deferReply();
     const result = await battleService.roll({ guildId: interaction.guildId, channelId: interaction.channelId, battleId, actorId: interaction.user.id, isGameMaster: isGameMaster(interaction) });
     await refreshBattleCard(interaction.client, result.view);
-    await interaction.editReply({ content: `<@${interaction.user.id}>`, embeds: [battleRollEmbed(result.view, result.side)] });
+    if (interaction.message.id !== result.view.battle.public_message_id) {
+      await interaction.message.edit({ components: [] }).catch((error) => console.error("Kullanılmış zar düğmesi kapatılamadı", { battleId, error }));
+    }
+    await interaction.editReply({ content: `<@${interaction.user.id}>`, embeds: [battleRollEmbed(result.view, result.side)], components: components(result.view) });
   } else if (interaction.customId.startsWith("battle_bombard|")) {
     await interaction.deferReply();
     const result = await battleService.bombard({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id, isGameMaster: isGameMaster(interaction) });
