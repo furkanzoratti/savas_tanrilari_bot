@@ -28,6 +28,7 @@ export interface TurnAnnouncementInput {
   mercenaryUpkeepDetails?: Array<{ countryName: string; companyName: string; amount: number }>;
   mercenaryUnpaidDetails?: Array<{ countryName: string; companyName: string; amount: number }>;
   mercenaryEndedDetails?: Array<{ countryName: string; companyName: string; reason: string }>;
+  assimilatedSettlementDetails?: Array<{ countryName: string; settlementName: string; diplomatName: string | null }>;
 }
 
 function fieldValue(lines: string[]): string {
@@ -87,6 +88,12 @@ export function turnAnnouncement(input: TurnAnnouncementInput): EmbedBuilder {
   if (input.activatedPolicyDetails?.length) embed.addFields({
     name: "⚖️ Etkinleşen Şehir Politikaları",
     value: fieldValue(input.activatedPolicyDetails.map((item) => `• **${item.settlementName}** — ${item.policyName}`))
+  });
+  if (input.assimilatedSettlementDetails?.length) embed.addFields({
+    name: "🤝 Tamamlanan Asimilasyonlar",
+    value: fieldValue(input.assimilatedSettlementDetails.map((item) =>
+      `• **${item.countryName} / ${item.settlementName}**${item.diplomatName ? ` — Diplomat: ${item.diplomatName}` : ""}`
+    ))
   });
   if (input.unrestDetails?.length) embed.addFields({
     name: "⚠️ Huzursuzluk Olayları",

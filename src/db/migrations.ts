@@ -1449,5 +1449,60 @@ export const migrations = [
       ALTER TABLE npc_auto_purchase_runs ADD CONSTRAINT npc_auto_purchase_runs_doctrine_check
         CHECK (doctrine IN ('FULL_BUILDING_ARMY','ARMY_ONLY','DEVELOPMENT','NAVAL_FOCUS'));
     `
+  },
+  {
+    version: 47,
+    name: "treasury_transfer_turn_quotas",
+    sql: `
+      ALTER TABLE settlement_treasury_transfers
+        DROP CONSTRAINT IF EXISTS settlement_treasury_transfers_guild_id_country_id_turn_key;
+
+      CREATE TABLE IF NOT EXISTS treasury_transfer_country_snapshots (
+        guild_id TEXT NOT NULL REFERENCES guilds(discord_id) ON DELETE CASCADE,
+        country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        turn INTEGER NOT NULL CHECK (turn >= 0),
+        opening_treasury BIGINT NOT NULL CHECK (opening_treasury >= 0),
+        transferred_amount BIGINT NOT NULL DEFAULT 0 CHECK (transferred_amount >= 0),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY(guild_id,country_id,turn)
+      );
+
+      CREATE TABLE IF NOT EXISTS treasury_transfer_settlement_snapshots (
+        guild_id TEXT NOT NULL REFERENCES guilds(discord_id) ON DELETE CASCADE,
+        country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        settlement_id UUID NOT NULL REFERENCES settlements(id) ON DELETE CASCADE,
+        turn INTEGER NOT NULL CHECK (turn >= 0),
+        opening_treasury BIGINT NOT NULL CHECK (opening_treasury >= 0),
+        outgoing_amount BIGINT NOT NULL DEFAULT 0 CHECK (outgoing_amount >= 0),
+        incoming_amount BIGINT NOT NULL DEFAULT 0 CHECK (incoming_amount >= 0),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY(guild_id,settlement_id,turn)
+      );
+      CREATE INDEX IF NOT EXISTS treasury_transfer_country_snapshots_turn_idx
+        ON treasury_transfer_country_snapshots(guild_id,turn,country_id);
+      CREATE INDEX IF NOT EXISTS treasury_transfer_settlement_snapshots_turn_idx
+        ON treasury_transfer_settlement_snapshots(guild_id,turn,country_id);
+    `
+  },
+  {
+    version: 48,
+    name: "automatic_assimilation_and_diplomat_assignments",
+    sql: `
+      ALTER TABLE country_characters DROP CONSTRAINT IF EXISTS country_characters_assignment_check;
+      ALTER TABLE country_characters ADD CONSTRAINT country_characters_assignment_check
+        CHECK (assignment IN (
+          'NONE','CURIA','AGORA','ARMY','ESPIONAGE','ESPIONAGE_RETURNING','CAPTURED',
+          'COUNTERINTELLIGENCE_TRAVELING_COUNTRY','COUNTERINTELLIGENCE_TRAVELING_SETTLEMENT',
+          'COUNTERINTELLIGENCE_COUNTRY','COUNTERINTELLIGENCE_SETTLEMENT','ASSIMILATION'
+        ));
+
+      CREATE TABLE IF NOT EXISTS settlement_assimilation_diplomats (
+        settlement_id UUID PRIMARY KEY REFERENCES settlements(id) ON DELETE CASCADE,
+        character_id UUID NOT NULL UNIQUE REFERENCES country_characters(id) ON DELETE CASCADE,
+        assigned_turn INTEGER NOT NULL CHECK (assigned_turn >= 0),
+        assigned_by TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `
   }
 ] as const;

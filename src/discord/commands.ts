@@ -215,10 +215,10 @@ export const commandBuilders = [
       .addChoices(...Object.entries(MOBILIZATION_RULES).map(([value, rule]) => ({ name: rule.label, value }))))
     .addStringOption(countryOption),
   new SlashCommandBuilder()
-    .setName("hazine-tasi").setDescription("Turda bir kez, kendi şehirleriniz arasında yerel hazine aktarır")
+    .setName("hazine-tasi").setDescription("Tur kotanız dolana kadar kendi şehirleriniz arasında hazine aktarır")
     .addStringOption((option) => option.setName("kaynak-sehir").setDescription("Altının alınacağı şehir").setRequired(true).setAutocomplete(true))
     .addStringOption((option) => option.setName("hedef-sehir").setDescription("Altının gönderileceği şehir").setRequired(true).setAutocomplete(true))
-    .addIntegerOption((option) => option.setName("miktar").setDescription("Taşınacak altın; kaynak hazinenin en fazla %50'si").setMinValue(1).setRequired(true)),
+    .addIntegerOption((option) => option.setName("miktar").setDescription("Taşınacak altın; tur başı devlet ve kaynak şehir kotasına tabidir").setMinValue(1).setRequired(true)),
   new SlashCommandBuilder()
     .setName("ticaret").setDescription("Ülkeler arası hammadde ticaretini yönetir")
     .addSubcommand((sub) => sub.setName("teklif").setDescription("Bir ülkenin yerleşkesine kaynak ticareti teklif eder")
@@ -264,6 +264,10 @@ export const commandBuilders = [
       .addStringOption((o) => o.setName("karakter").setDescription("Karakterin tam adı").setRequired(true))
       .addStringOption((o) => o.setName("yerleske").setDescription("Atanacağı yerleşke").setRequired(true))
       .addStringOption((o) => o.setName("gorev-yeri").setDescription("Atanacağı bina").setRequired(true).addChoices({ name: "Curia", value: "CURIA" }, { name: "Agora / Forum", value: "AGORA" }))
+      .addStringOption(countryOption))
+    .addSubcommand((sub) => sub.setName("asimilasyona-gonder").setDescription("Bir Diplomatla fethedilmiş yerleşkenin asimilasyonunu 1 tur kısaltır")
+      .addStringOption((o) => o.setName("karakter").setDescription("Gönderilecek Diplomatın tam adı").setRequired(true))
+      .addStringOption((o) => o.setName("yerleske").setDescription("Asimilasyonu süren yerleşke").setRequired(true))
       .addStringOption(countryOption))
     .addSubcommand((sub) => sub.setName("gorevden-al").setDescription("Karakterin bina atamasını kaldırır")
       .addStringOption((o) => o.setName("karakter").setDescription("Karakterin tam adı").setRequired(true))

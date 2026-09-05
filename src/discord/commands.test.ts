@@ -31,8 +31,8 @@ describe("yönetim komutları", () => {
     expect(vassalage?.options?.map((option) => option.name)).toEqual(["ayarla", "kaldir"]);
   });
 
-  it("hazine taşımayı turda bir hak olarak tanımlar ve gecikmeli fetih turunu destekler", () => {
-    expect(commandBuilders.find((command) => command.name === "hazine-tasi")?.description).toContain("Turda bir kez");
+  it("hazine taşımayı kullanım sayısı yerine tur kotasıyla tanımlar ve gecikmeli fetih turunu destekler", () => {
+    expect(commandBuilders.find((command) => command.name === "hazine-tasi")?.description).toContain("Tur kotanız dolana kadar");
     const transfer = commandBuilders.find((command) => command.name === "yonetim")?.options?.find((option) => option.name === "yerleske-devret");
     expect(transfer?.options?.find((option) => option.name === "fetih-turu")).toBeDefined();
   });

@@ -108,6 +108,7 @@ export async function handleCityCommand(interaction: ChatInputCommandInteraction
           : character.assignment === "AGORA" ? "Agora / Forum"
           : character.assignment === "ARMY" ? `Ordu komutanı${character.assigned_army_name ? ` • ${character.assigned_army_name}` : ""}`
           : character.assignment === "CURIA" ? "Curia"
+          : character.assignment === "ASSIMILATION" ? `Asimilasyon görevi${location ? ` • ${location}` : ""} • Tur ${character.assignment_ready_turn}`
           : character.assignment === "ESPIONAGE" ? `Casusluk görevi • yolda${location ? ` • ${location}` : ""}`
           : character.assignment === "ESPIONAGE_RETURNING" ? `Dönüş yolunda${location ? ` • ${location}` : ""}`
           : character.assignment === "CAPTURED" ? `Yakalandı${location ? ` • ${location}` : ""}`
@@ -126,6 +127,14 @@ export async function handleCityCommand(interaction: ChatInputCommandInteraction
       return true;
     }
     const settlement = await findSettlement(country.id, interaction.options.getString("yerleske", true));
+    if (sub === "asimilasyona-gonder") {
+      const result = await cityService.assignDiplomatToAssimilation({
+        guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id,
+        characterName: interaction.options.getString("karakter", true), settlementId: settlement.id
+      });
+      await interaction.reply({ content: `🤝 **${result.characterName}**, **${result.settlementName}** asimilasyonuna gönderildi. Süre 1 tur kısaldı; yerleşke **Tur ${result.completionTurn}** başında otomatik asimile edilecek.`, ephemeral: true });
+      return true;
+    }
     if (sub === "ata") {
       const result = await cityService.assignCharacter({
         guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id,

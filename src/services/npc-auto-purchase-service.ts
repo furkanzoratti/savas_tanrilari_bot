@@ -99,7 +99,7 @@ function validBuildingCandidates(doc: CountryDocument, doctrine: NpcAutoPurchase
   const developmentOnly = npcDevelopmentOnly(doctrine);
   const candidates: BuildingCandidate[] = [];
   for (const settlement of doc.settlements) {
-    if (settlement.is_conquered) continue;
+    if (settlement.is_conquered || settlement.isBesieged) continue;
     const activeConstruction = settlement.buildings.filter((building) => building.status === "BUILDING").length;
     if (activeConstruction >= settlement.constructionLimit) continue;
     const occupiedSlots = settlement.buildings.filter((building) => building.level > 0 || building.status === "BUILDING").length;
@@ -228,7 +228,7 @@ export function planCountryPurchases(doc: CountryDocument, config: NpcAutoPurcha
     for (const settlement of doc.settlements) {
       const portActive = settlement.buildings.some((building) => building.building_type === "port" && building.status === "ACTIVE" && building.level >= 1);
       const shipyardLevel = settlement.buildings.find((building) => building.building_type === "shipyard" && building.status === "ACTIVE")?.level ?? 0;
-      if (settlement.is_conquered || !portActive || shipyardLevel <= 0) continue;
+      if (settlement.is_conquered || settlement.isBesieged || !portActive || shipyardLevel <= 0) continue;
       const basePoints = shipyardLevel === 1 ? 5 : shipyardLevel === 2 ? 10 : 15;
       const pontusBonus = doc.country.active_formable_key === "PONTUS" ? (shipyardLevel >= 3 ? 4 : shipyardLevel >= 2 ? 2 : 0) : 0;
       const usedProduction = settlement.pendingShips
@@ -285,7 +285,7 @@ export function planCountryPurchases(doc: CountryDocument, config: NpcAutoPurcha
     const plannedShipPersonnel = shipActions
       .filter((action) => action.settlementId === settlement.id)
       .reduce((sum, action) => sum + SHIPS[action.shipType].manpower * action.quantity, 0);
-    const capacity = settlement.is_conquered ? 0 : Math.max(0, Math.min(
+    const capacity = settlement.is_conquered || settlement.isBesieged ? 0 : Math.max(0, Math.min(
       settlement.trainingRemaining,
       settlement.militaryLimit - settlement.militaryUsed - plannedShipPersonnel
     ));

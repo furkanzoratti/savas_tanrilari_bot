@@ -186,3 +186,26 @@ describe("kırk birinci migration", () => {
     expect(migration?.sql).toContain("battle_side_participants_source_settlement_idx");
   });
 });
+
+describe("kırk yedinci migration", () => {
+  const migration = migrations.find((item) => item.version === 47);
+
+  it("hazine taşımayı sınırsız işlemli devlet ve yerleşke tur başı kotalarına geçirir", () => {
+    expect(migration?.name).toBe("treasury_transfer_turn_quotas");
+    expect(migration?.sql).toContain("DROP CONSTRAINT IF EXISTS settlement_treasury_transfers_guild_id_country_id_turn_key");
+    expect(migration?.sql).toContain("treasury_transfer_country_snapshots");
+    expect(migration?.sql).toContain("treasury_transfer_settlement_snapshots");
+    expect(migration?.sql).toContain("incoming_amount");
+  });
+});
+
+describe("kırk sekizinci migration", () => {
+  const migration = migrations.find((item) => item.version === 48);
+
+  it("otomatik asimilasyon için yerleşke başına tek diplomat görevi saklar", () => {
+    expect(migration?.name).toBe("automatic_assimilation_and_diplomat_assignments");
+    expect(migration?.sql).toContain("settlement_assimilation_diplomats");
+    expect(migration?.sql).toContain("settlement_id UUID PRIMARY KEY");
+    expect(migration?.sql).toContain("'ASSIMILATION'");
+  });
+});

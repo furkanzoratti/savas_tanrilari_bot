@@ -120,6 +120,7 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
           : character.assignment === "AGORA" ? "Agora / Forum"
           : character.assignment === "ARMY" ? `Ordu komutanı${character.assigned_army_name ? ` • ${character.assigned_army_name}` : ""}`
           : character.assignment === "CURIA" ? "Curia"
+          : character.assignment === "ASSIMILATION" ? `Asimilasyon görevi${location ? ` • ${location}` : ""} • Tur ${character.assignment_ready_turn}`
           : character.assignment === "ESPIONAGE" ? `Casusluk görevi • yolda${location ? ` • ${location}` : ""}`
           : character.assignment === "ESPIONAGE_RETURNING" ? `Casusluk görevi tamamlandı • dönüş yolunda${location ? ` • ${location}` : ""}`
           : character.assignment === "CAPTURED" ? `Yakalandı${location ? ` • ${location}` : ""}`
@@ -185,6 +186,10 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
     const producedResource = RESOURCES[settlement.resource_type].label;
     const fixedGarrison = renderLandForces(settlement, "GARRISON", document.country.mobilization, document.manpowerPenaltyActive);
     const army = renderLandForces(settlement, "ARMY", document.country.mobilization, document.manpowerPenaltyActive);
+    const assimilationDiplomat = document.characters.find((character) => character.assignment === "ASSIMILATION" && character.assigned_settlement_id === settlement.id);
+    const assimilationTurn = settlement.is_conquered && settlement.conquered_turn !== null
+      ? settlement.conquered_turn + 6 - (assimilationDiplomat ? 1 : 0)
+      : null;
 
     const buildings = settlement.buildings.length
       ? settlement.buildings.map((building) => {
@@ -217,6 +222,7 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
       .setTitle(`🏛️ ${settlement.name} • Yerleşke Belgesi`)
       .setDescription([
         `**${ruinLabels[settlement.ruin_stage]}** • ${settlement.is_conquered ? `Fethedilmiş${settlement.conquered_turn !== null ? ` (Tur ${settlement.conquered_turn})` : ""}` : "Yerleşik Toprak"}`,
+        ...(assimilationTurn === null ? [] : [`Asimilasyon: **Tur ${assimilationTurn}**${assimilationDiplomat ? ` • 🤝 ${assimilationDiplomat.name}` : ""}`]),
         `Bina: **${occupiedSlots}/${settlement.slotLimit} slot** • İnşaat: **${activeConstruction}/${settlement.constructionLimit ?? 2}**${settlement.is_coastal ? " • ⚓ Kıyı" : ""}`
       ].join("\n"))
       .addFields(

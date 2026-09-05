@@ -14,6 +14,7 @@ interface GuildRow { current_turn: number; acquisition_interval: number; turn_ph
 interface SettlementRow {
   id: string; country_id: string; name: string; population: number; local_treasury: number;
   last_acquisition_income: number; curia_guard_granted: boolean;
+  is_conquered: boolean; conquered_turn: number | null;
 }
 
 async function getCountry(client: DbClient, guildId: string, countryId: string): Promise<CountryRow> {
@@ -216,12 +217,40 @@ export const cityService = {
     });
   },
 
+  async assignDiplomatToAssimilation(input: { guildId: string; actorId: string; countryId: string; characterName: string; settlementId: string }): Promise<{ characterName: string; settlementName: string; completionTurn: number }> {
+    return withTransaction(async (client) => {
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`country:${input.countryId}`]);
+      await getCountry(client, input.guildId, input.countryId);
+      const guild = await guildState(client, input.guildId);
+      const settlement = await getSettlement(client, input.countryId, input.settlementId, true);
+      if (!settlement.is_conquered || settlement.conquered_turn === null) throw new GameError("Diplomat yalnızca asimilasyonu süren fethedilmiş bir yerleşkeye gönderilebilir.");
+      const character = (await client.query<CountryCharacter>(
+        "SELECT *,NULL::text AS assigned_settlement_name,NULL::text AS assigned_country_name,NULL::text AS assigned_army_name,NULL::text AS trained_settlement_name FROM country_characters WHERE country_id=$1 AND lower(name)=lower($2) FOR UPDATE",
+        [input.countryId, input.characterName.trim()]
+      )).rows[0];
+      if (!character) throw new GameError("Bu ülkede belirtilen karakter bulunamadı.");
+      if (character.role !== "DIPLOMAT") throw new GameError("Asimilasyon görevine yalnızca Diplomat gönderilebilir.");
+      if (character.assignment !== "NONE") throw new GameError("Bu Diplomat hâlen başka bir görevde.");
+      const occupied = await client.query("SELECT 1 FROM settlement_assimilation_diplomats WHERE settlement_id=$1", [settlement.id]);
+      if (occupied.rowCount) throw new GameError("Bu yerleşkenin asimilasyonunda zaten bir Diplomat görev yapıyor.");
+      const completionTurn = Number(settlement.conquered_turn) + 5;
+      if (guild.current_turn >= completionTurn) throw new GameError("Bu yerleşke bir sonraki tur ilerlemesinde zaten otomatik olarak asimile edilecek.");
+      await client.query(
+        "INSERT INTO settlement_assimilation_diplomats(settlement_id,character_id,assigned_turn,assigned_by) VALUES($1,$2,$3,$4)",
+        [settlement.id, character.id, guild.current_turn, input.actorId]
+      );
+      await client.query("UPDATE country_characters SET assignment='ASSIMILATION',assigned_settlement_id=$1,assignment_ready_turn=$2 WHERE id=$3", [settlement.id, completionTurn, character.id]);
+      await audit(client, input.guildId, input.actorId, "DIPLOMAT_ASSIMILATION_ASSIGN", "character", character.id, { settlementId: settlement.id, completionTurn });
+      return { characterName: character.name, settlementName: settlement.name, completionTurn };
+    });
+  },
+
   async unassignCharacter(input: { guildId: string; actorId: string; countryId: string; characterName: string }): Promise<CountryCharacter> {
     return withTransaction(async (client) => {
       await getCountry(client, input.guildId, input.countryId);
       const character = (await client.query<CountryCharacter>("SELECT *,NULL::text AS assigned_settlement_name,NULL::text AS trained_settlement_name FROM country_characters WHERE country_id=$1 AND lower(name)=lower($2) FOR UPDATE", [input.countryId, input.characterName.trim()])).rows[0];
       if (!character) throw new GameError("Belirtilen karakter bulunamadı.");
-      if (["ARMY","ESPIONAGE","ESPIONAGE_RETURNING","CAPTURED"].includes(character.assignment)) throw new GameError("Ordu görevindeki, operasyondaki veya esir karakter bu komutla görevden alınamaz.");
+      if (["ARMY","ESPIONAGE","ESPIONAGE_RETURNING","CAPTURED","ASSIMILATION"].includes(character.assignment)) throw new GameError("Ordu, casusluk, esaret veya asimilasyon görevindeki karakter bu komutla görevden alınamaz.");
       const result = await client.query<CountryCharacter>("UPDATE country_characters SET assigned_settlement_id=NULL,assignment='NONE' WHERE id=$1 RETURNING *,NULL::text AS assigned_settlement_name,NULL::text AS trained_settlement_name", [character.id]);
       await audit(client, input.guildId, input.actorId, "CHARACTER_UNASSIGN", "character", result.rows[0]!.id, {});
       return result.rows[0]!;

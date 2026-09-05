@@ -143,6 +143,23 @@ function publicPayload(view: BattleView, result?: Parameters<typeof battleEmbed>
   return { embeds: [battleEmbed(view, result)], components: components(view), files: [new AttachmentBuilder(asset.path, { name: asset.name })] };
 }
 
+function battleRollEmbed(view: BattleView, side: BattleSideKey): EmbedBuilder {
+  const roll = view.rolls.find((item) => item.side_key === side)!;
+  const structureDamage = [
+    roll.wall_damage ? `Sur Hasarı: **${number(roll.wall_damage)}**` : null,
+    roll.gate_damage ? `Kapı Hasarı: **${number(roll.gate_damage)}**` : null
+  ].filter(Boolean).join(" • ");
+  return new EmbedBuilder()
+    .setColor(side === "A" ? 0xc94b55 : 0x4fa3d1)
+    .setTitle(`🎲 Savaş Turu ${view.battle.round_number} • ${view.sides[side].country_name}`)
+    .setDescription([
+      `Çarpışma: **${number(roll.clash_total)}**`,
+      `Hasar: **${number(roll.damage_total)}**`,
+      structureDamage || null
+    ].filter(Boolean).join("\n"))
+    .setFooter({ text: `${view.rolls.length}/2 taraf zarını tamamladı${roll.is_proxy ? " • DM vekili" : ""}` });
+}
+
 async function refreshBattleCard(client: Client, view: BattleView): Promise<boolean> {
   if (!view.battle.public_message_id) return false;
   try {
@@ -154,6 +171,19 @@ async function refreshBattleCard(client: Client, view: BattleView): Promise<bool
   } catch (error) {
     console.error("Savaş kartı güncellenemedi", { battleId: view.battle.id, error });
     return false;
+  }
+}
+
+async function retireBattleCard(client: Client, view: BattleView, replacementMessageId: string): Promise<void> {
+  const previousMessageId = view.battle.public_message_id;
+  if (!previousMessageId || previousMessageId === replacementMessageId) return;
+  try {
+    const channel = await client.channels.fetch(view.battle.channel_id);
+    if (!channel?.isTextBased() || channel.isDMBased() || !("messages" in channel)) return;
+    const message = await channel.messages.fetch(previousMessageId);
+    await message.edit({ components: [] });
+  } catch (error) {
+    console.error("Eski savaş kartının düğmeleri kapatılamadı", { battleId: view.battle.id, error });
   }
 }
 
@@ -290,6 +320,7 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
     const label = result.view.battle.siege_phase === "BOMBARDMENT" ? "Bombardıman — ordular temas etmiyor" : "Hücum — savaş zarları açıldı";
     if (result.shouldReveal) {
       const reply = await interaction.reply({ content: `🏰 Kuşatma durumu **${label}** olarak değiştirildi.`, ...publicPayload(result.view), fetchReply: true });
+      await retireBattleCard(interaction.client, result.view, reply.id);
       await battleService.setPublicMessage(result.view.battle.id, reply.id);
     } else {
       await refreshBattleCard(interaction.client, result.view);
@@ -308,7 +339,9 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
   } else if (sub === "tur-oynat") {
     requireGameMaster(interaction);
     const result = await battleService.resolve({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id });
-    await interaction.reply(publicPayload(result.view, result.round));
+    const reply = await interaction.reply({ ...publicPayload(result.view, result.round), fetchReply: true });
+    await retireBattleCard(interaction.client, result.view, reply.id);
+    await battleService.setPublicMessage(result.view.battle.id, reply.id);
     if (result.round.ended) await interaction.followUp({ embeds: [casualtyReportEmbed(result.view, result.report)], ephemeral: true });
   } else if (sub === "ordu-detay") {
     requireGameMaster(interaction);
@@ -356,8 +389,8 @@ export async function handleBattleButton(interaction: ButtonInteraction): Promis
   } else if (interaction.customId.startsWith("battle_roll|")) {
     await interaction.deferReply();
     const result = await battleService.roll({ guildId: interaction.guildId, channelId: interaction.channelId, battleId, actorId: interaction.user.id, isGameMaster: isGameMaster(interaction) });
-    const roll = result.view.rolls.find((r) => r.side_key === result.side)!;
-    await interaction.editReply({ content: `🎲 <@${interaction.user.id}> **${result.view.sides[result.side].country_name}** adına açık zar attı${result.isProxy ? " **(DM vekili)**" : ""}.\nÇarpışma: **${roll.clash_total}** • Hasar: **${roll.damage_total}**${roll.wall_damage ? ` • Sur Hasarı: **${roll.wall_damage}**` : ""}${roll.gate_damage ? ` • Kapı Hasarı: **${roll.gate_damage}**` : ""}`, ...publicPayload(result.view) });
+    await refreshBattleCard(interaction.client, result.view);
+    await interaction.editReply({ content: `<@${interaction.user.id}>`, embeds: [battleRollEmbed(result.view, result.side)] });
   } else if (interaction.customId.startsWith("battle_bombard|")) {
     await interaction.deferReply();
     const result = await battleService.bombard({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id, isGameMaster: isGameMaster(interaction) });

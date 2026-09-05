@@ -9,7 +9,7 @@ describe("şehir geliştirme ve Akademi komutları", () => {
     const pantheon = commandBuilders.find((command) => command.name === "panteon");
 
     expect(policy?.options?.map((option) => option.name)).toEqual(["uygula", "kaldir", "liste"]);
-    expect(academy?.options?.map((option) => option.name)).toEqual(["egit", "karakterler", "ata", "gorevden-al"]);
+    expect(academy?.options?.map((option) => option.name)).toEqual(["egit", "karakterler", "ata", "asimilasyona-gonder", "gorevden-al"]);
     expect(pantheon?.options?.map((option) => option.name)).toEqual(["kredi-al", "kredi-ode"]);
   });
 

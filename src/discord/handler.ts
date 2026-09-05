@@ -266,7 +266,8 @@ async function handleTurn(interaction: ChatInputCommandInteraction): Promise<voi
       mercenaryArrivalDetails: result.mercenaryArrivalDetails,
       mercenaryUpkeepDetails: result.mercenaryUpkeepDetails,
       mercenaryUnpaidDetails: result.mercenaryUnpaidDetails,
-      mercenaryEndedDetails: result.mercenaryEndedDetails
+      mercenaryEndedDetails: result.mercenaryEndedDetails,
+      assimilatedSettlementDetails: result.assimilatedSettlementDetails
     });
   } else {
     const phase = sub === "ac" ? "OPEN" : sub === "durdur" ? "RESOLVING" : "CLOSED";
@@ -540,7 +541,8 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
       mercenaryArrivalDetails: result.mercenaryArrivalDetails,
       mercenaryUpkeepDetails: result.mercenaryUpkeepDetails,
       mercenaryUnpaidDetails: result.mercenaryUnpaidDetails,
-      mercenaryEndedDetails: result.mercenaryEndedDetails
+      mercenaryEndedDetails: result.mercenaryEndedDetails,
+      assimilatedSettlementDetails: result.assimilatedSettlementDetails
     })], files: [new AttachmentBuilder(BRAND_BANNER_PATH, { name: BRAND_BANNER_NAME })] });
   } else if (sub === "tur-durumu") {
     const phase = interaction.options.getString("durum", true) as "OPEN" | "CLOSED" | "RESOLVING";
@@ -847,7 +849,9 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     await interaction.reply({
       content:
         "✅ **" + gold(result.amount) + "**, **" + result.sourceName + "** şehrinden **" + result.targetName + "** şehrine taşındı.\n" +
-        "Kaynak hazine: **" + gold(result.sourceBalance) + "** • Hedef hazine: **" + gold(result.targetBalance) + "**",
+        "Kaynak hazine: **" + gold(result.sourceBalance) + "** • Hedef hazine: **" + gold(result.targetBalance) + "**\n" +
+        "Devlet taşıma kotası kalan: **" + gold(result.countryQuotaRemaining) + "** • Kaynak şehir kotası kalan: **" + gold(result.sourceQuotaRemaining) + "**\n" +
+        "Kaynak şehir zorunlu bakım rezervi: **" + gold(result.maintenanceReserve) + "**",
       ephemeral: true
     });
   } else if (interaction.commandName === "alim-iptal") {
