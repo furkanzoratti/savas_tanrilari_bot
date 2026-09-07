@@ -124,7 +124,7 @@ async function hasActiveMarshalPartialMobilization(
         WHERE character.country_id=$1
           AND character.role='COMMANDER'
           AND character.commander_victories>=9
-          AND character.status='ACTIVE'
+          AND character.character_status='ACTIVE'
           AND EXISTS (
             SELECT 1
               FROM state_war_participants participant

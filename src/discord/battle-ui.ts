@@ -1,5 +1,5 @@
 import { ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, type ButtonInteraction, type ChatInputCommandInteraction, type Client } from "discord.js";
-import { BATTLE_TERRAINS, BATTLE_UNIT_STATS, LADDER_GROUP_ASSAULT_CAPACITY, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, SIEGE_ASSET_BATTLE_STATS, SIEGE_ASSAULT_FRONTAGE, SIEGE_TOWER_ASSAULT_CAPACITY, orderState, remainingBombardments, siegeAssaultAccess, siegeDefenseModifiers, siegeOrderState, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain, type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeTarget } from "../domain/battle.js";
+import { BATTLE_TERRAINS, BATTLE_UNIT_STATS, LADDER_GROUP_ASSAULT_CAPACITY, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, SIEGE_ASSET_BATTLE_STATS, SIEGE_ASSAULT_FRONTAGE, SIEGE_TOWER_ASSAULT_CAPACITY, assessArmyComposition, orderState, remainingBombardments, siegeAssaultAccess, siegeDefenderComposition, siegeDefenseModifiers, siegeOrderState, type ArmyCompositionContext, type BattleComposition, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain, type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeTarget } from "../domain/battle.js";
 import { number } from "../domain/format.js";
 import { battleService, type BattleRoundResult, type BattleView, type SiegePhase } from "../services/battle-service.js";
 import { gameService, GameError } from "../services/game-service.js";
@@ -14,6 +14,17 @@ const statusLabels: Record<string, string> = {
 };
 const orderLabels: Record<string, string> = { ORDERED: "Düzenli", WORN: "Baskı Altında", SHAKEN: "Sarsılmış", CRITICAL: "Kritik Hat", BROKEN: "Dağılmış" };
 const tierLabels: Record<string, string> = { BALANCED: "Dengeli Çarpışma", MINOR: "Hafif Üstünlük", CLEAR: "Belirgin Üstünlük", CRUSHING: "Ezici Üstünlük" };
+
+function currentCompositionLabel(view: BattleView, side: BattleSideKey): string {
+  const restricted = view.battle.terrain === "SIEGE"
+    && (view.battle.wall_current_hp ?? 0) > 0
+    && (view.battle.gate_current_hp ?? 0) > 0;
+  const context: ArmyCompositionContext = restricted ? "SIEGE_RESTRICTED" : "FIELD";
+  const composition: BattleComposition = view.battle.terrain === "SIEGE" && side === "B"
+    ? siegeDefenderComposition(view.sides[side].composition)
+    : view.sides[side].composition;
+  return assessArmyComposition(composition,context).label;
+}
 
 function expectedSide(view: BattleView): BattleSideKey | null {
   if (!["WAITING_FIRST_ROLL", "WAITING_SECOND_ROLL"].includes(view.battle.status)) return null;
@@ -74,6 +85,10 @@ ${accessNote}` }
     const winner = roundResult.winner ? view.sides[roundResult.winner].country_name : "Yok";
     const pressureWinner = roundResult.pressureWinner ? view.sides[roundResult.pressureWinner].country_name : "Yok";
     embed.addFields({ name: `⚔️ Tur Sonucu — ${tierLabels[roundResult.tier] ?? roundResult.tier}`, value: `Kayıp hesabındaki üstün taraf: **${winner}**\nBaskı üstünlüğü: **${pressureWinner}** (${tierLabels[roundResult.pressureTier] ?? roundResult.pressureTier})\n${view.sides.A.country_name}: **-${number(roundResult.lossA)}** • Baskı **${number(roundResult.pressureA)}/8** • ${orderLabels[roundResult.orderA]}\n${view.sides.B.country_name}: **-${number(roundResult.lossB)}** • Baskı **${number(roundResult.pressureB)}/8** • ${orderLabels[roundResult.orderB]}${roundResult.wallDamage ? `\nSurlara verilen hasar: **${number(roundResult.wallDamage)}**` : ""}${roundResult.gateDamage ? `\nKapıya verilen hasar: **${number(roundResult.gateDamage)}**` : ""}` });
+    if (view.battle.terrain !== "NAVAL") embed.addFields({
+      name: "🧩 Kayıplar Sonrası Kompozisyon",
+      value: `${view.sides.A.country_name}: **${currentCompositionLabel(view,"A")}**\n${view.sides.B.country_name}: **${currentCompositionLabel(view,"B")}**`
+    });
     if (view.battle.terrain === "SIEGE") {
       embed.addFields({
         name: "🛡️ Savunucu Zar Hesabı",

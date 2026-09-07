@@ -103,5 +103,9 @@ describe("kuşatma bilgi gizliliği", () => {
     expect(json).not.toContain("Kayıp gizli");
     expect(json).toContain("Savunucu Zar Hesabı");
     expect(json).toContain("Baskı ham Çarpışma zarından");
+    expect(json).toContain("Kayıplar Sonrası Kompozisyon");
+    expect(json).toContain("Roma: **Tekdüze Ordu**");
+    expect(json).toContain("Savunucu: **Tekdüze Ordu**");
+    expect(json).not.toContain("0,85");
   });
 });

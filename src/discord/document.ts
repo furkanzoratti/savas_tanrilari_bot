@@ -1,5 +1,5 @@
 import { EmbedBuilder } from "discord.js";
-import { BUILDINGS, CHARACTER_ROLES, CITY_POLICIES, MOBILIZATION_RULES, PORT_SHIP_CAPACITY, SHIPS, SIEGE_ASSETS, UNITS, fleetTransportCapacity, shipHarborRequirement } from "../domain/catalog.js";
+import { BUILDINGS, CITY_POLICIES, MOBILIZATION_RULES, PORT_SHIP_CAPACITY, SHIPS, SIEGE_ASSETS, UNITS, fleetTransportCapacity, shipHarborRequirement } from "../domain/catalog.js";
 import { CULTURE_GROUPS } from "../domain/cultures.js";
 import { calculateShipUpkeep, calculateUnitUpkeep } from "../domain/economy.js";
 import { SETTLEMENT_EVENT_TYPES, type SettlementEventType } from "../domain/events.js";
@@ -110,27 +110,6 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
     ? document.tradeAgreements.map((agreement) => `${agreement.status === "ACTIVE" ? "✅" : "⏳"} **${agreement.partner_name}** • ${TRADE_ROUTE_LABELS[agreement.route]}\n${agreement.proposer_settlement_name} (${RESOURCES[agreement.proposer_resource].label}) ⇄ ${agreement.receiver_settlement_name} (${RESOURCES[agreement.receiver_resource].label})`).join("\n\n")
     : "Aktif veya bekleyen ticaret antlaşması yok.";
   const remainingCapacity = Math.max(0, document.militaryLimit - document.militaryUsed);
-  const characterSummary = (document.characters ?? []).length
-    ? (document.characters ?? []).map((character) => {
-        const role = CHARACTER_ROLES[character.role];
-        const location = character.assigned_settlement_name
-          ? `${character.assigned_country_name ?? document.country.name} • ${character.assigned_settlement_name}`
-          : null;
-        const assignment = character.assignment === "NONE" ? "Görev bekliyor"
-          : character.assignment === "AGORA" ? "Agora / Forum"
-          : character.assignment === "ARMY" ? `Ordu komutanı${character.assigned_army_name ? ` • ${character.assigned_army_name}` : ""}`
-          : character.assignment === "CURIA" ? "Curia"
-          : character.assignment === "ASSIMILATION" ? `Asimilasyon görevi${location ? ` • ${location}` : ""} • Tur ${character.assignment_ready_turn}`
-          : character.assignment === "ESPIONAGE" ? `Casusluk görevi • yolda${location ? ` • ${location}` : ""}`
-          : character.assignment === "ESPIONAGE_RETURNING" ? `Casusluk görevi tamamlandı • dönüş yolunda${location ? ` • ${location}` : ""}`
-          : character.assignment === "CAPTURED" ? `Yakalandı${location ? ` • ${location}` : ""}`
-          : character.assignment === "COUNTERINTELLIGENCE_TRAVELING_COUNTRY" ? `Ülke karşı casusluğuna gidiyor • ${document.country.name}`
-          : character.assignment === "COUNTERINTELLIGENCE_TRAVELING_SETTLEMENT" ? `Şehir karşı casusluğuna gidiyor${location ? ` • ${location}` : ""}`
-          : character.assignment === "COUNTERINTELLIGENCE_COUNTRY" ? `Ülke çapında karşı casusluk • ${document.country.name}`
-          : `Şehir karşı casusluğu${location ? ` • ${location}` : ""}`;
-        return `${role.emoji} **${character.name}** — ${role.label} (+${character.skill_bonus})\n↳ ${assignment}`;
-      }).join("\n\n")
-    : "Henüz yetiştirilmiş devlet görevlisi yok.";
   const formable = document.country.active_formable_key ? FORMABLE_COUNTRIES[document.country.active_formable_key] : null;
   const mercenarySummary = (document.mercenaries ?? []).length
     ? (document.mercenaries ?? []).map((contract) => `• **${contract.companyName}** — ${contract.settlement_name}\n↳ ${mercenaryStatusLabels[contract.status] ?? contract.status} • Bakım ${gold(contract.turn_upkeep)}`).join("\n\n")
