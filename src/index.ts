@@ -28,6 +28,9 @@ const client = new Client({
 
 attachInteractionHandler(client);
 
+client.on("error", (error) => logger.error({ error }, "Discord istemcisi hatası"));
+client.on("shardError", (error, shardId) => logger.error({ error, shardId }, "Discord ağ bağlantısı shard hatası"));
+
 client.on("guildCreate", (guild) => gameService.ensureGuild(guild.id).catch((error) => logger.error(error, "Sunucu kaydı oluşturulamadı")));
 client.on("guildMemberAdd", async (member) => {
   if (member.user.bot) return;
@@ -139,3 +142,9 @@ async function shutdown(signal: string) {
 
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 process.on("SIGINT", () => void shutdown("SIGINT"));
+process.on("unhandledRejection", (reason) => {
+  logger.error({ reason }, "Yakalanmamış Promise hatası süreç sınırında tutuldu");
+});
+process.on("uncaughtExceptionMonitor", (error, origin) => {
+  logger.fatal({ error, origin }, "Yakalanmamış süreç hatası");
+});

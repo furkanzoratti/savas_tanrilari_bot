@@ -8,9 +8,9 @@ import { renderArmyEmbed } from "./army-embed.js";
 
 export async function handleArmyCommand(interaction: ChatInputCommandInteraction): Promise<void> {
   if (!interaction.guildId) throw new GameError("Ordu komutları yalnızca bir sunucuda kullanılabilir.");
-  const country = await resolveCountry(interaction);
   const sub = interaction.options.getSubcommand();
   await interaction.deferReply({ ephemeral: true });
+  const country = await resolveCountry(interaction);
 
   if (sub === "olustur") {
     const army = await armyService.create({

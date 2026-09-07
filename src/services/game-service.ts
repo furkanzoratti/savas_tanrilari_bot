@@ -31,7 +31,7 @@ interface SettlementRow {
   is_coastal: boolean; last_acquisition_income: number; curia_guard_granted: boolean;
   black_market_active: boolean; epidemic_active: boolean; unrest_active: boolean; rebellion_active: boolean;
 }
-interface BuildingRow { settlement_id: string; building_type: string; level: number; target_level: number | null; status: "ACTIVE" | "BUILDING" | "SABOTAGED"; started_turn: number | null; completion_turn: number | null; sabotaged_until_turn: number | null }
+interface BuildingRow { settlement_id: string; building_type: string; level: number; target_level: number | null; status: "ACTIVE" | "BUILDING" | "SABOTAGED"; started_turn: number | null; completion_turn: number | null; sabotaged_until_turn: number | null; sabotage_repair_cost:number }
 interface SettlementIncomePenaltyRow {
   settlement_id: string;
   penalty_percent: number;
@@ -58,10 +58,11 @@ export interface PurchaseCancellationResult extends PendingPurchase {
 
 export interface SettlementPolicyRow {
   id: string; settlement_id: string; policy_key: CityPolicyKey;
-  slot: 1 | 2; status: "PENDING" | "ACTIVE"; activation_turn: number;
+  slot: 1 | 2; status: "PENDING" | "ACTIVE"; activation_turn: number; suspended_until_turn: number | null;
 }
 export interface CountryCharacter {
   id: string; country_id: string; name: string; role: CharacterRole; skill_bonus: number;
+  specialization: string | null; specialization_progress: number; specialization_level: number;
   assignment: "NONE" | "CURIA" | "AGORA" | "ARMY" | "ESPIONAGE" | "ESPIONAGE_RETURNING" | "CAPTURED" | "COUNTERINTELLIGENCE_TRAVELING_COUNTRY" | "COUNTERINTELLIGENCE_TRAVELING_SETTLEMENT" | "COUNTERINTELLIGENCE_COUNTRY" | "COUNTERINTELLIGENCE_SETTLEMENT" | "ASSIMILATION"; assignment_ready_turn: number | null; trained_settlement_id: string | null;
   assigned_settlement_id: string | null; assigned_settlement_name: string | null; assigned_country_name: string | null; assigned_army_name: string | null;
   trained_settlement_name: string | null; trained_turn: number;
@@ -75,8 +76,8 @@ export interface AcademyTrainingSession {
   initiated_by: string;
 }
 
-function activePolicyKeys(policies: readonly SettlementPolicyRow[]): CityPolicyKey[] {
-  return policies.filter((policy) => policy.status === "ACTIVE").map((policy) => policy.policy_key);
+function activePolicyKeys(policies: readonly SettlementPolicyRow[], currentTurn: number): CityPolicyKey[] {
+  return policies.filter((policy) => policy.status === "ACTIVE" && (policy.suspended_until_turn === null || policy.suspended_until_turn <= currentTurn)).map((policy) => policy.policy_key);
 }
 
 function settlementStarvationBonus(buildings: Array<{ buildingType: string; level: number }>, policies: readonly CityPolicyKey[], formableKey?: FormableCountryKey | null): number {
@@ -108,6 +109,32 @@ function applyFormablePopulationModifiers(baseGain: number, ruinStage: number, f
     ? modifiers.ruinStageTwoIncomeMultiplier / 0.50
     : 1;
   return Math.max(0, Math.floor(baseGain * ruinRecoveryFactor * (1 + (modifiers.populationGainPercent ?? 0))));
+}
+
+async function hasActiveMarshalPartialMobilization(
+  client: DbClient,
+  countryId: string,
+  mobilization: Mobilization
+): Promise<boolean> {
+  if (mobilization !== "PARTIAL") return false;
+  const result = await client.query<{ active: boolean }>(
+    `SELECT EXISTS(
+       SELECT 1
+         FROM country_characters character
+        WHERE character.country_id=$1
+          AND character.role='COMMANDER'
+          AND character.commander_victories>=9
+          AND character.status='ACTIVE'
+          AND EXISTS (
+            SELECT 1
+              FROM state_war_participants participant
+              JOIN state_wars war ON war.id=participant.war_id
+             WHERE participant.country_id=$1 AND war.status='ACTIVE'
+          )
+     ) AS active`,
+    [countryId]
+  );
+  return Boolean(result.rows[0]?.active);
 }
 
 export function unitPurchaseCost(unitType: keyof typeof UNITS, quantity: number, resources: readonly ResourceType[], policies: readonly CityPolicyKey[], formableKey?: FormableCountryKey | null): number {
@@ -255,6 +282,49 @@ async function syncCountryTreasury(client: DbClient, countryId: string): Promise
     [countryId]
   );
   return Number(result.rows[0]?.treasury ?? 0);
+}
+
+async function applyPurchaseAgentDiscount(
+  client: DbClient,
+  input: {
+    countryId: string;
+    settlementId: string;
+    category: "UNITS" | "SHIPS" | "BUILDING" | "SIEGE";
+    currentTurn: number;
+    cost: number;
+  }
+): Promise<number> {
+  const discount = (await client.query<{
+    id: string; discount_percent: number; merchant_character_id: string;
+  }>(
+    `SELECT id,discount_percent,merchant_character_id
+       FROM purchase_agent_discounts
+      WHERE country_id=$1 AND settlement_id=$2 AND purchase_category=$3
+        AND consumed_at IS NULL AND expires_turn>=$4
+      ORDER BY discount_percent DESC,created_at LIMIT 1 FOR UPDATE`,
+    [input.countryId,input.settlementId,input.category,input.currentTurn]
+  )).rows[0];
+  if (!discount) return input.cost;
+  const discountedCost = Math.max(0,Math.ceil(input.cost*(100-Number(discount.discount_percent))/100));
+  await client.query("UPDATE purchase_agent_discounts SET consumed_at=NOW() WHERE id=$1", [discount.id]);
+  await client.query(
+    "UPDATE merchant_operations SET status='COMPLETED',ended_turn=$1,updated_at=NOW() WHERE merchant_character_id=$2 AND task_type='PURCHASE_AGENT' AND status='ACTIVE'",
+    [input.currentTurn,discount.merchant_character_id]
+  );
+  await client.query(
+    `UPDATE country_characters
+        SET assignment='NONE',assigned_settlement_id=NULL,assignment_ready_turn=NULL,
+            specialization_progress=specialization_progress+1,
+            specialization=CASE WHEN specialization IS NULL AND specialization_progress+1>=3
+                                THEN 'FINANCIAL_ADVISOR' ELSE specialization END,
+            specialization_level=CASE
+              WHEN specialization='FINANCIAL_ADVISOR' OR (specialization IS NULL AND specialization_progress+1>=3)
+              THEN CASE WHEN specialization_progress+1>=9 THEN 3 WHEN specialization_progress+1>=6 THEN 2 ELSE 1 END
+              ELSE specialization_level END
+      WHERE id=$1`,
+    [discount.merchant_character_id]
+  );
+  return discountedCost;
 }
 
 async function adjustCountryLocalTreasuries(client: DbClient, countryId: string, amount: number): Promise<number> {
@@ -484,9 +554,11 @@ async function activeTradeBonuses(client: DbClient, countryId: string): Promise<
     `SELECT settlement_id,route,SUM(income_per_country)::integer AS amount FROM (
        SELECT proposer_settlement_id AS settlement_id,route,income_per_country
          FROM trade_agreements WHERE proposer_country_id=$1 AND status='ACTIVE'
+          AND (suspended_until_turn IS NULL OR suspended_until_turn<=(SELECT g.current_turn FROM countries c JOIN guilds g ON g.discord_id=c.guild_id WHERE c.id=$1))
        UNION ALL
        SELECT receiver_settlement_id AS settlement_id,route,income_per_country
          FROM trade_agreements WHERE receiver_country_id=$1 AND status='ACTIVE' AND receiver_settlement_id IS NOT NULL
+          AND (suspended_until_turn IS NULL OR suspended_until_turn<=(SELECT g.current_turn FROM countries c JOIN guilds g ON g.discord_id=c.guild_id WHERE c.id=$1))
      ) active_routes GROUP BY settlement_id,route`,
     [countryId]
   );
@@ -1392,6 +1464,7 @@ export const gameService = {
       const tradeBonuses = await activeTradeBonuses(client, countryId);
       const resourceAccess = await settlementResourceAccess(client, countryId);
       const manpower = await countryManpower(client, countryId);
+      const marshalPartial = await hasActiveMarshalPartialMobilization(client, countryId, country.mobilization);
 
       let totalGrossBreakdown: IncomeBreakdown = { building: 0, tax: 0, landTrade: 0, seaTrade: 0 };
       let totalPayableBreakdown: IncomeBreakdown = { building: 0, tax: 0, landTrade: 0, seaTrade: 0 };
@@ -1402,7 +1475,7 @@ export const gameService = {
           .filter((building) => building.status === "ACTIVE" && building.level > 0)
           .map((building) => ({ buildingType: building.building_type, level: building.level }));
         const settlementPolicies = policies.filter((policy) => policy.settlement_id === settlement.id);
-        const activePolicies = activePolicyKeys(settlementPolicies);
+        const activePolicies = activePolicyKeys(settlementPolicies,guild.current_turn);
         const assignedMerchant = activeBuildings.some((building) => building.buildingType === "agora" && building.level >= 2)
           ? characters.find((character) => character.assigned_settlement_id === settlement.id && character.assignment === "AGORA" && character.role === "MERCHANT")
           : undefined;
@@ -1424,17 +1497,19 @@ export const gameService = {
           activePolicies,
           assignedMerchant: Boolean(assignedMerchant),
           merchantSkillBonus: assignedMerchant?.skill_bonus ?? 0,
+          merchantAgoraMaster: assignedMerchant?.specialization === "AGORA_MASTER",
           formableKey: country.active_formable_key
         });
         const incomePenalty = incomePenalties.find((penalty) => penalty.settlement_id === settlement.id) ?? null;
-        const mobilizedIncome = scaleIncome(economy.payable, MOBILIZATION_RULES[country.mobilization].incomeMultiplier);
+        const mobilizedIncome = scaleIncome(economy.payable, marshalPartial ? 1 : MOBILIZATION_RULES[country.mobilization].incomeMultiplier);
         const incomeBreakdown = applyIncomePenalty(mobilizedIncome, Number(incomePenalty?.penalty_percent ?? 0));
         const populationGain = applyFormablePopulationModifiers(calculatePopulationGain({
           population: settlement.population,
           buildings: activeBuildings,
           ruinStage: settlement.ruin_stage,
           mobilization: country.mobilization,
-          resources: effectiveResources
+          resources: effectiveResources,
+          marshalPartial
         }), settlement.ruin_stage, country.active_formable_key);
         const settlementUnits = units.filter((unit) => unit.settlement_id === settlement.id);
         const settlementShips = ships.filter((ship) => ship.settlement_id === settlement.id);
@@ -1452,7 +1527,7 @@ export const gameService = {
           + waves.filter((wave) => wave.settlement_id === settlement.id).reduce((sum, wave) => sum + wave.quantity, 0)
           + pendingShips.filter((ship) => ship.settlement_id === settlement.id).reduce((sum, ship) => sum + SHIPS[ship.ship_type].manpower * ship.quantity, 0)
           + pendingGarrisons.filter((order) => order.settlement_id === settlement.id).reduce((sum, order) => sum + Number(order.personnel_reserved), 0);
-        const trainingCapacity = settlement.is_conquered ? 0 : settlementTrainingCapacity(settlement.population, country.mobilization);
+        const trainingCapacity = settlement.is_conquered ? 0 : settlementTrainingCapacity(settlement.population, country.mobilization, marshalPartial);
         const trainingUsed = recruitmentUsage.find((usage) => usage.settlement_id === settlement.id)?.quantity ?? 0;
         totalGrossBreakdown = addIncomeBreakdowns(totalGrossBreakdown, economy.gross);
         totalPayableBreakdown = addIncomeBreakdowns(totalPayableBreakdown, incomeBreakdown);
@@ -1470,7 +1545,7 @@ export const gameService = {
           totalSettlementUpkeep,
           populationGain,
           militaryUsed: settlementMilitaryUsed,
-          militaryLimit: settlement.is_conquered ? 0 : settlementMobilizationLimit(settlement.population, country.mobilization),
+          militaryLimit: settlement.is_conquered ? 0 : settlementMobilizationLimit(settlement.population, country.mobilization, marshalPartial),
           trainingCapacity,
           trainingUsed,
           trainingRemaining: Math.max(0, trainingCapacity - trainingUsed),
@@ -1509,7 +1584,7 @@ export const gameService = {
         mercenaries,
         freePopulation: manpower.population,
         militaryUsed: manpower.used,
-        militaryLimit: militaryLimit(manpower.population, country.mobilization),
+        militaryLimit: militaryLimit(manpower.population, country.mobilization, marshalPartial),
         manpowerPenaltyActive: country.manpower_penalty_active,
         totalGrossIncome: incomeTotal(totalGrossBreakdown),
         totalPayableIncome,
@@ -1825,7 +1900,7 @@ export const gameService = {
       if (await settlementIsBesieged(client, settlement.id)) throw new GameError("Savunan konumunda aktif kuşatma bulunan yerleşke yeni bina emri veremez.");
       const definition = BUILDINGS[input.buildingType];
       if (!definition) throw new GameError("Bina türü bulunamadı.");
-      const activePolicies = activePolicyKeys((await client.query<SettlementPolicyRow>("SELECT * FROM settlement_policies WHERE settlement_id=$1 AND status='ACTIVE'", [settlement.id])).rows);
+      const activePolicies = activePolicyKeys((await client.query<SettlementPolicyRow>("SELECT * FROM settlement_policies WHERE settlement_id=$1 AND status='ACTIVE'", [settlement.id])).rows,guild.current_turn);
       const constructionLimit = activePolicies.includes("MASTER_ARCHITECTURE") ? 3 : 2;
       const activeConstruction = await client.query<{ count: number }>("SELECT COUNT(*)::integer AS count FROM buildings WHERE settlement_id=$1 AND status='BUILDING'", [settlement.id]);
       if ((activeConstruction.rows[0]?.count ?? 0) >= constructionLimit) throw new GameError(`Bu yerleşkede aynı anda en fazla ${constructionLimit} inşaat devam edebilir.`);
@@ -1846,16 +1921,18 @@ export const gameService = {
       }
       const effectiveResources = (await settlementResourceAccess(client, country.id)).get(settlement.id) ?? [settlement.resource_type];
       const terms = buildingPurchaseTerms(input.buildingType, targetLevel, effectiveResources, activePolicies, country.active_formable_key);
-      const cost = terms.cost;
+      const cost = await applyPurchaseAgentDiscount(client,{
+        countryId:country.id,settlementId:settlement.id,category:"BUILDING",currentTurn:guild.current_turn,cost:terms.cost
+      });
       if (settlement.local_treasury < cost) throw new GameError("Yerel hazinede yeterli altın yok.");
       const completionTurn = guild.current_turn + terms.duration;
       await client.query("UPDATE settlements SET local_treasury=local_treasury-$1 WHERE id=$2", [cost, settlement.id]);
       await syncCountryTreasury(client, country.id);
       await client.query(
-        `INSERT INTO buildings(settlement_id,building_type,level,target_level,status,started_turn,completion_turn)
-         VALUES ($1,$2,0,$3,'BUILDING',$4,$5)
-         ON CONFLICT(settlement_id,building_type) DO UPDATE SET target_level=$3,status='BUILDING',started_turn=$4,completion_turn=$5`,
-        [settlement.id, input.buildingType, targetLevel, guild.current_turn, completionTurn]
+        `INSERT INTO buildings(settlement_id,building_type,level,target_level,status,started_turn,completion_turn,construction_paid_amount)
+         VALUES ($1,$2,0,$3,'BUILDING',$4,$5,$6)
+         ON CONFLICT(settlement_id,building_type) DO UPDATE SET target_level=$3,status='BUILDING',started_turn=$4,completion_turn=$5,construction_paid_amount=$6`,
+        [settlement.id, input.buildingType, targetLevel, guild.current_turn, completionTurn, cost]
       );
       await client.query("INSERT INTO transactions(country_id,turn,kind,amount,description) VALUES($1,$2,'BUILDING_PURCHASE',$3,$4)", [country.id, guild.current_turn, -cost, `${settlement.name}: ${definition.name} Sv${targetLevel}`]);
       await audit(client, input.guildId, input.actorId, "BUILDING_PURCHASE", "settlement", settlement.id, { buildingType: input.buildingType, targetLevel, cost, completionTurn });
@@ -1875,7 +1952,8 @@ export const gameService = {
           throw new GameError("Genel Seferberlik en az bir tam Alım Dönemi sürmelidir.");
         }
         const manpower = await countryManpower(client, country.id);
-        if (manpower.used > militaryLimit(manpower.population, input.mobilization)) throw new GameError("Mevcut personel yeni seferberlik sınırının üzerinde.");
+        const marshalPartial = await hasActiveMarshalPartialMobilization(client, country.id, input.mobilization);
+        if (manpower.used > militaryLimit(manpower.population, input.mobilization, marshalPartial)) throw new GameError("Mevcut personel yeni seferberlik sınırının üzerinde.");
       }
       await client.query("UPDATE countries SET mobilization=$1,mobilization_started_turn=$2 WHERE id=$3", [input.mobilization, guild.current_turn, country.id]);
       await audit(client, input.guildId, input.actorId, "MOBILIZATION_SET", "country", country.id, { from: country.mobilization, to: input.mobilization });
@@ -1908,23 +1986,27 @@ export const gameService = {
 
       }
 
+      const marshalPartial = await hasActiveMarshalPartialMobilization(client, country.id, country.mobilization);
       const localUsed = await settlementManpower(client, settlement.id);
-      const localLimit = settlementMobilizationLimit(settlement.population, country.mobilization);
+      const localLimit = settlementMobilizationLimit(settlement.population, country.mobilization, marshalPartial);
       const remainingCapacity = Math.max(0, localLimit - localUsed);
       if (input.quantity > remainingCapacity) throw new GameError(`Yerleşkenin Ordu Limitinde yalnızca ${remainingCapacity.toLocaleString("tr-TR")} kişilik yer bulunuyor.`);
-      const trainingCapacity = settlementTrainingCapacity(settlement.population, country.mobilization);
+      const trainingCapacity = settlementTrainingCapacity(settlement.population, country.mobilization, marshalPartial);
       const usage = (await client.query<{ quantity: number }>("SELECT quantity FROM recruitment_usage WHERE settlement_id=$1 AND acquisition_turn=$2 FOR UPDATE", [settlement.id, guild.current_turn])).rows[0]?.quantity ?? 0;
       const trainingRemaining = Math.max(0, trainingCapacity - usage);
       if (input.quantity > trainingRemaining) throw new GameError(`Bu Alım Turunda Eğitim Kapasitesinde yalnızca ${trainingRemaining.toLocaleString("tr-TR")} kişilik yer bulunuyor.`);
 
       const manpower = await countryManpower(client, country.id);
-      const limit = militaryLimit(manpower.population, country.mobilization);
+      const limit = militaryLimit(manpower.population, country.mobilization, marshalPartial);
       if (manpower.used > limit) throw new GameError("Devlet askerî personel sınırının üzerindeyken yeni asker alamaz.");
       if (manpower.used + input.quantity > limit) throw new GameError(`Askerî personel sınırında yalnızca ${Math.max(0, limit - manpower.used).toLocaleString("tr-TR")} kişilik yer var.`);
 
       const effectiveResources = (await settlementResourceAccess(client, country.id)).get(settlement.id) ?? [settlement.resource_type];
-      const activePolicies = activePolicyKeys((await client.query<SettlementPolicyRow>("SELECT * FROM settlement_policies WHERE settlement_id=$1 AND status='ACTIVE'", [settlement.id])).rows);
-      const cost = unitPurchaseCost(input.unitType, input.quantity, effectiveResources, activePolicies, country.active_formable_key);
+      const activePolicies = activePolicyKeys((await client.query<SettlementPolicyRow>("SELECT * FROM settlement_policies WHERE settlement_id=$1 AND status='ACTIVE'", [settlement.id])).rows,guild.current_turn);
+      const baseCost = unitPurchaseCost(input.unitType, input.quantity, effectiveResources, activePolicies, country.active_formable_key);
+      const cost = await applyPurchaseAgentDiscount(client,{
+        countryId:country.id,settlementId:settlement.id,category:"UNITS",currentTurn:guild.current_turn,cost:baseCost
+      });
       if (settlement.local_treasury < cost) throw new GameError("Yerel hazinede yeterli altın yok.");
       const waves = createRecruitmentWaves(input.quantity, country.mobilization, guild.current_turn);
       const order = await client.query<{ id: string }>(
@@ -1962,17 +2044,20 @@ export const gameService = {
       if (existing.rowCount) throw new GameError("Bu yerleşkede zaten bir Gözcü Birliği var veya eğitiliyor.");
 
       const personLoad = formableModifiers(country.active_formable_key).observerManpower ?? 200;
+      const marshalPartial = await hasActiveMarshalPartialMobilization(client, country.id, country.mobilization);
       const localUsed = await settlementManpower(client, settlement.id);
-      const localLimit = settlementMobilizationLimit(settlement.population, country.mobilization);
+      const localLimit = settlementMobilizationLimit(settlement.population, country.mobilization, marshalPartial);
       if (localUsed + personLoad > localLimit) throw new GameError("Yerleşkenin Ordu Limitinde Gözcü Birliği için yer yok.");
-      const trainingCapacity = settlementTrainingCapacity(settlement.population, country.mobilization);
+      const trainingCapacity = settlementTrainingCapacity(settlement.population, country.mobilization, marshalPartial);
       const usage = (await client.query<{ quantity: number }>("SELECT quantity FROM recruitment_usage WHERE settlement_id=$1 AND acquisition_turn=$2 FOR UPDATE", [settlement.id, guild.current_turn])).rows[0]?.quantity ?? 0;
       if (usage + personLoad > trainingCapacity) throw new GameError("Bu Alım Turundaki Eğitim Kapasitesi Gözcü Birliği için yeterli değil.");
       const manpower = await countryManpower(client, country.id);
-      const limit = militaryLimit(manpower.population, country.mobilization);
+      const limit = militaryLimit(manpower.population, country.mobilization, marshalPartial);
       if (manpower.used + personLoad > limit) throw new GameError("Askerî personel sınırında Gözcü Birliği için yer yok.");
 
-      const cost = UNITS.observer.price;
+      const cost = await applyPurchaseAgentDiscount(client,{
+        countryId:country.id,settlementId:settlement.id,category:"UNITS",currentTurn:guild.current_turn,cost:UNITS.observer.price
+      });
       if (settlement.local_treasury < cost) throw new GameError("Yerel hazinede yeterli altın yok.");
       const dueTurn = guild.current_turn + 1;
       const order = await client.query<{ id: string }>(
@@ -2019,7 +2104,10 @@ export const gameService = {
       }
 
       const resources = (await settlementResourceAccess(client, country.id)).get(settlement.id) ?? [settlement.resource_type];
-      const cost = Math.ceil(asset.price * input.quantity * Math.max(0.5, siegeCostMultiplier(input.assetType, resources) - (formableModifiers(country.active_formable_key).siegeAssetDiscount ?? 0)));
+      const baseCost = Math.ceil(asset.price * input.quantity * Math.max(0.5, siegeCostMultiplier(input.assetType, resources) - (formableModifiers(country.active_formable_key).siegeAssetDiscount ?? 0)));
+      const cost = await applyPurchaseAgentDiscount(client,{
+        countryId:country.id,settlementId:settlement.id,category:"SIEGE",currentTurn:guild.current_turn,cost:baseCost
+      });
       if (settlement.local_treasury < cost) throw new GameError("Yerel hazinede yeterli altın yok.");
       const completionTurn = guild.current_turn + asset.buildTurns;
       await client.query(
@@ -2103,11 +2191,15 @@ export const gameService = {
       }
       const manpower = await countryManpower(client, country.id);
       const personNeed = ship.manpower * input.quantity;
-      const limit = militaryLimit(manpower.population, country.mobilization);
+      const marshalPartial = await hasActiveMarshalPartialMobilization(client, country.id, country.mobilization);
+      const limit = militaryLimit(manpower.population, country.mobilization, marshalPartial);
       if (manpower.used > limit) throw new GameError("Devlet askerî personel sınırının üzerindeyken yeni gemi üretemez.");
       if (manpower.used + personNeed > limit) throw new GameError("Gemi mürettebatı askerî personel sınırını aşıyor.");
       const effectiveResources = (await settlementResourceAccess(client, country.id)).get(settlement.id) ?? [settlement.resource_type];
-      const cost = Math.ceil(ship.price * input.quantity * Math.max(0.5, shipCostMultiplier(effectiveResources) - (formableModifiers(country.active_formable_key).shipDiscount ?? 0)));
+      const baseCost = Math.ceil(ship.price * input.quantity * Math.max(0.5, shipCostMultiplier(effectiveResources) - (formableModifiers(country.active_formable_key).shipDiscount ?? 0)));
+      const cost = await applyPurchaseAgentDiscount(client,{
+        countryId:country.id,settlementId:settlement.id,category:"SHIPS",currentTurn:guild.current_turn,cost:baseCost
+      });
       if (settlement.local_treasury < cost) throw new GameError("Yerel hazinede yeterli altın yok.");
       const completionTurn = guild.current_turn + ship.buildTurns;
       await client.query(`INSERT INTO naval_orders(country_id,settlement_id,ship_type,quantity,paid_amount,ordered_turn,completion_turn) VALUES($1,$2,$3,$4,$5,$6,$7)`, [country.id, settlement.id, input.shipType, input.quantity, cost, guild.current_turn, completionTurn]);
@@ -2304,7 +2396,11 @@ export const gameService = {
            LEFT JOIN settlement_assimilation_diplomats assignment ON assignment.settlement_id=s.id
            LEFT JOIN country_characters character ON character.id=assignment.character_id
           WHERE c.guild_id=$1 AND c.status='ACTIVE' AND s.is_conquered=TRUE AND s.conquered_turn IS NOT NULL
-            AND s.conquered_turn + 6 - CASE WHEN assignment.character_id IS NULL THEN 0 ELSE 1 END <= $2
+            AND s.conquered_turn + 6 - CASE
+              WHEN assignment.character_id IS NULL THEN 0
+              WHEN character.skill_bonus>=2 THEN 2
+              ELSE 1
+            END <= $2
           ORDER BY s.name FOR UPDATE OF s`,
         [guildId, newTurn]
       )).rows;
@@ -2390,7 +2486,8 @@ export const gameService = {
       const manpowerCountries = (await client.query<CountryRow>("SELECT * FROM countries WHERE guild_id=$1 AND status='ACTIVE' FOR UPDATE", [guildId])).rows;
       for (const country of manpowerCountries) {
         const manpower = await countryManpower(client, country.id);
-        const overLimit = manpower.used > militaryLimit(manpower.population, country.mobilization);
+        const marshalPartial = await hasActiveMarshalPartialMobilization(client, country.id, country.mobilization);
+        const overLimit = manpower.used > militaryLimit(manpower.population, country.mobilization, marshalPartial);
         if (!overLimit) {
           await client.query("UPDATE countries SET manpower_over_limit_since_turn=NULL,manpower_penalty_active=FALSE WHERE id=$1", [country.id]);
         } else if (country.manpower_over_limit_since_turn === null) {
@@ -2407,6 +2504,7 @@ export const gameService = {
       if (acquisition) {
         const countries = (await client.query<CountryRow>("SELECT * FROM countries WHERE guild_id=$1 AND status='ACTIVE' FOR UPDATE", [guildId])).rows;
         for (const country of countries) {
+          const marshalPartial = await hasActiveMarshalPartialMobilization(client, country.id, country.mobilization);
           const settlements = (await client.query<SettlementRow>("SELECT * FROM settlements WHERE country_id=$1 FOR UPDATE", [country.id])).rows;
           const tradeBonuses = await activeTradeBonuses(client, country.id);
           const resourceAccess = await settlementResourceAccess(client, country.id);
@@ -2415,9 +2513,9 @@ export const gameService = {
           for (const settlement of settlements) {
             const buildings = (await client.query<BuildingRow>("SELECT * FROM buildings WHERE settlement_id=$1", [settlement.id])).rows;
             const active = buildings.filter((b) => b.status === "ACTIVE" && b.level > 0).map((b) => ({ buildingType: b.building_type, level: b.level }));
-            const activePolicies = activePolicyKeys((await client.query<SettlementPolicyRow>("SELECT * FROM settlement_policies WHERE settlement_id=$1 AND status='ACTIVE'", [settlement.id])).rows);
+            const activePolicies = activePolicyKeys((await client.query<SettlementPolicyRow>("SELECT * FROM settlement_policies WHERE settlement_id=$1 AND status='ACTIVE'", [settlement.id])).rows,newTurn);
             const assignedMerchant = active.some((building) => building.buildingType === "agora" && building.level >= 2)
-              ? (await client.query<{ skill_bonus: number }>("SELECT skill_bonus FROM country_characters WHERE assigned_settlement_id=$1 AND assignment='AGORA' AND role='MERCHANT' LIMIT 1", [settlement.id])).rows[0]
+              ? (await client.query<{ skill_bonus: number; specialization: string | null }>("SELECT skill_bonus,specialization FROM country_characters WHERE assigned_settlement_id=$1 AND assignment='AGORA' AND role='MERCHANT' LIMIT 1", [settlement.id])).rows[0]
               : undefined;
             const agreementBonus = tradeBonuses.get(settlement.id) ?? { land: 0, sea: 0 };
             const effectiveResources = resourceAccess.get(settlement.id) ?? [settlement.resource_type];
@@ -2437,14 +2535,15 @@ export const gameService = {
               activePolicies,
               assignedMerchant: Boolean(assignedMerchant),
               merchantSkillBonus: assignedMerchant?.skill_bonus ?? 0,
+              merchantAgoraMaster: assignedMerchant?.specialization === "AGORA_MASTER",
               formableKey: country.active_formable_key
             });
-            const popGain = applyFormablePopulationModifiers(calculatePopulationGain({ population: settlement.population, buildings: active, ruinStage: settlement.ruin_stage, mobilization: country.mobilization, resources: effectiveResources }), settlement.ruin_stage, country.active_formable_key);
+            const popGain = applyFormablePopulationModifiers(calculatePopulationGain({ population: settlement.population, buildings: active, ruinStage: settlement.ruin_stage, mobilization: country.mobilization, resources: effectiveResources, marshalPartial }), settlement.ruin_stage, country.active_formable_key);
             const incomePenalty = (await client.query<SettlementIncomePenaltyRow>(
               "SELECT settlement_id,penalty_percent,remaining_acquisition_turns,reason,created_turn FROM settlement_income_penalties WHERE settlement_id=$1 FOR UPDATE",
               [settlement.id]
             )).rows[0];
-            const mobilizedIncome = scaleIncome(economy.payable, MOBILIZATION_RULES[country.mobilization].incomeMultiplier);
+            const mobilizedIncome = scaleIncome(economy.payable, marshalPartial ? 1 : MOBILIZATION_RULES[country.mobilization].incomeMultiplier);
             const adjustedSettlementIncome = applyIncomePenalty(mobilizedIncome, Number(incomePenalty?.penalty_percent ?? 0));
             const settlementUnits = (await client.query<{ unit_type: keyof typeof UNITS; quantity: number; status: UnitStatus }>("SELECT unit_type,quantity,status FROM unit_stacks WHERE settlement_id=$1", [settlement.id])).rows;
             const settlementShips = (await client.query<{ ship_type: keyof typeof SHIPS; quantity: number; status: ShipStatus }>("SELECT ship_type,quantity,status FROM naval_units WHERE settlement_id=$1", [settlement.id])).rows;

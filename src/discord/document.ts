@@ -167,7 +167,6 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
         value: spacedSection(`Dönem geliri: **${gold(document.totalPayableIncome)}**\nToplam bakım: **−${gold(document.totalUpkeep)}**\nNet değişim: **${document.netIncome >= 0 ? "+" : ""}${gold(document.netIncome)}**`),
         inline: true
       },
-      { name: "🎓 Devlet Görevlileri", value: spacedSection(characterSummary) },
       { name: "🪙 Paralı Asker Sözleşmeleri", value: spacedSection(mercenarySummary) },
       { name: "🛡️ Müttefikler", value: spacedSection((document.allies ?? []).length
         ? (document.allies ?? []).map((ally) => `• **${ally.name}**`).join("\n")
@@ -198,7 +197,9 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
           return building.status === "BUILDING"
             ? `🏗️ **${name} Sv${building.target_level}** • Tur ${building.completion_turn} • ${Math.max(0, (building.completion_turn ?? 0) - document.guild.current_turn)} tur kaldı`
             : building.status === "SABOTAGED"
-              ? `🕵️ **${name} Sv${building.level}** • Sabotaj nedeniyle geçici olarak devre dışı`
+              ? building.sabotage_repair_cost > 0
+                ? `🛠️ **${name} Sv${building.level}** • Ağır hasarlı • Onarım: ${gold(building.sabotage_repair_cost)}`
+                : `🕵️ **${name} Sv${building.level}** • Sabotaj nedeniyle geçici olarak devre dışı`
               : `• ${name} Sv${building.level}`;
         }).join("\n")
       : "Henüz bina bulunmuyor.";

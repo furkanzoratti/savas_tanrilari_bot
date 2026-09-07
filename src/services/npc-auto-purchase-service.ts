@@ -436,9 +436,11 @@ export const npcAutoPurchaseService = {
     const lockClient = await pool.connect();
     const lockKey = "npc-auto-purchase:" + guildId;
     let locked = false;
+    let discardClient = false;
     try {
-      await lockClient.query("SELECT pg_advisory_lock(hashtext($1))", [lockKey]);
-      locked = true;
+      const lockResult = await lockClient.query<{ locked: boolean }>("SELECT pg_try_advisory_lock(hashtext($1)) AS locked", [lockKey]);
+      locked = lockResult.rows[0]?.locked === true;
+      if (!locked) throw new GameError("Bu sunucuda başka bir NPC otomatik alımı hâlen çalışıyor. Mevcut işlem tamamlandıktan sonra yeniden deneyin.");
     const config = await this.config(guildId);
     if (!config.enabled) throw new GameError("NPC otomatik alım sistemi kapalı. Önce `/npc-devlet-oto-alim ayarla` ile etkinleştirin.");
     const guild = await gameService.guildState(guildId);
@@ -491,9 +493,21 @@ export const npcAutoPurchaseService = {
       results.push(result);
     }
     return results;
+    } catch (error) {
+      // Kilit sorgusu bağlantı hatasıyla sonuçlandıysa sunucu kilidi almış olabilir,
+      // fakat cevabı görememiş olabiliriz. Bu oturumu havuza geri döndürmeyiz.
+      if (!locked && !(error instanceof GameError)) discardClient = true;
+      throw error;
     } finally {
-      if (locked) await lockClient.query("SELECT pg_advisory_unlock(hashtext($1))", [lockKey]).catch(() => undefined);
-      lockClient.release();
+      if (locked) {
+        try {
+          const unlockResult = await lockClient.query<{ unlocked: boolean }>("SELECT pg_advisory_unlock(hashtext($1)) AS unlocked", [lockKey]);
+          if (unlockResult.rows[0]?.unlocked === false) discardClient = true;
+        } catch {
+          discardClient = true;
+        }
+      }
+      lockClient.release(discardClient);
     }
   }
 };

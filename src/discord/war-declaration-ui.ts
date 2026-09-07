@@ -15,6 +15,25 @@ import {
   PEACE_TREATY_BANNER_NAME, PEACE_TREATY_BANNER_PATH, PEACE_TREATY_BANNER_URL
 } from "./assets.js";
 
+type PendingWarDialog = {
+  guildId: string;
+  userId: string;
+  requestedCountryName: string | null;
+} & (
+  | { kind: "war_declare" | "peace_offer"; targetCountryName: string }
+  | { kind: "war_pact"; attackerPactName: string; targetPactName: string | null; targetCountryName: string | null }
+);
+
+const pendingWarDialogs = new Map<string, PendingWarDialog>();
+
+function rememberWarDialog(interaction: ChatInputCommandInteraction, dialog: PendingWarDialog): string {
+  const token = interaction.id;
+  pendingWarDialogs.set(token, dialog);
+  const expiry = setTimeout(() => pendingWarDialogs.delete(token), 15 * 60_000);
+  expiry.unref();
+  return `war_context|${token}`;
+}
+
 function fieldValue(value: string): string {
   return `${value.slice(0, 1022)}\n\u200B`;
 }
@@ -235,12 +254,12 @@ export async function handleWarDeclarationCommand(interaction: ChatInputCommandI
 
   if (interaction.commandName === "savas-sonlandir") {
     requireGameMaster(interaction);
+    await interaction.deferReply({ ephemeral: true });
     const channel = await warChannel(interaction);
     const warId = interaction.options.getString("savas", true);
     const winnerSelection = interaction.options.getString("kazanan", true);
     const winnerCountryId = winnerSelection === "WHITE_PEACE" ? null : winnerSelection;
     const description = interaction.options.getString("aciklama", true);
-    await interaction.deferReply({ ephemeral: true });
     const war = await warDeclarationService.forceEnd({ guildId: interaction.guildId, actorId: interaction.user.id, warId, winnerCountryId, description });
     const outcome = war.end_outcome!;
     await channel.send({
@@ -258,10 +277,10 @@ export async function handleWarDeclarationCommand(interaction: ChatInputCommandI
 
   if (interaction.commandName === "savas-yapilandir") {
     requireGameMaster(interaction);
+    await interaction.deferReply({ ephemeral: true });
     const channel = await warChannel(interaction);
     const subcommand = interaction.options.getSubcommand();
     const warId = interaction.options.getString("savas", true);
-    await interaction.deferReply({ ephemeral: true });
     let war: OfficialWarView;
     let operation = "Savaş yapısı güncellendi.";
     if (subcommand === "hedef-ayarla") {
@@ -315,22 +334,15 @@ export async function handleWarDeclarationCommand(interaction: ChatInputCommandI
   }
 
   if (interaction.commandName === "pakt-savasi") {
-    await warChannel(interaction);
-    const own = await resolveCountry(interaction, interaction.options.getString("ulke"));
-    const attackerPact = await diplomacyService.pactByName(interaction.guildId, interaction.options.getString("saldiran-pakt", true));
+    const attackerPactName = interaction.options.getString("saldiran-pakt", true);
     const targetPactName = interaction.options.getString("hedef-pakt");
     const targetCountryName = interaction.options.getString("hedef-ulke");
     if (Boolean(targetPactName) === Boolean(targetCountryName)) throw new GameError("Hedef olarak yalnızca bir pakt veya bir devlet seçmelisiniz.");
-    const defenderPact = targetPactName ? await diplomacyService.pactByName(interaction.guildId, targetPactName) : null;
-    const defenderCountry = targetCountryName ? await gameService.countryByName(interaction.guildId, targetCountryName) : null;
-    if (!attackerPact || (targetPactName && !defenderPact) || (targetCountryName && !defenderCountry)) throw new GameError("Saldıran pakt veya hedef taraf bulunamadı.");
-    if (attackerPact.id === defenderPact?.id) throw new GameError("Bir pakt kendisine savaş ilan edemez.");
-    if (attackerPact.founder_country_id === defenderCountry?.id) throw new GameError("Pakt lideri kendi devletine savaş ilan edemez.");
-    if (attackerPact.founder_country_id !== own.id) throw new GameError("Pakt adına savaşı yalnızca paktın mevcut lider devleti ilan edebilir.");
-    const modalId = defenderPact
-      ? `war_pact|${attackerPact.id}|${defenderPact.id}`
-      : `war_pact_country|${attackerPact.id}|${defenderCountry!.id}`;
-    const modal = new ModalBuilder().setCustomId(modalId).setTitle("Pakt Savaşı İlanı");
+    const customId = rememberWarDialog(interaction, {
+      kind: "war_pact", guildId: interaction.guildId, userId: interaction.user.id,
+      requestedCountryName: interaction.options.getString("ulke"), attackerPactName, targetPactName, targetCountryName
+    });
+    const modal = new ModalBuilder().setCustomId(customId).setTitle("Pakt Savaşı İlanı");
     modal.addComponents(
       modalText("war_goal", "Savaş hedefi", TextInputStyle.Short, { placeholder: "Örn. rakip paktın deniz üstünlüğünü kırmak", maxLength: 500 }),
       modalText("reason", "Savaş gerekçesi", TextInputStyle.Paragraph, { placeholder: "Savaşın diplomatik veya siyasi gerekçesi", maxLength: 1000 }),
@@ -341,11 +353,11 @@ export async function handleWarDeclarationCommand(interaction: ChatInputCommandI
   }
 
   if (interaction.commandName === "savas-cagrisi") {
+    await interaction.deferReply({ ephemeral: true });
     const channel = await warChannel(interaction);
     const own = await resolveCountry(interaction, interaction.options.getString("ulke"));
     const target = await countryByOption(interaction, "hedef-ulke");
     const warId = interaction.options.getString("savas", true);
-    await interaction.deferReply({ ephemeral: true });
     const invitation = await warDeclarationService.createWarInvitation({
       guildId: interaction.guildId, actorId: interaction.user.id, warId, leaderCountryId: own.id, targetCountryId: target.id
     });
@@ -367,15 +379,12 @@ export async function handleWarDeclarationCommand(interaction: ChatInputCommandI
     return true;
   }
 
-  await warChannel(interaction);
-  const own = await resolveCountry(interaction, interaction.options.getString("ulke"));
-  const target = await countryByOption(interaction, "hedef-ulke");
-  if (own.id === target.id) throw new GameError("Bir devlet kendisini hedef seçemez.");
-
   if (interaction.commandName === "savas-ilani") {
-    const existing = await warDeclarationService.activeWarBetween(interaction.guildId, own.id, target.id);
-    if (existing) throw new GameError("Bu devletler arasında zaten devam eden bir savaş bulunuyor.");
-    const modal = new ModalBuilder().setCustomId(`war_declare|${own.id}|${target.id}`).setTitle("Resmî Savaş İlanı");
+    const customId = rememberWarDialog(interaction, {
+      kind: "war_declare", guildId: interaction.guildId, userId: interaction.user.id,
+      requestedCountryName: interaction.options.getString("ulke"), targetCountryName: interaction.options.getString("hedef-ulke", true)
+    });
+    const modal = new ModalBuilder().setCustomId(customId).setTitle("Resmî Savaş İlanı");
     modal.addComponents(
       modalText("war_goal", "Savaş hedefi", TextInputStyle.Short, { placeholder: "Örn. sınır bölgesinin güvenliğini sağlamak", maxLength: 500 }),
       modalText("reason", "Savaş gerekçesi", TextInputStyle.Paragraph, { placeholder: "Savaşın diplomatik veya siyasi gerekçesi", maxLength: 1000 }),
@@ -385,12 +394,11 @@ export async function handleWarDeclarationCommand(interaction: ChatInputCommandI
     return true;
   }
 
-  const war = await warDeclarationService.activeWarBetween(interaction.guildId, own.id, target.id);
-  if (!war) throw new GameError("Bu devlete barış teklif etmek için aranızda aktif bir savaş bulunmalıdır.");
-  if (![war.attacker_country_id, war.defender_country_id].includes(own.id)) throw new GameError("Barış teklifini yalnızca iki cephenin savaş liderleri gönderebilir.");
-  const opposingLeaderId = war.attacker_country_id === own.id ? war.defender_country_id : war.attacker_country_id;
-  if (target.id !== opposingLeaderId) throw new GameError("Barış teklifi karşı cephenin savaş liderine gönderilmelidir.");
-  const modal = new ModalBuilder().setCustomId(`peace_offer|${war.id}|${own.id}`).setTitle("Barış Antlaşması Teklifi");
+  const customId = rememberWarDialog(interaction, {
+    kind: "peace_offer", guildId: interaction.guildId, userId: interaction.user.id,
+    requestedCountryName: interaction.options.getString("ulke"), targetCountryName: interaction.options.getString("hedef-ulke", true)
+  });
+  const modal = new ModalBuilder().setCustomId(customId).setTitle("Barış Antlaşması Teklifi");
   modal.addComponents(
     modalText("terms", "Barış şartları", TextInputStyle.Paragraph, { placeholder: "Örn. saldırmazlık ve sınırların korunması", maxLength: 2000 }),
     modalText("indemnity", "Tazminat (Altın) — isteğe bağlı", TextInputStyle.Short, { required: false, placeholder: "Örn. 10000", maxLength: 20 }),
@@ -401,10 +409,57 @@ export async function handleWarDeclarationCommand(interaction: ChatInputCommandI
 }
 
 export async function handleWarDeclarationModal(interaction: ModalSubmitInteraction): Promise<boolean> {
-  const [kind, firstId, secondId] = interaction.customId.split("|");
-  if (kind !== "war_declare" && kind !== "war_pact" && kind !== "war_pact_country" && kind !== "peace_offer") return false;
-  if (!interaction.guildId || !firstId || !secondId) throw new GameError("Savaş veya barış formunun bilgileri geçersiz.");
+  let [kind, firstId, secondId] = interaction.customId.split("|");
+  if (kind !== "war_context" && kind !== "war_declare" && kind !== "war_pact" && kind !== "war_pact_country" && kind !== "peace_offer") return false;
+  if (!interaction.guildId || !firstId) throw new GameError("Savaş veya barış formunun bilgileri geçersiz.");
+  await interaction.deferReply({ ephemeral: true });
   const channel = await warChannel(interaction);
+
+  if (kind === "war_context") {
+    const context = pendingWarDialogs.get(firstId);
+    pendingWarDialogs.delete(firstId);
+    if (!context || context.guildId !== interaction.guildId || context.userId !== interaction.user.id) {
+      throw new GameError("Bu savaş formunun süresi dolmuş. Komutu yeniden açın.");
+    }
+    const own = context.requestedCountryName && isGameMaster(interaction)
+      ? await gameService.countryByName(interaction.guildId, context.requestedCountryName)
+      : await gameService.countryForUser(interaction.guildId, interaction.user.id);
+    if (!own) throw new GameError("Discord hesabına atanmış veya belirtilen ülke bulunamadı.");
+
+    if (context.kind === "war_pact") {
+      const attackerPact = await diplomacyService.pactByName(interaction.guildId, context.attackerPactName);
+      const defenderPact = context.targetPactName ? await diplomacyService.pactByName(interaction.guildId, context.targetPactName) : null;
+      const defenderCountry = context.targetCountryName ? await gameService.countryByName(interaction.guildId, context.targetCountryName) : null;
+      if (!attackerPact || (context.targetPactName && !defenderPact) || (context.targetCountryName && !defenderCountry)) throw new GameError("Saldıran pakt veya hedef taraf bulunamadı.");
+      if (attackerPact.id === defenderPact?.id) throw new GameError("Bir pakt kendisine savaş ilan edemez.");
+      if (attackerPact.founder_country_id === defenderCountry?.id) throw new GameError("Pakt lideri kendi devletine savaş ilan edemez.");
+      if (attackerPact.founder_country_id !== own.id) throw new GameError("Pakt adına savaşı yalnızca paktın mevcut lider devleti ilan edebilir.");
+      kind = defenderPact ? "war_pact" : "war_pact_country";
+      firstId = attackerPact.id;
+      secondId = defenderPact?.id ?? defenderCountry!.id;
+    } else {
+      const target = await gameService.countryByName(interaction.guildId, context.targetCountryName);
+      if (!target) throw new GameError("Belirtilen hedef devlet bulunamadı.");
+      if (own.id === target.id) throw new GameError("Bir devlet kendisini hedef seçemez.");
+      const activeWar = await warDeclarationService.activeWarBetween(interaction.guildId, own.id, target.id);
+      if (context.kind === "war_declare") {
+        if (activeWar) throw new GameError("Bu devletler arasında zaten devam eden bir savaş bulunuyor.");
+        kind = "war_declare";
+        firstId = own.id;
+        secondId = target.id;
+      } else {
+        if (!activeWar) throw new GameError("Bu devlete barış teklif etmek için aranızda aktif bir savaş bulunmalıdır.");
+        if (![activeWar.attacker_country_id, activeWar.defender_country_id].includes(own.id)) throw new GameError("Barış teklifini yalnızca iki cephenin savaş liderleri gönderebilir.");
+        const opposingLeaderId = activeWar.attacker_country_id === own.id ? activeWar.defender_country_id : activeWar.attacker_country_id;
+        if (target.id !== opposingLeaderId) throw new GameError("Barış teklifi karşı cephenin savaş liderine gönderilmelidir.");
+        kind = "peace_offer";
+        firstId = activeWar.id;
+        secondId = own.id;
+      }
+    }
+  }
+
+  if (!secondId) throw new GameError("Savaş veya barış formunun hedef bilgisi geçersiz.");
 
   if (kind === "war_declare" || kind === "war_pact" || kind === "war_pact_country") {
     let attackerCountryId = firstId;
@@ -422,7 +477,6 @@ export async function handleWarDeclarationModal(interaction: ModalSubmitInteract
       }
     }
     await assertCountryAccess(interaction, attackerCountryId);
-    await interaction.deferReply({ ephemeral: true });
     const war = await warDeclarationService.declareWar({
       guildId: interaction.guildId, actorId: interaction.user.id, attackerCountryId, defenderCountryId,
       attackerPactId, defenderPactId, warGoal: interaction.fields.getTextInputValue("war_goal"),
@@ -462,7 +516,6 @@ export async function handleWarDeclarationModal(interaction: ModalSubmitInteract
   } else if (payerRaw) {
     throw new GameError("Tazminat belirtilmediyse ödeme tarafı boş bırakılmalıdır.");
   }
-  await interaction.deferReply({ ephemeral: true });
   const offer = await warDeclarationService.createPeaceOffer({
     guildId: interaction.guildId, actorId: interaction.user.id, warId: war.id,
     proposerCountryId: secondId, receiverCountryId, terms: interaction.fields.getTextInputValue("terms"),
@@ -487,13 +540,13 @@ export async function handleWarDeclarationButton(interaction: ButtonInteraction)
   const [action, offerId] = interaction.customId.split("|");
   if (action === "war_invite_accept" || action === "war_invite_reject") {
     if (!offerId || !interaction.guildId) throw new GameError("Savaş çağrısının bilgileri geçersiz.");
+    await interaction.deferReply({ ephemeral: true });
     const invitation = await warDeclarationService.getWarInvitation(offerId);
     if (!invitation || invitation.guild_id !== interaction.guildId) throw new GameError("Savaş çağrısı bulunamadı.");
     if (!isGameMaster(interaction)) {
       const country = await gameService.countryForUser(interaction.guildId, interaction.user.id);
       if (!country || country.id !== invitation.country_id) throw new GameError("Bu savaş çağrısını yalnızca davet edilen devletin oyuncuları yanıtlayabilir.");
     }
-    await interaction.deferUpdate();
     const accepted = action === "war_invite_accept";
     const result = await warDeclarationService.respondWarInvitation({
       guildId: interaction.guildId, actorId: interaction.user.id, invitationId: offerId,
@@ -503,23 +556,24 @@ export async function handleWarDeclarationButton(interaction: ButtonInteraction)
       .setColor(accepted ? 0x3c8b5c : 0x9f252c)
       .setTitle(accepted ? "✅ SAVAŞ ÇAĞRISI KABUL EDİLDİ" : "❌ SAVAŞ ÇAĞRISI REDDEDİLDİ")
       .setFooter({ text: `${interaction.user.username} tarafından sonuçlandırıldı.` });
-    await interaction.editReply({
+    await interaction.message.edit({
       content: accepted
         ? `⚔️ **${result.invitation.country_name}**, **${result.invitation.invited_by_country_name}** liderliğindeki cepheye katıldı.`
         : `❌ **${result.invitation.country_name}** savaş çağrısını reddetti.`,
       embeds: [resolved], components: []
     });
+    await interaction.editReply("✅ Savaş çağrısı sonuçlandırıldı.");
     return true;
   }
   if (action !== "peace_accept" && action !== "peace_reject") return false;
   if (!offerId || !interaction.guildId) throw new GameError("Barış teklifinin bilgileri geçersiz.");
+  await interaction.deferReply({ ephemeral: true });
   const offer = await warDeclarationService.getPeaceOffer(offerId);
   if (!offer || offer.guild_id !== interaction.guildId) throw new GameError("Barış teklifi bulunamadı.");
   if (!isGameMaster(interaction)) {
     const country = await gameService.countryForUser(interaction.guildId, interaction.user.id);
     if (!country || country.id !== offer.receiver_country_id) throw new GameError("Bu barış teklifini yalnızca hedef devletin oyuncuları yanıtlayabilir.");
   }
-  await interaction.deferUpdate();
   const accepted = action === "peace_accept";
   const result = await warDeclarationService.respondPeace({
     guildId: interaction.guildId, actorId: interaction.user.id, offerId, receiverCountryId: offer.receiver_country_id, accept: accepted
@@ -528,12 +582,13 @@ export async function handleWarDeclarationButton(interaction: ButtonInteraction)
     .setColor(accepted ? 0x3c8b5c : 0x9f252c)
     .setTitle(accepted ? "✅ BARIŞ TEKLİFİ KABUL EDİLDİ" : "❌ BARIŞ TEKLİFİ REDDEDİLDİ")
     .setFooter({ text: `${interaction.user.username} tarafından sonuçlandırıldı.` });
-  await interaction.editReply({
+  await interaction.message.edit({
     content: accepted
       ? `🕊️ **${result.offer.receiver_country_name}**, barış teklifini kabul etti.`
       : `❌ **${result.offer.receiver_country_name}**, barış teklifini reddetti; savaş devam ediyor.`,
     embeds: [resolved], components: []
   });
+  await interaction.editReply("✅ Barış teklifi sonuçlandırıldı.");
   if (accepted) {
     const channel = await warChannel(interaction);
     await channel.send({

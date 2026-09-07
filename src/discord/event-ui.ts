@@ -142,10 +142,10 @@ export async function handleSettlementEventCommand(interaction: ChatInputCommand
   }
 
   const type = selectedType(interaction);
+  await interaction.deferReply({ ephemeral: sub === "sec" || sub === "riskler" });
   const country = await optionalCountry(interaction);
 
   if (sub === "sec") {
-    await interaction.deferReply({ ephemeral: true });
     const draw = await eventService.select({ guildId: interaction.guildId, actorId: interaction.user.id, eventType: type, countryId: country?.id ?? null });
     const button = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(`settlement_event_apply|${draw.id}`)
@@ -156,7 +156,6 @@ export async function handleSettlementEventCommand(interaction: ChatInputCommand
   }
 
   if (sub === "riskler") {
-    await interaction.deferReply({ ephemeral: true });
     const report = await eventService.risks({ guildId: interaction.guildId, eventType: type, countryId: country?.id ?? null });
     await interaction.editReply({ embeds: [riskEmbed(report, country?.name ?? null)] });
     return true;
@@ -166,7 +165,6 @@ export async function handleSettlementEventCommand(interaction: ChatInputCommand
     const settlementName = interaction.options.getString("yerleske");
     if (Boolean(country) !== Boolean(settlementName)) throw new GameError("Elle uygulama için ülke ve yerleşke birlikte belirtilmelidir; boş bırakılırsa son seçim uygulanır.");
     const settlement = country && settlementName ? await findEventSettlement(country.id, settlementName) : null;
-    await interaction.deferReply();
     const input: { guildId: string; actorId: string; eventType: SettlementEventType; countryId?: string; settlementId?: string } = {
       guildId: interaction.guildId, actorId: interaction.user.id, eventType: type
     };
@@ -181,7 +179,6 @@ export async function handleSettlementEventCommand(interaction: ChatInputCommand
 
   if (!country) throw new GameError("Olayı sonlandırmak için ülke seçilmelidir.");
   const settlement = await findEventSettlement(country.id, interaction.options.getString("yerleske", true));
-  await interaction.deferReply();
   const result = await eventService.resolve({ guildId: interaction.guildId, actorId: interaction.user.id, eventType: type, countryId: country.id, settlementId: settlement.id });
   await interaction.editReply({ embeds: [applicationEmbed(result, true)] });
   return true;

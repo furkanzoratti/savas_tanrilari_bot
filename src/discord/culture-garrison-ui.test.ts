@@ -65,11 +65,7 @@ describe("kültür ve yerleşke kartı", () => {
     expect(fields.find((field) => field.name === "🏗️ Binalar ve İnşaatlar")?.value).not.toContain("Yüzdesel Ekonomi");
     expect(countryFields.find((field) => field.name === "🛡️ Müttefikler")?.value).toContain("Kartaca");
     expect(countryFields.find((field) => field.name === "🏛️ Üye Olunan Paktlar")?.value).toContain("Akdeniz Birliği");
-    const officials = countryFields.find((field) => field.name === "🎓 Devlet Görevlileri")?.value;
-    expect(officials).toContain("↳ Curia");
-    expect(officials).toContain("↳ Agora / Forum");
-    expect(officials).not.toContain("Ordusal");
-    expect(officials).toContain("Casusluk görevi • yolda • Kartaca • Kartaca");
+    expect(countryFields.find((field) => field.name === "🎓 Devlet Görevlileri")).toBeUndefined();
     expect(fields.find((field) => field.name === "👥 Nüfus")?.value).not.toContain("Sonraki Alım");
     expect(fields.find((field) => field.name === "💰 Gelir Kalemleri")?.value).toContain("Toplam:");
     expect(fields.find((field) => field.name === "💰 Gelir Kalemleri")?.value).not.toContain("Tahsil edilecek");

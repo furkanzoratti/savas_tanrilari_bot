@@ -13,7 +13,8 @@ describe("casusluk kuralları", () => {
     expect(ESPIONAGE_TARGETS.NAVAL.buildingTypes).toEqual(["port", "shipyard"]);
     expect(ESPIONAGE_TARGETS.CONSTRUCTION.buildingTypes).toHaveLength(0);
     expect(ESPIONAGE_PREPARATIONS.AGGRESSIVE).toMatchObject({ cost: 2_000, attackBonus: 3, detectionPenalty: 2 });
-    expect(sabotageDuration("LIGHT")).toBe(1);
-    expect(sabotageDuration("HEAVY")).toBe(2);
+    expect(sabotageDuration("LIGHT")).toBe(2);
+    expect(sabotageDuration("MEDIUM")).toBe(3);
+    expect(sabotageDuration("HEAVY")).toBe(0);
   });
 });

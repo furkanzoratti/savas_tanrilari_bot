@@ -70,7 +70,9 @@ describe("NPC otomatik alım tekrar çalıştırma", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     let attempt = 0;
-    mocks.lockQuery.mockResolvedValue({ rows: [], rowCount: 1 });
+    mocks.lockQuery.mockImplementation(async (sql: string) => sql.includes("pg_try_advisory_lock")
+      ? { rows: [{ locked: true }], rowCount: 1 }
+      : { rows: [{ unlocked: true }], rowCount: 1 });
     mocks.poolQuery.mockImplementation(async (sql: string) => {
       if (sql.startsWith("SELECT enabled")) return { rows: [{
         enabled: true,
@@ -105,7 +107,25 @@ describe("NPC otomatik alım tekrar çalıştırma", () => {
     expect(second[0]).toMatchObject({ runNumber: 2, status: "COMPLETE", actualCost: 2_000 });
     expect(second[0]!.unitActions.reduce((sum, action) => sum + action.quantity, 0)).toBe(2_000);
     expect(mocks.poolQuery.mock.calls.some(([sql]) => String(sql).includes("attempt_count=npc_auto_purchase_runs.attempt_count+1"))).toBe(true);
-    expect(mocks.lockQuery).toHaveBeenCalledWith("SELECT pg_advisory_lock(hashtext($1))", ["npc-auto-purchase:guild"]);
-    expect(mocks.lockQuery).toHaveBeenCalledWith("SELECT pg_advisory_unlock(hashtext($1))", ["npc-auto-purchase:guild"]);
+    expect(mocks.lockQuery).toHaveBeenCalledWith("SELECT pg_try_advisory_lock(hashtext($1)) AS locked", ["npc-auto-purchase:guild"]);
+    expect(mocks.lockQuery).toHaveBeenCalledWith("SELECT pg_advisory_unlock(hashtext($1)) AS unlocked", ["npc-auto-purchase:guild"]);
+    expect(mocks.release).toHaveBeenLastCalledWith(false);
+  });
+
+  it("kilit açılamazsa bağlantıyı havuza kilitli olarak geri bırakmaz", async () => {
+    mocks.lockQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes("pg_try_advisory_lock")) return { rows: [{ locked: true }], rowCount: 1 };
+      throw Object.assign(new Error("connection lost"), { code: "ECONNRESET" });
+    });
+
+    await expect(npcAutoPurchaseService.execute("guild", "gm")).resolves.toBeDefined();
+    expect(mocks.release).toHaveBeenCalledWith(true);
+  });
+
+  it("başka çalıştırma kilidi tutuyorsa beklemek yerine anlaşılır hata verir", async () => {
+    mocks.lockQuery.mockResolvedValueOnce({ rows: [{ locked: false }], rowCount: 1 });
+
+    await expect(npcAutoPurchaseService.execute("guild", "gm")).rejects.toThrow("başka bir NPC otomatik alımı");
+    expect(mocks.release).toHaveBeenCalledWith(false);
   });
 });

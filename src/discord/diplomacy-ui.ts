@@ -129,10 +129,10 @@ async function findPact(interaction: ChatInputCommandInteraction) {
 }
 
 async function handleAlliance(interaction: ChatInputCommandInteraction): Promise<void> {
-  const channel = await requireDiplomacyChannel(interaction);
-  const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
   const action = interaction.options.getSubcommand();
   await interaction.deferReply({ ephemeral: !diplomacyReplyIsPublic("ittifak", action) });
+  const channel = await requireDiplomacyChannel(interaction);
+  const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
 
   if (action === "liste") {
     const alliances = await diplomacyService.allianceList(country.id);
@@ -177,29 +177,27 @@ async function handleAlliance(interaction: ChatInputCommandInteraction): Promise
 async function handlePact(interaction: ChatInputCommandInteraction): Promise<void> {
   if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
   const action = interaction.options.getSubcommand();
+  await interaction.deferReply({ ephemeral: !diplomacyReplyIsPublic("pakt", action) });
   if (action === "bilgi") {
     const pact = await diplomacyService.pactDetails(interaction.guildId, interaction.options.getString("pakt", true));
-    await interaction.reply({
+    await interaction.editReply({
       embeds: [renderPublicPactProfile(pact)],
-      files: [new AttachmentBuilder(PACT_BANNER_PATH, { name: PACT_BANNER_NAME })],
-      ephemeral: !diplomacyReplyIsPublic("pakt", action)
+      files: [new AttachmentBuilder(PACT_BANNER_PATH, { name: PACT_BANNER_NAME })]
     });
     return;
   }
   if (action === "liste") {
     const pacts = await diplomacyService.pactList(interaction.guildId);
     const lines = pacts.map((pact) => `🏛️ **${pact.name}** • ${pact.member_count} devlet\n🎯 ${pact.purpose}\n👑 ${pact.founder_country_name}`);
-    await interaction.reply({
+    await interaction.editReply({
       embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle("🏛️ Aktif Diplomatik Paktlar")
-        .setDescription((lines.length ? lines.join("\n\n") : "Henüz kurulmuş bir pakt bulunmuyor.").slice(0, 4096))],
-      ephemeral: !diplomacyReplyIsPublic("pakt", action)
+        .setDescription((lines.length ? lines.join("\n\n") : "Henüz kurulmuş bir pakt bulunmuyor.").slice(0, 4096))]
     });
     return;
   }
 
   const channel = await requireDiplomacyChannel(interaction);
   const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
-  await interaction.deferReply({ ephemeral: !diplomacyReplyIsPublic("pakt", action) });
 
   if (action === "olustur") {
     const pact = await diplomacyService.createPact({
@@ -287,10 +285,10 @@ export async function handleDiplomacyCommand(interaction: ChatInputCommandIntera
   if (interaction.commandName === "vassallik") {
     requireGameMaster(interaction);
     const action = interaction.options.getSubcommand();
+    await interaction.deferReply({ ephemeral: true });
     const overlord = await gameService.countryByName(interaction.guildId, interaction.options.getString("hakim-ulke", true));
     const vassal = await gameService.countryByName(interaction.guildId, interaction.options.getString("vassal-ulke", true));
     if (!overlord || !vassal) throw new GameError("Hâkim veya vassal devlet bulunamadı.");
-    await interaction.deferReply({ ephemeral: true });
     if (action === "ayarla") {
       const relation = await diplomacyService.setVassalage({
         guildId: interaction.guildId, actorId: interaction.user.id,
@@ -321,11 +319,11 @@ export async function handleDiplomacyCommand(interaction: ChatInputCommandIntera
   }
 
   if (interaction.commandName === "devlet-bilgisi") {
+    await interaction.deferReply({ ephemeral: !diplomacyReplyIsPublic("devlet-bilgisi") });
     const profile = await diplomacyService.publicCountry(interaction.guildId, interaction.options.getString("ulke", true));
-    await interaction.reply({
+    await interaction.editReply({
       embeds: [renderPublicCountryProfile(profile)],
-      files: [new AttachmentBuilder(STATE_PROFILE_BANNER_PATH, { name: STATE_PROFILE_BANNER_NAME })],
-      ephemeral: !diplomacyReplyIsPublic("devlet-bilgisi")
+      files: [new AttachmentBuilder(STATE_PROFILE_BANNER_PATH, { name: STATE_PROFILE_BANNER_NAME })]
     });
     return true;
   }
@@ -344,13 +342,13 @@ export async function handleDiplomacyButton(interaction: ButtonInteraction): Pro
   const invitationId = match[3]!;
 
   if (kind === "alliance") {
+    await interaction.deferReply({ ephemeral: true });
     const offer = await diplomacyService.getAlliance(invitationId);
     if (!offer || offer.guild_id !== interaction.guildId) throw new GameError("İttifak daveti bulunamadı.");
     if (!isGameMaster(interaction)) {
       const country = await gameService.countryForUser(interaction.guildId, interaction.user.id);
       if (!country || country.id !== offer.receiver_country_id) throw new GameError("Bu daveti yalnızca hedef devletin oyuncuları yanıtlayabilir.");
     }
-    await interaction.deferUpdate();
     const result = await diplomacyService.respondAlliance({
       guildId: interaction.guildId, actorId: interaction.user.id,
       receiverCountryId: offer.receiver_country_id, allianceId: offer.id, accept: accepted
@@ -359,12 +357,13 @@ export async function handleDiplomacyButton(interaction: ButtonInteraction): Pro
       .setColor(accepted ? 0x2e8b57 : 0xb22222)
       .setTitle(accepted ? "✅ İttifak Daveti Kabul Edildi" : "❌ İttifak Daveti Reddedildi")
       .setFooter({ text: `${interaction.user.username} tarafından sonuçlandırıldı.` });
-    await interaction.editReply({
+    await interaction.message.edit({
       content: accepted
         ? `✅ **${result.proposer_country_name}** ile **${result.receiver_country_name}** artık müttefik.`
         : `❌ **${result.receiver_country_name}**, **${result.proposer_country_name}** devletinin ittifak davetini reddetti.`,
       embeds: [embed], components: [], allowedMentions: { parse: [] }
     });
+    await interaction.editReply("✅ İttifak daveti sonuçlandırıldı.");
     if (accepted) {
       await interaction.followUp({
         content: `📣 **${result.proposer_country_name}** ile **${result.receiver_country_name}** arasındaki ittifak resmen yürürlüğe girdi.`,
@@ -374,13 +373,13 @@ export async function handleDiplomacyButton(interaction: ButtonInteraction): Pro
     return true;
   }
 
+  await interaction.deferReply({ ephemeral: true });
   const invitation = await diplomacyService.getPactInvitation(invitationId);
   if (!invitation || invitation.guild_id !== interaction.guildId) throw new GameError("Pakt daveti bulunamadı.");
   if (!isGameMaster(interaction)) {
     const country = await gameService.countryForUser(interaction.guildId, interaction.user.id);
     if (!country || country.id !== invitation.receiver_country_id) throw new GameError("Bu daveti yalnızca hedef devletin oyuncuları yanıtlayabilir.");
   }
-  await interaction.deferUpdate();
   const result = await diplomacyService.respondPactInvitation({
     guildId: interaction.guildId, actorId: interaction.user.id,
     receiverCountryId: invitation.receiver_country_id, invitationId: invitation.id, accept: accepted
@@ -389,12 +388,13 @@ export async function handleDiplomacyButton(interaction: ButtonInteraction): Pro
     .setColor(accepted ? 0x2e8b57 : 0xb22222)
     .setTitle(accepted ? `✅ ${result.pact_name} • Pakt Daveti Kabul Edildi` : `❌ ${result.pact_name} • Pakt Daveti Reddedildi`)
     .setFooter({ text: `${interaction.user.username} tarafından sonuçlandırıldı.` });
-  await interaction.editReply({
+  await interaction.message.edit({
     content: accepted
       ? `✅ **${result.receiver_country_name}**, **${result.pact_name}** paktına katıldı.`
       : `❌ **${result.receiver_country_name}**, **${result.pact_name}** paktının davetini reddetti.`,
     embeds: [embed], components: [], allowedMentions: { parse: [] }
   });
+  await interaction.editReply("✅ Pakt daveti sonuçlandırıldı.");
   if (accepted) {
     await interaction.followUp({
       content: `📣 **${result.receiver_country_name}**, **${result.pact_name}** paktına resmen katıldı.`,

@@ -1504,5 +1504,182 @@ export const migrations = [
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
     `
+  },
+  {
+    version: 49,
+    name: "complete_academy_character_specializations",
+    sql: `
+      ALTER TABLE guilds ADD COLUMN IF NOT EXISTS character_log_channel_id TEXT;
+
+      ALTER TABLE countries ADD COLUMN IF NOT EXISTS primary_culture_group TEXT NOT NULL DEFAULT 'UNASSIGNED';
+      ALTER TABLE countries DROP CONSTRAINT IF EXISTS countries_primary_culture_group_check;
+      ALTER TABLE countries ADD CONSTRAINT countries_primary_culture_group_check CHECK (primary_culture_group IN (
+        'UNASSIGNED','BRITTONIC','CELTIC','GERMANIC','BALTIC','IBERIAN','ITALIC','ILLYRO_PANNONIAN',
+        'DACO_GETIC','THRACIAN','HELLENIC','PUNIC','BERBER','LIBYAN','EGYPTIAN','KUSHITIC','HABESHA',
+        'ARABIAN','LEVANTINE','MESOPOTAMIAN','ANATOLIAN','ARMENIAN','CAUCASIAN','SARMATIAN','SCYTHIAN',
+        'WEST_IRANIAN','EAST_IRANIAN'
+      ));
+      UPDATE countries c SET primary_culture_group=COALESCE((
+        SELECT s.culture_group FROM settlements s WHERE s.country_id=c.id AND s.culture_group<>'UNASSIGNED'
+        ORDER BY s.is_conquered ASC,s.population DESC,s.created_at ASC LIMIT 1
+      ),'UNASSIGNED') WHERE c.primary_culture_group='UNASSIGNED';
+
+      ALTER TABLE country_characters ADD COLUMN IF NOT EXISTS doctrine TEXT;
+      ALTER TABLE country_characters ADD COLUMN IF NOT EXISTS commander_victories INTEGER NOT NULL DEFAULT 0 CHECK (commander_victories >= 0);
+      ALTER TABLE country_characters ADD COLUMN IF NOT EXISTS specialization TEXT;
+      ALTER TABLE country_characters ADD COLUMN IF NOT EXISTS specialization_progress INTEGER NOT NULL DEFAULT 0 CHECK (specialization_progress >= 0);
+      ALTER TABLE country_characters ADD COLUMN IF NOT EXISTS specialization_level INTEGER NOT NULL DEFAULT 0 CHECK (specialization_level BETWEEN 0 AND 3);
+      ALTER TABLE country_characters ADD COLUMN IF NOT EXISTS character_status TEXT NOT NULL DEFAULT 'ACTIVE';
+      ALTER TABLE country_characters ADD COLUMN IF NOT EXISTS unavailable_until_turn INTEGER;
+      ALTER TABLE country_characters DROP CONSTRAINT IF EXISTS country_characters_doctrine_check;
+      ALTER TABLE country_characters ADD CONSTRAINT country_characters_doctrine_check CHECK (doctrine IS NULL OR doctrine IN (
+        'OFFENSIVE','DEFENSIVE','FLEXIBLE','ORDERLY_RETREAT','SIEGE_PREPARATION'
+      ));
+      ALTER TABLE country_characters DROP CONSTRAINT IF EXISTS country_characters_specialization_check;
+      ALTER TABLE country_characters ADD CONSTRAINT country_characters_specialization_check CHECK (specialization IS NULL OR specialization IN (
+        'FIELD_TACTICIAN','SIEGE_EXPERT','GUARDIAN','QUARTERMASTER','AGORA_MASTER','CARAVAN_MASTER',
+        'FINANCIAL_ADVISOR','MARKET_INSPECTOR','SABOTEUR','FINANCIAL_SPY','PROVOCATEUR','MILITARY_AGENT',
+        'ASSASSIN','COUNTER_SPY','PROVINCIAL_GOVERNOR','CULTURAL_ENVOY','HEGEMON_ENVOY','RESIDENT_ENVOY'
+      ));
+      ALTER TABLE country_characters DROP CONSTRAINT IF EXISTS country_characters_status_check;
+      ALTER TABLE country_characters ADD CONSTRAINT country_characters_status_check CHECK (character_status IN ('ACTIVE','DEAD'));
+      ALTER TABLE country_characters DROP CONSTRAINT IF EXISTS country_characters_assignment_check;
+      ALTER TABLE country_characters ADD CONSTRAINT country_characters_assignment_check CHECK (assignment IN (
+        'NONE','CURIA','AGORA','ARMY','ESPIONAGE','ESPIONAGE_RETURNING','CAPTURED',
+        'COUNTERINTELLIGENCE_TRAVELING_COUNTRY','COUNTERINTELLIGENCE_TRAVELING_SETTLEMENT',
+        'COUNTERINTELLIGENCE_COUNTRY','COUNTERINTELLIGENCE_SETTLEMENT','PERSONAL_GUARD','ASSIMILATION',
+        'MERCHANT_LOCAL_TRAVELING','MERCHANT_LOCAL','MERCHANT_FOREIGN_PENDING','MERCHANT_FOREIGN_TRAVELING',
+        'MERCHANT_FOREIGN','MERCHANT_PURCHASE','MERCHANT_BLACK_MARKET_TRAVELING','MERCHANT_BLACK_MARKET',
+        'DIPLOMAT_TRAVELING','DIPLOMAT_RECONCILIATION','DIPLOMAT_CULTURE','DIPLOMAT_VASSALIZE',
+        'DIPLOMAT_INTEGRATE','DIPLOMAT_DEFENSE'
+      ));
+
+      CREATE TABLE IF NOT EXISTS commander_battle_victories (
+        commander_character_id UUID NOT NULL REFERENCES country_characters(id) ON DELETE CASCADE,
+        battle_id UUID NOT NULL REFERENCES battles(id) ON DELETE CASCADE,
+        victory_turn INTEGER NOT NULL CHECK (victory_turn >= 0),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY(commander_character_id,battle_id)
+      );
+      ALTER TABLE battle_sides ADD COLUMN IF NOT EXISTS chief_commander_character_id UUID REFERENCES country_characters(id) ON DELETE SET NULL;
+      ALTER TABLE battles ADD COLUMN IF NOT EXISTS guardian_pressure_ignored_a BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE battles ADD COLUMN IF NOT EXISTS guardian_pressure_ignored_b BOOLEAN NOT NULL DEFAULT FALSE;
+
+      CREATE TABLE IF NOT EXISTS merchant_operations (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        guild_id TEXT NOT NULL REFERENCES guilds(discord_id) ON DELETE CASCADE,
+        country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        merchant_character_id UUID NOT NULL REFERENCES country_characters(id) ON DELETE CASCADE,
+        task_type TEXT NOT NULL CHECK (task_type IN ('LOCAL_TRADE','FOREIGN_CONCESSION','PURCHASE_AGENT','BLACK_MARKET')),
+        target_country_id UUID REFERENCES countries(id) ON DELETE CASCADE,
+        target_settlement_id UUID NOT NULL REFERENCES settlements(id) ON DELETE CASCADE,
+        home_settlement_id UUID REFERENCES settlements(id) ON DELETE CASCADE,
+        purchase_category TEXT CHECK (purchase_category IS NULL OR purchase_category IN ('UNITS','SHIPS','BUILDING','SIEGE')),
+        status TEXT NOT NULL CHECK (status IN ('PENDING_ACCEPTANCE','TRAVELING','ACTIVE','CONTROLLED','COMPLETED','ENDED','REJECTED','CANCELLED')),
+        started_turn INTEGER NOT NULL,
+        arrival_turn INTEGER,
+        expires_turn INTEGER,
+        last_processed_turn INTEGER,
+        accepted_by TEXT,
+        accepted_at TIMESTAMPTZ,
+        ended_turn INTEGER,
+        created_by TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS merchant_one_live_operation ON merchant_operations(merchant_character_id)
+        WHERE status IN ('PENDING_ACCEPTANCE','TRAVELING','ACTIVE','CONTROLLED');
+      CREATE INDEX IF NOT EXISTS merchant_operations_due_idx ON merchant_operations(guild_id,status,arrival_turn);
+      CREATE TABLE IF NOT EXISTS merchant_income_results (
+        operation_id UUID NOT NULL REFERENCES merchant_operations(id) ON DELETE CASCADE,
+        acquisition_turn INTEGER NOT NULL,
+        roll SMALLINT NOT NULL CHECK (roll BETWEEN 1 AND 10),
+        effective_percent SMALLINT NOT NULL CHECK (effective_percent BETWEEN 1 AND 10),
+        amount BIGINT NOT NULL CHECK (amount >= 0),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY(operation_id,acquisition_turn)
+      );
+      CREATE TABLE IF NOT EXISTS purchase_agent_discounts (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(), guild_id TEXT NOT NULL REFERENCES guilds(discord_id) ON DELETE CASCADE,
+        country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        settlement_id UUID NOT NULL REFERENCES settlements(id) ON DELETE CASCADE,
+        merchant_character_id UUID NOT NULL REFERENCES country_characters(id) ON DELETE CASCADE,
+        purchase_category TEXT NOT NULL CHECK (purchase_category IN ('UNITS','SHIPS','BUILDING','SIEGE')),
+        discount_percent INTEGER NOT NULL CHECK (discount_percent BETWEEN 1 AND 20),
+        created_turn INTEGER NOT NULL, expires_turn INTEGER NOT NULL, consumed_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS purchase_agent_one_unused_per_merchant
+        ON purchase_agent_discounts(merchant_character_id) WHERE consumed_at IS NULL;
+
+      CREATE TABLE IF NOT EXISTS diplomat_operations (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(), guild_id TEXT NOT NULL REFERENCES guilds(discord_id) ON DELETE CASCADE,
+        country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        diplomat_character_id UUID NOT NULL REFERENCES country_characters(id) ON DELETE CASCADE,
+        task_type TEXT NOT NULL CHECK (task_type IN ('RECONCILIATION','CULTURE_CHANGE','VASSALIZE','VASSAL_INTEGRATION')),
+        target_country_id UUID REFERENCES countries(id) ON DELETE CASCADE,
+        target_settlement_id UUID REFERENCES settlements(id) ON DELETE CASCADE,
+        target_event_type TEXT, target_culture_group TEXT,
+        status TEXT NOT NULL CHECK (status IN ('TRAVELING','ACTIVE','COMPLETED','FAILED','CANCELLED','PAUSED')),
+        started_turn INTEGER NOT NULL, arrival_turn INTEGER NOT NULL, progress INTEGER NOT NULL DEFAULT 0,
+        goal INTEGER NOT NULL CHECK (goal > 0), last_resolved_turn INTEGER,
+        insufficient_power_turns INTEGER NOT NULL DEFAULT 0, completion_text TEXT, created_by TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS diplomat_one_live_operation ON diplomat_operations(diplomat_character_id)
+        WHERE status IN ('TRAVELING','ACTIVE','PAUSED');
+      CREATE INDEX IF NOT EXISTS diplomat_operations_due_idx ON diplomat_operations(guild_id,status,arrival_turn,last_resolved_turn);
+      CREATE TABLE IF NOT EXISTS diplomat_rolls (
+        operation_id UUID NOT NULL REFERENCES diplomat_operations(id) ON DELETE CASCADE,
+        game_turn INTEGER NOT NULL, attack_roll SMALLINT NOT NULL CHECK (attack_roll BETWEEN 1 AND 20),
+        attack_bonus INTEGER NOT NULL, attack_total INTEGER NOT NULL,
+        defense_roll SMALLINT NOT NULL CHECK (defense_roll BETWEEN 1 AND 20), defense_bonus INTEGER NOT NULL,
+        defense_total INTEGER NOT NULL, progress_delta INTEGER NOT NULL, details JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(operation_id,game_turn)
+      );
+      ALTER TABLE country_vassalages ADD COLUMN IF NOT EXISTS integration_points INTEGER NOT NULL DEFAULT 0 CHECK (integration_points BETWEEN 0 AND 18);
+      ALTER TABLE country_vassalages ADD COLUMN IF NOT EXISTS annexation_ready_turn INTEGER;
+
+      ALTER TABLE trade_agreements ADD COLUMN IF NOT EXISTS suspended_until_turn INTEGER;
+      ALTER TABLE settlement_policies ADD COLUMN IF NOT EXISTS suspended_until_turn INTEGER;
+      ALTER TABLE naval_units ADD COLUMN IF NOT EXISTS disabled_until_turn INTEGER;
+      CREATE TABLE IF NOT EXISTS army_temporary_effects (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(), army_id UUID NOT NULL REFERENCES armies(id) ON DELETE CASCADE,
+        effect_type TEXT NOT NULL CHECK (effect_type IN ('SUPPLY_COLLAPSE')),
+        clash_multiplier NUMERIC(5,3) NOT NULL DEFAULT 1, damage_multiplier NUMERIC(5,3) NOT NULL DEFAULT 1,
+        rounds_remaining INTEGER NOT NULL CHECK (rounds_remaining > 0), disable_doctrine_first_round BOOLEAN NOT NULL DEFAULT FALSE,
+        created_turn INTEGER NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      ALTER TABLE espionage_operations ADD COLUMN IF NOT EXISTS target_character_id UUID REFERENCES country_characters(id) ON DELETE SET NULL;
+      ALTER TABLE espionage_operations ADD COLUMN IF NOT EXISTS target_army_id UUID REFERENCES armies(id) ON DELETE SET NULL;
+      ALTER TABLE espionage_operations DROP CONSTRAINT IF EXISTS espionage_operations_target_type_check;
+      ALTER TABLE espionage_operations ADD CONSTRAINT espionage_operations_target_type_check CHECK (target_type IN (
+        'BUILDING_SABOTAGE','CONSTRUCTION_SABOTAGE','RECRUITMENT_SABOTAGE','PRODUCTION_SABOTAGE',
+        'INCOME_SABOTAGE','TREASURY_INFILTRATION','TRADE_COLLAPSE','INCITE_PUBLIC','PARALYZE_GOVERNMENT',
+        'AGGRAVATE_EVENT','SUPPLY_COLLAPSE','DESERTION','POISON_GARRISON','DESTROY_SIEGE_SUPPLIES',
+        'SABOTAGE_FLEET','DISCREDIT','KIDNAP','ASSASSINATE','ECONOMIC','MILITARY','PUBLIC','NAVAL','CONSTRUCTION'
+      ));
+    `
+  },
+  {
+    version: 50,
+    name: "expanded_character_operations",
+    sql: `
+      ALTER TABLE country_characters ADD COLUMN IF NOT EXISTS protected_character_id UUID REFERENCES country_characters(id) ON DELETE SET NULL;
+      ALTER TABLE buildings ADD COLUMN IF NOT EXISTS sabotage_repair_cost INTEGER NOT NULL DEFAULT 0 CHECK (sabotage_repair_cost >= 0);
+      ALTER TABLE buildings ADD COLUMN IF NOT EXISTS construction_paid_amount INTEGER NOT NULL DEFAULT 0 CHECK (construction_paid_amount >= 0);
+      ALTER TABLE espionage_operations ADD COLUMN IF NOT EXISTS target_character_id UUID REFERENCES country_characters(id) ON DELETE SET NULL;
+      ALTER TABLE espionage_operations ADD COLUMN IF NOT EXISTS target_army_id UUID REFERENCES armies(id) ON DELETE SET NULL;
+      ALTER TABLE espionage_operations ADD COLUMN IF NOT EXISTS specialization_awarded BOOLEAN NOT NULL DEFAULT FALSE;
+      CREATE TABLE IF NOT EXISTS spy_specialization_progress (
+        character_id UUID NOT NULL REFERENCES country_characters(id) ON DELETE CASCADE,
+        specialization TEXT NOT NULL CHECK (specialization IN ('SABOTEUR','FINANCIAL_SPY','PROVOCATEUR','MILITARY_AGENT','ASSASSIN','COUNTER_SPY')),
+        successes INTEGER NOT NULL DEFAULT 0 CHECK (successes >= 0),
+        PRIMARY KEY(character_id,specialization)
+      );
+      CREATE INDEX IF NOT EXISTS espionage_target_character_idx ON espionage_operations(target_character_id,status);
+      CREATE INDEX IF NOT EXISTS espionage_target_army_idx ON espionage_operations(target_army_id,status);
+    `
   }
 ] as const;

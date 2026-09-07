@@ -61,6 +61,7 @@ export function calculateCategorizedIncome(input: {
   activePolicies?: readonly CityPolicyKey[];
   assignedMerchant?: boolean;
   merchantSkillBonus?: number;
+  merchantAgoraMaster?: boolean;
   formableKey?: FormableCountryKey | null;
 }): { gross: IncomeBreakdown; payable: IncomeBreakdown; buildingUpkeep: number; buildingBonuses: IncomeBreakdown } {
   const resources = input.resources ?? [];
@@ -99,7 +100,8 @@ export function calculateCategorizedIncome(input: {
     }
     if (building.buildingType === "agora" && building.level >= 2 && input.assignedMerchant) {
       const skillIncomePercent = Math.max(0, Math.floor(input.merchantSkillBonus ?? 0)) * 0.02;
-      globalIncomePercent += (formable.academyMerchantAgoraBonus ?? 0.10) + skillIncomePercent;
+      globalIncomePercent += (formable.academyMerchantAgoraBonus ?? 0.10) + skillIncomePercent
+        + (input.merchantAgoraMaster ? 0.02 : 0);
     }
     if (resources.includes("GLASS") && ["healer", "aqueduct"].includes(building.buildingType)) gross.building += 100;
     if (resources.includes("AMBER") && building.buildingType === "pantheon") gross.building += 300;

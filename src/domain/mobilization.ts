@@ -1,16 +1,18 @@
 import { MOBILIZATION_RULES } from "./catalog.js";
 import type { Mobilization } from "./types.js";
 
-export function militaryLimit(freePopulation: number, mobilization: Mobilization): number {
-  return Math.floor(freePopulation * MOBILIZATION_RULES[mobilization].manpowerRate);
+export function militaryLimit(freePopulation: number, mobilization: Mobilization, marshalPartial = false): number {
+  const rate = marshalPartial && mobilization === "PARTIAL" ? 0.125 : MOBILIZATION_RULES[mobilization].manpowerRate;
+  return Math.floor(freePopulation * rate);
 }
 
-export function settlementMobilizationLimit(population: number, mobilization: Mobilization): number {
-  return militaryLimit(population, mobilization);
+export function settlementMobilizationLimit(population: number, mobilization: Mobilization, marshalPartial = false): number {
+  return militaryLimit(population, mobilization, marshalPartial);
 }
 
-export function settlementTrainingCapacity(population: number, mobilization: Mobilization): number {
-  return Math.floor(population * MOBILIZATION_RULES[mobilization].trainingRate);
+export function settlementTrainingCapacity(population: number, mobilization: Mobilization, marshalPartial = false): number {
+  const rate = marshalPartial && mobilization === "PARTIAL" ? 0.10 : MOBILIZATION_RULES[mobilization].trainingRate;
+  return Math.floor(population * rate);
 }
 
 export function createRecruitmentWaves(

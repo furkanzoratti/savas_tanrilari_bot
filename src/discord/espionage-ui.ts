@@ -14,6 +14,7 @@ const assignmentLabels: Record<string, string> = {
   COUNTERINTELLIGENCE_TRAVELING_SETTLEMENT: "Şehir karşı casusluğuna gidiyor",
   COUNTERINTELLIGENCE_COUNTRY: "Ülke karşı casusluğu",
   COUNTERINTELLIGENCE_SETTLEMENT: "Şehir karşı casusluğu",
+  PERSONAL_GUARD: "Şahsi koruma",
   CURIA: "Curia görevi",
   AGORA: "Agora görevi",
   ARMY: "Ordu görevi"
@@ -41,6 +42,7 @@ export function espionageLogEmbed(operation: EspionageOperationView): EmbedBuild
       `**Saldıran:** ${operation.attacker_country_name} • **Casus:** ${operation.spy_name} (+${operation.spy_skill_bonus})`,
       `**Hedef:** ${operation.target_country_name} / ${operation.target_settlement_name}`,
       `**Hedef Türü:** ${ESPIONAGE_TARGETS[operation.target_type].label}`,
+      operation.target_character_name ? `**Özel Hedef:** ${operation.target_character_name}` : operation.target_army_name ? `**Özel Hedef:** ${operation.target_army_name}` : null,
       `**Hazırlık:** ${ESPIONAGE_PREPARATIONS[operation.preparation].label} • ${gold(operation.preparation_cost)}`,
       "",
       `**Geçerli Hedef:** ${operation.valid_target ? `Evet • ${operation.target_building_name ?? operation.target_building_type}` : "Hayır"}`,
@@ -51,8 +53,8 @@ export function espionageLogEmbed(operation: EspionageOperationView): EmbedBuild
       "",
       `**Tespit Zarı:** ${operation.detection_roll} → **${operation.detection_total}**`,
       `**Tespit Sonucu:** ${detectionText(operation.detection_level, operation.captured)}`,
-      operation.captured ? `**Esaret:** Casus Tur ${operation.return_turn + 2} başında yeniden kullanılabilir.` : `**Dönüş:** Tur ${operation.return_turn} başında yeniden kullanılabilir.`
-    ].join("\n"))
+      operation.captured && operation.target_type === "ASSASSINATE" ? "**Sonuç:** Yakalanan Suikastçı kalıcı olarak kaybedildi." : operation.captured ? `**Esaret:** Casus Tur ${operation.return_turn + 2} başında yeniden kullanılabilir.` : `**Dönüş:** Tur ${operation.return_turn} başında yeniden kullanılabilir.`
+    ].filter((line):line is string=>line!==null).join("\n"))
     .setFooter({ text: `Operasyon: ${operation.id}` })
     .setTimestamp(operation.resolved_at ?? new Date());
 }
@@ -74,10 +76,10 @@ export async function publishPendingEspionageLogs(client: Client, guildId: strin
 export async function handleEspionageCommand(interaction: ChatInputCommandInteraction): Promise<boolean> {
   if (!interaction.guildId) return false;
   if (interaction.commandName === "casusluk") {
-    const country = await resolveCountry(interaction);
     const sub = interaction.options.getSubcommand();
+    await interaction.deferReply({ ephemeral: true });
+    const country = await resolveCountry(interaction);
     if (sub === "gorev-baslat") {
-      await interaction.deferReply({ ephemeral: true });
       const targetCountry = await gameService.countryByName(interaction.guildId, interaction.options.getString("hedef-ulke", true));
       if (!targetCountry) throw new GameError("Hedef ülke bulunamadı.");
       const operation = await espionageService.startOperation({
@@ -88,38 +90,48 @@ export async function handleEspionageCommand(interaction: ChatInputCommandIntera
         targetCountryId: targetCountry.id,
         targetSettlementId: interaction.options.getString("hedef-sehir", true),
         targetType: interaction.options.getString("hedef", true) as EspionageTarget,
-        preparation: interaction.options.getString("hazirlik", true) as EspionagePreparation
+        preparation: interaction.options.getString("hazirlik", true) as EspionagePreparation,
+        targetCharacterId: ["DISCREDIT","KIDNAP","ASSASSINATE"].includes(interaction.options.getString("hedef",true)) ? interaction.options.getString("ozel-hedef") : null,
+        targetArmyId: ["SUPPLY_COLLAPSE","DESERTION"].includes(interaction.options.getString("hedef",true)) ? interaction.options.getString("ozel-hedef") : null
       });
       await interaction.editReply([
         `🕵️ **${operation.spy_name}**, **${operation.target_country_name} / ${operation.target_settlement_name}** hedefine gönderildi.`,
         `Görev: **${ESPIONAGE_TARGETS[operation.target_type].label}** • Çözüm: **Tur ${operation.resolve_turn}**`,
         `Hazırlık gideri: **${gold(operation.preparation_cost)}**`,
-        "Hedefte uygun bina bulunup bulunmadığı açıklanmaz. Sonuç DM anlatımıyla duyurulacaktır."
+        "Hedefin uygunluğu ve gerçek mekanik sonuç oyuncuya açıklanmaz. Sonuç DM anlatımıyla duyurulacaktır."
       ].join("\n"));
       return true;
     }
     if (sub === "operasyonlarim") {
       const operations = await espionageService.operationsForCountry(country.id);
-      await interaction.reply({ embeds: [new EmbedBuilder().setColor(0x4b4d52).setTitle(`🕵️ ${country.name} • Casusluk Operasyonları`).setDescription(operations.length ? operations.map(playerOperationLine).join("\n\n").slice(0, 4_000) : "Henüz operasyon bulunmuyor.")], ephemeral: true });
+      await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x4b4d52).setTitle(`🕵️ ${country.name} • Casusluk Operasyonları`).setDescription(operations.length ? operations.map(playerOperationLine).join("\n\n").slice(0, 4_000) : "Henüz operasyon bulunmuyor.")] });
       return true;
     }
     if (sub === "casuslarim") {
       const spies = await espionageService.spies(country.id);
       const text = spies.length ? spies.map((spy) => `• **${spy.name}** (+${spy.skill_bonus}) — ${assignmentLabels[spy.assignment] ?? spy.assignment}${spy.country_name && spy.settlement_name ? `\n↳ ${spy.country_name} • ${spy.settlement_name}` : ""}`).join("\n\n") : "Akademide yetişmiş casus bulunmuyor.";
-      await interaction.reply({ embeds: [new EmbedBuilder().setColor(0x4b4d52).setTitle(`🕵️ ${country.name} • Casuslar`).setDescription(text.slice(0, 4_000))], ephemeral: true });
+      await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x4b4d52).setTitle(`🕵️ ${country.name} • Casuslar`).setDescription(text.slice(0, 4_000))] });
       return true;
     }
     if (sub === "savunma-ata") {
-      const scope = interaction.options.getString("kapsam", true) as "COUNTRY" | "SETTLEMENT";
+      const scope = interaction.options.getString("kapsam", true) as "COUNTRY" | "SETTLEMENT" | "CHARACTER";
       const settlementId = interaction.options.getString("sehir");
       if (scope === "SETTLEMENT" && !settlementId) throw new GameError("Şehir karşı casusluğu için bir şehir seçmelisiniz.");
-      await espionageService.assignDefense({ guildId: interaction.guildId, countryId: country.id, spyCharacterId: interaction.options.getString("casus", true), scope, settlementId });
-      await interaction.reply({ content: `🛡️ Casus karşı casusluk görevine gönderildi; **bir sonraki tur başında** göreve başlayacak: **${scope === "COUNTRY" ? `${country.name} geneli` : "seçilen şehir"}**.`, ephemeral: true });
+      const protectedCharacterId = interaction.options.getString("korunan-karakter");
+      if (scope === "CHARACTER" && !protectedCharacterId) throw new GameError("Şahsi koruma için korunacak karakteri seçmelisiniz.");
+      await espionageService.assignDefense({ guildId: interaction.guildId, countryId: country.id, spyCharacterId: interaction.options.getString("casus", true), scope, settlementId,characterId:protectedCharacterId });
+      await interaction.editReply({ content: `🛡️ Casus karşı casusluk görevine gönderildi; **bir sonraki tur başında** göreve başlayacak: **${scope === "COUNTRY" ? `${country.name} geneli` : scope === "SETTLEMENT" ? "seçilen şehir" : "seçilen karakter"}**.` });
       return true;
     }
     if (sub === "savunma-kaldir") {
       await espionageService.removeDefense({ guildId: interaction.guildId, countryId: country.id, spyCharacterId: interaction.options.getString("casus", true) });
-      await interaction.reply({ content: "✅ Casusun karşı casusluk görevi kaldırıldı.", ephemeral: true });
+      await interaction.editReply({ content: "✅ Casusun karşı casusluk görevi kaldırıldı." });
+      return true;
+    }
+    if (sub === "bina-onar") {
+      const settlementId=interaction.options.getString("sehir",true);
+      const cost=await espionageService.repairBuilding({countryId:country.id,settlementId,buildingType:interaction.options.getString("hasarli-bina",true)});
+      await interaction.editReply(`✅ Bina onarıldı ve yeniden etkinleştirildi. Şehir hazinesinden **${gold(cost)}** ödendi.`);
       return true;
     }
   }
@@ -184,9 +196,31 @@ export async function handleEspionageAutocomplete(interaction: AutocompleteInter
     await interaction.respond(settlements.filter((item) => !query || item.name.toLocaleLowerCase("tr-TR").includes(query)).slice(0,25).map((item) => ({ name: item.name, value: item.id })));
     return true;
   }
+  if (focused.name === "ozel-hedef") {
+    const targetType = interaction.options.getString("hedef") as EspionageTarget|null;
+    const name = interaction.options.getString("hedef-ulke");
+    const target = name ? await gameService.countryByName(interaction.guildId,name) : null;
+    if (!target || !targetType) { await interaction.respond([]); return true; }
+    const kind = ["DISCREDIT","KIDNAP","ASSASSINATE"].includes(targetType) ? "CHARACTER"
+      : ["SUPPLY_COLLAPSE","DESERTION"].includes(targetType) ? "ARMY" : null;
+    const rows = kind ? await espionageService.targets(target.id,kind) : [];
+    await interaction.respond(rows.filter((item)=>!query||item.name.toLocaleLowerCase("tr-TR").includes(query)).slice(0,25).map((item)=>({name:item.name.slice(0,100),value:item.id})));
+    return true;
+  }
+  if (focused.name === "korunan-karakter") {
+    const rows = (await gameService.document(own.id)).characters.filter((item)=>item.id !== interaction.options.getString("casus"));
+    await interaction.respond(rows.filter((item)=>!query||item.name.toLocaleLowerCase("tr-TR").includes(query)).slice(0,25).map((item)=>({name:`${item.name} • ${item.role}`.slice(0,100),value:item.id})));
+    return true;
+  }
   if (focused.name === "sehir") {
     const settlements = await gameService.listSettlements(own.id);
     await interaction.respond(settlements.filter((item) => !query || item.name.toLocaleLowerCase("tr-TR").includes(query)).slice(0,25).map((item) => ({ name: item.name, value: item.id })));
+    return true;
+  }
+  if (focused.name === "hasarli-bina") {
+    const rows=await espionageService.damagedBuildings(own.id,interaction.options.getString("sehir"));
+    await interaction.respond(rows.filter((item)=>!query||`${item.name} ${item.settlement_name}`.toLocaleLowerCase("tr-TR").includes(query)).slice(0,25)
+      .map((item)=>({name:`${item.name} • ${item.cost.toLocaleString("tr-TR")} Altın`.slice(0,100),value:item.key})));
     return true;
   }
   await interaction.respond([]);

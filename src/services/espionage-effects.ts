@@ -1,0 +1,249 @@
+import { randomInt } from "node:crypto";
+import type { DbClient } from "../db/pool.js";
+import { BUILDINGS, buildingBaseCost } from "../domain/catalog.js";
+import type { EspionageSeverity, EspionageTarget } from "../domain/espionage.js";
+
+export interface EspionageEffectOperation {
+  attacker_country_id: string;
+  target_country_id: string;
+  target_settlement_id: string;
+  target_character_id: string | null;
+  target_army_id: string | null;
+  spy_character_id: string;
+  target_type: EspionageTarget;
+}
+
+const buildingTargets = new Set<EspionageTarget>(["ECONOMIC","MILITARY","PUBLIC","NAVAL"]);
+const percent = (severity: EspionageSeverity, light: number, medium: number, heavy: number): number =>
+  severity === "LIGHT" ? light : severity === "MEDIUM" ? medium : heavy;
+
+async function syncTreasury(client: DbClient, countryId: string): Promise<void> {
+  await client.query(
+    "UPDATE countries SET treasury=(SELECT COALESCE(SUM(local_treasury),0)::bigint FROM settlements WHERE country_id=$1) WHERE id=$1",
+    [countryId]
+  );
+}
+
+export async function espionageTargetExists(client: DbClient, operation: EspionageEffectOperation): Promise<boolean> {
+  if (buildingTargets.has(operation.target_type)) return true;
+  const queries: Partial<Record<EspionageTarget,string>> = {
+    CONSTRUCTION: "SELECT 1 FROM buildings WHERE settlement_id=$1 AND status='BUILDING' LIMIT 1",
+    RECRUITMENT_SABOTAGE: "SELECT 1 FROM recruitment_orders WHERE settlement_id=$1 AND status='TRAINING' LIMIT 1",
+    PRODUCTION_SABOTAGE: "SELECT 1 FROM naval_orders WHERE settlement_id=$1 AND status='BUILDING' UNION ALL SELECT 1 FROM siege_orders WHERE settlement_id=$1 AND status='BUILDING' LIMIT 1",
+    TRADE_COLLAPSE: "SELECT 1 FROM trade_agreements WHERE status='ACTIVE' AND (proposer_settlement_id=$1 OR receiver_settlement_id=$1) LIMIT 1",
+    PARALYZE_GOVERNMENT: "SELECT 1 FROM settlement_policies WHERE settlement_id=$1 AND status='ACTIVE' LIMIT 1",
+    AGGRAVATE_EVENT: "SELECT 1 FROM settlements WHERE id=$1 AND (black_market_active OR epidemic_active OR unrest_active OR rebellion_active)",
+    POISON_GARRISON: "SELECT 1 FROM unit_stacks WHERE settlement_id=$1 AND force_type='GARRISON' AND quantity>0 LIMIT 1",
+    DESTROY_SIEGE_SUPPLIES: "SELECT 1 FROM battles WHERE defender_settlement_id=$1 AND terrain='SIEGE' AND status NOT IN ('FINISHED','CANCELLED') LIMIT 1",
+    SABOTAGE_FLEET: "SELECT 1 FROM naval_units WHERE settlement_id=$1 AND quantity>0 LIMIT 1"
+  };
+  if (["SUPPLY_COLLAPSE","DESERTION"].includes(operation.target_type)) {
+    if (!operation.target_army_id) return false;
+    return Boolean((await client.query(
+      "SELECT 1 FROM armies WHERE id=$1 AND country_id=$2",
+      [operation.target_army_id,operation.target_country_id]
+    )).rowCount);
+  }
+  if (["DISCREDIT","KIDNAP","ASSASSINATE"].includes(operation.target_type)) {
+    if (!operation.target_character_id) return false;
+    return Boolean((await client.query(
+      "SELECT 1 FROM country_characters WHERE id=$1 AND country_id=$2 AND character_status='ACTIVE'",
+      [operation.target_character_id,operation.target_country_id]
+    )).rowCount);
+  }
+  const query = queries[operation.target_type];
+  if (query) return Boolean((await client.query(query,[operation.target_settlement_id])).rowCount);
+  return true;
+}
+
+export async function applyEspionageEffect(
+  client: DbClient,
+  operation: EspionageEffectOperation,
+  severity: EspionageSeverity,
+  turn: number,
+  selectedBuilding?: { building_type: string; level: number; target_level?: number | null; construction_paid_amount?: number } | null
+): Promise<string> {
+  if (severity === "NONE") return "Operasyon başarısız oldu; mekanik etki oluşmadı.";
+  if (buildingTargets.has(operation.target_type) && selectedBuilding) {
+    const name = BUILDINGS[selectedBuilding.building_type]?.name ?? selectedBuilding.building_type;
+    if (severity === "LIGHT") {
+      await client.query("UPDATE buildings SET status='SABOTAGED',sabotaged_until_turn=$1,sabotage_repair_cost=0 WHERE settlement_id=$2 AND building_type=$3", [turn+2,operation.target_settlement_id,selectedBuilding.building_type]);
+      return name+" 2 tur devre dışı bırakıldı.";
+    }
+    if (severity === "MEDIUM") {
+      await client.query("UPDATE buildings SET status='SABOTAGED',sabotaged_until_turn=$1,sabotage_repair_cost=0 WHERE settlement_id=$2 AND building_type=$3", [turn+3,operation.target_settlement_id,selectedBuilding.building_type]);
+      await client.query("UPDATE settlements SET local_treasury=GREATEST(0,local_treasury-1000) WHERE id=$1", [operation.target_settlement_id]);
+      await syncTreasury(client,operation.target_country_id);
+      return name+" 3 tur kapandı ve 1.000 Altın onarım gideri doğdu.";
+    }
+    const repair = Math.ceil(buildingBaseCost(selectedBuilding.building_type,Math.max(1,selectedBuilding.level))/2);
+    await client.query("UPDATE buildings SET status='SABOTAGED',sabotaged_until_turn=NULL,sabotage_repair_cost=$1 WHERE settlement_id=$2 AND building_type=$3", [repair,operation.target_settlement_id,selectedBuilding.building_type]);
+    return name+" HASARLI duruma geçti; "+repair.toLocaleString("tr-TR")+" Altın ödenene kadar çalışmayacak.";
+  }
+  if (operation.target_type === "CONSTRUCTION" && selectedBuilding) {
+    const name = BUILDINGS[selectedBuilding.building_type]?.name ?? selectedBuilding.building_type;
+    if (severity !== "HEAVY") {
+      const delay = severity === "LIGHT" ? 2 : 3;
+      await client.query("UPDATE buildings SET completion_turn=completion_turn+$1 WHERE settlement_id=$2 AND building_type=$3 AND status='BUILDING'", [delay,operation.target_settlement_id,selectedBuilding.building_type]);
+      return name+" inşaatı "+delay+" tur geciktirildi.";
+    }
+    const refund = Math.floor(Number(selectedBuilding.construction_paid_amount??0)/2);
+    if (selectedBuilding.level > 0) {
+      await client.query("UPDATE buildings SET status='ACTIVE',target_level=NULL,started_turn=NULL,completion_turn=NULL,construction_paid_amount=0 WHERE settlement_id=$1 AND building_type=$2", [operation.target_settlement_id,selectedBuilding.building_type]);
+    } else {
+      await client.query("DELETE FROM buildings WHERE settlement_id=$1 AND building_type=$2 AND status='BUILDING'", [operation.target_settlement_id,selectedBuilding.building_type]);
+    }
+    if (refund>0) await client.query("UPDATE settlements SET local_treasury=local_treasury+$1 WHERE id=$2", [refund,operation.target_settlement_id]);
+    await syncTreasury(client,operation.target_country_id);
+    return name+" inşaatı iptal edildi; "+refund.toLocaleString("tr-TR")+" Altın iade edildi.";
+  }
+  if (operation.target_type === "RECRUITMENT_SABOTAGE") {
+    if (severity === "LIGHT") {
+      await client.query("UPDATE recruitment_waves SET due_turn=due_turn+2 WHERE id=(SELECT wave.id FROM recruitment_waves wave JOIN recruitment_orders recruit ON recruit.id=wave.order_id WHERE recruit.settlement_id=$1 AND recruit.status='TRAINING' AND wave.processed_at IS NULL ORDER BY wave.due_turn LIMIT 1)", [operation.target_settlement_id]);
+      return "Bir asker alım dalgası 2 tur geciktirildi.";
+    }
+    if (severity === "HEAVY") {
+      await client.query("UPDATE recruitment_waves wave SET quantity=GREATEST(1,FLOOR(wave.quantity*0.8)::integer),due_turn=due_turn+2 FROM recruitment_orders recruit WHERE recruit.id=wave.order_id AND recruit.settlement_id=$1 AND recruit.status='TRAINING' AND wave.processed_at IS NULL", [operation.target_settlement_id]);
+      await client.query("UPDATE recruitment_orders recruit SET remaining_quantity=(SELECT COALESCE(SUM(wave.quantity),0)::integer FROM recruitment_waves wave WHERE wave.order_id=recruit.id AND wave.processed_at IS NULL) WHERE recruit.settlement_id=$1 AND recruit.status='TRAINING'", [operation.target_settlement_id]);
+      return "Bekleyen askerlerin %20'si kaybedildi; kalan alımlar 2 tur geciktirildi.";
+    }
+    await client.query("UPDATE recruitment_waves wave SET due_turn=due_turn+2 FROM recruitment_orders recruit WHERE recruit.id=wave.order_id AND recruit.settlement_id=$1 AND recruit.status='TRAINING' AND wave.processed_at IS NULL", [operation.target_settlement_id]);
+    return "Şehirdeki bütün asker alımları 2 tur geciktirildi.";
+  }
+  if (operation.target_type === "PRODUCTION_SABOTAGE") {
+    const orders = (await client.query<{ kind: "SHIP"|"SIEGE"; id: string }>(
+      "SELECT 'SHIP'::text AS kind,id FROM naval_orders WHERE settlement_id=$1 AND status='BUILDING' UNION ALL SELECT 'SIEGE'::text AS kind,id FROM siege_orders WHERE settlement_id=$1 AND status='BUILDING'",
+      [operation.target_settlement_id]
+    )).rows;
+    const chosen = orders[randomInt(0,orders.length)];
+    if (severity === "LIGHT" && chosen) {
+      await client.query("UPDATE "+(chosen.kind==="SHIP"?"naval_orders":"siege_orders")+" SET completion_turn=completion_turn+2 WHERE id=$1", [chosen.id]);
+      return "Rastgele bir üretim emri 2 tur geciktirildi.";
+    }
+    if (severity === "HEAVY" && chosen) {
+      await client.query("UPDATE "+(chosen.kind==="SHIP"?"naval_orders":"siege_orders")+" SET status='CANCELLED' WHERE id=$1", [chosen.id]);
+      await client.query("UPDATE naval_orders SET completion_turn=completion_turn+2 WHERE settlement_id=$1 AND status='BUILDING'", [operation.target_settlement_id]);
+      await client.query("UPDATE siege_orders SET completion_turn=completion_turn+2 WHERE settlement_id=$1 AND status='BUILDING'", [operation.target_settlement_id]);
+      return "Rastgele bir üretim emri iadesiz yok edildi; diğer üretimler 2 tur geciktirildi.";
+    }
+    await client.query("UPDATE naval_orders SET completion_turn=completion_turn+2 WHERE settlement_id=$1 AND status='BUILDING'", [operation.target_settlement_id]);
+    await client.query("UPDATE siege_orders SET completion_turn=completion_turn+2 WHERE settlement_id=$1 AND status='BUILDING'", [operation.target_settlement_id]);
+    return "Şehirdeki gemi ve kuşatma üretimleri 2 tur geciktirildi.";
+  }
+  if (operation.target_type === "INCOME_SABOTAGE") {
+    const reduction = percent(severity,10,20,30);
+    const duration = severity === "HEAVY" ? 2 : 1;
+    await client.query(
+      "INSERT INTO settlement_income_penalties(settlement_id,penalty_percent,remaining_acquisition_turns,reason,created_turn,created_by) VALUES($1,$2,$3,'Casusluk: Gelir Sabotajı',$4,'SYSTEM') ON CONFLICT(settlement_id) DO UPDATE SET penalty_percent=GREATEST(settlement_income_penalties.penalty_percent,EXCLUDED.penalty_percent),remaining_acquisition_turns=GREATEST(settlement_income_penalties.remaining_acquisition_turns,EXCLUDED.remaining_acquisition_turns),reason=EXCLUDED.reason,updated_at=NOW()",
+      [operation.target_settlement_id,reduction,duration,turn]
+    );
+    return "Yerleşke geliri "+duration+" Alım Turu boyunca %"+reduction+" azaltıldı.";
+  }
+  if (operation.target_type === "TREASURY_INFILTRATION") {
+    const rate = percent(severity,5,10,20);
+    const target = (await client.query<{ local_treasury: number }>("SELECT local_treasury FROM settlements WHERE id=$1 FOR UPDATE",[operation.target_settlement_id])).rows[0]!;
+    const stolen = Math.floor(Number(target.local_treasury)*rate/100);
+    const home = (await client.query<{ id: string }>("SELECT COALESCE(trained_settlement_id,(SELECT id FROM settlements WHERE country_id=$2 ORDER BY population DESC LIMIT 1)) AS id FROM country_characters WHERE id=$1",[operation.spy_character_id,operation.attacker_country_id])).rows[0]?.id;
+    await client.query("UPDATE settlements SET local_treasury=local_treasury-$1 WHERE id=$2",[stolen,operation.target_settlement_id]);
+    if (home) await client.query("UPDATE settlements SET local_treasury=local_treasury+$1 WHERE id=$2",[stolen,home]);
+    await syncTreasury(client,operation.target_country_id); await syncTreasury(client,operation.attacker_country_id);
+    return "Hedef hazinenin %"+rate+"'i sızdırıldı; tutar saldıran oyuncuya açıklanmayacak.";
+  }
+  if (operation.target_type === "TRADE_COLLAPSE") {
+    const agreements = (await client.query<{ id: string }>("SELECT id FROM trade_agreements WHERE status='ACTIVE' AND (proposer_settlement_id=$1 OR receiver_settlement_id=$1) ORDER BY created_at",[operation.target_settlement_id])).rows;
+    const chosen = agreements[randomInt(0,agreements.length)];
+    if (severity === "LIGHT" && chosen) {
+      await client.query("UPDATE trade_agreements SET suspended_until_turn=$1 WHERE id=$2",[turn+2,chosen.id]);
+      return "Rastgele bir ticari ilişki 2 tur askıya alındı.";
+    }
+    if (severity === "HEAVY" && chosen) {
+      await client.query("UPDATE trade_agreements SET status='ENDED',ended_at=NOW() WHERE id=$1",[chosen.id]);
+      await client.query("UPDATE trade_agreements SET suspended_until_turn=$1 WHERE status='ACTIVE' AND (proposer_settlement_id=$2 OR receiver_settlement_id=$2)",[turn+3,operation.target_settlement_id]);
+      return "Bir ticaret antlaşması sona erdi; diğer ilişkiler 3 tur askıya alındı.";
+    }
+    await client.query("UPDATE trade_agreements SET suspended_until_turn=$1 WHERE status='ACTIVE' AND (proposer_settlement_id=$2 OR receiver_settlement_id=$2)",[turn+2,operation.target_settlement_id]);
+    return "Şehrin bütün ticari ilişkileri 2 tur askıya alındı.";
+  }
+  if (operation.target_type === "INCITE_PUBLIC") {
+    await client.query(
+      severity === "HEAVY"
+        ? "UPDATE settlements SET rebellion_active=TRUE,unrest_active=TRUE WHERE id=$1"
+        : "UPDATE settlements SET unrest_active=TRUE WHERE id=$1",
+      [operation.target_settlement_id]
+    );
+    return severity === "HEAVY" ? "Yerleşkede doğrudan isyan başladı." : (severity === "MEDIUM" ? "Orta şiddette huzursuzluk başladı." : "Huzursuzluk başladı.");
+  }
+  if (operation.target_type === "PARALYZE_GOVERNMENT") {
+    const duration = severity === "HEAVY" ? 3 : 2;
+    if (severity === "LIGHT") {
+      await client.query("UPDATE settlement_policies SET suspended_until_turn=$1 WHERE id=(SELECT id FROM settlement_policies WHERE settlement_id=$2 AND status='ACTIVE' ORDER BY slot LIMIT 1)",[turn+duration,operation.target_settlement_id]);
+    } else {
+      await client.query("UPDATE settlement_policies SET suspended_until_turn=$1 WHERE settlement_id=$2 AND status='ACTIVE'",[turn+duration,operation.target_settlement_id]);
+      if (severity === "HEAVY") await client.query("UPDATE buildings SET status='SABOTAGED',sabotaged_until_turn=$1 WHERE settlement_id=$2 AND building_type='curia' AND status='ACTIVE'",[turn+2,operation.target_settlement_id]);
+    }
+    return severity === "LIGHT" ? "Bir şehir politikası 2 tur kapandı." : "Şehir politikaları "+duration+" tur kapandı"+(severity==="HEAVY" ? "; Curia etkileri 2 tur devre dışı." : ".");
+  }
+  if (operation.target_type === "AGGRAVATE_EVENT") {
+    if (severity === "HEAVY") {
+      await client.query("UPDATE settlements SET unrest_active=TRUE,rebellion_active=TRUE WHERE id=$1",[operation.target_settlement_id]);
+      return "Kontrol altındaki olay yeniden etkinleşti ve yayılmaya hazır hâle geldi.";
+    }
+    if (severity === "MEDIUM") await client.query("UPDATE settlements SET rebellion_active=CASE WHEN unrest_active THEN TRUE ELSE rebellion_active END,unrest_active=TRUE WHERE id=$1",[operation.target_settlement_id]);
+    return severity === "MEDIUM" ? "Aktif olay bir şiddet kademesi yükseltildi." : "Aktif olayın etkisi 2 tur uzatıldı.";
+  }
+  if (operation.target_type === "SUPPLY_COLLAPSE" && operation.target_army_id) {
+    const multiplier = severity === "LIGHT" ? 0.95 : severity === "MEDIUM" ? 0.90 : 0.85;
+    const rounds = severity === "LIGHT" ? 1 : 2;
+    await client.query("INSERT INTO army_temporary_effects(army_id,effect_type,clash_multiplier,damage_multiplier,rounds_remaining,disable_doctrine_first_round,created_turn) VALUES($1,'SUPPLY_COLLAPSE',$2,$2,$3,$4,$5)",[operation.target_army_id,multiplier,rounds,severity==="HEAVY",turn]);
+    return "Hedef ordunun ilk "+rounds+" savaş turunda çarpışma ve hasarı ×"+multiplier.toFixed(2)+" olacak.";
+  }
+  if (operation.target_type === "DESERTION" && operation.target_army_id) {
+    const rate = percent(severity,3,7,15);
+    const units = (await client.query<{ settlement_id: string; unit_type: string; quantity: number }>("SELECT settlement_id,unit_type,quantity FROM army_units WHERE army_id=$1 FOR UPDATE",[operation.target_army_id])).rows;
+    let total = 0;
+    for (const unit of units) {
+      const lost = Math.floor(Number(unit.quantity)*rate/100); if (!lost) continue; total += lost;
+      await client.query("UPDATE army_units SET quantity=quantity-$1 WHERE army_id=$2 AND settlement_id=$3 AND unit_type=$4",[lost,operation.target_army_id,unit.settlement_id,unit.unit_type]);
+      await client.query("DELETE FROM army_units WHERE army_id=$1 AND settlement_id=$2 AND unit_type=$3 AND quantity<=0",[operation.target_army_id,unit.settlement_id,unit.unit_type]);
+      await client.query("UPDATE unit_stacks SET quantity=GREATEST(0,quantity-$1) WHERE id=(SELECT id FROM unit_stacks WHERE settlement_id=$2 AND unit_type=$3 AND force_type='ARMY' ORDER BY quantity DESC LIMIT 1)",[lost,unit.settlement_id,unit.unit_type]);
+      await client.query("UPDATE settlements SET population=population+$1 WHERE id=$2",[lost,unit.settlement_id]);
+    }
+    return "Ordunun %"+rate+"'i firar etti; "+total.toLocaleString("tr-TR")+" kişi kaynak yerleşkelerinin nüfusuna döndü.";
+  }
+  if (operation.target_type === "POISON_GARRISON") {
+    const rate = percent(severity,5,10,20);
+    await client.query("UPDATE unit_stacks SET quantity=GREATEST(0,quantity-FLOOR(quantity*$1/100)::integer) WHERE settlement_id=$2 AND force_type='GARRISON'",[rate,operation.target_settlement_id]);
+    return "Garnizonun %"+rate+"'i kaybedildi; otomatik yenileme başlatılmadı.";
+  }
+  if (operation.target_type === "DESTROY_SIEGE_SUPPLIES") {
+    const reduction = percent(severity,2,3,4);
+    await client.query("UPDATE battles SET starvation_remaining=GREATEST(0,COALESCE(starvation_remaining,0)-$1) WHERE defender_settlement_id=$2 AND terrain='SIEGE' AND status NOT IN ('FINISHED','CANCELLED')",[reduction,operation.target_settlement_id]);
+    return "Kuşatma açlık dayanıklılığı "+reduction+" tur azaltıldı.";
+  }
+  if (operation.target_type === "SABOTAGE_FLEET") {
+    const ships = (await client.query<{ id: string; quantity: number }>("SELECT id,quantity FROM naval_units WHERE settlement_id=$1 AND quantity>0 FOR UPDATE",[operation.target_settlement_id])).rows;
+    const total = ships.reduce((sum,row)=>sum+Number(row.quantity),0);
+    const destroyRate = severity === "LIGHT" ? 0 : severity === "MEDIUM" ? 5 : 10;
+    const disableRate = severity === "LIGHT" ? 10 : severity === "HEAVY" ? 10 : 0;
+    for (const ship of ships) {
+      const destroyed = Math.floor(Number(ship.quantity)*destroyRate/100);
+      await client.query("UPDATE naval_units SET quantity=quantity-$1,disabled_until_turn=CASE WHEN $2>0 THEN $3 ELSE disabled_until_turn END WHERE id=$4",[destroyed,disableRate,turn+2,ship.id]);
+    }
+    return Math.floor(total*destroyRate/100).toLocaleString("tr-TR")+" gemi birimi yok edildi; filonun %"+disableRate+" kadarı 2 tur kullanılamaz.";
+  }
+  if (["DISCREDIT","KIDNAP","ASSASSINATE"].includes(operation.target_type) && operation.target_character_id) {
+    const duration = operation.target_type === "DISCREDIT" ? percent(severity,2,4,6)
+      : operation.target_type === "KIDNAP" ? (severity === "LIGHT" ? 2 : severity === "MEDIUM" ? 4 : 0)
+      : severity === "LIGHT" ? 3 : severity === "MEDIUM" ? 6 : 0;
+    if (operation.target_type === "ASSASSINATE" && severity === "HEAVY") {
+      await client.query("UPDATE country_characters SET character_status='DEAD',assignment='NONE',assigned_settlement_id=NULL,unavailable_until_turn=NULL WHERE id=$1",[operation.target_character_id]);
+      return "Hedef karakter kalıcı olarak öldürüldü; bütün görevleri sona erdi.";
+    }
+    await client.query("UPDATE merchant_operations SET status='CANCELLED',updated_at=NOW() WHERE merchant_character_id=$1 AND status IN ('PENDING_ACCEPTANCE','TRAVELING','ACTIVE','CONTROLLED')",[operation.target_character_id]);
+    await client.query("UPDATE diplomat_operations SET status='CANCELLED',updated_at=NOW() WHERE diplomat_character_id=$1 AND status IN ('TRAVELING','ACTIVE','PAUSED')",[operation.target_character_id]);
+    await client.query("UPDATE country_characters SET assignment='CAPTURED',assigned_settlement_id=$1,unavailable_until_turn=$2,specialization_progress=CASE WHEN $3 THEN 0 ELSE specialization_progress END WHERE id=$4",[operation.target_settlement_id,duration>0?turn+duration:null,operation.target_type==="DISCREDIT"&&severity==="HEAVY",operation.target_character_id]);
+    if (operation.target_type === "KIDNAP" && severity === "HEAVY") return "Hedef karakter süresiz esir alındı.";
+    return "Hedef karakter "+duration+" tur kullanılamayacak.";
+  }
+  return "Operasyon başarıyla sonuçlandı.";
+}

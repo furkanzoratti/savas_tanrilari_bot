@@ -233,7 +233,8 @@ export const cityService = {
       if (character.assignment !== "NONE") throw new GameError("Bu Diplomat hâlen başka bir görevde.");
       const occupied = await client.query("SELECT 1 FROM settlement_assimilation_diplomats WHERE settlement_id=$1", [settlement.id]);
       if (occupied.rowCount) throw new GameError("Bu yerleşkenin asimilasyonunda zaten bir Diplomat görev yapıyor.");
-      const completionTurn = Number(settlement.conquered_turn) + 5;
+      const assimilationReduction = Number(character.skill_bonus) >= 2 ? 2 : 1;
+      const completionTurn = Math.max(guild.current_turn + 1, Number(settlement.conquered_turn) + 6 - assimilationReduction);
       if (guild.current_turn >= completionTurn) throw new GameError("Bu yerleşke bir sonraki tur ilerlemesinde zaten otomatik olarak asimile edilecek.");
       await client.query(
         "INSERT INTO settlement_assimilation_diplomats(settlement_id,character_id,assigned_turn,assigned_by) VALUES($1,$2,$3,$4)",

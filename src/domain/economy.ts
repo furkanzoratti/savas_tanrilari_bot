@@ -91,6 +91,7 @@ export function calculatePopulationGain(input: {
   ruinStage: RuinStage;
   mobilization: Mobilization;
   resources?: readonly ResourceType[];
+  marshalPartial?: boolean;
 }): number {
   let healerGrowth = 0;
   let growthPercent = 0;
@@ -113,6 +114,8 @@ export function calculatePopulationGain(input: {
   if (input.resources?.includes("GRAIN")) rawGrowth *= 1.10;
   if (input.resources?.includes("SPICES")) rawGrowth *= 1.05;
   rawGrowth *= ruinIncomeMultiplier(input.ruinStage);
-  rawGrowth *= MOBILIZATION_RULES[input.mobilization].populationMultiplier;
+  rawGrowth *= input.marshalPartial && input.mobilization === "PARTIAL"
+    ? 1
+    : MOBILIZATION_RULES[input.mobilization].populationMultiplier;
   return Math.max(0, Math.floor(rawGrowth));
 }

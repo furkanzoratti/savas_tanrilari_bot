@@ -5,10 +5,10 @@ describe("casusluk komutları", () => {
   it("oyuncu görev, takip ve karşı casusluk akışlarını kaydeder", () => {
     const command = commandBuilders.find((item) => item.name === "casusluk");
     expect(command?.options?.map((item) => item.name)).toEqual([
-      "gorev-baslat", "operasyonlarim", "casuslarim", "savunma-ata", "savunma-kaldir"
+      "gorev-baslat", "operasyonlarim", "casuslarim", "savunma-ata", "savunma-kaldir", "bina-onar"
     ]);
     const start = command?.options?.find((item) => item.name === "gorev-baslat");
-    expect(start?.options?.map((item) => item.name)).toEqual(["casus", "hedef-ulke", "hedef-sehir", "hedef", "hazirlik"]);
+    expect(start?.options?.map((item) => item.name)).toEqual(["casus", "hedef-ulke", "hedef-sehir", "hedef", "hazirlik", "ozel-hedef"]);
     expect(start?.options?.find((item) => item.name === "casus")).toMatchObject({ required: true, autocomplete: true });
     expect(start?.options?.find((item) => item.name === "hedef-sehir")).toMatchObject({ required: true, autocomplete: true });
   });
