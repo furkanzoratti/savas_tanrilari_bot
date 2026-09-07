@@ -1303,6 +1303,7 @@ export const gameService = {
       const enslavedExistingGarrison = Math.min(Number(settlement.population), remainingGarrison);
       const enslavedGarrison = enslavedExistingGarrison + cancelledGarrisonTrainees;
       await client.query("DELETE FROM army_units WHERE settlement_id=$1", [settlement.id]);
+      await client.query("DELETE FROM army_siege_assets WHERE settlement_id=$1", [settlement.id]);
       const removedStacks = (await client.query<{ quantity: number; force_type: "ARMY" | "GARRISON" }>(
         "DELETE FROM unit_stacks WHERE settlement_id=$1 RETURNING quantity,force_type", [settlement.id]
       )).rows;
@@ -1393,17 +1394,31 @@ export const gameService = {
       }>(`SELECT au.army_id,au.settlement_id,s.name AS settlement_name,au.unit_type,au.quantity
              FROM army_units au JOIN settlements s ON s.id=au.settlement_id
             WHERE au.army_id=ANY($1::uuid[]) ORDER BY s.name,au.unit_type`, [armyRows.map((army) => army.id)])).rows;
+      const armySiegeAssetRows = (await client.query<ArmyView["siegeAssets"][number] & { army_id: string }>(
+        `SELECT asset.army_id,asset.settlement_id,s.name AS settlement_name,asset.asset_type,asset.quantity,asset.enhanced_quantity
+           FROM army_siege_assets asset JOIN settlements s ON s.id=asset.settlement_id
+          WHERE asset.army_id=ANY($1::uuid[]) ORDER BY s.name,asset.asset_type`, [armyRows.map((army) => army.id)]
+      )).rows;
       const armies: ArmyView[] = armyRows.map((army) => {
         const armyUnits = armyUnitRows.filter((unit) => unit.army_id === army.id).map(({ army_id: _armyId, ...unit }) => ({ ...unit, quantity: Number(unit.quantity) }));
+        const siegeAssets = armySiegeAssetRows.filter((asset) => asset.army_id === army.id).map(({ army_id: _armyId, ...asset }) => ({
+          ...asset, quantity: Number(asset.quantity), enhanced_quantity: Number(asset.enhanced_quantity)
+        }));
         const composition = armyUnits.reduce<BattleComposition>((result, unit) => {
           result[unit.unit_type] = (result[unit.unit_type] ?? 0) + unit.quantity;
           return result;
         }, {});
+        const siegeComposition: ArmyView["siegeComposition"] = {};
+        const enhancedSiegeComposition: ArmyView["enhancedSiegeComposition"] = {};
+        for (const asset of siegeAssets) {
+          siegeComposition[asset.asset_type] = (siegeComposition[asset.asset_type] ?? 0) + asset.quantity;
+          enhancedSiegeComposition[asset.asset_type] = (enhancedSiegeComposition[asset.asset_type] ?? 0) + asset.enhanced_quantity;
+        }
         const activationTurn = guild.army_composition_activation_turn === null ? null : Number(guild.army_composition_activation_turn);
         return {
           ...army,
           commander_skill_bonus: Number(army.commander_skill_bonus), created_turn: Number(army.created_turn),
-          units: armyUnits, composition,
+          units: armyUnits, siegeAssets, siegeComposition, enhancedSiegeComposition, composition,
           total: Object.values(composition).reduce<number>((sum, value) => sum + Number(value ?? 0), 0),
           assessment: assessArmyComposition(composition, "FIELD"),
           composition_active: activationTurn === null || guild.current_turn >= activationTurn,

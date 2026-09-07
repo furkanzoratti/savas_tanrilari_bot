@@ -1681,5 +1681,26 @@ export const migrations = [
       CREATE INDEX IF NOT EXISTS espionage_target_character_idx ON espionage_operations(target_character_id,status);
       CREATE INDEX IF NOT EXISTS espionage_target_army_idx ON espionage_operations(target_army_id,status);
     `
+  },
+  {
+    version: 51,
+    name: "persistent_army_siege_assets",
+    sql: `
+      CREATE TABLE IF NOT EXISTS army_siege_assets (
+        army_id UUID NOT NULL REFERENCES armies(id) ON DELETE CASCADE,
+        settlement_id UUID NOT NULL REFERENCES settlements(id) ON DELETE CASCADE,
+        asset_type TEXT NOT NULL CHECK (asset_type IN ('ladder_group','ram','mantlet','ballista','catapult','siege_tower')),
+        quantity INTEGER NOT NULL CHECK (quantity > 0),
+        enhanced_quantity INTEGER NOT NULL DEFAULT 0 CHECK (enhanced_quantity >= 0 AND enhanced_quantity <= quantity),
+        PRIMARY KEY(army_id,settlement_id,asset_type)
+      );
+      CREATE INDEX IF NOT EXISTS army_siege_assets_settlement_idx
+        ON army_siege_assets(settlement_id,asset_type);
+
+      ALTER TABLE battle_army_assignments
+        ADD COLUMN IF NOT EXISTS initial_assets JSONB NOT NULL DEFAULT '{}'::jsonb;
+      ALTER TABLE battle_army_assignments
+        ADD COLUMN IF NOT EXISTS initial_enhanced JSONB NOT NULL DEFAULT '{}'::jsonb;
+    `
   }
 ] as const;

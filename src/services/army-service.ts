@@ -1,13 +1,24 @@
 import type { DbClient } from "../db/pool.js";
 import { pool, withTransaction } from "../db/pool.js";
-import { BATTLE_UNIT_STATS, assessArmyComposition, type ArmyCompositionAssessment, type BattleComposition, type BattleUnitType } from "../domain/battle.js";
+import { SIEGE_ASSETS } from "../domain/catalog.js";
+import { BATTLE_UNIT_STATS, assessArmyComposition, type ArmyCompositionAssessment, type BattleComposition, type BattleUnitType, type SiegeAssetType, type SiegeComposition } from "../domain/battle.js";
 import { GameError } from "./game-service.js";
+
+export type MobileSiegeAssetType = Exclude<SiegeAssetType, "wall_ballista">;
 
 export interface ArmyUnitAllocation {
   settlement_id: string;
   settlement_name: string;
   unit_type: BattleUnitType;
   quantity: number;
+}
+
+export interface ArmySiegeAssetAllocation {
+  settlement_id: string;
+  settlement_name: string;
+  asset_type: MobileSiegeAssetType;
+  quantity: number;
+  enhanced_quantity: number;
 }
 
 export interface ArmyView {
@@ -21,6 +32,9 @@ export interface ArmyView {
   commander_skill_bonus: number;
   created_turn: number;
   units: ArmyUnitAllocation[];
+  siegeAssets: ArmySiegeAssetAllocation[];
+  siegeComposition: SiegeComposition;
+  enhancedSiegeComposition: SiegeComposition;
   composition: BattleComposition;
   total: number;
   assessment: ArmyCompositionAssessment;
@@ -63,13 +77,27 @@ async function loadArmy(client: DbClient, armyId: string, countryId?: string): P
        FROM army_units au JOIN settlements s ON s.id=au.settlement_id
       WHERE au.army_id=$1 ORDER BY s.name,au.unit_type`, [army.id]
   )).rows.map((row) => ({ ...row, quantity: Number(row.quantity) }));
+  const siegeAssets = (await client.query<ArmySiegeAssetAllocation>(
+    `SELECT asset.settlement_id,s.name AS settlement_name,asset.asset_type,asset.quantity,asset.enhanced_quantity
+       FROM army_siege_assets asset JOIN settlements s ON s.id=asset.settlement_id
+      WHERE asset.army_id=$1 ORDER BY s.name,asset.asset_type`, [army.id]
+  )).rows.map((row) => ({ ...row, quantity: Number(row.quantity), enhanced_quantity: Number(row.enhanced_quantity) }));
   const composition = mergeComposition(units);
+  const siegeComposition: SiegeComposition = {};
+  const enhancedSiegeComposition: SiegeComposition = {};
+  for (const asset of siegeAssets) {
+    siegeComposition[asset.asset_type] = (siegeComposition[asset.asset_type] ?? 0) + asset.quantity;
+    enhancedSiegeComposition[asset.asset_type] = (enhancedSiegeComposition[asset.asset_type] ?? 0) + asset.enhanced_quantity;
+  }
   const activationTurn = army.army_composition_activation_turn === null ? null : Number(army.army_composition_activation_turn);
   return {
     ...army,
     commander_skill_bonus: Number(army.commander_skill_bonus),
     created_turn: Number(army.created_turn),
     units,
+    siegeAssets,
+    siegeComposition,
+    enhancedSiegeComposition,
     composition,
     total: Object.values(composition).reduce<number>((sum, value) => sum + Number(value ?? 0), 0),
     assessment: assessArmyComposition(composition, "FIELD"),
@@ -132,6 +160,34 @@ export const armyService = {
     return rows
       .map((row) => ({ unit_type: row.unit_type, available: Number(row.available) }))
       .filter((row) => row.available > 0 && row.unit_type !== "militia" && Boolean(BATTLE_UNIT_STATS[row.unit_type]));
+  },
+
+  async availableSettlementSiegeAssets(countryId: string, settlementValue: string): Promise<Array<{ asset_type: MobileSiegeAssetType; available: number; enhanced: number }>> {
+    const rows = (await pool.query<{ asset_type: MobileSiegeAssetType; available: number; enhanced: number }>(
+      `SELECT stock.asset_type,
+              GREATEST(0,stock.quantity-COALESCE(allocated.quantity,0))::integer AS available,
+              GREATEST(0,stock.enhanced-COALESCE(allocated.enhanced,0))::integer AS enhanced
+         FROM (
+           SELECT asset.asset_type,COALESCE(SUM(asset.quantity),0)::integer AS quantity,
+                  COALESCE(SUM(asset.enhanced_quantity),0)::integer AS enhanced
+             FROM siege_assets asset JOIN settlements s ON s.id=asset.settlement_id
+            WHERE s.country_id=$1 AND (s.id::text=$2 OR lower(s.name)=lower($2))
+              AND asset.asset_type<>'wall_ballista'
+            GROUP BY asset.asset_type
+         ) stock
+         LEFT JOIN (
+           SELECT assigned.asset_type,COALESCE(SUM(assigned.quantity),0)::integer AS quantity,
+                  COALESCE(SUM(assigned.enhanced_quantity),0)::integer AS enhanced
+             FROM army_siege_assets assigned JOIN settlements s ON s.id=assigned.settlement_id
+            WHERE s.country_id=$1 AND (s.id::text=$2 OR lower(s.name)=lower($2))
+            GROUP BY assigned.asset_type
+         ) allocated ON allocated.asset_type=stock.asset_type
+        ORDER BY stock.asset_type`,
+      [countryId, settlementValue.trim()]
+    )).rows;
+    return rows
+      .map((row) => ({ asset_type: row.asset_type, available: Number(row.available), enhanced: Math.min(Number(row.available), Number(row.enhanced)) }))
+      .filter((row) => row.available > 0 && Boolean(SIEGE_ASSETS[row.asset_type]));
   },
 
   async listBattleCountry(guildId: string, countryId: string, battleId: string): Promise<ArmyView[]> {
@@ -221,6 +277,65 @@ export const armyService = {
       else await client.query("UPDATE army_units SET quantity=$1 WHERE army_id=$2 AND settlement_id=$3 AND unit_type=$4", [next, army.id, row.settlement_id, input.unitType]);
       await client.query("UPDATE armies SET updated_at=NOW() WHERE id=$1", [army.id]);
       await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'army.units.remove','army',$3,$4::jsonb)", [input.guildId, input.actorId, army.id, JSON.stringify({ settlementId: row.settlement_id, unitType: input.unitType, quantity: input.quantity })]);
+      return loadArmy(client, army.id, input.countryId);
+    });
+  },
+
+  async addSiegeAssets(input: { guildId: string; countryId: string; actorId: string; army: string; settlement: string; assetType: MobileSiegeAssetType; quantity: number }): Promise<ArmyView> {
+    return withTransaction(async (client) => {
+      if (!Number.isInteger(input.quantity) || input.quantity < 1) throw new GameError("Eklenecek kuşatma aleti miktarı pozitif tam sayı olmalıdır.");
+      if (!SIEGE_ASSETS[input.assetType] || input.assetType === ("wall_ballista" as MobileSiegeAssetType)) throw new GameError("Bu kuşatma aleti hareketli orduya tahsis edilemez.");
+      const army = await resolveArmy(client, input.countryId, input.army, true);
+      await assertMutable(client, army.id);
+      const settlement = (await client.query<{ id: string; name: string }>(
+        "SELECT id,name FROM settlements WHERE country_id=$1 AND (id::text=$2 OR lower(name)=lower($2)) FOR UPDATE",
+        [input.countryId, input.settlement.trim()]
+      )).rows[0];
+      if (!settlement) throw new GameError("Yerleşke bulunamadı veya bu devlete ait değil.");
+      const stock = (await client.query<{ quantity: number; enhanced: number }>(
+        `SELECT COALESCE(SUM(quantity),0)::integer AS quantity,COALESCE(SUM(enhanced_quantity),0)::integer AS enhanced
+           FROM siege_assets WHERE settlement_id=$1 AND asset_type=$2`, [settlement.id, input.assetType]
+      )).rows[0];
+      const allocated = (await client.query<{ quantity: number; enhanced: number }>(
+        `SELECT COALESCE(SUM(quantity),0)::integer AS quantity,COALESCE(SUM(enhanced_quantity),0)::integer AS enhanced
+           FROM army_siege_assets WHERE settlement_id=$1 AND asset_type=$2`, [settlement.id, input.assetType]
+      )).rows[0];
+      const available = Math.max(0, Number(stock?.quantity ?? 0) - Number(allocated?.quantity ?? 0));
+      if (input.quantity > available) throw new GameError(`Bu yerleşkede başka ordulara ayrılmamış yalnızca ${available} ${SIEGE_ASSETS[input.assetType].name} var.`);
+      const enhancedAvailable = Math.max(0, Number(stock?.enhanced ?? 0) - Number(allocated?.enhanced ?? 0));
+      const enhancedToAdd = Math.min(input.quantity, enhancedAvailable);
+      await client.query(
+        `INSERT INTO army_siege_assets(army_id,settlement_id,asset_type,quantity,enhanced_quantity) VALUES($1,$2,$3,$4,$5)
+         ON CONFLICT(army_id,settlement_id,asset_type) DO UPDATE
+           SET quantity=army_siege_assets.quantity+EXCLUDED.quantity,
+               enhanced_quantity=army_siege_assets.enhanced_quantity+EXCLUDED.enhanced_quantity`,
+        [army.id, settlement.id, input.assetType, input.quantity, enhancedToAdd]
+      );
+      await client.query("UPDATE armies SET updated_at=NOW() WHERE id=$1", [army.id]);
+      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'army.assets.add','army',$3,$4::jsonb)", [input.guildId, input.actorId, army.id, JSON.stringify({ settlementId: settlement.id, assetType: input.assetType, quantity: input.quantity, enhanced: enhancedToAdd })]);
+      return loadArmy(client, army.id, input.countryId);
+    });
+  },
+
+  async removeSiegeAssets(input: { guildId: string; countryId: string; actorId: string; army: string; settlement: string; assetType: MobileSiegeAssetType; quantity: number }): Promise<ArmyView> {
+    return withTransaction(async (client) => {
+      if (!Number.isInteger(input.quantity) || input.quantity < 1) throw new GameError("Çıkarılacak kuşatma aleti miktarı pozitif tam sayı olmalıdır.");
+      const army = await resolveArmy(client, input.countryId, input.army, true);
+      await assertMutable(client, army.id);
+      const row = (await client.query<{ settlement_id: string; quantity: number; enhanced_quantity: number }>(
+        `SELECT asset.settlement_id,asset.quantity,asset.enhanced_quantity
+           FROM army_siege_assets asset JOIN settlements s ON s.id=asset.settlement_id
+          WHERE asset.army_id=$1 AND asset.asset_type=$2 AND (s.id::text=$3 OR lower(s.name)=lower($3))
+          FOR UPDATE OF asset`, [army.id, input.assetType, input.settlement.trim()]
+      )).rows[0];
+      if (!row) throw new GameError("Bu orduda seçilen yerleşkeye ait böyle bir kuşatma aleti bulunmuyor.");
+      if (input.quantity > Number(row.quantity)) throw new GameError(`Orduda bu kaynak için yalnızca ${row.quantity} alet var.`);
+      const next = Number(row.quantity) - input.quantity;
+      const nextEnhanced = Math.min(next, Number(row.enhanced_quantity));
+      if (next === 0) await client.query("DELETE FROM army_siege_assets WHERE army_id=$1 AND settlement_id=$2 AND asset_type=$3", [army.id, row.settlement_id, input.assetType]);
+      else await client.query("UPDATE army_siege_assets SET quantity=$1,enhanced_quantity=$2 WHERE army_id=$3 AND settlement_id=$4 AND asset_type=$5", [next, nextEnhanced, army.id, row.settlement_id, input.assetType]);
+      await client.query("UPDATE armies SET updated_at=NOW() WHERE id=$1", [army.id]);
+      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'army.assets.remove','army',$3,$4::jsonb)", [input.guildId, input.actorId, army.id, JSON.stringify({ settlementId: row.settlement_id, assetType: input.assetType, quantity: input.quantity })]);
       return loadArmy(client, army.id, input.countryId);
     });
   },

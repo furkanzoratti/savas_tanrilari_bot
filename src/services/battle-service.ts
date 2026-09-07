@@ -318,6 +318,13 @@ function retreatLoss(view: BattleView, side: BattleSideKey): number {
   return Math.min(loser.current_total, Math.round(loser.current_total * Math.min(0.25, rate)));
 }
 
+function defaultArmySiegeTarget(asset: SiegeAssetType): SiegeTarget {
+  if (asset === "ram") return "GATE";
+  if (["ladder_group", "mantlet", "siege_tower"].includes(asset)) return "ASSAULT";
+  if (asset === "catapult") return "WALL";
+  return "ARMY";
+}
+
 interface BattleCommanderProfile {
   id: string;
   skill_bonus: number;
@@ -867,8 +874,26 @@ export const battleService = {
       )).rows[0];
       if (!army) throw new GameError("Ordu bulunamadı veya seçilen savaş tarafındaki bir devlete ait değil.");
       if (input.action === "REMOVE") {
-        const removed = await client.query("DELETE FROM battle_army_assignments WHERE battle_id=$1 AND army_id=$2 RETURNING army_id", [battle.id, army.id]);
-        if (!removed.rowCount) throw new GameError("Bu ordu savaş taslağına ekli değil.");
+        const assignment = (await client.query<{ initial_assets: SiegeComposition; initial_enhanced: SiegeComposition }>(
+          "SELECT initial_assets,initial_enhanced FROM battle_army_assignments WHERE battle_id=$1 AND army_id=$2 FOR UPDATE",
+          [battle.id, army.id]
+        )).rows[0];
+        if (!assignment) throw new GameError("Bu ordu savaş taslağına ekli değil.");
+        const current = await loadView(client, battle.id, true);
+        const support: SiegeComposition = { ...current.sides[input.side].support_assets };
+        const enhanced: SiegeComposition = { ...current.sides[input.side].support_enhanced };
+        const targets: SiegeTargets = { ...current.sides[input.side].support_targets };
+        for (const [type, quantity] of Object.entries(assignment.initial_assets ?? {})) {
+          const asset = type as SiegeAssetType;
+          support[asset] = Math.max(0, (support[asset] ?? 0) - Number(quantity ?? 0));
+          enhanced[asset] = Math.max(0, (enhanced[asset] ?? 0) - Number(assignment.initial_enhanced?.[asset] ?? 0));
+          if (!support[asset]) { delete support[asset]; delete enhanced[asset]; delete targets[asset]; }
+        }
+        await client.query("DELETE FROM battle_army_assignments WHERE battle_id=$1 AND army_id=$2", [battle.id, army.id]);
+        await client.query(
+          "UPDATE battle_sides SET support_assets=$1::jsonb,support_enhanced=$2::jsonb,support_targets=$3::jsonb WHERE battle_id=$4 AND side_key=$5",
+          [JSON.stringify(support), JSON.stringify(enhanced), JSON.stringify(targets), battle.id, input.side]
+        );
         await rebuildParticipantFromArmies(client, battle.id, army.country_id);
         await rebuildDraftSide(client, battle.id, input.side);
         const view = await loadView(client, battle.id);
@@ -890,7 +915,38 @@ export const battleService = {
       )).rows.map((row) => [row.unit_type,Number(row.quantity)])) as BattleComposition;
       const total = compositionTotal(composition);
       if (!total) throw new GameError("Bu orduda savaşa eklenebilecek asker bulunmuyor.");
-      await client.query("INSERT INTO battle_army_assignments(battle_id,side_key,army_id,country_id,initial_composition) VALUES($1,$2,$3,$4,$5::jsonb)", [battle.id,input.side,army.id,army.country_id,JSON.stringify(composition)]);
+      const armyAssetRows = battle.terrain === "SIEGE" && input.side === "A"
+        ? (await client.query<{ asset_type: SiegeAssetType; quantity: number; enhanced: number }>(
+            `SELECT asset_type,COALESCE(SUM(quantity),0)::integer AS quantity,
+                    COALESCE(SUM(enhanced_quantity),0)::integer AS enhanced
+               FROM army_siege_assets WHERE army_id=$1 GROUP BY asset_type HAVING SUM(quantity)>0`, [army.id]
+          )).rows
+        : [];
+      const assets: SiegeComposition = {};
+      const armyEnhanced: SiegeComposition = {};
+      const current = await loadView(client, battle.id, true);
+      const support: SiegeComposition = { ...current.sides[input.side].support_assets };
+      const enhanced: SiegeComposition = { ...current.sides[input.side].support_enhanced };
+      const targets: SiegeTargets = { ...current.sides[input.side].support_targets };
+      for (const row of armyAssetRows) {
+        const target = targets[row.asset_type] ?? defaultArmySiegeTarget(row.asset_type);
+        validateSiegeTarget(input.side, row.asset_type, target);
+        assets[row.asset_type] = Number(row.quantity);
+        armyEnhanced[row.asset_type] = Math.min(Number(row.quantity), Number(row.enhanced));
+        support[row.asset_type] = (support[row.asset_type] ?? 0) + Number(row.quantity);
+        enhanced[row.asset_type] = (enhanced[row.asset_type] ?? 0) + armyEnhanced[row.asset_type]!;
+        targets[row.asset_type] = target;
+      }
+      if ((support.ram ?? 0) > 1) throw new GameError("Kuşatmada toplam Koçbaşı sayısı 1'i aşamaz.");
+      await client.query(
+        `INSERT INTO battle_army_assignments(battle_id,side_key,army_id,country_id,initial_composition,initial_assets,initial_enhanced)
+         VALUES($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb)`,
+        [battle.id,input.side,army.id,army.country_id,JSON.stringify(composition),JSON.stringify(assets),JSON.stringify(armyEnhanced)]
+      );
+      await client.query(
+        "UPDATE battle_sides SET support_assets=$1::jsonb,support_enhanced=$2::jsonb,support_targets=$3::jsonb WHERE battle_id=$4 AND side_key=$5",
+        [JSON.stringify(support),JSON.stringify(enhanced),JSON.stringify(targets),battle.id,input.side]
+      );
       await rebuildParticipantFromArmies(client,battle.id,army.country_id);
       await rebuildDraftSide(client,battle.id,input.side);
       const view = await loadView(client,battle.id);
@@ -1040,6 +1096,7 @@ export const battleService = {
       if (battle.terrain !== "SIEGE") throw new GameError("Kuşatma aletleri yalnızca kuşatma savaşına eklenebilir.");
       validateSiegeTarget(input.side, input.assetType, input.target);
       if ((await client.query("SELECT 1 FROM battle_mercenary_assignments WHERE battle_id=$1 AND side_key=$2 AND COALESCE((initial_assets->>$3)::integer,0)>0 LIMIT 1", [battle.id, input.side, input.assetType])).rowCount) throw new GameError("Bu alet türü atanmış paralı asker şirketinden geliyor. Önce şirketi taslaktan kaldırın.");
+      if ((await client.query("SELECT 1 FROM battle_army_assignments WHERE battle_id=$1 AND side_key=$2 AND COALESCE((initial_assets->>$3)::integer,0)>0 LIMIT 1", [battle.id, input.side, input.assetType])).rowCount) throw new GameError("Bu alet türü savaşa eklenmiş bir ordudan geliyor. Önce ilgili orduyu taslaktan kaldırın.");
       const view = await loadView(client, battle.id, true);
       if (input.quantity > 0 && (input.assetType === "ladder_group" || input.assetType === "ram")) {
         throw new GameError("Merdiven ve Koçbaşı miktarı yalnızca /savas saha-aleti-al ile satın alınarak artırılabilir.");

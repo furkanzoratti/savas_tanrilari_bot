@@ -21,7 +21,7 @@ import { FORMABLE_COUNTRIES, formableModifiers } from "../domain/formable-countr
 import { RESOURCES, shipCostMultiplier, type ResourceType } from "../domain/resources.js";
 import { buildingPurchaseTerms, unitPurchaseCost, gameService, GameError } from "../services/game-service.js";
 import { battleService } from "../services/battle-service.js";
-import { armyService } from "../services/army-service.js";
+import { armyService, type MobileSiegeAssetType } from "../services/army-service.js";
 import { cityService } from "../services/city-service.js";
 import { commandLogService } from "../services/command-log-service.js";
 import { greatPowerService } from "../services/great-power-service.js";
@@ -1222,12 +1222,38 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
         })));
       return;
     }
+    if (focused.name === "alet") {
+      const sub = interaction.options.getSubcommand(false) ?? "";
+      const settlementValue = interaction.options.getString("yerleske");
+      if (!settlementValue || !["kusatma-aleti-ekle", "kusatma-aleti-cikar"].includes(sub)) { await interaction.respond([]); return; }
+      let assets: Array<{ asset_type: MobileSiegeAssetType; quantity: number; enhanced: number }>;
+      if (sub === "kusatma-aleti-cikar") {
+        const armyValue = interaction.options.getString("ordu");
+        if (!armyValue) { await interaction.respond([]); return; }
+        const army = await armyService.get(country.id, armyValue);
+        assets = army.siegeAssets
+          .filter((asset) => asset.settlement_id === settlementValue || asset.settlement_name.toLocaleLowerCase("tr-TR") === settlementValue.toLocaleLowerCase("tr-TR"))
+          .map((asset) => ({ asset_type: asset.asset_type, quantity: asset.quantity, enhanced: asset.enhanced_quantity }));
+      } else {
+        assets = (await armyService.availableSettlementSiegeAssets(country.id, settlementValue))
+          .map((asset) => ({ asset_type: asset.asset_type, quantity: asset.available, enhanced: asset.enhanced }));
+      }
+      await interaction.respond(assets
+        .filter((asset) => !query || SIEGE_ASSETS[asset.asset_type].name.toLocaleLowerCase("tr-TR").includes(query))
+        .slice(0, 25)
+        .map((asset) => ({
+          name: `${SIEGE_ASSETS[asset.asset_type].name} • ${number(asset.quantity)} ${sub === "kusatma-aleti-cikar" ? "orduda" : "müsait"}${asset.enhanced > 0 ? ` • ${number(asset.enhanced)} geliştirilmiş` : ""}`.slice(0, 100),
+          value: asset.asset_type
+        })));
+      return;
+    }
     if (focused.name === "yerleske") {
       const sub = interaction.options.getSubcommand(false) ?? "";
       const armyId = interaction.options.getString("ordu");
-      if (sub === "asker-cikar" && armyId) {
+      if ((sub === "asker-cikar" || sub === "kusatma-aleti-cikar") && armyId) {
         const army = await armyService.get(country.id, armyId);
-        const settlements = [...new Map(army.units.map((unit) => [unit.settlement_id, unit.settlement_name])).entries()];
+        const allocations = sub === "asker-cikar" ? army.units : army.siegeAssets;
+        const settlements = [...new Map(allocations.map((allocation) => [allocation.settlement_id, allocation.settlement_name])).entries()];
         await interaction.respond(settlements.filter(([, name]) => !query || name.toLocaleLowerCase("tr-TR").includes(query)).slice(0, 25)
           .map(([value, name]) => ({ name, value })));
       } else {

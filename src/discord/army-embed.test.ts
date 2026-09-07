@@ -12,6 +12,11 @@ describe("ordu belgesi", () => {
       created_turn: 3, active_battle_id: null, composition, total: 1_500,
       composition_active: true, composition_activation_turn: null,
       assessment: assessArmyComposition(composition),
+      siegeComposition: { catapult: 2 },
+      enhancedSiegeComposition: { catapult: 1 },
+      siegeAssets: [
+        { settlement_id: "rome", settlement_name: "Roma", asset_type: "catapult", quantity: 2, enhanced_quantity: 1 }
+      ],
       units: [
         { settlement_id: "rome", settlement_name: "Roma", unit_type: "light_infantry", quantity: 1_000 },
         { settlement_id: "neapolis", settlement_name: "Neapolis", unit_type: "spear", quantity: 500 }
@@ -23,5 +28,7 @@ describe("ordu belgesi", () => {
     expect(embed.fields?.find((field) => field.name.includes("Kompozisyon"))?.value).toContain("Baskın birim oranı");
     expect(embed.fields?.find((field) => field.name.includes("Kaynak"))?.value).toContain("Roma");
     expect(embed.fields?.find((field) => field.name.includes("Kaynak"))?.value).toContain("Neapolis");
+    expect(embed.fields?.find((field) => field.name.includes("Kuşatma"))?.value).toContain("Katapult");
+    expect(embed.fields?.find((field) => field.name.includes("Kuşatma"))?.value).toContain("geliştirilmiş");
   });
 });

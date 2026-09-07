@@ -1,5 +1,6 @@
 import type { ChatInputCommandInteraction } from "discord.js";
 import type { BattleUnitType } from "../domain/battle.js";
+import type { MobileSiegeAssetType } from "../services/army-service.js";
 import { number } from "../domain/format.js";
 import { armyService } from "../services/army-service.js";
 import { GameError } from "../services/game-service.js";
@@ -37,6 +38,18 @@ export async function handleArmyCommand(interaction: ChatInputCommandInteraction
     };
     const army = sub === "asker-ekle" ? await armyService.addUnits(input) : await armyService.removeUnits(input);
     await interaction.editReply({ content: sub === "asker-ekle" ? "✅ Askerler orduya tahsis edildi." : "✅ Askerlerin ordu tahsisi kaldırıldı.", embeds: [renderArmyEmbed(army)] });
+  } else if (sub === "kusatma-aleti-ekle" || sub === "kusatma-aleti-cikar") {
+    const input = {
+      guildId: interaction.guildId, countryId: country.id, actorId: interaction.user.id, army: armyValue,
+      settlement: interaction.options.getString("yerleske", true),
+      assetType: interaction.options.getString("alet", true) as MobileSiegeAssetType,
+      quantity: interaction.options.getInteger("miktar", true)
+    };
+    const army = sub === "kusatma-aleti-ekle" ? await armyService.addSiegeAssets(input) : await armyService.removeSiegeAssets(input);
+    await interaction.editReply({
+      content: sub === "kusatma-aleti-ekle" ? "✅ Kuşatma aletleri orduya tahsis edildi." : "✅ Kuşatma aletlerinin ordu tahsisi kaldırıldı.",
+      embeds: [renderArmyEmbed(army)]
+    });
   } else if (sub === "komutan-ata") {
     const army = await armyService.assignCommander({
       guildId: interaction.guildId, countryId: country.id, actorId: interaction.user.id, army: armyValue,

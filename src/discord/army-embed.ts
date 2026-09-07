@@ -1,5 +1,5 @@
 import { EmbedBuilder } from "discord.js";
-import { BATTLE_UNIT_STATS, type BattleUnitType } from "../domain/battle.js";
+import { SIEGE_ASSET_BATTLE_STATS, BATTLE_UNIT_STATS, type BattleUnitType, type SiegeAssetType } from "../domain/battle.js";
 import { number } from "../domain/format.js";
 import type { ArmyView } from "../services/army-service.js";
 
@@ -19,6 +19,19 @@ export function renderArmyEmbed(army: ArmyView): EmbedBuilder {
     sources.set(unit.settlement_name, rows);
   }
   const sourceText = [...sources.entries()].map(([settlement, rows]) => `**${settlement}:** ${rows.join(" • ")}`).join("\n") || "Kaynak yerleşke bulunmuyor.";
+  const siegeAssets = Object.entries(army.siegeComposition ?? {})
+    .filter(([, quantity]) => Number(quantity ?? 0) > 0)
+    .map(([assetType, quantity]) => {
+      const enhanced = Number(army.enhancedSiegeComposition?.[assetType as SiegeAssetType] ?? 0);
+      return `• **${number(Number(quantity))}** ${SIEGE_ASSET_BATTLE_STATS[assetType as SiegeAssetType]?.label ?? assetType}${enhanced > 0 ? ` • ${number(enhanced)} geliştirilmiş` : ""}`;
+    }).join("\n") || "Henüz kuşatma aleti tahsis edilmedi.";
+  const siegeSources = new Map<string, string[]>();
+  for (const asset of army.siegeAssets ?? []) {
+    const rows = siegeSources.get(asset.settlement_name) ?? [];
+    rows.push(`${number(asset.quantity)} ${SIEGE_ASSET_BATTLE_STATS[asset.asset_type]?.label ?? asset.asset_type}`);
+    siegeSources.set(asset.settlement_name, rows);
+  }
+  const siegeSourceText = [...siegeSources.entries()].map(([settlement, rows]) => `**${settlement}:** ${rows.join(" • ")}`).join("\n");
   const state = army.active_battle_id ? "⚔️ Etkin savaşa bağlı" : "✅ Kullanıma hazır";
   const activation = army.composition_active
     ? `Çarpışma **×${army.assessment.clashMultiplier.toFixed(2)}** • Hasar **×${army.assessment.damageMultiplier.toFixed(2)}**`
@@ -38,6 +51,7 @@ export function renderArmyEmbed(army: ArmyView): EmbedBuilder {
         ].join("\n")
       },
       { name: "🪖 Birlikler", value: trimField(unitTotals) },
-      { name: "🏛️ Kaynak Yerleşkeler", value: trimField(sourceText) }
+      { name: "🏛️ Kaynak Yerleşkeler", value: trimField(sourceText) },
+      { name: "🛠️ Kuşatma Aletleri", value: trimField(`${siegeAssets}${siegeSourceText ? `\n\n${siegeSourceText}` : ""}`) }
     );
 }
