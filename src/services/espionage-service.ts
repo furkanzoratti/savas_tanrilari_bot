@@ -53,6 +53,17 @@ export interface EspionageOperationView {
   log_posted_at: Date | null;
 }
 
+export interface EspionageResolutionFailure {
+  operationId:string;
+  targetType:EspionageTarget;
+  message:string;
+}
+
+export interface EspionageResolutionResult {
+  resolved:EspionageOperationView[];
+  failures:EspionageResolutionFailure[];
+}
+
 interface CountryRow { id: string; guild_id: string; name: string; status: string }
 interface GuildRow { current_turn: number; turn_phase: string; espionage_log_channel_id: string | null }
 
@@ -135,7 +146,12 @@ async function progressSpySpecialization(client: DbClient, characterId: string, 
   );
 }
 
-export async function resolveDueEspionageOperations(guildId: string, turn: number): Promise<EspionageOperationView[]> {
+export function randomEspionageCandidate<T>(validTarget:boolean,candidates:readonly T[]):T|null {
+  if (!validTarget || !candidates.length) return null;
+  return candidates[randomInt(0,candidates.length)]??null;
+}
+
+export async function resolveDueEspionageOperations(guildId: string, turn: number): Promise<EspionageResolutionResult> {
   return withTransaction(async (client) => {
     await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`espionage:${guildId}:${turn}`]);
     await client.query("UPDATE buildings SET status='ACTIVE',sabotaged_until_turn=NULL WHERE status='SABOTAGED' AND sabotaged_until_turn<=$1", [turn]);
@@ -172,6 +188,7 @@ export async function resolveDueEspionageOperations(guildId: string, turn: numbe
         ORDER BY operation.created_at FOR UPDATE OF operation`, [guildId, turn]
     )).rows;
 
+    const failures:EspionageResolutionFailure[] = [];
     for (const operation of due) {
       await client.query("SAVEPOINT espionage_operation");
       try {
@@ -210,7 +227,7 @@ export async function resolveDueEspionageOperations(guildId: string, turn: numbe
       const validTarget = buildingCategory || operation.target_type === "CONSTRUCTION"
         ? candidates.length > 0 : await espionageTargetExists(client,effectOperation);
       const severity = validTarget ? espionageSeverity(margin) : "NONE";
-      const selected = validTarget ? candidates[randomInt(0, candidates.length)]! : null;
+      const selected = randomEspionageCandidate(validTarget,candidates);
       const effectText = validTarget
         ? await applyEspionageEffect(client,effectOperation,severity,turn,selected)
         : "Uygun hedef bulunamadı; mekanik etki oluşmadı.";
@@ -242,14 +259,19 @@ export async function resolveDueEspionageOperations(guildId: string, turn: numbe
       } catch (error) {
         await client.query("ROLLBACK TO SAVEPOINT espionage_operation");
         await client.query("RELEASE SAVEPOINT espionage_operation");
+        failures.push({
+          operationId:operation.id,targetType:operation.target_type,
+          message:error instanceof Error ? error.message : String(error)
+        });
         logger.error({error,guildId,turn,operationId:operation.id,targetType:operation.target_type},"Tek casusluk operasyonu çözümlenemedi; diğer operasyonlara devam ediliyor");
       }
     }
-    if (!due.length) return [];
-    return (await client.query<EspionageOperationView>(
+    if (!due.length) return {resolved:[],failures};
+    const resolved = (await client.query<EspionageOperationView>(
       `${operationViewSql} WHERE operation.guild_id=$1 AND operation.id=ANY($2::uuid[]) AND operation.status='RESOLVED' ORDER BY operation.created_at`,
       [guildId,due.map((operation)=>operation.id)]
     )).rows;
+    return {resolved,failures};
   });
 }
 

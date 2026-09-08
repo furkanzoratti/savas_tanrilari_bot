@@ -19,6 +19,7 @@ import { MERCENARY_COMPANIES, type MercenaryCompanyKey } from "../domain/mercena
 import { NPC_AUTO_PURCHASE_DOCTRINES, type NpcAutoPurchaseDoctrine } from "../domain/npc-auto-purchase.js";
 import { SPECIAL_UNITS, isSpecialUnitType, type SpecialUnitType } from "../domain/special-units.js";
 import { FORMABLE_COUNTRIES, formableModifiers } from "../domain/formable-countries.js";
+import { ESPIONAGE_TARGETS } from "../domain/espionage.js";
 import { RESOURCES, shipCostMultiplier, type ResourceType } from "../domain/resources.js";
 import { buildingPurchaseTerms, unitPurchaseCost, gameService, GameError } from "../services/game-service.js";
 import { battleService } from "../services/battle-service.js";
@@ -72,8 +73,13 @@ async function processEspionageTurn(client: Client, guildId: string, turn: numbe
   resolved: number; published: number; warning: string | null;
 }> {
   let resolved = 0;
+  let resolutionWarnings:string[] = [];
   try {
-    resolved = (await resolveDueEspionageOperations(guildId, turn)).length;
+    const result = await resolveDueEspionageOperations(guildId, turn);
+    resolved = result.resolved.length;
+    resolutionWarnings = result.failures.map((failure)=>
+      `${ESPIONAGE_TARGETS[failure.targetType]?.label??failure.targetType} (${failure.operationId.slice(0,8)}): ${failure.message}`
+    );
   } catch (error) {
     logger.error({ error, guildId, turn }, "Casusluk tur otomasyonu tamamlanamadı");
     return {
@@ -90,6 +96,7 @@ async function processEspionageTurn(client: Client, guildId: string, turn: numbe
     return { resolved, published: 0, warning: "Casusluk sonuçları işlendi fakat Akademi log kanalına gönderilemedi; kayıtlar kuyrukta bekliyor." };
   }
   const warnings:string[] = [];
+  warnings.push(...resolutionWarnings);
   if (remaining) warnings.push(`${remaining} vadesi gelmiş casus görevi bir işlem hatası nedeniyle beklemede kaldı; diğer görevler tamamlandı.`);
   if (resolved && !published) {
     const channelId = await characterService.logChannel(guildId) ?? await espionageService.logChannel(guildId);
