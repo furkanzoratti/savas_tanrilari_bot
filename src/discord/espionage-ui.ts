@@ -3,7 +3,9 @@ import { ESPIONAGE_PREPARATIONS, ESPIONAGE_SEVERITY_LABELS, ESPIONAGE_TARGETS, t
 import { gold } from "../domain/format.js";
 import { espionageService, type EspionageOperationView } from "../services/espionage-service.js";
 import { gameService, GameError } from "../services/game-service.js";
+import { characterService } from "../services/character-service.js";
 import { isGameMaster, requireGameMaster, resolveCountry } from "./auth.js";
+import { queueCharacterLog } from "./character-ui.js";
 
 const assignmentLabels: Record<string, string> = {
   NONE: "Müsait",
@@ -60,7 +62,7 @@ export function espionageLogEmbed(operation: EspionageOperationView): EmbedBuild
 }
 
 export async function publishPendingEspionageLogs(client: Client, guildId: string): Promise<number> {
-  const channelId = await espionageService.logChannel(guildId);
+  const channelId = await characterService.logChannel(guildId) ?? await espionageService.logChannel(guildId);
   if (!channelId) return 0;
   const channel = await client.channels.fetch(channelId).catch(() => null);
   if (!channel?.isTextBased() || channel.isDMBased()) throw new Error("Casusluk log kanalı bulunamadı veya metin kanalı değil.");
@@ -71,6 +73,14 @@ export async function publishPendingEspionageLogs(client: Client, guildId: strin
     published += 1;
   }
   return published;
+}
+
+async function logEspionageCommand(interaction: ChatInputCommandInteraction, countryName: string, entry: string): Promise<void> {
+  await queueCharacterLog({
+    client:interaction.client,guildId:interaction.guildId!,interactionId:interaction.id,
+    actorUserId:interaction.user.id,title:"Casus Görev Günlüğü",source:"ESPIONAGE_COMMAND",
+    entry:"🕵️ <@"+interaction.user.id+"> • **"+countryName+"**\n↳ "+entry
+  }).catch(() => undefined);
 }
 
 export async function handleEspionageCommand(interaction: ChatInputCommandInteraction): Promise<boolean> {
@@ -100,17 +110,20 @@ export async function handleEspionageCommand(interaction: ChatInputCommandIntera
         `Hazırlık gideri: **${gold(operation.preparation_cost)}**`,
         "Hedefin uygunluğu ve gerçek mekanik sonuç oyuncuya açıklanmaz. Sonuç DM anlatımıyla duyurulacaktır."
       ].join("\n"));
+      await logEspionageCommand(interaction,country.name,"**"+operation.spy_name+"**, **"+operation.target_country_name+" / "+operation.target_settlement_name+"** hedefine gönderildi • "+ESPIONAGE_TARGETS[operation.target_type].label+" • Çözüm Tur "+operation.resolve_turn+".");
       return true;
     }
     if (sub === "operasyonlarim") {
       const operations = await espionageService.operationsForCountry(country.id);
       await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x4b4d52).setTitle(`🕵️ ${country.name} • Casusluk Operasyonları`).setDescription(operations.length ? operations.map(playerOperationLine).join("\n\n").slice(0, 4_000) : "Henüz operasyon bulunmuyor.")] });
+      await logEspionageCommand(interaction,country.name,"Casusluk operasyonlarını görüntüledi.");
       return true;
     }
     if (sub === "casuslarim") {
       const spies = await espionageService.spies(country.id);
       const text = spies.length ? spies.map((spy) => `• **${spy.name}** (+${spy.skill_bonus}) — ${assignmentLabels[spy.assignment] ?? spy.assignment}${spy.country_name && spy.settlement_name ? `\n↳ ${spy.country_name} • ${spy.settlement_name}` : ""}`).join("\n\n") : "Akademide yetişmiş casus bulunmuyor.";
       await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x4b4d52).setTitle(`🕵️ ${country.name} • Casuslar`).setDescription(text.slice(0, 4_000))] });
+      await logEspionageCommand(interaction,country.name,"Casus listesini görüntüledi.");
       return true;
     }
     if (sub === "savunma-ata") {
@@ -121,17 +134,20 @@ export async function handleEspionageCommand(interaction: ChatInputCommandIntera
       if (scope === "CHARACTER" && !protectedCharacterId) throw new GameError("Şahsi koruma için korunacak karakteri seçmelisiniz.");
       await espionageService.assignDefense({ guildId: interaction.guildId, countryId: country.id, spyCharacterId: interaction.options.getString("casus", true), scope, settlementId,characterId:protectedCharacterId });
       await interaction.editReply({ content: `🛡️ Casus karşı casusluk görevine gönderildi; **bir sonraki tur başında** göreve başlayacak: **${scope === "COUNTRY" ? `${country.name} geneli` : scope === "SETTLEMENT" ? "seçilen şehir" : "seçilen karakter"}**.` });
+      await logEspionageCommand(interaction,country.name,"Casus karşı casusluk görevine atandı • **"+scope+"**.");
       return true;
     }
     if (sub === "savunma-kaldir") {
       await espionageService.removeDefense({ guildId: interaction.guildId, countryId: country.id, spyCharacterId: interaction.options.getString("casus", true) });
       await interaction.editReply({ content: "✅ Casusun karşı casusluk görevi kaldırıldı." });
+      await logEspionageCommand(interaction,country.name,"Casusun karşı casusluk görevi kaldırıldı.");
       return true;
     }
     if (sub === "bina-onar") {
       const settlementId=interaction.options.getString("sehir",true);
       const cost=await espionageService.repairBuilding({countryId:country.id,settlementId,buildingType:interaction.options.getString("hasarli-bina",true)});
       await interaction.editReply(`✅ Bina onarıldı ve yeniden etkinleştirildi. Şehir hazinesinden **${gold(cost)}** ödendi.`);
+      await logEspionageCommand(interaction,country.name,"Casusluk hasarlı bina onarıldı • **"+gold(cost)+"** ödendi.");
       return true;
     }
   }

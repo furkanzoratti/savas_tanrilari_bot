@@ -363,11 +363,12 @@ async function recordCommanderVictory(
   if (!winner) return;
   const fought = await client.query("SELECT 1 FROM battle_rounds WHERE battle_id=$1 LIMIT 1", [battleId]);
   if (!fought.rowCount) return;
-  const commanders = (await client.query<{ id: string }>(
-    `SELECT DISTINCT commander.id
+  const commanders = (await client.query<{ id: string; name: string; country_name: string }>(
+    `SELECT DISTINCT commander.id,commander.name,country.name AS country_name
        FROM battle_army_assignments assignment
        JOIN armies army ON army.id=assignment.army_id
        JOIN country_characters commander ON commander.id=army.commander_character_id
+       JOIN countries country ON country.id=commander.country_id
       WHERE assignment.battle_id=$1 AND assignment.side_key=$2
         AND commander.role='COMMANDER' AND commander.character_status='ACTIVE'`,
     [battleId,winner]
@@ -379,7 +380,7 @@ async function recordCommanderVictory(
       [commander.id,battleId,turn]
     );
     if (!inserted.rowCount) continue;
-    await client.query(
+    const updated = (await client.query<{commander_victories:number;specialization_level:number}>(
       `UPDATE country_characters
           SET commander_victories=LEAST(9,commander_victories+1),
               specialization_progress=CASE WHEN specialization IS NULL THEN specialization_progress
@@ -388,8 +389,18 @@ async function recordCommanderVictory(
                                         WHEN commander_victories+1>=9 THEN 3
                                         WHEN commander_victories+1>=6 THEN 2
                                         WHEN commander_victories+1>=3 THEN 1 ELSE 0 END
-        WHERE id=$1`,
+        WHERE id=$1 RETURNING commander_victories,specialization_level`,
       [commander.id]
+    )).rows[0]!;
+    const guildId = (await client.query<{guild_id:string}>("SELECT guild_id FROM battles WHERE id=$1",[battleId])).rows[0]?.guild_id;
+    if (guildId) await client.query(
+      `INSERT INTO character_turn_log_batches(guild_id,game_turn,entries,source,title,dedupe_key)
+       VALUES($1,$2,$3::jsonb,'COMMANDER_RESULT','Komutan Savaş Sonucu',$4)
+       ON CONFLICT(guild_id,dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING`,
+      [guildId,turn,JSON.stringify([
+        "⚔️ **"+commander.name+"** • **"+commander.country_name+"**\n↳ Savaş zaferi kaydedildi • Toplam **"+updated.commander_victories+"/9**"+
+        (Number(updated.specialization_level)>0?" • Uzmanlık Sv"+updated.specialization_level:"")
+      ]),"COMMANDER_VICTORY:"+battleId+":"+commander.id]
     );
   }
 }

@@ -29,6 +29,12 @@ describe("Akademi karakter komutları", () => {
     expect(operations?.choices?.map((choice) => choice.value)).toEqual(["set","clear","status","test"]);
   });
 
+  it("yönetici mali hareket dökümünde ülke ve isteğe bağlı tur seçtirir", () => {
+    const command = commandBuilders.find((item) => item.name === "hazine-hareketleri");
+    expect(command?.options?.find((item)=>item.name==="ulke")).toMatchObject({required:true});
+    expect(command?.options?.find((item)=>item.name==="tur")).toMatchObject({required:false,min_value:0});
+  });
+
   it("Tüccar görevini casusluk açıklamasına düşürmeden doğru gösterir", () => {
     const embed = charactersEmbed("Gallaekler", [{
       id:"00000000-0000-4000-8000-000000000001",country_id:"00000000-0000-4000-8000-000000000002",

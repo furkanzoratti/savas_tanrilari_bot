@@ -1734,5 +1734,37 @@ export const migrations = [
          AND character.character_status<>'ACTIVE'
          AND operation.status IN ('PENDING_ACCEPTANCE','TRAVELING','ACTIVE','CONTROLLED');
     `
+  },
+  {
+    version: 53,
+    name: "academy_activity_and_treasury_ledger",
+    sql: `
+      ALTER TABLE character_turn_log_batches
+        DROP CONSTRAINT IF EXISTS character_turn_log_batches_guild_id_game_turn_key;
+      ALTER TABLE character_turn_log_batches
+        ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'TURN_RESULT';
+      ALTER TABLE character_turn_log_batches
+        ADD COLUMN IF NOT EXISTS title TEXT NOT NULL DEFAULT 'Akademi Görev Sonuçları';
+      ALTER TABLE character_turn_log_batches
+        ADD COLUMN IF NOT EXISTS actor_user_id TEXT;
+      ALTER TABLE character_turn_log_batches
+        ADD COLUMN IF NOT EXISTS dedupe_key TEXT;
+      UPDATE character_turn_log_batches
+         SET dedupe_key='TURN_RESULT:'||game_turn::text
+       WHERE dedupe_key IS NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS character_log_batch_dedupe_idx
+        ON character_turn_log_batches(guild_id,dedupe_key) WHERE dedupe_key IS NOT NULL;
+
+      ALTER TABLE transactions
+        ADD COLUMN IF NOT EXISTS settlement_id UUID REFERENCES settlements(id) ON DELETE SET NULL;
+      ALTER TABLE transactions
+        ADD COLUMN IF NOT EXISTS details JSONB NOT NULL DEFAULT '{}'::jsonb;
+      ALTER TABLE transactions
+        ADD COLUMN IF NOT EXISTS balance_after BIGINT;
+      CREATE INDEX IF NOT EXISTS transactions_country_turn_created_idx
+        ON transactions(country_id,turn,created_at,id);
+      CREATE INDEX IF NOT EXISTS transactions_settlement_idx
+        ON transactions(settlement_id,turn,created_at) WHERE settlement_id IS NOT NULL;
+    `
   }
 ] as const;

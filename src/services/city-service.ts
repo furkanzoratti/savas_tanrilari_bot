@@ -4,6 +4,7 @@ import { pool, withTransaction } from "../db/pool.js";
 import { CHARACTER_ROLES, CITY_POLICIES, type CityPolicyKey } from "../domain/catalog.js";
 import { academyRoleForRoll, academyRollSides } from "../domain/academy.js";
 import { isAcquisitionTurn } from "../domain/mobilization.js";
+import { assimilationCompletionTurn } from "../domain/assimilation.js";
 import type { CharacterRole } from "../domain/types.js";
 import { formableModifiers, type FormableCountryKey } from "../domain/formable-countries.js";
 import { settlementResourceAccess } from "./resource-service.js";
@@ -233,15 +234,18 @@ export const cityService = {
       if (character.assignment !== "NONE") throw new GameError("Bu Diplomat hâlen başka bir görevde.");
       const occupied = await client.query("SELECT 1 FROM settlement_assimilation_diplomats WHERE settlement_id=$1", [settlement.id]);
       if (occupied.rowCount) throw new GameError("Bu yerleşkenin asimilasyonunda zaten bir Diplomat görev yapıyor.");
-      const assimilationReduction = Number(character.skill_bonus) >= 2 ? 2 : 1;
-      const completionTurn = Math.max(guild.current_turn + 1, Number(settlement.conquered_turn) + 6 - assimilationReduction);
+      const resources = (await settlementResourceAccess(client,input.countryId)).get(settlement.id) ?? [];
+      const completionTurn = Math.max(guild.current_turn + 1,assimilationCompletionTurn({
+        conqueredTurn:Number(settlement.conquered_turn),hasWine:resources.includes("WINE"),
+        diplomatSkillBonus:Number(character.skill_bonus)
+      }));
       if (guild.current_turn >= completionTurn) throw new GameError("Bu yerleşke bir sonraki tur ilerlemesinde zaten otomatik olarak asimile edilecek.");
       await client.query(
         "INSERT INTO settlement_assimilation_diplomats(settlement_id,character_id,assigned_turn,assigned_by) VALUES($1,$2,$3,$4)",
         [settlement.id, character.id, guild.current_turn, input.actorId]
       );
       await client.query("UPDATE country_characters SET assignment='ASSIMILATION',assigned_settlement_id=$1,assignment_ready_turn=$2 WHERE id=$3", [settlement.id, completionTurn, character.id]);
-      await audit(client, input.guildId, input.actorId, "DIPLOMAT_ASSIMILATION_ASSIGN", "character", character.id, { settlementId: settlement.id, completionTurn });
+      await audit(client, input.guildId, input.actorId, "DIPLOMAT_ASSIMILATION_ASSIGN", "character", character.id, { settlementId: settlement.id, completionTurn, wineReduction:resources.includes("WINE")?1:0 });
       return { characterName: character.name, settlementName: settlement.name, completionTurn };
     });
   },
@@ -325,6 +329,11 @@ export const cityService = {
       await client.query("INSERT INTO pantheon_loans(country_id,settlement_id,principal,remaining_amount,issued_turn,due_turn) VALUES($1,$2,$3,$3,$4,$5)", [input.countryId, settlement.id, input.amount, guild.current_turn, dueTurn]);
       await client.query("UPDATE settlements SET local_treasury=local_treasury+$1 WHERE id=$2", [input.amount, settlement.id]);
       await syncTreasury(client, input.countryId);
+      await client.query(
+        `INSERT INTO transactions(country_id,settlement_id,turn,kind,amount,description,balance_after,details)
+         VALUES($1,$2,$3,'PANTHEON_LOAN_RECEIVED',$4,'Panteon faizsiz savaş kredisi',$5,$6::jsonb)`,
+        [input.countryId,settlement.id,guild.current_turn,input.amount,Number(settlement.local_treasury)+input.amount,JSON.stringify({dueTurn})]
+      );
       await audit(client, input.guildId, input.actorId, "PANTHEON_LOAN_TAKE", "settlement", settlement.id, { amount: input.amount, dueTurn });
       return { amount: input.amount, dueTurn };
     });
@@ -333,6 +342,7 @@ export const cityService = {
   async repayPantheonLoan(input: { guildId: string; actorId: string; countryId: string; amount: number }): Promise<{ remaining: number }> {
     return withTransaction(async (client) => {
       await getCountry(client, input.guildId, input.countryId);
+      const guild = await guildState(client,input.guildId);
       const loan = (await client.query<{ id: string; settlement_id: string; remaining_amount: number }>("SELECT id,settlement_id,remaining_amount FROM pantheon_loans WHERE country_id=$1 AND status='ACTIVE' FOR UPDATE", [input.countryId])).rows[0];
       if (!loan) throw new GameError("Aktif bir Panteon kredisi bulunmuyor.");
       if (!Number.isSafeInteger(input.amount) || input.amount < 1 || input.amount > loan.remaining_amount) throw new GameError("Geçerli bir geri ödeme tutarı girilmelidir.");
@@ -342,6 +352,11 @@ export const cityService = {
       await client.query("UPDATE settlements SET local_treasury=local_treasury-$1 WHERE id=$2", [input.amount, settlement.id]);
       await client.query("UPDATE pantheon_loans SET remaining_amount=$1,status=$2 WHERE id=$3", [remaining, remaining ? "ACTIVE" : "REPAID", loan.id]);
       await syncTreasury(client, input.countryId);
+      await client.query(
+        `INSERT INTO transactions(country_id,settlement_id,turn,kind,amount,description,balance_after,details)
+         VALUES($1,$2,$3,'PANTHEON_LOAN_REPAYMENT',$4,'Panteon kredisi oyuncu ödemesi',$5,$6::jsonb)`,
+        [input.countryId,settlement.id,guild.current_turn,-input.amount,Number(settlement.local_treasury)-input.amount,JSON.stringify({remainingAfter:remaining,automatic:false})]
+      );
       await audit(client, input.guildId, input.actorId, "PANTHEON_LOAN_REPAY", "pantheon_loan", loan.id, { amount: input.amount, remaining });
       return { remaining };
     });

@@ -326,6 +326,13 @@ export const espionageService = {
       await client.query("UPDATE settlements SET local_treasury=local_treasury-$1 WHERE id=$2",[cost,input.settlementId]);
       await client.query("UPDATE buildings SET status='ACTIVE',sabotaged_until_turn=NULL,sabotage_repair_cost=0 WHERE settlement_id=$1 AND building_type=$2",[input.settlementId,input.buildingType]);
       await client.query("UPDATE countries SET treasury=(SELECT COALESCE(SUM(local_treasury),0)::bigint FROM settlements WHERE country_id=$1) WHERE id=$1",[input.countryId]);
+      await client.query(
+        `INSERT INTO transactions(country_id,settlement_id,turn,kind,amount,description,balance_after,details)
+         SELECT $1,$2,guild.current_turn,'ESPIONAGE_REPAIR',$3,$4,$5,$6::jsonb
+           FROM countries country JOIN guilds guild ON guild.discord_id=country.guild_id WHERE country.id=$1`,
+        [input.countryId,input.settlementId,-cost,"Casusluk hasarlı bina onarımı: "+input.buildingType,
+          Number(row.local_treasury)-cost,JSON.stringify({buildingType:input.buildingType})]
+      );
       return cost;
     });
   },

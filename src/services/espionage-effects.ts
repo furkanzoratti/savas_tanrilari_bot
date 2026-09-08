@@ -72,8 +72,16 @@ export async function applyEspionageEffect(
     }
     if (severity === "MEDIUM") {
       await client.query("UPDATE buildings SET status='SABOTAGED',sabotaged_until_turn=$1,sabotage_repair_cost=0 WHERE settlement_id=$2 AND building_type=$3", [turn+3,operation.target_settlement_id,selectedBuilding.building_type]);
-      await client.query("UPDATE settlements SET local_treasury=GREATEST(0,local_treasury-1000) WHERE id=$1", [operation.target_settlement_id]);
+      const treasury = (await client.query<{local_treasury:number}>("SELECT local_treasury FROM settlements WHERE id=$1 FOR UPDATE",[operation.target_settlement_id])).rows[0]?.local_treasury??0;
+      const charged = Math.min(1000,Number(treasury));
+      const balance = Number(treasury)-charged;
+      await client.query("UPDATE settlements SET local_treasury=$1 WHERE id=$2", [balance,operation.target_settlement_id]);
       await syncTreasury(client,operation.target_country_id);
+      if (charged>0) await client.query(
+        `INSERT INTO transactions(country_id,settlement_id,turn,kind,amount,description,balance_after,details)
+         VALUES($1,$2,$3,'ESPIONAGE_DAMAGE',$4,$5,$6,$7::jsonb)`,
+        [operation.target_country_id,operation.target_settlement_id,turn,-charged,name+" sabotaj onarım zararı",balance,JSON.stringify({severity,targetType:operation.target_type})]
+      );
       return name+" 3 tur kapandı ve 1.000 Altın onarım gideri doğdu.";
     }
     const repair = Math.ceil(buildingBaseCost(selectedBuilding.building_type,Math.max(1,selectedBuilding.level))/2);
@@ -93,8 +101,14 @@ export async function applyEspionageEffect(
     } else {
       await client.query("DELETE FROM buildings WHERE settlement_id=$1 AND building_type=$2 AND status='BUILDING'", [operation.target_settlement_id,selectedBuilding.building_type]);
     }
-    if (refund>0) await client.query("UPDATE settlements SET local_treasury=local_treasury+$1 WHERE id=$2", [refund,operation.target_settlement_id]);
+    let balance: number|null = null;
+    if (refund>0) balance=Number((await client.query<{local_treasury:number}>("UPDATE settlements SET local_treasury=local_treasury+$1 WHERE id=$2 RETURNING local_treasury", [refund,operation.target_settlement_id])).rows[0]?.local_treasury??0);
     await syncTreasury(client,operation.target_country_id);
+    if (refund>0) await client.query(
+      `INSERT INTO transactions(country_id,settlement_id,turn,kind,amount,description,balance_after,details)
+       VALUES($1,$2,$3,'ESPIONAGE_REFUND',$4,$5,$6,$7::jsonb)`,
+      [operation.target_country_id,operation.target_settlement_id,turn,refund,name+" sabotaj sonrası inşaat iadesi",balance,JSON.stringify({severity,targetType:operation.target_type})]
+    );
     return name+" inşaatı iptal edildi; "+refund.toLocaleString("tr-TR")+" Altın iade edildi.";
   }
   if (operation.target_type === "RECRUITMENT_SABOTAGE") {
@@ -144,9 +158,21 @@ export async function applyEspionageEffect(
     const target = (await client.query<{ local_treasury: number }>("SELECT local_treasury FROM settlements WHERE id=$1 FOR UPDATE",[operation.target_settlement_id])).rows[0]!;
     const stolen = Math.floor(Number(target.local_treasury)*rate/100);
     const home = (await client.query<{ id: string }>("SELECT COALESCE(trained_settlement_id,(SELECT id FROM settlements WHERE country_id=$2 ORDER BY population DESC LIMIT 1)) AS id FROM country_characters WHERE id=$1",[operation.spy_character_id,operation.attacker_country_id])).rows[0]?.id;
-    await client.query("UPDATE settlements SET local_treasury=local_treasury-$1 WHERE id=$2",[stolen,operation.target_settlement_id]);
-    if (home) await client.query("UPDATE settlements SET local_treasury=local_treasury+$1 WHERE id=$2",[stolen,home]);
+    const targetBalance=Number((await client.query<{local_treasury:number}>("UPDATE settlements SET local_treasury=local_treasury-$1 WHERE id=$2 RETURNING local_treasury",[stolen,operation.target_settlement_id])).rows[0]?.local_treasury??0);
+    const homeBalance=home ? Number((await client.query<{local_treasury:number}>("UPDATE settlements SET local_treasury=local_treasury+$1 WHERE id=$2 RETURNING local_treasury",[stolen,home])).rows[0]?.local_treasury??0) : null;
     await syncTreasury(client,operation.target_country_id); await syncTreasury(client,operation.attacker_country_id);
+    if (stolen>0) {
+      await client.query(
+        `INSERT INTO transactions(country_id,settlement_id,turn,kind,amount,description,balance_after,details)
+         VALUES($1,$2,$3,'ESPIONAGE_THEFT',$4,'Casusluk: hazine sızdırma kaybı',$5,$6::jsonb)`,
+        [operation.target_country_id,operation.target_settlement_id,turn,-stolen,targetBalance,JSON.stringify({severity,rate})]
+      );
+      if (home) await client.query(
+        `INSERT INTO transactions(country_id,settlement_id,turn,kind,amount,description,balance_after,details)
+         VALUES($1,$2,$3,'ESPIONAGE_THEFT_INCOME',$4,'Casusluk: hazine sızdırma kazancı',$5,$6::jsonb)`,
+        [operation.attacker_country_id,home,turn,stolen,homeBalance,JSON.stringify({severity,rate})]
+      );
+    }
     return "Hedef hazinenin %"+rate+"'i sızdırıldı; tutar saldıran oyuncuya açıklanmayacak.";
   }
   if (operation.target_type === "TRADE_COLLAPSE") {

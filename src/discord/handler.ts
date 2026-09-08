@@ -30,6 +30,7 @@ import { npcAutoPurchaseService, type NpcAutoPurchaseScope, type NpcCountryOverr
 import { warDeclarationService } from "../services/war-declaration-service.js";
 import { DEFAULT_WELCOME_MESSAGE, renderWelcomeMessage, welcomeService } from "../services/welcome-service.js";
 import { tradeService } from "../services/trade-service.js";
+import { treasuryLedgerService, type TreasuryMovement } from "../services/treasury-ledger-service.js";
 import { assertCountryAccess, isGameMaster, requireGameMaster, resolveCountry } from "./auth.js";
 import { buildingChoices, shipChoices, unitChoices } from "./commands.js";
 import { batchDocumentEmbeds, renderDocument } from "./document.js";
@@ -817,7 +818,39 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
   if (await handleWarDeclarationCommand(interaction)) return;
   if (await handleDiplomacyCommand(interaction)) return;
   if (await handleCityCommand(interaction)) return;
-  if (interaction.commandName === "yok-edilen-devletler") {
+  if (interaction.commandName === "hazine-hareketleri") {
+    requireGameMaster(interaction);
+    if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
+    await interaction.deferReply({ephemeral:true});
+    const report = await treasuryLedgerService.turnReport(
+      interaction.guildId,interaction.options.getString("ulke",true),interaction.options.getInteger("tur")
+    );
+    const value = (details: Record<string,unknown>, key: string): number => Number(details[key]??0);
+    const line = (movement: TreasuryMovement): string => {
+      const sign = movement.amount>=0 ? "+" : "−";
+      const place = movement.settlement_name ? " • "+movement.settlement_name : "";
+      if (movement.kind === "ACQUISITION_SETTLEMENT") {
+        const details = movement.details;
+        const income = value(details,"buildingIncome")+value(details,"taxIncome")+value(details,"landTradeIncome")+value(details,"seaTradeIncome");
+        const upkeep = value(details,"buildingUpkeep")+value(details,"unitUpkeep")+value(details,"shipUpkeep");
+        const effects = Array.isArray(details.effects) ? details.effects.map(String).join(" • ") : "Yok";
+        return "🏛️ **Alım Turu"+place+"** • **"+sign+gold(Math.abs(movement.amount))+"**\n"+
+          "↳ Bina "+gold(value(details,"buildingIncome"))+" • Vergi "+gold(value(details,"taxIncome"))+" • Kara "+gold(value(details,"landTradeIncome"))+" • Deniz "+gold(value(details,"seaTradeIncome"))+"\n"+
+          "↳ Brüt "+gold(income)+" • Bina bakımı "+gold(value(details,"buildingUpkeep"))+" • Asker bakımı "+gold(value(details,"unitUpkeep"))+" • Gemi bakımı "+gold(value(details,"shipUpkeep"))+" • Toplam gider "+gold(upkeep)+"\n"+
+          "↳ Etkiler: "+effects+(value(details,"penaltyDeduction") ? " • Gelir cezası −"+gold(value(details,"penaltyDeduction")) : "");
+      }
+      return (movement.amount>=0?"🟢":"🔴")+" **"+sign+gold(Math.abs(movement.amount))+"**"+place+"\n↳ "+movement.description;
+    };
+    const visible = report.movements.filter((movement)=>movement.details.summary!==true);
+    const rows = visible.map(line);
+    if (!rows.length) rows.push("Bu tur için kayıtlı hazine hareketi bulunmuyor.");
+    const pages: string[]=[];
+    for (let index=0;index<rows.length;index+=8) pages.push(rows.slice(index,index+8).join("\n\n"));
+    const footer = "Gelir "+gold(report.income)+" • Gider "+gold(report.expense)+" • Net "+(report.net>=0?"+":"−")+gold(Math.abs(report.net))+
+      (report.turn===report.currentTurn?" • Güncel hazine "+gold(report.country.currentTreasury):"");
+    await interaction.editReply({embeds:[new EmbedBuilder().setColor(0xc59b45).setTitle("💰 "+report.country.name+" • Tur "+report.turn+" Mali Dökümü").setDescription(pages[0]!).setFooter({text:footer})]});
+    for (let index=1;index<pages.length;index+=1) await interaction.followUp({ephemeral:true,embeds:[new EmbedBuilder().setColor(0xc59b45).setTitle("💰 Mali Döküm • Devam "+(index+1)).setDescription(pages[index]!).setFooter({text:footer})]});
+  } else if (interaction.commandName === "yok-edilen-devletler") {
     requireGameMaster(interaction);
     if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
     const action = interaction.options.getSubcommand();

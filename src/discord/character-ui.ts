@@ -101,7 +101,7 @@ export async function publishCharacterTurnLogs(client: Client, guildId: string, 
   const publishable = batches.length
     ? batches
     : logs.length
-      ? [{id:"",game_turn:0,entries:logs,publish_attempts:0}]
+      ? [{id:"",game_turn:0,entries:logs,publish_attempts:0,source:"TURN_RESULT",title:"Akademi Görev Sonuçları"}]
       : [];
   if (!publishable.length) return {state:"NO_LOGS",channelId:null,publishedBatches:0,publishedEntries:0};
   const channelId = await characterService.logChannel(guildId);
@@ -122,7 +122,7 @@ export async function publishCharacterTurnLogs(client: Client, guildId: string, 
         await channel.send({
           embeds: [new EmbedBuilder()
             .setColor(0x5865f2)
-            .setTitle("🎓 Akademi Görev Sonuçları"+(batch.game_turn ? " • Tur "+batch.game_turn : ""))
+            .setTitle("🎓 "+batch.title+(batch.game_turn ? " • Tur "+batch.game_turn : ""))
             .setDescription(batch.entries.slice(index,index+12).join("\n\n").slice(0,4000))]
         });
       }
@@ -138,12 +138,44 @@ export async function publishCharacterTurnLogs(client: Client, guildId: string, 
   return {state:"PUBLISHED",channelId,publishedBatches,publishedEntries};
 }
 
+export async function queueCharacterLog(input: {
+  client: Client; guildId: string; interactionId: string; actorUserId: string;
+  title: string; entry: string; source?: string;
+}): Promise<void> {
+  await characterService.enqueueLog({
+    guildId:input.guildId,
+    source:input.source??"COMMAND",
+    title:input.title,
+    entries:[input.entry],
+    actorUserId:input.actorUserId,
+    dedupeKey:(input.source??"COMMAND")+":"+input.interactionId
+  });
+  await publishCharacterTurnLogs(input.client,input.guildId,[]);
+}
+
+async function logCharacterCommand(
+  interaction: ChatInputCommandInteraction,
+  countryName: string,
+  entry: string
+): Promise<void> {
+  try {
+    await queueCharacterLog({
+      client:interaction.client,guildId:interaction.guildId!,interactionId:interaction.id,
+      actorUserId:interaction.user.id,title:"Karakter Komutu",
+      entry:"👤 <@"+interaction.user.id+"> • **"+countryName+"**\n↳ "+entry
+    });
+  } catch (error) {
+    logger.error({error,interactionId:interaction.id},"Karakter komutu Akademi log kuyruğuna yazılamadı");
+  }
+}
+
 export async function handleCharacterCommand(interaction: ChatInputCommandInteraction): Promise<boolean> {
   if (!interaction.guildId) return false;
   if (interaction.commandName === "karakterlerim") {
     await interaction.deferReply({ ephemeral: true });
     const country = await resolveCountry(interaction);
     await interaction.editReply({ embeds: [charactersEmbed(country.name,await characterService.list(country.id))] });
+    await logCharacterCommand(interaction,country.name,"Karakter listesini görüntüledi.");
     return true;
   }
   if (interaction.commandName === "karakter-yonetim") {
@@ -156,14 +188,14 @@ export async function handleCharacterCommand(interaction: ChatInputCommandIntera
       await characterService.setLogChannel(interaction.guildId,channel!.id);
       const publication = await publishCharacterTurnLogs(interaction.client,interaction.guildId,[]);
       await interaction.editReply(
-        "✅ Akademi görev sonuçları " + String(channel) + " kanalına gönderilecek."+
+        "✅ Akademi komutları, bütün karakter görevleri ve casusluk sonuçları " + String(channel) + " kanalına gönderilecek."+
         (publication.state === "PUBLISHED" ? " Kuyrukta bekleyen "+publication.publishedEntries+" sonuç da gönderildi." : "")
       );
       return true;
     }
     if (operation === "clear") {
       await characterService.setLogChannel(interaction.guildId,null);
-      await interaction.editReply("✅ Akademi görev log kanalı kapatıldı. Yeni sonuçlar kanal ayarlanana kadar kaybolmadan kuyrukta bekler.");
+      await interaction.editReply("✅ Karakter etkinlik log kanalı kapatıldı. Yeni kayıtlar kanal ayarlanana kadar kaybolmadan kuyrukta bekler.");
       return true;
     }
     const status = await characterService.logStatus(interaction.guildId);
@@ -188,7 +220,7 @@ export async function handleCharacterCommand(interaction: ChatInputCommandIntera
       "🎓 **Akademi Log Durumu**\n"+
       "Kanal: "+(status.channelId ? "<#"+status.channelId+">" : "Ayarlanmamış")+"\n"+
       "Erişim: "+(available ? "✅ Kullanılabilir" : "❌ Kullanılamıyor")+"\n"+
-      "Bekleyen: **"+status.pendingBatches+" tur / "+status.pendingEntries+" sonuç**"
+      "Bekleyen: **"+status.pendingBatches+" kayıt grubu / "+status.pendingEntries+" etkinlik**"
     );
     return true;
   }
@@ -202,16 +234,19 @@ export async function handleCharacterCommand(interaction: ChatInputCommandIntera
       const doctrine = interaction.options.getString("doktrin",true) as CommanderDoctrine;
       await characterService.setCommanderDoctrine({countryId:country.id,characterId,doctrine});
       await interaction.editReply("✅ Komutanın kalıcı doktrini **" + COMMANDER_DOCTRINES[doctrine].label + "** olarak belirlendi.");
+      await logCharacterCommand(interaction,country.name,"Komutan doktrini **"+COMMANDER_DOCTRINES[doctrine].label+"** olarak seçildi.");
     } else if (sub === "uzmanlik-sec") {
       const specialization = interaction.options.getString("uzmanlik",true) as CharacterSpecialization;
       await characterService.setCommanderSpecialization({countryId:country.id,characterId,specialization});
       await interaction.editReply("✅ Komutanın kalıcı uzmanlığı **" + CHARACTER_SPECIALIZATIONS[specialization].label + "** olarak belirlendi.");
+      await logCharacterCommand(interaction,country.name,"Komutan uzmanlığı **"+CHARACTER_SPECIALIZATIONS[specialization].label+"** olarak seçildi.");
     } else {
       await characterService.setBattleChief({
         guildId:interaction.guildId,countryId:country.id,characterId,
         battleId:interaction.options.getString("savas",true)
       });
       await interaction.editReply("✅ Seçilen Komutan bu savaşta tarafın **Başkomutanı** oldu.");
+      await logCharacterCommand(interaction,country.name,"Etkin savaş için Başkomutan atandı.");
     }
     return true;
   }
@@ -223,11 +258,13 @@ export async function handleCharacterCommand(interaction: ChatInputCommandIntera
         operationId:interaction.options.getString("teklif",true),accept
       });
       await interaction.editReply(accept ? "✅ Ticari imtiyaz kabul edildi; Tüccar bir tur sonra göreve başlayacak." : "❌ Ticari imtiyaz reddedildi.");
+      await logCharacterCommand(interaction,country.name,"Ticari imtiyaz teklifi **"+(accept?"kabul edildi":"reddedildi")+"**.");
       return true;
     }
     if (sub === "gorev-bitir") {
       await characterService.endMerchant({guildId:interaction.guildId,countryId:country.id,characterId:interaction.options.getString("tuccar",true)});
       await interaction.editReply("✅ Tüccar görevi sona erdirildi.");
+      await logCharacterCommand(interaction,country.name,"Tüccar görevi sonlandırıldı.");
       return true;
     }
     const task = interaction.options.getString("gorev",true) as MerchantTask;
@@ -248,16 +285,19 @@ export async function handleCharacterCommand(interaction: ChatInputCommandIntera
       : result.arrivalTurn ? "✅ Tüccar görevlendirildi; Tur " + result.arrivalTurn + " başında göreve ulaşacak."
       : "✅ Satın alma temsilciliği bir sonraki uygun sipariş için hazırlandı.";
     await interaction.editReply(response);
+    await logCharacterCommand(interaction,country.name,"Tüccar görevi başlatıldı: **"+(MERCHANT_TASK_LABELS[task]??task)+"**.");
     return true;
   }
   if (sub === "gorev-bitir") {
     await characterService.endDiplomat({guildId:interaction.guildId,countryId:country.id,characterId:interaction.options.getString("diplomat",true)});
     await interaction.editReply("✅ Diplomat görevi sona erdirildi.");
+    await logCharacterCommand(interaction,country.name,"Diplomat görevi sonlandırıldı.");
     return true;
   }
   if (sub === "savunma-ata") {
     await characterService.assignDiplomatDefense({countryId:country.id,characterId:interaction.options.getString("diplomat",true),settlementId:interaction.options.getString("sehir")??undefined});
     await interaction.editReply("🛡️ Diplomat diplomatik savunmaya atandı.");
+    await logCharacterCommand(interaction,country.name,"Diplomat diplomatik savunmaya atandı.");
     return true;
   }
   const task = interaction.options.getString("gorev",true) as DiplomatTask;
@@ -272,6 +312,7 @@ export async function handleCharacterCommand(interaction: ChatInputCommandIntera
     targetCultureGroup:interaction.options.getString("kultur")??undefined
   });
   await interaction.editReply("✅ Diplomat görevlendirildi; Tur " + result.arrivalTurn + " başında göreve ulaşacak. Hedef ilerleme: " + result.goal + ".");
+  await logCharacterCommand(interaction,country.name,"Diplomat görevi başlatıldı: **"+(DIPLOMAT_TASK_LABELS[task]??task)+"** • Varış Tur "+result.arrivalTurn+".");
   return true;
 }
 

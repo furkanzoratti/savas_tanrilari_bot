@@ -9,7 +9,7 @@ import { cityService } from "../services/city-service.js";
 import { characterService } from "../services/character-service.js";
 import { gameService, GameError, type AcademyTrainingSession } from "../services/game-service.js";
 import { assertCountryAccess, requireGameMaster, resolveCountry } from "./auth.js";
-import { charactersEmbed } from "./character-ui.js";
+import { charactersEmbed, queueCharacterLog } from "./character-ui.js";
 import { handleSettlementEventButton, handleSettlementEventCommand } from "./event-ui.js";
 
 async function findSettlement(countryId: string, name: string) {
@@ -47,6 +47,19 @@ function trainingButtons(countryId: string, session: AcademyTrainingSession): Ac
       .setEmoji(naming ? "✍️" : "🎲")
       .setStyle(naming ? ButtonStyle.Success : ButtonStyle.Primary)
   )];
+}
+
+async function logAcademyAction(
+  interaction: ChatInputCommandInteraction | ButtonInteraction | ModalSubmitInteraction,
+  countryName: string,
+  entry: string
+): Promise<void> {
+  if (!interaction.guildId) return;
+  await queueCharacterLog({
+    client:interaction.client,guildId:interaction.guildId,interactionId:interaction.id,
+    actorUserId:interaction.user.id,title:"Akademi Komut Günlüğü",source:"ACADEMY_COMMAND",
+    entry:"👤 <@"+interaction.user.id+"> • **"+countryName+"**\n↳ "+entry
+  }).catch(() => undefined);
 }
 
 export async function handleCityCommand(interaction: ChatInputCommandInteraction): Promise<boolean> {
@@ -105,11 +118,13 @@ export async function handleCityCommand(interaction: ChatInputCommandInteraction
   if (interaction.commandName === "akademi") {
     if (sub === "karakterler") {
       await interaction.editReply({embeds:[charactersEmbed(country.name,await characterService.list(country.id))]});
+      await logAcademyAction(interaction,country.name,"Akademi karakterlerini görüntüledi.");
       return true;
     }
     if (sub === "gorevden-al") {
       const character = await cityService.unassignCharacter({ guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id, characterName: interaction.options.getString("karakter", true) });
       await interaction.editReply({ content: `✅ **${character.name}** mevcut görevinden alındı.` });
+      await logAcademyAction(interaction,country.name,"**"+character.name+"** görevden alındı.");
       return true;
     }
     const settlement = await findSettlement(country.id, interaction.options.getString("yerleske", true));
@@ -119,6 +134,7 @@ export async function handleCityCommand(interaction: ChatInputCommandInteraction
         characterName: interaction.options.getString("karakter", true), settlementId: settlement.id
       });
       await interaction.editReply({ content: `🤝 **${result.characterName}**, **${result.settlementName}** asimilasyonuna gönderildi. Süre 1 tur kısaldı; yerleşke **Tur ${result.completionTurn}** başında otomatik asimile edilecek.` });
+      await logAcademyAction(interaction,country.name,"**"+result.characterName+"**, **"+result.settlementName+"** asimilasyonuna gönderildi.");
       return true;
     }
     if (sub === "ata") {
@@ -128,6 +144,7 @@ export async function handleCityCommand(interaction: ChatInputCommandInteraction
         assignment: interaction.options.getString("gorev-yeri", true) as "CURIA" | "AGORA"
       });
       await interaction.editReply({ content: `✅ **${result.character.name}**, **${settlement.name}** yerleşkesindeki **${result.character.assignment === "AGORA" ? "Agora / Forum" : "Curia"}** görevine atandı.${result.guardCreated ? "\n🛡️ Garnizona Curia muhafızı olarak 200 Ağır Piyade eklendi." : ""}` });
+      await logAcademyAction(interaction,country.name,"**"+result.character.name+"**, **"+settlement.name+"** yerleşkesinde **"+(result.character.assignment === "AGORA" ? "Agora / Forum" : "Curia")+"** görevine atandı.");
       return true;
     }
     const session = await cityService.beginTraining({
@@ -135,6 +152,7 @@ export async function handleCityCommand(interaction: ChatInputCommandInteraction
       settlementId: settlement.id, excludedRole: interaction.options.getString("elenen-gorev"), selectedRole: interaction.options.getString("secilen-gorev")
     });
     await interaction.editReply({ embeds: [academyEmbed(country.name, settlement.name, session)], components: trainingButtons(country.id, session) });
+    await logAcademyAction(interaction,country.name,"**"+settlement.name+"** Akademisinde eğitim başlatıldı.");
     return true;
   }
 
@@ -170,6 +188,7 @@ export async function handleCityButton(interaction: ButtonInteraction): Promise<
   const settlement = document.settlements.find((item) => item.id === session.settlement_id);
   await interaction.message.edit({ embeds: [academyEmbed(document.country.name, settlement?.name ?? "Akademi", session)], components: trainingButtons(countryId, session) });
   await interaction.editReply("✅ Akademi zarı işlendi.");
+  await logAcademyAction(interaction,document.country.name,"Akademi eğitim zarı atıldı: **1d"+session.roll_sides+" → "+session.roll_value+"**.");
   return true;
 }
 
@@ -185,6 +204,8 @@ export async function handleCityModal(interaction: ModalSubmitInteraction): Prom
   });
   const role = CHARACTER_ROLES[character.role];
   await interaction.editReply({ content: `${role.emoji} **${character.name}** adlı **${role.label}** yetiştirildi ve devlet belgesine eklendi. Karakter bonusu: **+${character.skill_bonus}**.`, components: [] });
+  const document = await gameService.document(countryId);
+  await logAcademyAction(interaction,document.country.name,"**"+character.name+"** adlı **"+role.label+"** yetiştirildi • Bonus **+"+character.skill_bonus+"**.");
   if (interaction.message?.editable) await interaction.message.edit({ components: [] }).catch(() => undefined);
   return true;
 }

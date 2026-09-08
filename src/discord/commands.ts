@@ -14,6 +14,10 @@ const SETTLEMENT_EVENT_CHOICES = Object.entries(SETTLEMENT_EVENT_TYPES).map(([va
 
 export const commandBuilders = [
   new SlashCommandBuilder()
+    .setName("hazine-hareketleri").setDescription("Yalnızca yönetici: bir ülkenin tur içindeki bütün mali hareketlerini gösterir")
+    .addStringOption((o) => o.setName("ulke").setDescription("Mali dökümü görüntülenecek ülke").setRequired(true))
+    .addIntegerOption((o) => o.setName("tur").setDescription("Boş bırakılırsa mevcut tur").setMinValue(0)),
+  new SlashCommandBuilder()
     .setName("karakterlerim").setDescription("Ülkenizin bütün Akademi karakterlerini, konumlarını ve etkin görevlerini gösterir"),
   new SlashCommandBuilder()
     .setName("komutan").setDescription("Komutanın kalıcı doktrin ve uzmanlığını yönetir")
@@ -75,14 +79,14 @@ export const commandBuilders = [
     .addSubcommand((sub) => sub.setName("gorev-bitir").setDescription("Etkin Diplomat görevini sona erdirir")
       .addStringOption((o) => o.setName("diplomat").setDescription("Görevi bitecek Diplomat").setRequired(true).setAutocomplete(true))),
   new SlashCommandBuilder()
-    .setName("karakter-yonetim").setDescription("Yalnızca yönetici: Akademi görev sonuç kanalını ayarlar")
-    .addSubcommand((sub) => sub.setName("log-kanali").setDescription("Karakter görev sonuç kanalını ayarlar")
+    .setName("karakter-yonetim").setDescription("Yalnızca yönetici: Akademi, karakter görevi ve casus sonuç kanalını ayarlar")
+    .addSubcommand((sub) => sub.setName("log-kanali").setDescription("Bütün karakter etkinliklerinin yönetici log kanalını ayarlar")
       .addStringOption((o) => o.setName("islem").setDescription("İşlem").setRequired(true)
         .addChoices(
           { name: "Ayarla", value: "set" }, { name: "Kapat", value: "clear" },
           { name: "Durumu Gör", value: "status" }, { name: "Test Et", value: "test" }
         ))
-      .addChannelOption((o) => o.setName("kanal").setDescription("Sonuçların gönderileceği yönetici kanalı").addChannelTypes(ChannelType.GuildText))),
+      .addChannelOption((o) => o.setName("kanal").setDescription("Akademi komutları, görevler ve casus sonuçlarının gönderileceği kanal").addChannelTypes(ChannelType.GuildText))),
   new SlashCommandBuilder()
     .setName("belge").setDescription("Ülkenin güncel belgesini gösterir")
     .addStringOption(countryOption),

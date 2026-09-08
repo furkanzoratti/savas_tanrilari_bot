@@ -58,6 +58,8 @@ export interface CharacterTurnLogBatch {
   game_turn: number;
   entries: string[];
   publish_attempts: number;
+  source: string;
+  title: string;
 }
 
 export interface CharacterLogStatus {
@@ -600,13 +602,30 @@ export const characterService = {
 
   async pendingLogBatches(guildId: string): Promise<CharacterTurnLogBatch[]> {
     return (await pool.query<CharacterTurnLogBatch>(
-      `SELECT id,game_turn,entries,publish_attempts
+      `SELECT id,game_turn,entries,publish_attempts,source,title
          FROM character_turn_log_batches
         WHERE guild_id=$1 AND published_at IS NULL
         ORDER BY game_turn,created_at
         LIMIT 25`,
       [guildId]
     )).rows.map((row) => ({...row,entries:Array.isArray(row.entries)?row.entries:[]}));
+  },
+
+  async enqueueLog(input: {
+    guildId: string; source: string; title: string; entries: string[];
+    actorUserId?: string | null; dedupeKey: string; gameTurn?: number;
+  }): Promise<void> {
+    if (!input.entries.length) return;
+    await pool.query(
+      `INSERT INTO character_turn_log_batches(
+         guild_id,game_turn,entries,source,title,actor_user_id,dedupe_key
+       )
+       SELECT guild.discord_id,COALESCE($7,guild.current_turn),$2::jsonb,$3,$4,$5,$6
+         FROM guilds guild WHERE guild.discord_id=$1
+       ON CONFLICT(guild_id,dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING`,
+      [input.guildId,JSON.stringify(input.entries),input.source,input.title,
+        input.actorUserId??null,input.dedupeKey,input.gameTurn??null]
+    );
   },
 
   async markLogBatchPublished(id: string): Promise<void> {
@@ -794,10 +813,19 @@ export async function processCharacterTurn(
         );
         if (!inserted.rowCount) continue;
         if (amount>0) {
-          await client.query("UPDATE settlements SET local_treasury=local_treasury+$1 WHERE id=$2", [amount,destination]);
+          const destinationBalance = (await client.query<{local_treasury:number}>(
+            "UPDATE settlements SET local_treasury=local_treasury+$1 WHERE id=$2 RETURNING local_treasury",
+            [amount,destination]
+          )).rows[0]?.local_treasury;
           await client.query(
             "UPDATE countries SET treasury=(SELECT COALESCE(SUM(local_treasury),0)::bigint FROM settlements WHERE country_id=$1) WHERE id=$1",
             [operation.country_id]
+          );
+          await client.query(
+            `INSERT INTO transactions(country_id,settlement_id,turn,kind,amount,description,balance_after,details)
+             VALUES($1,$2,$3,'MERCHANT_INCOME',$4,$5,$6,$7::jsonb)`,
+            [operation.country_id,destination,turn,amount,operation.merchant_name+" Tüccar görevi geliri",
+              Number(destinationBalance??0),JSON.stringify({roll,effectivePercent,task:operation.task_type,targetSettlementId:operation.target_settlement_id})]
           );
         }
         await client.query("UPDATE merchant_operations SET last_processed_turn=$1,updated_at=NOW() WHERE id=$2", [turn,operation.id]);
@@ -954,10 +982,10 @@ export async function processCharacterTurn(
     }
     if (logs.length) {
       await client.query(
-        `INSERT INTO character_turn_log_batches(guild_id,game_turn,entries)
-         VALUES($1,$2,$3::jsonb)
-         ON CONFLICT(guild_id,game_turn) DO NOTHING`,
-        [guildId,turn,JSON.stringify(logs)]
+        `INSERT INTO character_turn_log_batches(guild_id,game_turn,entries,source,title,dedupe_key)
+         VALUES($1,$2,$3::jsonb,'TURN_RESULT','Akademi Görev Sonuçları',$4)
+         ON CONFLICT(guild_id,dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING`,
+        [guildId,turn,JSON.stringify(logs),'TURN_RESULT:'+turn]
       );
     }
     return { logs };

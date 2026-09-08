@@ -220,3 +220,15 @@ describe("elli ikinci migration", () => {
     expect(migration?.sql).toContain("published_at IS NULL");
   });
 });
+
+describe("elli üçüncü migration", () => {
+  const migration = migrations.find((item) => item.version === 53);
+
+  it("Akademi etkinliklerini tekilleştirir ve hazine hareketlerini ayrıntılandırır", () => {
+    expect(migration?.name).toBe("academy_activity_and_treasury_ledger");
+    expect(migration?.sql).toContain("character_log_batch_dedupe_idx");
+    expect(migration?.sql).toContain("ADD COLUMN IF NOT EXISTS settlement_id");
+    expect(migration?.sql).toContain("ADD COLUMN IF NOT EXISTS details JSONB");
+    expect(migration?.sql).toContain("ADD COLUMN IF NOT EXISTS balance_after");
+  });
+});

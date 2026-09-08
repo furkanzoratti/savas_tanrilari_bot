@@ -7,6 +7,7 @@ import { armyService } from "../services/army-service.js";
 import { isGameMaster, requireGameMaster } from "./auth.js";
 import { battlefieldAsset } from "./assets.js";
 import { renderArmyEmbed } from "./army-embed.js";
+import { publishCharacterTurnLogs } from "./character-ui.js";
 
 const statusLabels: Record<string, string> = {
   DRAFT: "Taslak", WAITING_FIRST_ROLL: "İlk tarafın zarı bekleniyor", WAITING_SECOND_ROLL: "İkinci tarafın zarı bekleniyor",
@@ -363,7 +364,10 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
     const reply = await interaction.editReply(publicPayload(result.view, result.round));
     await retireBattleCard(interaction.client, result.view, reply.id);
     await battleService.setPublicMessage(result.view.battle.id, reply.id);
-    if (result.round.ended) await interaction.followUp({ embeds: [casualtyReportEmbed(result.view, result.report)], ephemeral: true });
+    if (result.round.ended) {
+      await interaction.followUp({ embeds: [casualtyReportEmbed(result.view, result.report)], ephemeral: true });
+      await publishCharacterTurnLogs(interaction.client,interaction.guildId,[]).catch(() => undefined);
+    }
   } else if (sub === "ordu-detay") {
     requireGameMaster(interaction);
     const view = await battleService.active(interaction.guildId, interaction.channelId);
@@ -388,6 +392,7 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
     const result = await battleService.finish({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id, winner: winnerRaw === "NONE" ? null : winnerRaw as BattleSideKey, reason: interaction.options.getString("neden", true) });
     await interaction.editReply(publicPayload(result.view));
     await interaction.followUp({ embeds: [casualtyReportEmbed(result.view, result.report)], ephemeral: true });
+    await publishCharacterTurnLogs(interaction.client,interaction.guildId,[]).catch(() => undefined);
   } else if (sub === "iptal") {
     requireGameMaster(interaction);
     const view = await battleService.cancel({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id });
