@@ -78,7 +78,10 @@ export const commandBuilders = [
     .setName("karakter-yonetim").setDescription("Yalnızca yönetici: Akademi görev sonuç kanalını ayarlar")
     .addSubcommand((sub) => sub.setName("log-kanali").setDescription("Karakter görev sonuç kanalını ayarlar")
       .addStringOption((o) => o.setName("islem").setDescription("İşlem").setRequired(true)
-        .addChoices({ name: "Ayarla", value: "set" }, { name: "Kapat", value: "clear" }))
+        .addChoices(
+          { name: "Ayarla", value: "set" }, { name: "Kapat", value: "clear" },
+          { name: "Durumu Gör", value: "status" }, { name: "Test Et", value: "test" }
+        ))
       .addChannelOption((o) => o.setName("kanal").setDescription("Sonuçların gönderileceği yönetici kanalı").addChannelTypes(ChannelType.GuildText))),
   new SlashCommandBuilder()
     .setName("belge").setDescription("Ülkenin güncel belgesini gösterir")

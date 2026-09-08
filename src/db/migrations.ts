@@ -1702,5 +1702,37 @@ export const migrations = [
       ALTER TABLE battle_army_assignments
         ADD COLUMN IF NOT EXISTS initial_enhanced JSONB NOT NULL DEFAULT '{}'::jsonb;
     `
+  },
+  {
+    version: 52,
+    name: "reliable_academy_character_logs",
+    sql: `
+      CREATE TABLE IF NOT EXISTS character_turn_log_batches (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        guild_id TEXT NOT NULL REFERENCES guilds(discord_id) ON DELETE CASCADE,
+        game_turn INTEGER NOT NULL CHECK (game_turn >= 0),
+        entries JSONB NOT NULL CHECK (jsonb_typeof(entries) = 'array'),
+        published_at TIMESTAMPTZ,
+        publish_attempts INTEGER NOT NULL DEFAULT 0 CHECK (publish_attempts >= 0),
+        last_error TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE(guild_id,game_turn)
+      );
+      CREATE INDEX IF NOT EXISTS character_turn_log_batches_pending_idx
+        ON character_turn_log_batches(guild_id,created_at) WHERE published_at IS NULL;
+
+      UPDATE diplomat_operations operation
+         SET status='CANCELLED',completion_text='Etkin olmayan karakter görevi otomatik kapatıldı.',updated_at=NOW()
+        FROM country_characters character
+       WHERE character.id=operation.diplomat_character_id
+         AND character.character_status<>'ACTIVE'
+         AND operation.status IN ('TRAVELING','ACTIVE','PAUSED');
+      UPDATE merchant_operations operation
+         SET status='CANCELLED',ended_turn=COALESCE(ended_turn,started_turn),updated_at=NOW()
+        FROM country_characters character
+       WHERE character.id=operation.merchant_character_id
+         AND character.character_status<>'ACTIVE'
+         AND operation.status IN ('PENDING_ACCEPTANCE','TRAVELING','ACTIVE','CONTROLLED');
+    `
   }
 ] as const;

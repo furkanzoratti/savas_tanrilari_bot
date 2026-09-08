@@ -1,7 +1,7 @@
 import { randomInt } from "node:crypto";
 import { pool, withTransaction, type DbClient } from "../db/pool.js";
 import {
-  CHARACTER_SPECIALIZATIONS, COMMANDER_DOCTRINES, culturePopulationResistance,
+  CHARACTER_SPECIALIZATIONS, COMMANDER_DOCTRINES, DIPLOMAT_TASK_LABELS, culturePopulationResistance,
   cultureProgressDelta, diplomaticPowerBonus, integrationProgressDelta,
   merchantBaseDiscount, specializationLevel, vassalizationProgressDelta,
   type CharacterSpecialization, type CommanderDoctrine, type DiplomatTask, type MerchantTask
@@ -53,6 +53,27 @@ interface BasicCharacter {
   specialization_progress: number;
 }
 
+export interface CharacterTurnLogBatch {
+  id: string;
+  game_turn: number;
+  entries: string[];
+  publish_attempts: number;
+}
+
+export interface CharacterLogStatus {
+  channelId: string | null;
+  pendingBatches: number;
+  pendingEntries: number;
+}
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function assertUuid(value: string, label: string): void {
+  if (!UUID_PATTERN.test(value)) {
+    throw new GameError(label + " açılan listeden seçilmelidir.");
+  }
+}
+
 async function guildState(client: DbClient, guildId: string): Promise<GuildState> {
   const row = (await client.query<GuildState>(
     "SELECT current_turn,turn_phase,acquisition_interval FROM guilds WHERE discord_id=$1",
@@ -68,6 +89,7 @@ async function activeCharacter(
   characterId: string,
   role: CharacterRole
 ): Promise<BasicCharacter> {
+  assertUuid(characterId,"Karakter");
   const row = (await client.query<BasicCharacter>(
     "SELECT id,name,role,skill_bonus,assignment,specialization,specialization_progress FROM country_characters WHERE id=$1 AND country_id=$2 AND role=$3 AND character_status='ACTIVE' FOR UPDATE",
     [characterId, countryId, role]
@@ -84,6 +106,7 @@ async function settlement(
   id: string; name: string; country_id: string; population: number; culture_group: string;
   black_market_active: boolean; unrest_active: boolean; rebellion_active: boolean; epidemic_active: boolean;
 }> {
+  assertUuid(settlementId,"Yerleşke");
   const params: unknown[] = countryId ? [settlementId, countryId] : [settlementId];
   const countryClause = countryId ? " AND country_id=$2" : "";
   const row = (await client.query<{
@@ -419,6 +442,9 @@ export const characterService = {
     targetCountryId?: string | undefined; targetSettlementId?: string | undefined;
     targetEventType?: string | undefined; targetCultureGroup?: string | undefined;
   }): Promise<{ arrivalTurn: number; goal: number }> {
+    if (input.task === "RECONCILIATION" && !["BLACK_MARKET","EPIDEMIC","UNREST","REBELLION"].includes(input.targetEventType??"")) {
+      throw new GameError("Halkla Uzlaşma için hedef olay seçilmelidir.");
+    }
     const ranking = input.task === "VASSALIZE"
       ? await greatPowerService.calculateRanking(input.guildId)
       : [];
@@ -428,6 +454,20 @@ export const characterService = {
       if (state.turn_phase !== "OPEN") throw new GameError("Diplomat görevi yalnızca hareketler açıkken başlatılabilir.");
       const diplomat = await activeCharacter(client,input.countryId,input.characterId,"DIPLOMAT");
       if (diplomat.assignment !== "NONE") throw new GameError("Bu Diplomat şu anda başka bir görevde.");
+      const existingOperation = await client.query<{ task_type: DiplomatTask; status: string }>(
+        `SELECT task_type,status FROM diplomat_operations
+          WHERE diplomat_character_id=$1 AND status IN ('TRAVELING','ACTIVE','PAUSED')
+          ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
+        [diplomat.id]
+      );
+      if (existingOperation.rowCount) {
+        const existing = existingOperation.rows[0]!;
+        throw new GameError(
+          "Bu Diplomatın kayıtlı bir görevi zaten var ("+
+          (DIPLOMAT_TASK_LABELS[existing.task_type]??existing.task_type)+
+          "). Önce /diplomat görev-bitir komutunu kullanın."
+        );
+      }
       const target = input.targetSettlementId
         ? await settlement(client,input.targetSettlementId,input.targetCountryId??input.countryId)
         : null;
@@ -437,6 +477,11 @@ export const characterService = {
         : 1;
       if (input.task === "RECONCILIATION") {
         if (!target) throw new GameError("Halkla Uzlaşma için hedef yerleşke seçilmelidir.");
+        const eventActive = input.targetEventType === "REBELLION" ? target.rebellion_active
+          : input.targetEventType === "EPIDEMIC" ? target.epidemic_active
+          : input.targetEventType === "BLACK_MARKET" ? target.black_market_active
+          : target.unrest_active;
+        if (!eventActive) throw new GameError("Seçilen olay bu yerleşkede etkin değil.");
         const required = input.targetEventType === "REBELLION" ? 3
           : input.targetEventType === "UNREST" || input.targetEventType === "EPIDEMIC" ? 2 : 1;
         if (Number(diplomat.skill_bonus) < required) {
@@ -551,6 +596,52 @@ export const characterService = {
       "SELECT character_log_channel_id AS channel_id FROM guilds WHERE discord_id=$1",
       [guildId]
     )).rows[0]?.channel_id ?? null;
+  },
+
+  async pendingLogBatches(guildId: string): Promise<CharacterTurnLogBatch[]> {
+    return (await pool.query<CharacterTurnLogBatch>(
+      `SELECT id,game_turn,entries,publish_attempts
+         FROM character_turn_log_batches
+        WHERE guild_id=$1 AND published_at IS NULL
+        ORDER BY game_turn,created_at
+        LIMIT 25`,
+      [guildId]
+    )).rows.map((row) => ({...row,entries:Array.isArray(row.entries)?row.entries:[]}));
+  },
+
+  async markLogBatchPublished(id: string): Promise<void> {
+    await pool.query(
+      "UPDATE character_turn_log_batches SET published_at=NOW(),publish_attempts=publish_attempts+1,last_error=NULL WHERE id=$1",
+      [id]
+    );
+  },
+
+  async markLogBatchFailed(id: string, error: string): Promise<void> {
+    await pool.query(
+      "UPDATE character_turn_log_batches SET publish_attempts=publish_attempts+1,last_error=$1 WHERE id=$2",
+      [error.slice(0,1000),id]
+    );
+  },
+
+  async logStatus(guildId: string): Promise<CharacterLogStatus> {
+    const row = (await pool.query<{
+      channel_id: string | null; pending_batches: number; pending_entries: number;
+    }>(
+      `SELECT guild.character_log_channel_id AS channel_id,
+              COUNT(batch.id)::integer AS pending_batches,
+              COALESCE(SUM(jsonb_array_length(batch.entries)),0)::integer AS pending_entries
+         FROM guilds guild
+         LEFT JOIN character_turn_log_batches batch
+           ON batch.guild_id=guild.discord_id AND batch.published_at IS NULL
+        WHERE guild.discord_id=$1
+        GROUP BY guild.character_log_channel_id`,
+      [guildId]
+    )).rows[0];
+    return {
+      channelId:row?.channel_id??null,
+      pendingBatches:Number(row?.pending_batches??0),
+      pendingEntries:Number(row?.pending_entries??0)
+    };
   }
 };
 
@@ -859,6 +950,14 @@ export async function processCharacterTurn(
       logs.push(
         "🤝 **"+operation.name+"** • "+operation.task_type+" • Zarlar "+(attackRoll+attackBonus)+"–"+
         (defenseRoll+defenseBonus)+" • İlerleme **"+next+"/"+operation.goal+"**"+(complete?" • TAMAMLANDI":"")
+      );
+    }
+    if (logs.length) {
+      await client.query(
+        `INSERT INTO character_turn_log_batches(guild_id,game_turn,entries)
+         VALUES($1,$2,$3::jsonb)
+         ON CONFLICT(guild_id,game_turn) DO NOTHING`,
+        [guildId,turn,JSON.stringify(logs)]
       );
     }
     return { logs };

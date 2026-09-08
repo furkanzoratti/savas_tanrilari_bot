@@ -209,3 +209,14 @@ describe("kırk sekizinci migration", () => {
     expect(migration?.sql).toContain("'ASSIMILATION'");
   });
 });
+
+describe("elli ikinci migration", () => {
+  const migration = migrations.find((item) => item.version === 52);
+
+  it("Akademi karakter sonuçlarını kalıcı bir yayın kuyruğunda tutar", () => {
+    expect(migration?.name).toBe("reliable_academy_character_logs");
+    expect(migration?.sql).toContain("CREATE TABLE IF NOT EXISTS character_turn_log_batches");
+    expect(migration?.sql).toContain("UNIQUE(guild_id,game_turn)");
+    expect(migration?.sql).toContain("published_at IS NULL");
+  });
+});

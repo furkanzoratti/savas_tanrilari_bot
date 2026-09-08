@@ -67,12 +67,17 @@ async function processEspionageTurn(client: Client, guildId: string, turn: numbe
   }
 }
 
-async function processAcademyCharacterTurn(client: Client, guildId: string, turn: number, acquisition: boolean): Promise<void> {
+async function processAcademyCharacterTurn(client: Client, guildId: string, turn: number, acquisition: boolean): Promise<string | null> {
   try {
     const result = await processCharacterTurn(guildId,turn,acquisition);
-    await publishCharacterTurnLogs(client,guildId,result.logs);
+    const publication = await publishCharacterTurnLogs(client,guildId,result.logs);
+    if (publication.state === "NO_CHANNEL") return "Akademi görev sonuç kanalı ayarlı değil; sonuçlar kuyrukta bekliyor.";
+    if (publication.state === "CHANNEL_UNAVAILABLE") return "Akademi log kanalı bulunamadı veya botun kanala erişimi yok; sonuçlar kuyrukta bekliyor.";
+    if (publication.state === "FAILED") return "Akademi sonuçları Discord kanalına gönderilemedi; sonuçlar kaybolmadı ve kuyrukta bekliyor.";
+    return null;
   } catch (error) {
     logger.error({ error, guildId, turn }, "Akademi karakter tur otomasyonu tamamlanamadı");
+    return "Akademi karakter otomasyonu bu tur tamamlanamadı. İşlem geri alındı; sunucu kayıtlarındaki hata incelenmeli.";
   }
 }
 async function sendDocument(interaction: ChatInputCommandInteraction, countryId: string): Promise<void> {
@@ -548,7 +553,7 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
   } else if (sub === "tur-ilerlet") {
     const result = await gameService.advanceTurn(interaction.guildId, interaction.user.id);
     await processEspionageTurn(interaction.client, interaction.guildId, result.turn);
-    await processAcademyCharacterTurn(interaction.client, interaction.guildId, result.turn, result.acquisition);
+    const academyWarning = await processAcademyCharacterTurn(interaction.client, interaction.guildId, result.turn, result.acquisition);
     await refreshActiveBattleCards(interaction.client, interaction.guildId);
     await interaction.editReply({ embeds: [turnAnnouncement({
       kind: "ADVANCE", turn: result.turn, acquisition: result.acquisition,
@@ -572,6 +577,9 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
       mercenaryEndedDetails: result.mercenaryEndedDetails,
       assimilatedSettlementDetails: result.assimilatedSettlementDetails
     })], files: [new AttachmentBuilder(BRAND_BANNER_PATH, { name: BRAND_BANNER_NAME })] });
+    if (academyWarning) {
+      await interaction.followUp({content:"⚠️ **Akademi sistemi:** "+academyWarning,ephemeral:true});
+    }
   } else if (sub === "tur-durumu") {
     const phase = interaction.options.getString("durum", true) as "OPEN" | "CLOSED" | "RESOLVING";
     await gameService.setTurnPhase(interaction.guildId, interaction.user.id, phase);
