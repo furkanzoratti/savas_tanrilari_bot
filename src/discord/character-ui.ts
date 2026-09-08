@@ -5,6 +5,7 @@ import {
   type CharacterSpecialization, type CommanderDoctrine, type DiplomatTask, type MerchantTask
 } from "../domain/characters.js";
 import { ESPIONAGE_TARGETS, type EspionageTarget } from "../domain/espionage.js";
+import { CULTURE_GROUPS, type CultureGroup } from "../domain/cultures.js";
 import { characterService, type CharacterView } from "../services/character-service.js";
 import { gameService, GameError } from "../services/game-service.js";
 import { logger } from "../logger.js";
@@ -27,6 +28,23 @@ const assignmentLabels: Record<string,string> = {
   DIPLOMAT_VASSALIZE: "Vassallaştırma", DIPLOMAT_INTEGRATE: "Vassal entegrasyonu",
   DIPLOMAT_DEFENSE: "Diplomatik savunma"
 };
+
+const eventLabels:Record<string,string> = {
+  BLACK_MARKET:"Karaborsa", EPIDEMIC:"Salgın", UNREST:"Huzursuzluk", REBELLION:"İsyan"
+};
+
+const purchaseCategoryLabels:Record<string,string> = {
+  UNITS:"Asker", SHIPS:"Gemi", BUILDING:"Bina", SIEGE:"Kuşatma Aleti"
+};
+
+async function characterForLog(countryId:string,characterId:string):Promise<CharacterView|null> {
+  return (await characterService.list(countryId)).find((character)=>character.id===characterId)??null;
+}
+
+async function settlementNameForLog(countryId:string,settlementId:string|null):Promise<string|null> {
+  if (!settlementId) return null;
+  return (await gameService.listSettlements(countryId)).find((settlement)=>settlement.id===settlementId)?.name??null;
+}
 
 function characterLocation(character: CharacterView): string | null {
   if (character.target_country_name || character.target_settlement_name) {
@@ -230,89 +248,162 @@ export async function handleCharacterCommand(interaction: ChatInputCommandIntera
   const sub = interaction.options.getSubcommand();
   if (interaction.commandName === "komutan") {
     const characterId = interaction.options.getString("komutan",true);
+    const commander = await characterForLog(country.id,characterId);
+    const commanderText = "⚔️ Komutan: **"+(commander?.name??"Bilinmeyen Komutan")+"** (+"+(commander?.skill_bonus??0)+") • Devlet: **"+country.name+"**";
     if (sub === "doktrin-sec") {
       const doctrine = interaction.options.getString("doktrin",true) as CommanderDoctrine;
       await characterService.setCommanderDoctrine({countryId:country.id,characterId,doctrine});
       await interaction.editReply("✅ Komutanın kalıcı doktrini **" + COMMANDER_DOCTRINES[doctrine].label + "** olarak belirlendi.");
-      await logCharacterCommand(interaction,country.name,"Komutan doktrini **"+COMMANDER_DOCTRINES[doctrine].label+"** olarak seçildi.");
+      await logCharacterCommand(interaction,country.name,
+        commanderText+"\n↳ İşlem: Kalıcı doktrin **"+COMMANDER_DOCTRINES[doctrine].label+"** olarak seçildi.\n"+
+        "↳ Etki: "+COMMANDER_DOCTRINES[doctrine].description+" • Bu seçim değiştirilemez."
+      );
     } else if (sub === "uzmanlik-sec") {
       const specialization = interaction.options.getString("uzmanlik",true) as CharacterSpecialization;
       await characterService.setCommanderSpecialization({countryId:country.id,characterId,specialization});
       await interaction.editReply("✅ Komutanın kalıcı uzmanlığı **" + CHARACTER_SPECIALIZATIONS[specialization].label + "** olarak belirlendi.");
-      await logCharacterCommand(interaction,country.name,"Komutan uzmanlığı **"+CHARACTER_SPECIALIZATIONS[specialization].label+"** olarak seçildi.");
+      await logCharacterCommand(interaction,country.name,
+        commanderText+"\n↳ İşlem: Kalıcı uzmanlık **"+CHARACTER_SPECIALIZATIONS[specialization].label+"** olarak seçildi.\n"+
+        "↳ Kayıt anındaki zafer: **"+(commander?.commander_victories??0)+"** • Uzmanlık seviyesi: **"+Math.min(3,Math.floor((commander?.commander_victories??0)/3))+"**"
+      );
     } else {
+      const battleId = interaction.options.getString("savas",true);
+      const battle = (await characterService.activeBattlesForCountry(interaction.guildId,country.id)).find((item)=>item.id===battleId);
       await characterService.setBattleChief({
         guildId:interaction.guildId,countryId:country.id,characterId,
-        battleId:interaction.options.getString("savas",true)
+        battleId
       });
       await interaction.editReply("✅ Seçilen Komutan bu savaşta tarafın **Başkomutanı** oldu.");
-      await logCharacterCommand(interaction,country.name,"Etkin savaş için Başkomutan atandı.");
+      await logCharacterCommand(interaction,country.name,
+        commanderText+"\n↳ İşlem: Etkin savaşın Başkomutanı olarak atandı.\n↳ Savaş: **"+(battle?.label??battleId)+"**"
+      );
     }
     return true;
   }
   if (interaction.commandName === "tuccar") {
     if (sub === "imtiyaz-yanit") {
       const accept = interaction.options.getBoolean("kabul",true);
+      const operationId = interaction.options.getString("teklif",true);
+      const offer = (await characterService.pendingConcessions(country.id)).find((item)=>item.id===operationId);
       await characterService.respondConcession({
         guildId:interaction.guildId,actorId:interaction.user.id,targetCountryId:country.id,
-        operationId:interaction.options.getString("teklif",true),accept
+        operationId,accept
       });
       await interaction.editReply(accept ? "✅ Ticari imtiyaz kabul edildi; Tüccar bir tur sonra göreve başlayacak." : "❌ Ticari imtiyaz reddedildi.");
-      await logCharacterCommand(interaction,country.name,"Ticari imtiyaz teklifi **"+(accept?"kabul edildi":"reddedildi")+"**.");
+      await logCharacterCommand(interaction,country.name,
+        "🪙 Tüccar: **"+(offer?.merchant_name??"Bilinmeyen Tüccar")+"** • Gönderen devlet: **"+(offer?.country_name??"Bilinmeyen devlet")+"**\n"+
+        "↳ Hedef: **"+country.name+" / "+(offer?.settlement_name??"Bilinmeyen yerleşke")+"**\n"+
+        "↳ Ticari imtiyaz teklifi **"+(accept?"kabul edildi":"reddedildi")+"**."+
+        (accept?" Tüccar bir tur yolculuğun ardından göreve başlayacak.":" Tüccar gönderen devlette yeniden kullanılabilir hale geldi.")
+      );
       return true;
     }
     if (sub === "gorev-bitir") {
-      await characterService.endMerchant({guildId:interaction.guildId,countryId:country.id,characterId:interaction.options.getString("tuccar",true)});
+      const characterId = interaction.options.getString("tuccar",true);
+      const merchant = await characterForLog(country.id,characterId);
+      await characterService.endMerchant({guildId:interaction.guildId,countryId:country.id,characterId});
       await interaction.editReply("✅ Tüccar görevi sona erdirildi.");
-      await logCharacterCommand(interaction,country.name,"Tüccar görevi sonlandırıldı.");
+      await logCharacterCommand(interaction,country.name,
+        "🪙 Tüccar: **"+(merchant?.name??"Bilinmeyen Tüccar")+"** • Devlet: **"+country.name+"**\n"+
+        "↳ Sonlandırılan görev: **"+(MERCHANT_TASK_LABELS[merchant?.operation_type as MerchantTask]??assignmentLabels[merchant?.assignment??""]??"Etkin Tüccar görevi")+"**\n"+
+        "↳ Önceki görev yeri: **"+([merchant?.target_country_name,merchant?.target_settlement_name].filter(Boolean).join(" / ")||"Kayıtlı hedef yok")+"**"
+      );
       return true;
     }
     const task = interaction.options.getString("gorev",true) as MerchantTask;
+    const characterId = interaction.options.getString("tuccar",true);
+    const merchant = await characterForLog(country.id,characterId);
     const targetSettlementId = interaction.options.getString("hedef-sehir");
     if (!targetSettlementId) throw new GameError("Bu Tüccar görevi için hedef yerleşke seçilmelidir.");
     const targetName = interaction.options.getString("hedef-ulke");
     const targetCountry = targetName ? await gameService.countryByName(interaction.guildId,targetName) : null;
     if (targetName && !targetCountry) throw new GameError("Hedef devlet bulunamadı.");
+    const effectiveTargetCountry = task === "FOREIGN_CONCESSION" ? targetCountry : country;
+    const targetSettlementName = effectiveTargetCountry
+      ? await settlementNameForLog(effectiveTargetCountry.id,targetSettlementId)
+      : null;
+    const homeSettlementId = interaction.options.getString("gelir-sehri");
+    const homeSettlementName = await settlementNameForLog(country.id,homeSettlementId);
+    const purchaseCategory = (interaction.options.getString("alim-kategorisi") as "UNITS"|"SHIPS"|"BUILDING"|"SIEGE"|null)??undefined;
     const result = await characterService.startMerchant({
       guildId:interaction.guildId,actorId:interaction.user.id,countryId:country.id,
-      characterId:interaction.options.getString("tuccar",true),task,targetCountryId:targetCountry?.id,
+      characterId,task,targetCountryId:targetCountry?.id,
       targetSettlementId,
-      homeSettlementId:interaction.options.getString("gelir-sehri")??undefined,
-      purchaseCategory:(interaction.options.getString("alim-kategorisi") as "UNITS"|"SHIPS"|"BUILDING"|"SIEGE"|null)??undefined
+      homeSettlementId:homeSettlementId??undefined,
+      purchaseCategory
     });
     const response = result.status === "PENDING_ACCEPTANCE"
       ? "📨 Ticari imtiyaz teklifi hedef devlete kaydedildi; kabul edilmeden Tüccar yola çıkmaz."
       : result.arrivalTurn ? "✅ Tüccar görevlendirildi; Tur " + result.arrivalTurn + " başında göreve ulaşacak."
       : "✅ Satın alma temsilciliği bir sonraki uygun sipariş için hazırlandı.";
     await interaction.editReply(response);
-    await logCharacterCommand(interaction,country.name,"Tüccar görevi başlatıldı: **"+(MERCHANT_TASK_LABELS[task]??task)+"**.");
+    const taskState = result.status === "PENDING_ACCEPTANCE"
+      ? "Hedef devletin onayı bekleniyor; Tüccar henüz yola çıkmadı."
+      : result.arrivalTurn
+        ? "Yolculuk başladı; **Tur "+result.arrivalTurn+"** başında göreve ulaşacak."
+        : "Görev hemen etkinleştirildi.";
+    await logCharacterCommand(interaction,country.name,
+      "🪙 Tüccar: **"+(merchant?.name??"Bilinmeyen Tüccar")+"** (+"+(merchant?.skill_bonus??0)+") • Gönderen devlet: **"+country.name+"**\n"+
+      "↳ Görev: **"+(MERCHANT_TASK_LABELS[task]??task)+"**\n"+
+      "↳ Hedef: **"+(effectiveTargetCountry?.name??country.name)+" / "+(targetSettlementName??"Bilinmeyen yerleşke")+"**"+
+      (homeSettlementName?" • Gelir merkezi: **"+homeSettlementName+"**":"")+"\n"+
+      (purchaseCategory?"↳ Alım kategorisi: **"+purchaseCategoryLabels[purchaseCategory]+"**\n":"")+
+      "↳ Durum: "+taskState
+    );
     return true;
   }
   if (sub === "gorev-bitir") {
-    await characterService.endDiplomat({guildId:interaction.guildId,countryId:country.id,characterId:interaction.options.getString("diplomat",true)});
+    const characterId = interaction.options.getString("diplomat",true);
+    const diplomat = await characterForLog(country.id,characterId);
+    await characterService.endDiplomat({guildId:interaction.guildId,countryId:country.id,characterId});
     await interaction.editReply("✅ Diplomat görevi sona erdirildi.");
-    await logCharacterCommand(interaction,country.name,"Diplomat görevi sonlandırıldı.");
+    await logCharacterCommand(interaction,country.name,
+      "🤝 Diplomat: **"+(diplomat?.name??"Bilinmeyen Diplomat")+"** • Devlet: **"+country.name+"**\n"+
+      "↳ Sonlandırılan görev: **"+(DIPLOMAT_TASK_LABELS[diplomat?.operation_type as DiplomatTask]??assignmentLabels[diplomat?.assignment??""]??"Etkin Diplomat görevi")+"**\n"+
+      "↳ Önceki görev yeri: **"+([diplomat?.target_country_name,diplomat?.target_settlement_name].filter(Boolean).join(" / ")||"Ülke geneli")+"**"
+    );
     return true;
   }
   if (sub === "savunma-ata") {
-    await characterService.assignDiplomatDefense({countryId:country.id,characterId:interaction.options.getString("diplomat",true),settlementId:interaction.options.getString("sehir")??undefined});
+    const characterId = interaction.options.getString("diplomat",true);
+    const settlementId = interaction.options.getString("sehir");
+    const diplomat = await characterForLog(country.id,characterId);
+    const settlementName = await settlementNameForLog(country.id,settlementId);
+    await characterService.assignDiplomatDefense({countryId:country.id,characterId,settlementId:settlementId??undefined});
     await interaction.editReply("🛡️ Diplomat diplomatik savunmaya atandı.");
-    await logCharacterCommand(interaction,country.name,"Diplomat diplomatik savunmaya atandı.");
+    await logCharacterCommand(interaction,country.name,
+      "🤝 Diplomat: **"+(diplomat?.name??"Bilinmeyen Diplomat")+"** (+"+(diplomat?.skill_bonus??0)+") • Devlet: **"+country.name+"**\n"+
+      "↳ Görev: **Diplomatik Savunma** • Kapsam: **"+(settlementName?country.name+" / "+settlementName:country.name+" geneli")+"**"
+    );
     return true;
   }
   const task = interaction.options.getString("gorev",true) as DiplomatTask;
+  const characterId = interaction.options.getString("diplomat",true);
+  const diplomat = await characterForLog(country.id,characterId);
   const targetName = interaction.options.getString("hedef-ulke");
   const targetCountry = targetName ? await gameService.countryByName(interaction.guildId,targetName) : null;
   if (targetName && !targetCountry) throw new GameError("Hedef devlet bulunamadı.");
+  const targetSettlementId = interaction.options.getString("hedef-sehir");
+  const targetSettlementOwner = targetCountry??country;
+  const targetSettlementName = await settlementNameForLog(targetSettlementOwner.id,targetSettlementId);
+  const targetEventType = interaction.options.getString("olay");
+  const targetCultureGroup = interaction.options.getString("kultur");
   const result = await characterService.startDiplomat({
     guildId:interaction.guildId,actorId:interaction.user.id,countryId:country.id,
-    characterId:interaction.options.getString("diplomat",true),task,targetCountryId:targetCountry?.id,
-    targetSettlementId:interaction.options.getString("hedef-sehir")??undefined,
-    targetEventType:interaction.options.getString("olay")??undefined,
-    targetCultureGroup:interaction.options.getString("kultur")??undefined
+    characterId,task,targetCountryId:targetCountry?.id,
+    targetSettlementId:targetSettlementId??undefined,
+    targetEventType:targetEventType??undefined,
+    targetCultureGroup:targetCultureGroup??undefined
   });
   await interaction.editReply("✅ Diplomat görevlendirildi; Tur " + result.arrivalTurn + " başında göreve ulaşacak. Hedef ilerleme: " + result.goal + ".");
-  await logCharacterCommand(interaction,country.name,"Diplomat görevi başlatıldı: **"+(DIPLOMAT_TASK_LABELS[task]??task)+"** • Varış Tur "+result.arrivalTurn+".");
+  await logCharacterCommand(interaction,country.name,
+    "🤝 Diplomat: **"+(diplomat?.name??"Bilinmeyen Diplomat")+"** (+"+(diplomat?.skill_bonus??0)+") • Gönderen devlet: **"+country.name+"**\n"+
+    "↳ Görev: **"+(DIPLOMAT_TASK_LABELS[task]??task)+"**\n"+
+    "↳ Hedef: **"+(targetCountry?.name??country.name)+(targetSettlementName?" / "+targetSettlementName:"")+"**"+
+    (targetEventType?" • Olay: **"+(eventLabels[targetEventType]??targetEventType)+"**":"")+
+    (targetCultureGroup?" • Hedef kültür: **"+(CULTURE_GROUPS[targetCultureGroup as CultureGroup]?.label??targetCultureGroup)+"**":"")+"\n"+
+    "↳ Yolculuk: Tur "+result.arrivalTurn+" başında tamamlanacak • Hedef ilerleme: **"+result.goal+"**"
+  );
   return true;
 }
 

@@ -1,7 +1,7 @@
 import { Client, EmbedBuilder, GatewayIntentBits } from "discord.js";
 import { migrate } from "./db/migrate.js";
 import { pool } from "./db/pool.js";
-import { attachInteractionHandler } from "./discord/handler.js";
+import { attachInteractionHandler, processDueCharacterSystems } from "./discord/handler.js";
 import { startHealthServer } from "./http.js";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
@@ -112,7 +112,20 @@ async function sendScheduledGreatPowerRanking(now = new Date()): Promise<void> {
 
 client.once("clientReady", async (readyClient) => {
   logger.info({ user: readyClient.user.tag, guilds: readyClient.guilds.cache.size }, "Discord botu hazır");
-  for (const guild of readyClient.guilds.cache.values()) await gameService.ensureGuild(guild.id);
+  for (const guild of readyClient.guilds.cache.values()) {
+    await gameService.ensureGuild(guild.id);
+    try {
+      const state = await gameService.guildState(guild.id);
+      const result = await processDueCharacterSystems(
+        readyClient,guild.id,state.current_turn,state.current_turn % state.acquisition_interval === 0
+      );
+      if (result.espionageResolved || result.characterEvents || result.warnings.length) {
+        logger.info({guildId:guild.id,turn:state.current_turn,...result},"Başlangıç karakter görevi telafisi tamamlandı");
+      }
+    } catch (error) {
+      logger.error({error,guildId:guild.id},"Başlangıç karakter görevi telafisi tamamlanamadı");
+    }
+  }
   await sendCompletedRoleReports();
   await sendScheduledGreatPowerRanking();
 });

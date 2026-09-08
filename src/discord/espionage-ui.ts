@@ -37,6 +37,9 @@ function detectionText(level: number | null, captured: boolean): string {
 }
 
 export function espionageLogEmbed(operation: EspionageOperationView): EmbedBuilder {
+  const attackBonus = Number(operation.attack_total??0)-Number(operation.attack_roll??0);
+  const defenseBonus = Number(operation.defense_total??0)-Number(operation.defense_roll??0);
+  const detectionBonus = Number(operation.detection_total??0)-Number(operation.detection_roll??0);
   return new EmbedBuilder()
     .setColor(operation.captured ? 0xed4245 : operation.severity === "HEAVY" ? 0x8b1e1e : operation.severity === "NONE" ? 0x747f8d : 0xc59b45)
     .setTitle(`🕵️ Casusluk Operasyonu • Tur ${operation.resolve_turn}`)
@@ -48,12 +51,12 @@ export function espionageLogEmbed(operation: EspionageOperationView): EmbedBuild
       `**Hazırlık:** ${ESPIONAGE_PREPARATIONS[operation.preparation].label} • ${gold(operation.preparation_cost)}`,
       "",
       `**Geçerli Hedef:** ${operation.valid_target ? `Evet • ${operation.target_building_name ?? operation.target_building_type}` : "Hayır"}`,
-      `**Başarı Zarı:** ${operation.attack_roll} → **${operation.attack_total}**`,
-      `**Savunma Zarı:** ${operation.defense_roll} → **${operation.defense_total}**`,
+      `**Başarı Zarı:** 1d20 **${operation.attack_roll}** + toplam bonus **${attackBonus}** = **${operation.attack_total}**`,
+      `**Savunma Zarı:** 1d20 **${operation.defense_roll}** + toplam bonus **${defenseBonus}** = **${operation.defense_total}**`,
       `**Fark / Sonuç:** ${operation.margin} • **${ESPIONAGE_SEVERITY_LABELS[operation.severity ?? "NONE"]}**`,
       `**Mekanik Etki:** ${operation.effect_text ?? "Yok"}`,
       "",
-      `**Tespit Zarı:** ${operation.detection_roll} → **${operation.detection_total}**`,
+      `**Tespit Zarı:** 1d20 **${operation.detection_roll}** + toplam bonus/ceza **${detectionBonus}** = **${operation.detection_total}**`,
       `**Tespit Sonucu:** ${detectionText(operation.detection_level, operation.captured)}`,
       operation.captured && operation.target_type === "ASSASSINATE" ? "**Sonuç:** Yakalanan Suikastçı kalıcı olarak kaybedildi." : operation.captured ? `**Esaret:** Casus Tur ${operation.return_turn + 2} başında yeniden kullanılabilir.` : `**Dönüş:** Tur ${operation.return_turn} başında yeniden kullanılabilir.`
     ].filter((line):line is string=>line!==null).join("\n"))

@@ -12,6 +12,7 @@ import { gold, number } from "../domain/format.js";
 import { CULTURE_GROUPS, type CultureGroup } from "../domain/cultures.js";
 import { garrisonComposition } from "../domain/garrison.js";
 import { currentLocalDate } from "../domain/great-power.js";
+import { isAcquisitionTurn } from "../domain/mobilization.js";
 import type { Mobilization, UnitStatus } from "../domain/types.js";
 import { TRADE_ROUTE_LABELS, type TradeRoute } from "../domain/trade.js";
 import { MERCENARY_COMPANIES, type MercenaryCompanyKey } from "../domain/mercenaries.js";
@@ -43,9 +44,9 @@ import { handleCityButton, handleCityCommand, handleCityModal } from "./city-ui.
 import { addCountryRoleToMember, deleteCountryRole, ensureCountryRole, removeCountryRoleFromMember } from "./country-roles.js";
 import { handleSettlementEventSelect } from "./event-ui.js";
 import { handleEspionageAutocomplete, handleEspionageCommand, publishPendingEspionageLogs } from "./espionage-ui.js";
-import { resolveDueEspionageOperations } from "../services/espionage-service.js";
+import { espionageService, resolveDueEspionageOperations } from "../services/espionage-service.js";
 import { handleCharacterAutocomplete, handleCharacterCommand, publishCharacterTurnLogs } from "./character-ui.js";
-import { processCharacterTurn } from "../services/character-service.js";
+import { characterService, processCharacterTurn } from "../services/character-service.js";
 import { handleDiplomacyButton, handleDiplomacyCommand } from "./diplomacy-ui.js";
 import { handleWarDeclarationButton, handleWarDeclarationCommand, handleWarDeclarationModal } from "./war-declaration-ui.js";
 import { mercenaryCompanyAutocompleteAllowed, mercenarySubcommandRequiresGameMaster } from "./mercenary-access.js";
@@ -59,27 +60,96 @@ function settlementSelect(customId: string, settlements: Array<{ id: string; nam
   );
 }
 
-async function processEspionageTurn(client: Client, guildId: string, turn: number): Promise<void> {
-  try {
-    await resolveDueEspionageOperations(guildId, turn);
-    await publishPendingEspionageLogs(client, guildId);
-  } catch (error) {
-    console.error("Casusluk tur otomasyonu tamamlanamadı", error);
-  }
+interface CharacterAutomationResult {
+  espionageResolved: number;
+  espionagePublished: number;
+  characterEvents: number;
+  characterPublished: number;
+  warnings: string[];
 }
 
-async function processAcademyCharacterTurn(client: Client, guildId: string, turn: number, acquisition: boolean): Promise<string | null> {
+async function processEspionageTurn(client: Client, guildId: string, turn: number): Promise<{
+  resolved: number; published: number; warning: string | null;
+}> {
+  let resolved = 0;
+  try {
+    resolved = (await resolveDueEspionageOperations(guildId, turn)).length;
+  } catch (error) {
+    logger.error({ error, guildId, turn }, "Casusluk tur otomasyonu tamamlanamadı");
+    return {
+      resolved: 0, published: 0,
+      warning: "Casusluk otomasyonu tamamlanamadı; vadesi gelen görevler sonuçlandırılmadan bekletildi."
+    };
+  }
+  const remaining = await espionageService.dueCount(guildId,turn).catch(() => 0);
+  let published = 0;
+  try {
+    published = await publishPendingEspionageLogs(client, guildId);
+  } catch (error) {
+    logger.error({ error, guildId, turn }, "Casusluk sonuç logları yayımlanamadı");
+    return { resolved, published: 0, warning: "Casusluk sonuçları işlendi fakat Akademi log kanalına gönderilemedi; kayıtlar kuyrukta bekliyor." };
+  }
+  const warnings:string[] = [];
+  if (remaining) warnings.push(`${remaining} vadesi gelmiş casus görevi bir işlem hatası nedeniyle beklemede kaldı; diğer görevler tamamlandı.`);
+  if (resolved && !published) {
+    const channelId = await characterService.logChannel(guildId) ?? await espionageService.logChannel(guildId);
+    if (!channelId) warnings.push("Casus görevi sonuçlandı fakat Akademi log kanalı ayarlı olmadığı için sonuç veritabanında yayımlanmayı bekliyor.");
+  }
+  return { resolved,published,warning:warnings.length ? warnings.join(" ") : null };
+}
+
+async function processAcademyCharacterTurn(client: Client, guildId: string, turn: number, acquisition: boolean): Promise<{
+  events: number; published: number; warning: string | null;
+}> {
   try {
     const result = await processCharacterTurn(guildId,turn,acquisition);
     const publication = await publishCharacterTurnLogs(client,guildId,result.logs);
-    if (publication.state === "NO_CHANNEL") return "Akademi görev sonuç kanalı ayarlı değil; sonuçlar kuyrukta bekliyor.";
-    if (publication.state === "CHANNEL_UNAVAILABLE") return "Akademi log kanalı bulunamadı veya botun kanala erişimi yok; sonuçlar kuyrukta bekliyor.";
-    if (publication.state === "FAILED") return "Akademi sonuçları Discord kanalına gönderilemedi; sonuçlar kaybolmadı ve kuyrukta bekliyor.";
-    return null;
+    const common = { events: result.logs.length, published: publication.publishedEntries };
+    if (publication.state === "NO_CHANNEL") return { ...common, warning: "Akademi görev sonuç kanalı ayarlı değil; sonuçlar kuyrukta bekliyor." };
+    if (publication.state === "CHANNEL_UNAVAILABLE") return { ...common, warning: "Akademi log kanalı bulunamadı veya botun kanala erişimi yok; sonuçlar kuyrukta bekliyor." };
+    if (publication.state === "FAILED") return { ...common, warning: "Akademi sonuçları Discord kanalına gönderilemedi; sonuçlar kaybolmadı ve kuyrukta bekliyor." };
+    return { ...common, warning: null };
   } catch (error) {
     logger.error({ error, guildId, turn }, "Akademi karakter tur otomasyonu tamamlanamadı");
-    return "Akademi karakter otomasyonu bu tur tamamlanamadı. İşlem geri alındı; sunucu kayıtlarındaki hata incelenmeli.";
+    return {
+      events: 0, published: 0,
+      warning: "Akademi karakter otomasyonu bu tur tamamlanamadı. İşlem geri alındı ve güvenle yeniden denenebilir."
+    };
   }
+}
+
+export async function processDueCharacterSystems(
+  client: Client,
+  guildId: string,
+  turn: number,
+  acquisition: boolean
+): Promise<CharacterAutomationResult> {
+  const espionage = await processEspionageTurn(client,guildId,turn);
+  const academy = await processAcademyCharacterTurn(client,guildId,turn,acquisition);
+  return {
+    espionageResolved: espionage.resolved,
+    espionagePublished: espionage.published,
+    characterEvents: academy.events,
+    characterPublished: academy.published,
+    warnings: [espionage.warning,academy.warning].filter((warning): warning is string => Boolean(warning))
+  };
+}
+
+async function handleCharacterTurnRecovery(interaction: ChatInputCommandInteraction): Promise<void> {
+  requireGameMaster(interaction);
+  if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
+  await interaction.deferReply({ ephemeral: true });
+  const guild = await gameService.guildState(interaction.guildId);
+  const result = await processDueCharacterSystems(
+    interaction.client,interaction.guildId,guild.current_turn,
+    isAcquisitionTurn(guild.current_turn,guild.acquisition_interval)
+  );
+  await interaction.editReply([
+    `✅ **Tur ${guild.current_turn} karakter görevleri yeniden denetlendi.**`,
+    `🕵️ Sonuçlandırılan vadesi gelmiş casus görevi: **${result.espionageResolved}** • Loglanan: **${result.espionagePublished}**`,
+    `🎓 İşlenen Tüccar/Diplomat etkinliği: **${result.characterEvents}** • Loglanan/kuyruktan yayımlanan: **${result.characterPublished}**`,
+    result.warnings.length ? `\n⚠️ ${result.warnings.join("\n⚠️ ")}` : "\nBütün işlemler tamamlandı. Komut tekrar kullanılırsa tamamlanmış görevler ikinci kez uygulanmaz."
+  ].join("\n"));
 }
 async function sendDocument(interaction: ChatInputCommandInteraction, countryId: string): Promise<void> {
   if (!interaction.deferred && !interaction.replied) await interaction.deferReply({ ephemeral: true });
@@ -276,9 +346,11 @@ async function handleTurn(interaction: ChatInputCommandInteraction): Promise<voi
   const sub = interaction.options.getSubcommand();
   await interaction.deferReply();
   let embed: EmbedBuilder;
+  let characterAutomationWarnings:string[] = [];
   if (sub === "atla") {
     const result = await gameService.advanceTurn(interaction.guildId, interaction.user.id);
-    await processEspionageTurn(interaction.client, interaction.guildId, result.turn);
+    const characterAutomation = await processDueCharacterSystems(interaction.client, interaction.guildId, result.turn, result.acquisition);
+    characterAutomationWarnings = characterAutomation.warnings;
     await refreshActiveBattleCards(interaction.client, interaction.guildId);
     embed = turnAnnouncement({
       kind: "ADVANCE", turn: result.turn, acquisition: result.acquisition,
@@ -309,6 +381,12 @@ async function handleTurn(interaction: ChatInputCommandInteraction): Promise<voi
     embed = turnAnnouncement({ kind: sub === "ac" ? "OPEN" : sub === "durdur" ? "PAUSE" : "CLOSE", turn: guild.current_turn });
   }
   await interaction.editReply({ embeds: [embed], files: [new AttachmentBuilder(BRAND_BANNER_PATH, { name: BRAND_BANNER_NAME })] });
+  if (characterAutomationWarnings.length) {
+    await interaction.followUp({
+      content:"⚠️ **Yalnızca yöneticiye görünen karakter otomasyonu uyarısı:**\n"+characterAutomationWarnings.join("\n⚠️ "),
+      ephemeral:true
+    });
+  }
 }
 
 async function handleWelcomeCommand(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -553,8 +631,7 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
     await interaction.editReply(`✅ **${settlement.name}** artık **${RESOURCES[resourceType].label}** üretiyor.`);
   } else if (sub === "tur-ilerlet") {
     const result = await gameService.advanceTurn(interaction.guildId, interaction.user.id);
-    await processEspionageTurn(interaction.client, interaction.guildId, result.turn);
-    const academyWarning = await processAcademyCharacterTurn(interaction.client, interaction.guildId, result.turn, result.acquisition);
+    const characterAutomation = await processDueCharacterSystems(interaction.client, interaction.guildId, result.turn, result.acquisition);
     await refreshActiveBattleCards(interaction.client, interaction.guildId);
     await interaction.editReply({ embeds: [turnAnnouncement({
       kind: "ADVANCE", turn: result.turn, acquisition: result.acquisition,
@@ -578,8 +655,8 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
       mercenaryEndedDetails: result.mercenaryEndedDetails,
       assimilatedSettlementDetails: result.assimilatedSettlementDetails
     })], files: [new AttachmentBuilder(BRAND_BANNER_PATH, { name: BRAND_BANNER_NAME })] });
-    if (academyWarning) {
-      await interaction.followUp({content:"⚠️ **Akademi sistemi:** "+academyWarning,ephemeral:true});
+    if (characterAutomation.warnings.length) {
+      await interaction.followUp({content:"⚠️ **Karakter otomasyonu:** "+characterAutomation.warnings.join("\n⚠️ "),ephemeral:true});
     }
   } else if (sub === "tur-durumu") {
     const phase = interaction.options.getString("durum", true) as "OPEN" | "CLOSED" | "RESOLVING";
@@ -813,6 +890,10 @@ async function handleGreatPowerCommand(interaction: ChatInputCommandInteraction)
   await interaction.editReply(`✅ Güncel **${snapshot.rows.length} devletlik Büyük Güçler sıralaması** <#${channelId}> kanalında paylaşıldı.`);
 }
 async function handleCommand(interaction: ChatInputCommandInteraction): Promise<void> {
+  if (interaction.commandName === "karakter-yonetim" && interaction.options.getSubcommand() === "tur-gorevlerini-isle") {
+    await handleCharacterTurnRecovery(interaction);
+    return;
+  }
   if (await handleCharacterCommand(interaction)) return;
   if (await handleEspionageCommand(interaction)) return;
   if (await handleWarDeclarationCommand(interaction)) return;

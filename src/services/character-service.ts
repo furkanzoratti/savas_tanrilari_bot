@@ -1,7 +1,7 @@
 import { randomInt } from "node:crypto";
 import { pool, withTransaction, type DbClient } from "../db/pool.js";
 import {
-  CHARACTER_SPECIALIZATIONS, COMMANDER_DOCTRINES, DIPLOMAT_TASK_LABELS, culturePopulationResistance,
+  CHARACTER_SPECIALIZATIONS, COMMANDER_DOCTRINES, DIPLOMAT_TASK_LABELS, MERCHANT_TASK_LABELS, culturePopulationResistance,
   cultureProgressDelta, diplomaticPowerBonus, integrationProgressDelta,
   merchantBaseDiscount, specializationLevel, vassalizationProgressDelta,
   type CharacterSpecialization, type CommanderDoctrine, type DiplomatTask, type MerchantTask
@@ -52,6 +52,10 @@ interface BasicCharacter {
   specialization: CharacterSpecialization | null;
   specialization_progress: number;
 }
+
+const EVENT_LABELS:Record<string,string> = {
+  BLACK_MARKET:"Karaborsa", EPIDEMIC:"Salgın", UNREST:"Huzursuzluk", REBELLION:"İsyan"
+};
 
 export interface CharacterTurnLogBatch {
   id: string;
@@ -736,6 +740,19 @@ export async function processCharacterTurn(
       [guildId,turn]
     )).rows;
     for (const arrival of merchantArrivals) {
+      const detail = (await client.query<{
+        merchant_name:string; target_name:string; target_country_name:string; home_name:string|null;
+      }>(
+        `SELECT character.name AS merchant_name,target.name AS target_name,target_country.name AS target_country_name,
+                home.name AS home_name
+           FROM country_characters character
+           JOIN settlements target ON target.id=$2
+           JOIN countries target_country ON target_country.id=target.country_id
+           LEFT JOIN merchant_operations operation ON operation.id=$1
+           LEFT JOIN settlements home ON home.id=operation.home_settlement_id
+          WHERE character.id=$3`,
+        [arrival.id,arrival.target_settlement_id,arrival.merchant_character_id]
+      )).rows[0];
       const assignment = arrival.task_type === "LOCAL_TRADE" ? "MERCHANT_LOCAL"
         : arrival.task_type === "FOREIGN_CONCESSION" ? "MERCHANT_FOREIGN"
         : "MERCHANT_BLACK_MARKET";
@@ -751,7 +768,18 @@ export async function processCharacterTurn(
           [arrival.merchant_character_id]
         )).rows[0]!;
         await progressSpecialization(client,merchant,"MARKET_INSPECTOR");
-        logs.push("🪙 **"+merchant.name+"** Karaborsa olayını kontrol altına aldı.");
+        logs.push(
+          "🪙 **"+merchant.name+"** • **Karaborsa Tasfiyesi tamamlandı**\n"+
+          "↳ Hedef: **"+(detail?.target_country_name??"Bilinmeyen devlet")+" / "+(detail?.target_name??"Bilinmeyen yerleşke")+"**\n"+
+          "↳ Mekanik sonuç: Yerleşkedeki Karaborsa etkisi kapatıldı; Pazar Denetçisi uzmanlık ilerlemesi işlendi."
+        );
+      } else {
+        logs.push(
+          "🪙 **"+(detail?.merchant_name??"Tüccar")+"** • **"+MERCHANT_TASK_LABELS[arrival.task_type]+" görevi başladı**\n"+
+          "↳ Görev yeri: **"+(detail?.target_country_name??"Bilinmeyen devlet")+" / "+(detail?.target_name??"Bilinmeyen yerleşke")+"**"+
+          (detail?.home_name ? " • Gelir merkezi: **"+detail.home_name+"**" : "")+"\n"+
+          "↳ Durum: Yolculuk tamamlandı; görev artık etkin."
+        );
       }
     }
     await client.query(
@@ -760,16 +788,29 @@ export async function processCharacterTurn(
       [guildId,turn]
     );
     const arrivedDiplomats = await client.query<{
-      diplomat_character_id: string; completion_text: string | null;
+      diplomat_character_id: string; completion_text: string | null; task_type:DiplomatTask;
+      diplomat_name:string; target_country_name:string|null; target_settlement_name:string|null;
     }>(
-      `SELECT diplomat_character_id,completion_text FROM diplomat_operations
-        WHERE guild_id=$1 AND status='ACTIVE' AND arrival_turn=$2 AND last_resolved_turn IS NULL`,
+      `SELECT operation.diplomat_character_id,operation.completion_text,operation.task_type,
+              character.name AS diplomat_name,target_country.name AS target_country_name,
+              target_settlement.name AS target_settlement_name
+         FROM diplomat_operations operation
+         JOIN country_characters character ON character.id=operation.diplomat_character_id
+         LEFT JOIN countries target_country ON target_country.id=operation.target_country_id
+         LEFT JOIN settlements target_settlement ON target_settlement.id=operation.target_settlement_id
+        WHERE operation.guild_id=$1 AND operation.status='ACTIVE' AND operation.arrival_turn<=$2
+          AND operation.last_resolved_turn IS NULL`,
       [guildId,turn]
     );
     for (const arrived of arrivedDiplomats.rows) {
       await client.query(
         "UPDATE country_characters SET assignment=$1,assignment_ready_turn=NULL WHERE id=$2",
         [arrived.completion_text??"DIPLOMAT_TRAVELING",arrived.diplomat_character_id]
+      );
+      logs.push(
+        "🤝 **"+arrived.diplomat_name+"** • **"+DIPLOMAT_TASK_LABELS[arrived.task_type]+" görevi başladı**\n"+
+        "↳ Hedef: **"+[arrived.target_country_name,arrived.target_settlement_name].filter(Boolean).join(" / ")+"**\n"+
+        "↳ Durum: Yolculuk tamamlandı; görevin bu turdaki çözümü aşağıda ayrıca gösterilir."
       );
     }
 
@@ -779,18 +820,23 @@ export async function processCharacterTurn(
         target_settlement_id: string; home_settlement_id: string | null; merchant_name: string;
         skill_bonus: number; specialization: CharacterSpecialization | null; specialization_progress: number;
         land_trade_income: number; sea_trade_income: number; besieged: boolean;
+        country_name:string; target_name:string; target_country_name:string; home_name:string|null;
       }>(
         `SELECT operation.id,operation.country_id,operation.merchant_character_id,operation.task_type,
                 operation.target_settlement_id,operation.home_settlement_id,character.name AS merchant_name,
                 character.skill_bonus,character.specialization,character.specialization_progress,
-                target.land_trade_income,target.sea_trade_income,
+                target.land_trade_income,target.sea_trade_income,owner.name AS country_name,
+                target.name AS target_name,target_country.name AS target_country_name,home.name AS home_name,
                 EXISTS(
                   SELECT 1 FROM battles battle WHERE battle.defender_settlement_id=target.id
                     AND battle.terrain='SIEGE' AND battle.status NOT IN ('FINISHED','CANCELLED')
                 ) AS besieged
            FROM merchant_operations operation
            JOIN country_characters character ON character.id=operation.merchant_character_id
+           JOIN countries owner ON owner.id=operation.country_id
            JOIN settlements target ON target.id=operation.target_settlement_id
+           JOIN countries target_country ON target_country.id=target.country_id
+           LEFT JOIN settlements home ON home.id=operation.home_settlement_id
           WHERE operation.guild_id=$1 AND operation.status='ACTIVE'
             AND operation.task_type IN ('LOCAL_TRADE','FOREIGN_CONCESSION')
             AND (operation.last_processed_turn IS NULL OR operation.last_processed_turn<$2)
@@ -799,9 +845,11 @@ export async function processCharacterTurn(
       )).rows;
       for (const operation of operations) {
         const roll = randomInt(1,11);
+        const skillBonus = Number(operation.skill_bonus);
+        const specializationBonus = operation.specialization === "CARAVAN_MASTER" ? 1 : 0;
         const effectivePercent = Math.min(
           10,
-          roll + Number(operation.skill_bonus) + (operation.specialization === "CARAVAN_MASTER" ? 1 : 0)
+          roll + skillBonus + specializationBonus
         );
         const tradeIncome = Number(operation.land_trade_income)+Number(operation.sea_trade_income);
         const amount = operation.besieged ? 0 : Math.min(1000,Math.floor(tradeIncome*effectivePercent/100));
@@ -835,8 +883,11 @@ export async function processCharacterTurn(
           specialization_progress:Number(operation.specialization_progress)
         },merchantSpecialization(operation.task_type));
         logs.push(
-          "🪙 **"+operation.merchant_name+"** • 1d10: "+roll+" • Etkin oran: %"+effectivePercent+
-          " • Kazanç: **"+amount.toLocaleString("tr-TR")+" Altın**"+(operation.besieged?" (kuşatma nedeniyle 0)":"")
+          "🪙 **"+operation.merchant_name+"** • **"+MERCHANT_TASK_LABELS[operation.task_type]+"**\n"+
+          "↳ Görev yeri: **"+operation.target_country_name+" / "+operation.target_name+"** • Gelir merkezi: **"+(operation.home_name??operation.target_name)+"**\n"+
+          "↳ Zar hesabı: 1d10 **"+roll+"** + yetenek **"+skillBonus+"** + uzmanlık **"+specializationBonus+"** = etkin oran **%"+effectivePercent+"**\n"+
+          "↳ Ticaret geliri tabanı: "+tradeIncome.toLocaleString("tr-TR")+" Altın • Kazanç: **"+amount.toLocaleString("tr-TR")+" Altın**"+
+          (operation.besieged?" • Kuşatma nedeniyle gelir sıfırlandı.":"")
         );
       }
     }
@@ -846,19 +897,26 @@ export async function processCharacterTurn(
       target_country_id: string | null; target_settlement_id: string | null; target_event_type: string | null;
       target_culture_group: string | null; progress: number; goal: number; name: string; skill_bonus: number;
       specialization: CharacterSpecialization | null; specialization_progress: number;
+      country_name:string; target_country_name:string|null; target_settlement_name:string|null;
     }>(
       `SELECT operation.id,operation.country_id,operation.diplomat_character_id,operation.task_type,
               operation.target_country_id,operation.target_settlement_id,operation.target_event_type,
               operation.target_culture_group,operation.progress,operation.goal,character.name,
-              character.skill_bonus,character.specialization,character.specialization_progress
+              character.skill_bonus,character.specialization,character.specialization_progress,
+              owner.name AS country_name,target_country.name AS target_country_name,
+              target_settlement.name AS target_settlement_name
          FROM diplomat_operations operation
          JOIN country_characters character ON character.id=operation.diplomat_character_id
+         JOIN countries owner ON owner.id=operation.country_id
+         LEFT JOIN countries target_country ON target_country.id=operation.target_country_id
+         LEFT JOIN settlements target_settlement ON target_settlement.id=operation.target_settlement_id
         WHERE operation.guild_id=$1 AND operation.status='ACTIVE' AND operation.arrival_turn<=$2
           AND (operation.last_resolved_turn IS NULL OR operation.last_resolved_turn<$2)
         ORDER BY operation.created_at FOR UPDATE OF operation`,
       [guildId,turn]
     )).rows;
     for (const operation of diplomats) {
+      const targetText = [operation.target_country_name,operation.target_settlement_name].filter(Boolean).join(" / ") || "Hedef kaydı yok";
       const character: BasicCharacter = {
         id:operation.diplomat_character_id,name:operation.name,role:"DIPLOMAT",
         skill_bonus:Number(operation.skill_bonus),assignment:"",specialization:operation.specialization,
@@ -882,7 +940,11 @@ export async function processCharacterTurn(
           [operation.diplomat_character_id]
         );
         await progressSpecialization(client,character,"PROVINCIAL_GOVERNOR");
-        logs.push("🤝 **"+operation.name+"** Halkla Uzlaşma görevini tamamladı; "+(operation.target_event_type??"UNREST")+" sonlandırıldı.");
+        logs.push(
+          "🤝 **"+operation.name+"** • **Halkla Uzlaşma tamamlandı**\n"+
+          "↳ Hedef: **"+targetText+"** • Olay: **"+(EVENT_LABELS[operation.target_event_type??"UNREST"]??operation.target_event_type??"Huzursuzluk")+"**\n"+
+          "↳ Mekanik sonuç: Olay etkisi doğrudan sonlandırıldı; diplomat serbest bırakıldı ve Eyalet Valisi ilerlemesi işlendi."
+        );
         continue;
       }
       const attackRoll = randomInt(1,21);
@@ -894,6 +956,7 @@ export async function processCharacterTurn(
       let defenseBonus = 0;
       let delta = 0;
       let failed = false;
+      let powerText = "";
       if (operation.task_type === "CULTURE_CHANGE") {
         const target = await settlement(client,operation.target_settlement_id!);
         defenseBonus = culturePopulationResistance(Number(target.population))
@@ -904,12 +967,19 @@ export async function processCharacterTurn(
         const ownPower = powers.get(operation.country_id);
         const targetPower = powers.get(operation.target_country_id!);
         const powerBonus = ownPower && targetPower ? diplomaticPowerBonus(ownPower/targetPower) : null;
+        powerText = ownPower && targetPower
+          ? " • Güç oranı: "+(ownPower/targetPower).toLocaleString("tr-TR",{maximumFractionDigits:2})+"x"
+          : " • Güç puanı hesaplanamadı";
         if (powerBonus === null) {
           await client.query(
             "UPDATE diplomat_operations SET status='PAUSED',insufficient_power_turns=insufficient_power_turns+1,last_resolved_turn=$1,updated_at=NOW() WHERE id=$2",
             [turn,operation.id]
           );
-          logs.push("🤝 **"+operation.name+"** vassallaştırma görevi güç oranı yetersiz olduğu için durakladı.");
+          logs.push(
+            "⏸️ **"+operation.name+"** • **Diplomatik Vassallaştırma durakladı**\n"+
+            "↳ Hedef: **"+targetText+"**"+powerText+"\n"+
+            "↳ Neden: Gerekli asgari **1,50x** güç oranı sağlanmadı; bu tur zar atılmadı."
+          );
           continue;
         }
         attackBonus += powerBonus;
@@ -940,7 +1010,12 @@ export async function processCharacterTurn(
           "UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL,assignment_ready_turn=NULL,unavailable_until_turn=$1 WHERE id=$2",
           [turn+6,operation.diplomat_character_id]
         );
-        logs.push("❌ **"+operation.name+"** vassallaştırma görevi başarısız oldu; 6 tur bekleme başladı.");
+        logs.push(
+          "❌ **"+operation.name+"** • **Diplomatik Vassallaştırma başarısız**\n"+
+          "↳ Hedef: **"+targetText+"**"+powerText+"\n"+
+          "↳ Başarı: 1d20 **"+attackRoll+"** + bonus **"+attackBonus+"** = **"+(attackRoll+attackBonus)+"** • Savunma: 1d20 **"+defenseRoll+"** + bonus **"+defenseBonus+"** = **"+(defenseRoll+defenseBonus)+"**\n"+
+          "↳ Sonuç: Savunma farkı 9 veya üzeri; diplomat **Tur "+(turn+6)+"** başına kadar kullanılamaz."
+        );
         continue;
       }
       const next = Math.max(0,Math.min(Number(operation.goal),Number(operation.progress)+delta));
@@ -976,8 +1051,10 @@ export async function processCharacterTurn(
       }
       if (delta>0) await progressSpecialization(client,character,expectedSpecialization);
       logs.push(
-        "🤝 **"+operation.name+"** • "+operation.task_type+" • Zarlar "+(attackRoll+attackBonus)+"–"+
-        (defenseRoll+defenseBonus)+" • İlerleme **"+next+"/"+operation.goal+"**"+(complete?" • TAMAMLANDI":"")
+        "🤝 **"+operation.name+"** • **"+DIPLOMAT_TASK_LABELS[operation.task_type]+"**\n"+
+        "↳ Hedef: **"+targetText+"**"+powerText+"\n"+
+        "↳ Başarı: 1d20 **"+attackRoll+"** + bonus **"+attackBonus+"** = **"+(attackRoll+attackBonus)+"** • Savunma: 1d20 **"+defenseRoll+"** + bonus **"+defenseBonus+"** = **"+(defenseRoll+defenseBonus)+"**\n"+
+        "↳ Tur etkisi: **"+(delta>=0?"+":"")+delta+" ilerleme** • Önceki: "+operation.progress+"/"+operation.goal+" • Güncel: **"+next+"/"+operation.goal+"**"+(complete?" • **TAMAMLANDI**":"")
       );
     }
     if (logs.length) {

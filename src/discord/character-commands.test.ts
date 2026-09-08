@@ -27,6 +27,7 @@ describe("Akademi karakter komutları", () => {
     const operations = logChannel?.options?.find((item) => item.name === "islem");
 
     expect(operations?.choices?.map((choice) => choice.value)).toEqual(["set","clear","status","test"]);
+    expect(command?.options?.map((item)=>item.name)).toContain("tur-gorevlerini-isle");
   });
 
   it("yönetici mali hareket dökümünde ülke ve isteğe bağlı tur seçtirir", () => {

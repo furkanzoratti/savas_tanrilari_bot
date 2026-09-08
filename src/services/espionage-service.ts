@@ -8,6 +8,7 @@ import {
 } from "../domain/espionage.js";
 import { applyEspionageEffect, espionageTargetExists, type EspionageEffectOperation } from "./espionage-effects.js";
 import { GameError } from "./game-service.js";
+import { logger } from "../logger.js";
 
 export type EspionageOperationStatus = "TRAVELING" | "RESOLVED" | "CANCELLED";
 
@@ -172,6 +173,8 @@ export async function resolveDueEspionageOperations(guildId: string, turn: numbe
     )).rows;
 
     for (const operation of due) {
+      await client.query("SAVEPOINT espionage_operation");
+      try {
       const buildingCategory = ["ECONOMIC","MILITARY","PUBLIC","NAVAL"].includes(operation.target_type);
       const candidates = operation.target_type === "CONSTRUCTION"
         ? (await client.query<{ building_type: string; level: number; target_level: number|null; construction_paid_amount: number }>("SELECT building_type,level,target_level,construction_paid_amount FROM buildings WHERE settlement_id=$1 AND status='BUILDING' ORDER BY building_type", [operation.target_settlement_id])).rows
@@ -235,12 +238,28 @@ export async function resolveDueEspionageOperations(guildId: string, turn: numbe
       } else {
         await client.query("UPDATE country_characters SET assignment='ESPIONAGE_RETURNING',assigned_settlement_id=$1 WHERE id=$2", [operation.target_settlement_id, operation.spy_character_id]);
       }
+      await client.query("RELEASE SAVEPOINT espionage_operation");
+      } catch (error) {
+        await client.query("ROLLBACK TO SAVEPOINT espionage_operation");
+        await client.query("RELEASE SAVEPOINT espionage_operation");
+        logger.error({error,guildId,turn,operationId:operation.id,targetType:operation.target_type},"Tek casusluk operasyonu çözümlenemedi; diğer operasyonlara devam ediliyor");
+      }
     }
-    return (await client.query<EspionageOperationView>(`${operationViewSql} WHERE operation.guild_id=$1 AND operation.resolve_turn=$2 AND operation.status='RESOLVED' ORDER BY operation.created_at`, [guildId, turn])).rows;
+    if (!due.length) return [];
+    return (await client.query<EspionageOperationView>(
+      `${operationViewSql} WHERE operation.guild_id=$1 AND operation.id=ANY($2::uuid[]) AND operation.status='RESOLVED' ORDER BY operation.created_at`,
+      [guildId,due.map((operation)=>operation.id)]
+    )).rows;
   });
 }
 
 export const espionageService = {
+  async dueCount(guildId:string,turn:number):Promise<number> {
+    return Number((await pool.query<{count:string}>(
+      "SELECT COUNT(*)::text AS count FROM espionage_operations WHERE guild_id=$1 AND status='TRAVELING' AND resolve_turn<=$2",
+      [guildId,turn]
+    )).rows[0]?.count??0);
+  },
   async startOperation(input: {
     guildId: string; actorId: string; attackerCountryId: string; spyCharacterId: string;
     targetCountryId: string; targetSettlementId: string; targetType: EspionageTarget; preparation: EspionagePreparation;

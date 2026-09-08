@@ -86,7 +86,9 @@ export const commandBuilders = [
           { name: "Ayarla", value: "set" }, { name: "Kapat", value: "clear" },
           { name: "Durumu Gör", value: "status" }, { name: "Test Et", value: "test" }
         ))
-      .addChannelOption((o) => o.setName("kanal").setDescription("Akademi komutları, görevler ve casus sonuçlarının gönderileceği kanal").addChannelTypes(ChannelType.GuildText))),
+      .addChannelOption((o) => o.setName("kanal").setDescription("Akademi komutları, görevler ve casus sonuçlarının gönderileceği kanal").addChannelTypes(ChannelType.GuildText)))
+    .addSubcommand((sub) => sub.setName("tur-gorevlerini-isle")
+      .setDescription("Mevcut turda vadesi gelen Casus, Tüccar ve Diplomat görevlerini güvenle yeniden işler")),
   new SlashCommandBuilder()
     .setName("belge").setDescription("Ülkenin güncel belgesini gösterir")
     .addStringOption(countryOption),
