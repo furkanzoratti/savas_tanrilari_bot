@@ -64,6 +64,7 @@ export interface SettlementPolicyRow {
 }
 export interface CountryCharacter {
   id: string; country_id: string; name: string; role: CharacterRole; skill_bonus: number;
+  character_status: "ACTIVE" | "DEAD";
   specialization: string | null; specialization_progress: number; specialization_level: number;
   assignment: "NONE" | "CURIA" | "AGORA" | "ARMY" | "FLEET" | "ESPIONAGE" | "ESPIONAGE_RETURNING" | "CAPTURED" | "COUNTERINTELLIGENCE_TRAVELING_COUNTRY" | "COUNTERINTELLIGENCE_TRAVELING_SETTLEMENT" | "COUNTERINTELLIGENCE_COUNTRY" | "COUNTERINTELLIGENCE_SETTLEMENT" | "ASSIMILATION"; assignment_ready_turn: number | null; trained_settlement_id: string | null;
   assigned_settlement_id: string | null; assigned_settlement_name: string | null; assigned_country_name: string | null; assigned_army_name: string | null; assigned_fleet_name: string | null;

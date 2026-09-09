@@ -1,7 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.hoisted(() => {
+  process.env.DISCORD_TOKEN = "test-token";
+  process.env.DISCORD_CLIENT_ID = "test-client";
+  process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
+});
 import { commandBuilders } from "./commands.js";
+import { isSpyDefenseAssignment } from "../services/espionage-service.js";
 
 describe("casusluk komutları", () => {
+  it("şahsi koruma dâhil bütün casus savunma görevlerini iptal edilebilir sayar", () => {
+    expect(isSpyDefenseAssignment("PERSONAL_GUARD")).toBe(true);
+    expect(isSpyDefenseAssignment("COUNTERINTELLIGENCE_COUNTRY")).toBe(true);
+    expect(isSpyDefenseAssignment("ESPIONAGE")).toBe(false);
+  });
+
   it("oyuncu görev, takip ve karşı casusluk akışlarını kaydeder", () => {
     const command = commandBuilders.find((item) => item.name === "casusluk");
     expect(command?.options?.map((item) => item.name)).toEqual([

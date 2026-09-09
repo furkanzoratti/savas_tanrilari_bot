@@ -331,6 +331,15 @@ export const characterService = {
       if (state.turn_phase !== "OPEN") throw new GameError("Tüccar görevi yalnızca hareketler açıkken başlatılabilir.");
       const merchant = await activeCharacter(client, input.countryId, input.characterId, "MERCHANT");
       if (merchant.assignment !== "NONE") throw new GameError("Bu Tüccar şu anda başka bir görevde.");
+      const existingOperation = await client.query<{ task_type: MerchantTask }>(
+        `SELECT task_type FROM merchant_operations
+          WHERE merchant_character_id=$1 AND status IN ('PENDING_ACCEPTANCE','TRAVELING','ACTIVE','CONTROLLED')
+          ORDER BY created_at DESC LIMIT 1 FOR UPDATE`, [merchant.id]
+      );
+      if (existingOperation.rowCount) {
+        const task = existingOperation.rows[0]!.task_type;
+        throw new GameError(`Bu Tüccarın kayıtlı görevi zaten var (${MERCHANT_TASK_LABELS[task] ?? task}). Önce /tuccar gorev-bitir komutunu kullanın.`);
+      }
       const targetCountryId = input.task === "FOREIGN_CONCESSION" ? input.targetCountryId : input.countryId;
       const target = await settlement(client, input.targetSettlementId, targetCountryId);
       const home = input.homeSettlementId ? await settlement(client, input.homeSettlementId, input.countryId) : null;
@@ -444,17 +453,21 @@ export const characterService = {
     });
   },
 
-  async endMerchant(input: { guildId: string; countryId: string; characterId: string }): Promise<void> {
-    await withTransaction(async (client) => {
+  async endMerchant(input: { guildId: string; countryId: string; characterId: string }): Promise<boolean> {
+    return withTransaction(async (client) => {
       const state = await guildState(client,input.guildId);
-      await activeCharacter(client,input.countryId,input.characterId,"MERCHANT");
+      const merchant = await activeCharacter(client,input.countryId,input.characterId,"MERCHANT");
       const ended = await client.query(
         "UPDATE merchant_operations SET status='ENDED',ended_turn=$1,updated_at=NOW() WHERE merchant_character_id=$2 AND status IN ('PENDING_ACCEPTANCE','TRAVELING','ACTIVE','CONTROLLED') RETURNING id",
         [state.current_turn,input.characterId]
       );
-      if (!ended.rowCount) throw new GameError("Bu Tüccarın sonlandırılabilecek etkin görevi yok.");
+      if (!ended.rowCount && merchant.assignment === "NONE") return false;
+      if (!ended.rowCount && !merchant.assignment.startsWith("MERCHANT_")) {
+        throw new GameError("Bu Tüccar bir bina görevinde. Atamayı /akademi gorevden-al komutuyla kaldırın.");
+      }
       await client.query("UPDATE purchase_agent_discounts SET consumed_at=NOW() WHERE merchant_character_id=$1 AND consumed_at IS NULL", [input.characterId]);
-      await client.query("UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL,assignment_ready_turn=NULL WHERE id=$1", [input.characterId]);
+      await client.query("UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL,protected_character_id=NULL,assignment_ready_turn=NULL WHERE id=$1", [input.characterId]);
+      return true;
     });
   },
 
@@ -486,7 +499,7 @@ export const characterService = {
         throw new GameError(
           "Bu Diplomatın kayıtlı bir görevi zaten var ("+
           (DIPLOMAT_TASK_LABELS[existing.task_type]??existing.task_type)+
-          "). Önce /diplomat görev-bitir komutunu kullanın."
+          "). Önce /diplomat gorev-bitir komutunu kullanın."
         );
       }
       const target = input.targetSettlementId
@@ -582,6 +595,11 @@ export const characterService = {
     await withTransaction(async (client) => {
       const diplomat = await activeCharacter(client,input.countryId,input.characterId,"DIPLOMAT");
       if (diplomat.assignment !== "NONE" && diplomat.assignment !== "DIPLOMAT_DEFENSE") throw new GameError("Bu Diplomat başka bir görevde.");
+      const operation = await client.query(
+        "SELECT 1 FROM diplomat_operations WHERE diplomat_character_id=$1 AND status IN ('TRAVELING','ACTIVE','PAUSED') LIMIT 1 FOR UPDATE",
+        [diplomat.id]
+      );
+      if (operation.rowCount) throw new GameError("Bu Diplomatın kayıtlı görevi devam ediyor. Önce /diplomat gorev-bitir komutunu kullanın.");
       if (input.settlementId) await settlement(client,input.settlementId,input.countryId);
       await client.query(
         "UPDATE country_characters SET assignment='DIPLOMAT_DEFENSE',assigned_settlement_id=$1,assignment_ready_turn=NULL WHERE id=$2",
@@ -590,20 +608,23 @@ export const characterService = {
     });
   },
 
-  async endDiplomat(input: { guildId: string; countryId: string; characterId: string }): Promise<void> {
-    await withTransaction(async (client) => {
+  async endDiplomat(input: { guildId: string; countryId: string; characterId: string }): Promise<boolean> {
+    return withTransaction(async (client) => {
       await guildState(client,input.guildId);
       const diplomat = await activeCharacter(client,input.countryId,input.characterId,"DIPLOMAT");
-      if (diplomat.assignment === "DIPLOMAT_DEFENSE") {
-        await client.query("UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL,assignment_ready_turn=NULL WHERE id=$1", [diplomat.id]);
-        return;
+      if (diplomat.assignment === "ASSIMILATION") {
+        throw new GameError("Bu Diplomat asimilasyon görevinde; yerleşke asimile edilmeden bu komutla geri çağrılamaz.");
+      }
+      if (!["NONE","DIPLOMAT_DEFENSE","DIPLOMAT_TRAVELING","DIPLOMAT_RECONCILIATION","DIPLOMAT_CULTURE","DIPLOMAT_VASSALIZE","DIPLOMAT_INTEGRATE"].includes(diplomat.assignment)) {
+        throw new GameError("Bu Diplomat bir bina veya ordu görevinde. İlgili atama komutuyla görevden alınmalıdır.");
       }
       const ended = await client.query(
         "UPDATE diplomat_operations SET status='CANCELLED',updated_at=NOW(),completion_text='Oyuncu tarafından sonlandırıldı.' WHERE diplomat_character_id=$1 AND status IN ('TRAVELING','ACTIVE','PAUSED') RETURNING id",
         [diplomat.id]
       );
-      if (!ended.rowCount) throw new GameError("Bu Diplomatın sonlandırılabilecek görevi yok.");
-      await client.query("UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL,assignment_ready_turn=NULL WHERE id=$1", [diplomat.id]);
+      if (!ended.rowCount && diplomat.assignment === "NONE") return false;
+      await client.query("UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL,protected_character_id=NULL,assignment_ready_turn=NULL WHERE id=$1", [diplomat.id]);
+      return true;
     });
   },
 

@@ -1,14 +1,14 @@
 import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ModalBuilder,
   TextInputBuilder, TextInputStyle,
-  type ButtonInteraction, type ChatInputCommandInteraction, type ModalSubmitInteraction
+  type AutocompleteInteraction, type ButtonInteraction, type ChatInputCommandInteraction, type ModalSubmitInteraction
 } from "discord.js";
 import { CHARACTER_ROLES, CITY_POLICIES, type CityPolicyKey } from "../domain/catalog.js";
 import { gold } from "../domain/format.js";
 import { cityService } from "../services/city-service.js";
 import { characterService } from "../services/character-service.js";
 import { gameService, GameError, type AcademyTrainingSession } from "../services/game-service.js";
-import { assertCountryAccess, requireGameMaster, resolveCountry } from "./auth.js";
+import { assertCountryAccess, isGameMaster, requireGameMaster, resolveCountry } from "./auth.js";
 import { charactersEmbed, queueCharacterLog } from "./character-ui.js";
 import { handleSettlementEventButton, handleSettlementEventCommand } from "./event-ui.js";
 
@@ -60,6 +60,53 @@ async function logAcademyAction(
     actorUserId:interaction.user.id,title:"Akademi Komut Günlüğü",source:"ACADEMY_COMMAND",
     entry:"👤 <@"+interaction.user.id+"> • **"+countryName+"**\n↳ "+entry
   }).catch(() => undefined);
+}
+
+export async function handleCityAutocomplete(interaction: AutocompleteInteraction): Promise<boolean> {
+  if (!interaction.guildId || interaction.commandName !== "akademi") return false;
+  const focused = interaction.options.getFocused(true);
+  if (!["karakter", "yerleske"].includes(focused.name)) return false;
+  const requestedCountry = interaction.options.getString("ulke");
+  const country = requestedCountry && isGameMaster(interaction)
+    ? await gameService.countryByName(interaction.guildId, requestedCountry)
+    : await gameService.countryForUser(interaction.guildId, interaction.user.id);
+  if (!country) { await interaction.respond([]); return true; }
+  const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
+  const sub = interaction.options.getSubcommand(false) ?? "";
+  if (focused.name === "karakter") {
+    let characters = (await characterService.list(country.id))
+      .filter((character) => character.character_status === "ACTIVE");
+    if (sub === "asimilasyona-gonder") {
+      characters = characters.filter((character) => character.role === "DIPLOMAT" && character.assignment === "NONE");
+    } else if (sub === "gorevden-al") {
+      characters = characters.filter((character) => ["CURIA", "AGORA"].includes(character.assignment));
+    } else if (sub === "ata") {
+      characters = characters.filter((character) => ["NONE", "CURIA", "AGORA"].includes(character.assignment));
+    }
+    await interaction.respond(characters
+      .filter((character) => !query || character.name.toLocaleLowerCase("tr-TR").includes(query))
+      .slice(0,25)
+      .map((character) => ({
+        name: `${character.name} • ${CHARACTER_ROLES[character.role].label} • ${character.assignment === "NONE" ? "Müsait" : character.assignment}`.slice(0,100),
+        value: character.name
+      })));
+    return true;
+  }
+  const document = await gameService.document(country.id);
+  const assignment = interaction.options.getString("gorev-yeri");
+  let settlements = document.settlements;
+  if (sub === "egit") {
+    settlements = settlements.filter((item) => item.buildings.some((building) => building.building_type === "academy" && building.status === "ACTIVE"));
+  } else if (sub === "asimilasyona-gonder") {
+    settlements = settlements.filter((item) => item.is_conquered);
+  } else if (sub === "ata" && assignment) {
+    const buildingType = assignment === "CURIA" ? "curia" : "agora";
+    settlements = settlements.filter((item) => item.buildings.some((building) => building.building_type === buildingType && building.status === "ACTIVE" && building.level >= 2));
+  }
+  await interaction.respond(settlements
+    .filter((item) => !query || item.name.toLocaleLowerCase("tr-TR").includes(query))
+    .slice(0,25).map((item) => ({ name:item.name.slice(0,100), value:item.name })));
+  return true;
 }
 
 export async function handleCityCommand(interaction: ChatInputCommandInteraction): Promise<boolean> {

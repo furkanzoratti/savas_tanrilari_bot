@@ -7,9 +7,33 @@ vi.hoisted(() => {
 });
 
 import { commandBuilders } from "./commands.js";
-import { charactersEmbed } from "./character-ui.js";
+import { characterAvailableForCommand, charactersEmbed } from "./character-ui.js";
+
+const availableCharacter = {
+  role:"DIPLOMAT", assignment:"NONE", operation_status:null, character_status:"ACTIVE",
+  doctrine:null, commander_victories:0, specialization:null
+} as const;
 
 describe("Akademi karakter komutları", () => {
+  it("Akademi seçimlerinde karakter ve yerleşkeleri otomatik tamamlar", () => {
+    const command = commandBuilders.find((item) => item.name === "akademi");
+    for (const subcommand of ["ata", "asimilasyona-gonder"]) {
+      const sub = command?.options?.find((item) => item.name === subcommand);
+      expect(sub?.options?.find((item) => item.name === "karakter")).toMatchObject({autocomplete:true});
+      expect(sub?.options?.find((item) => item.name === "yerleske")).toMatchObject({autocomplete:true});
+    }
+    expect(command?.options?.find((item) => item.name === "gorevden-al")?.options?.find((item) => item.name === "karakter"))
+      .toMatchObject({autocomplete:true});
+  });
+
+  it("aynı turda yeniden görevlendirilebilen Diplomat ve Tüccarı doğru filtreler", () => {
+    expect(characterAvailableForCommand(availableCharacter,"diplomat","gorev-baslat")).toBe(true);
+    expect(characterAvailableForCommand({...availableCharacter,assignment:"DIPLOMAT_DEFENSE"},"diplomat","gorev-bitir")).toBe(true);
+    expect(characterAvailableForCommand({...availableCharacter,assignment:"DIPLOMAT_DEFENSE"},"diplomat","gorev-baslat")).toBe(false);
+    expect(characterAvailableForCommand({...availableCharacter,role:"MERCHANT",assignment:"MERCHANT_DOMESTIC"},"tuccar","gorev-bitir")).toBe(true);
+    expect(characterAvailableForCommand({...availableCharacter,character_status:"DEAD"},"diplomat","gorev-baslat")).toBe(false);
+  });
+
   it("Diplomat görevlerinde gerekli hedefleri seçimli olarak sunar", () => {
     const command = commandBuilders.find((item) => item.name === "diplomat");
     const start = command?.options?.find((item) => item.name === "gorev-baslat");

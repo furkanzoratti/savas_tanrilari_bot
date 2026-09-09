@@ -197,6 +197,7 @@ export const cityService = {
       const settlement = await getSettlement(client, input.countryId, input.settlementId, true);
       const character = (await client.query<CountryCharacter>("SELECT *,NULL::text AS assigned_settlement_name,NULL::text AS trained_settlement_name FROM country_characters WHERE country_id=$1 AND lower(name)=lower($2) FOR UPDATE", [input.countryId, input.characterName.trim()])).rows[0];
       if (!character) throw new GameError("Bu ülkede belirtilen karakter bulunamadı.");
+      if (character.character_status !== "ACTIVE") throw new GameError("Ölü veya kullanılamaz durumdaki karakter görevlendirilemez.");
       if (!["NONE","CURIA","AGORA"].includes(character.assignment)) throw new GameError("Bu karakter ordu, casusluk veya esaret nedeniyle bu göreve atanamaz.");
       const building = input.assignment === "CURIA" ? "curia" : "agora";
       const level = await activeBuildingLevel(client, settlement.id, building);
@@ -230,8 +231,14 @@ export const cityService = {
         [input.countryId, input.characterName.trim()]
       )).rows[0];
       if (!character) throw new GameError("Bu ülkede belirtilen karakter bulunamadı.");
+      if (character.character_status !== "ACTIVE") throw new GameError("Ölü veya kullanılamaz durumdaki karakter görevlendirilemez.");
       if (character.role !== "DIPLOMAT") throw new GameError("Asimilasyon görevine yalnızca Diplomat gönderilebilir.");
       if (character.assignment !== "NONE") throw new GameError("Bu Diplomat hâlen başka bir görevde.");
+      const activeOperation = await client.query(
+        "SELECT 1 FROM diplomat_operations WHERE diplomat_character_id=$1 AND status IN ('TRAVELING','ACTIVE','PAUSED') LIMIT 1 FOR UPDATE",
+        [character.id]
+      );
+      if (activeOperation.rowCount) throw new GameError("Bu Diplomatın kayıtlı görevi devam ediyor. Önce /diplomat gorev-bitir komutunu kullanın.");
       const occupied = await client.query("SELECT 1 FROM settlement_assimilation_diplomats WHERE settlement_id=$1", [settlement.id]);
       if (occupied.rowCount) throw new GameError("Bu yerleşkenin asimilasyonunda zaten bir Diplomat görev yapıyor.");
       const resources = (await settlementResourceAccess(client,input.countryId)).get(settlement.id) ?? [];
@@ -255,8 +262,13 @@ export const cityService = {
       await getCountry(client, input.guildId, input.countryId);
       const character = (await client.query<CountryCharacter>("SELECT *,NULL::text AS assigned_settlement_name,NULL::text AS trained_settlement_name FROM country_characters WHERE country_id=$1 AND lower(name)=lower($2) FOR UPDATE", [input.countryId, input.characterName.trim()])).rows[0];
       if (!character) throw new GameError("Belirtilen karakter bulunamadı.");
-      if (["ARMY","FLEET","ESPIONAGE","ESPIONAGE_RETURNING","CAPTURED","ASSIMILATION"].includes(character.assignment)) throw new GameError("Ordu, filo, casusluk, esaret veya asimilasyon görevindeki karakter bu komutla görevden alınamaz.");
-      const result = await client.query<CountryCharacter>("UPDATE country_characters SET assigned_settlement_id=NULL,assignment='NONE' WHERE id=$1 RETURNING *,NULL::text AS assigned_settlement_name,NULL::text AS trained_settlement_name", [character.id]);
+      if (!["CURIA","AGORA"].includes(character.assignment)) {
+        throw new GameError("Bu komut yalnızca Curia veya Agora bina görevini kaldırır. Casus için **/casusluk savunma-kaldir**, Diplomat veya Tüccar için kendi **gorev-bitir** komutunu kullanın.");
+      }
+      const result = await client.query<CountryCharacter>(
+        "UPDATE country_characters SET assigned_settlement_id=NULL,protected_character_id=NULL,assignment_ready_turn=NULL,assignment='NONE' WHERE id=$1 RETURNING *,NULL::text AS assigned_settlement_name,NULL::text AS trained_settlement_name",
+        [character.id]
+      );
       await audit(client, input.guildId, input.actorId, "CHARACTER_UNASSIGN", "character", result.rows[0]!.id, {});
       return result.rows[0]!;
     });

@@ -43,7 +43,7 @@ import { turnAnnouncement } from "./turn-announcements.js";
 import { handleBattleButton, handleBattleCommand, refreshActiveBattleCards } from "./battle-ui.js";
 import { handleArmyCommand } from "./army-ui.js";
 import { handleFleetCommand } from "./fleet-ui.js";
-import { handleCityButton, handleCityCommand, handleCityModal } from "./city-ui.js";
+import { handleCityAutocomplete, handleCityButton, handleCityCommand, handleCityModal } from "./city-ui.js";
 import { addCountryRoleToMember, deleteCountryRole, ensureCountryRole, removeCountryRoleFromMember } from "./country-roles.js";
 import { handleSettlementEventSelect } from "./event-ui.js";
 import { handleEspionageAutocomplete, handleEspionageCommand, publishPendingEspionageLogs } from "./espionage-ui.js";
@@ -1308,6 +1308,7 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
 async function handleAutocomplete(interaction: AutocompleteInteraction): Promise<void> {
   if (await handleCharacterAutocomplete(interaction)) return;
   if (await handleEspionageAutocomplete(interaction)) return;
+  if (await handleCityAutocomplete(interaction)) return;
   const focused = interaction.options.getFocused(true);
   if (interaction.commandName === "ordu") {
     if (!interaction.guildId) { await interaction.respond([]); return; }

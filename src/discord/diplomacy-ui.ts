@@ -9,6 +9,7 @@ import {
 } from "../services/diplomacy-service.js";
 import { gameService, GameError } from "../services/game-service.js";
 import { isGameMaster, requireGameMaster, resolveCountry } from "./auth.js";
+import { addCountryRoleToMember, deleteCountryRole, ensureCountryRole } from "./country-roles.js";
 import {
   PACT_BANNER_NAME, PACT_BANNER_PATH, PACT_BANNER_URL,
   STATE_PROFILE_BANNER_NAME, STATE_PROFILE_BANNER_PATH, STATE_PROFILE_BANNER_URL
@@ -295,12 +296,40 @@ export async function handleDiplomacyCommand(interaction: ChatInputCommandIntera
         overlordCountryId: overlord.id, vassalCountryId: vassal.id
       });
       await interaction.editReply(`✅ **${relation.vassal_country_name}**, Tur **${relation.started_turn}** itibarıyla **${relation.overlord_country_name}** devletinin vassalı olarak kaydedildi.`);
-    } else {
+    } else if (action === "kaldir") {
       const relation = await diplomacyService.endVassalage({
         guildId: interaction.guildId, actorId: interaction.user.id,
         overlordCountryId: overlord.id, vassalCountryId: vassal.id
       });
       await interaction.editReply(`✅ **${relation.vassal_country_name}** ile **${relation.overlord_country_name}** arasındaki vassallık ilişkisi sona erdirildi.`);
+    } else {
+      if (interaction.options.getString("onay", true) !== "ILHAK_ET") {
+        throw new GameError("Vassal ilhakı iptal edildi. Onay alanına tam olarak **ILHAK_ET** yazmalısınız.");
+      }
+      const result = await diplomacyService.annexVassal({
+        guildId: interaction.guildId, actorId: interaction.user.id,
+        overlordCountryId: overlord.id, vassalCountryId: vassal.id
+      });
+      let roleNote = "";
+      if (interaction.guild) {
+        try {
+          const roleResult = await ensureCountryRole(interaction.guild, {
+            id: overlord.id, name: result.overlordName, discord_role_id: result.overlordDiscordRoleId
+          }, interaction.user.id);
+          for (const memberId of result.memberIds) await addCountryRoleToMember(interaction.guild, memberId, roleResult.role);
+          if (result.vassalDiscordRoleId) {
+            await deleteCountryRole(interaction.guild, result.vassalDiscordRoleId, `Vassal ilhak edildi • Yönetici: ${interaction.user.id}`);
+          }
+          roleNote = `\n🏛️ ${result.memberIds.length} üyenin devlet rolü eşitlendi; eski vassal rolü kaldırıldı.`;
+        } catch {
+          roleNote = "\n⚠️ Discord rolleri tamamen eşitlenemedi; **/devlet-rolleri** komutunu çalıştırın.";
+        }
+      }
+      await interaction.editReply(
+        `👑 **${result.vassalName}**, Tur **${result.turn}** itibarıyla **${result.overlordName}** tarafından ilhak edildi.\n` +
+        `🗺️ ${result.settlementCount} yerleşke • ⚔️ ${result.armyPersonnel.toLocaleString("tr-TR")} saha askeri • 🛡️ ${result.garrisonPersonnel.toLocaleString("tr-TR")} garnizon • 🚢 ${result.shipCount.toLocaleString("tr-TR")} gemi • 🪨 ${result.siegeAssetCount.toLocaleString("tr-TR")} kuşatma aleti korundu.\n` +
+        `✅ Yerleşkeler doğrudan bağlandı; fetih, köleleştirme, asimilasyon süresi ve garnizon ücreti uygulanmadı.${roleNote}`
+      );
     }
     return true;
   }

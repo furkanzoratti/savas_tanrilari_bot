@@ -1,7 +1,7 @@
 import { EmbedBuilder, type AutocompleteInteraction, type ChatInputCommandInteraction, type Client } from "discord.js";
 import { ESPIONAGE_PREPARATIONS, ESPIONAGE_SEVERITY_LABELS, ESPIONAGE_TARGETS, type EspionagePreparation, type EspionageTarget } from "../domain/espionage.js";
 import { gold } from "../domain/format.js";
-import { espionageService, type EspionageOperationView } from "../services/espionage-service.js";
+import { espionageService, isSpyDefenseAssignment, type EspionageOperationView } from "../services/espionage-service.js";
 import { gameService, GameError } from "../services/game-service.js";
 import { characterService } from "../services/character-service.js";
 import { isGameMaster, requireGameMaster, resolveCountry } from "./auth.js";
@@ -141,9 +141,9 @@ export async function handleEspionageCommand(interaction: ChatInputCommandIntera
       return true;
     }
     if (sub === "savunma-kaldir") {
-      await espionageService.removeDefense({ guildId: interaction.guildId, countryId: country.id, spyCharacterId: interaction.options.getString("casus", true) });
-      await interaction.editReply({ content: "✅ Casusun karşı casusluk görevi kaldırıldı." });
-      await logEspionageCommand(interaction,country.name,"Casusun karşı casusluk görevi kaldırıldı.");
+      const changed = await espionageService.removeDefense({ guildId: interaction.guildId, countryId: country.id, spyCharacterId: interaction.options.getString("casus", true) });
+      await interaction.editReply({ content: changed ? "✅ Casusun karşı casusluk görevi kaldırıldı; casus hemen yeniden görevlendirilebilir." : "ℹ️ Casus zaten müsait durumda." });
+      await logEspionageCommand(interaction,country.name,changed ? "Casusun karşı casusluk görevi kaldırıldı; aynı turda yeniden kullanılabilir." : "Zaten müsait olan casus için savunma kaldırma denendi.");
       return true;
     }
     if (sub === "bina-onar") {
@@ -197,8 +197,9 @@ export async function handleEspionageAutocomplete(interaction: AutocompleteInter
   if (focused.name === "casus") {
     const spies = await espionageService.spies(own.id);
     const sub = interaction.options.getSubcommand(false);
-    const filtered = ["gorev-baslat", "savunma-ata"].includes(sub ?? "") ? spies.filter((spy) => spy.assignment === "NONE")
-      : sub === "savunma-kaldir" ? spies.filter((spy) => spy.assignment.startsWith("COUNTERINTELLIGENCE"))
+    const filtered = sub === "gorev-baslat" ? spies.filter((spy) => spy.assignment === "NONE")
+      : sub === "savunma-ata" ? spies.filter((spy) => spy.assignment === "NONE" || isSpyDefenseAssignment(spy.assignment))
+      : sub === "savunma-kaldir" ? spies.filter((spy) => isSpyDefenseAssignment(spy.assignment))
       : spies.filter((spy) => spy.assignment === "NONE" || spy.assignment.startsWith("COUNTERINTELLIGENCE"));
     await interaction.respond(filtered.filter((spy) => !query || spy.name.toLocaleLowerCase("tr-TR").includes(query)).slice(0,25).map((spy) => ({ name: `${spy.name} (+${spy.skill_bonus}) • ${assignmentLabels[spy.assignment] ?? spy.assignment}`.slice(0,100), value: spy.id })));
     return true;

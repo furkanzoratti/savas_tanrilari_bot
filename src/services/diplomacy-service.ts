@@ -37,6 +37,20 @@ export interface VassalageView {
   ended_turn: number | null;
 }
 
+export interface VassalAnnexationResult {
+  overlordName: string;
+  vassalName: string;
+  turn: number;
+  settlementCount: number;
+  armyPersonnel: number;
+  garrisonPersonnel: number;
+  shipCount: number;
+  siegeAssetCount: number;
+  memberIds: string[];
+  overlordDiscordRoleId: string | null;
+  vassalDiscordRoleId: string | null;
+}
+
 export interface PactView {
   id: string;
   guild_id: string;
@@ -322,6 +336,158 @@ export const diplomacyService = {
       if (!relation) throw new GameError("Bu iki devlet arasında etkin vassallık ilişkisi bulunmuyor.");
       await audit(client, input.guildId, input.actorId, "VASSALAGE_END", "country_vassalage", relation.id, input);
       return (await client.query<VassalageView>(`${vassalageViewSql} WHERE relation.id=$1`, [relation.id])).rows[0]!;
+    });
+  },
+
+  async annexVassal(input: { guildId: string; actorId: string; overlordCountryId: string; vassalCountryId: string }): Promise<VassalAnnexationResult> {
+    if (input.overlordCountryId === input.vassalCountryId) throw new GameError("Bir devlet kendisini ilhak edemez.");
+    return withTransaction(async (client) => {
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`turn:${input.guildId}`]);
+      await lockCountries(client, [input.overlordCountryId, input.vassalCountryId]);
+      const guild = (await client.query<{ current_turn: number }>(
+        "SELECT current_turn FROM guilds WHERE discord_id=$1 FOR UPDATE", [input.guildId]
+      )).rows[0];
+      if (!guild) throw new GameError("Sunucu oyun kaydı bulunamadı.");
+      const countries = (await client.query<{
+        id: string; name: string; discord_role_id: string | null;
+      }>(
+        "SELECT id,name,discord_role_id FROM countries WHERE guild_id=$1 AND id=ANY($2::uuid[]) AND status='ACTIVE' ORDER BY id FOR UPDATE",
+        [input.guildId, [input.overlordCountryId, input.vassalCountryId]]
+      )).rows;
+      const overlord = countries.find((country) => country.id === input.overlordCountryId);
+      const vassal = countries.find((country) => country.id === input.vassalCountryId);
+      if (!overlord || !vassal) throw new GameError("Hâkim veya vassal devlet aktif durumda bulunamadı.");
+      const relation = (await client.query<{ id: string }>(
+        `SELECT id FROM country_vassalages
+          WHERE guild_id=$1 AND overlord_country_id=$2 AND vassal_country_id=$3 AND status='ACTIVE'
+          FOR UPDATE`,
+        [input.guildId, overlord.id, vassal.id]
+      )).rows[0];
+      if (!relation) throw new GameError("Bu iki devlet arasında etkin vassallık ilişkisi bulunmuyor.");
+
+      const activeWars = Number((await client.query<{ count: number }>(
+        `SELECT COUNT(DISTINCT war.id)::integer AS count FROM state_wars war
+          JOIN state_war_participants participant ON participant.war_id=war.id
+         WHERE war.status='ACTIVE' AND participant.country_id=$1`, [vassal.id]
+      )).rows[0]?.count ?? 0);
+      if (activeWars > 0) throw new GameError(`Vassal devletin ${activeWars} aktif resmî savaşı var. İlhaktan önce savaş sonuçlandırılmalıdır.`);
+      const activeBattles = Number((await client.query<{ count: number }>(
+        `SELECT COUNT(DISTINCT battle.id)::integer AS count FROM battles battle
+          WHERE battle.status NOT IN ('FINISHED','CANCELLED') AND (
+            EXISTS (SELECT 1 FROM battle_sides side WHERE side.battle_id=battle.id AND side.country_id=$1)
+            OR EXISTS (SELECT 1 FROM battle_side_participants participant WHERE participant.battle_id=battle.id AND participant.country_id=$1)
+            OR EXISTS (SELECT 1 FROM battle_army_assignments assignment WHERE assignment.battle_id=battle.id AND assignment.country_id=$1)
+            OR EXISTS (SELECT 1 FROM battle_fleet_assignments assignment WHERE assignment.battle_id=battle.id AND assignment.country_id=$1)
+          )`, [vassal.id]
+      )).rows[0]?.count ?? 0);
+      if (activeBattles > 0) throw new GameError(`Vassal devletin ${activeBattles} devam eden savaş ekranı var. İlhaktan önce sonuçlandırılmalıdır.`);
+      const activeOperations = Number((await client.query<{ count: number }>(
+        `SELECT (
+          (SELECT COUNT(*) FROM espionage_operations WHERE status='TRAVELING' AND (attacker_country_id=$1 OR target_country_id=$1))
+          +(SELECT COUNT(*) FROM merchant_operations WHERE status IN ('PENDING_ACCEPTANCE','TRAVELING','ACTIVE','CONTROLLED') AND (country_id=$1 OR target_country_id=$1))
+          +(SELECT COUNT(*) FROM diplomat_operations WHERE status IN ('TRAVELING','ACTIVE','PAUSED') AND (country_id=$1 OR target_country_id=$1))
+        )::integer AS count`, [vassal.id]
+      )).rows[0]?.count ?? 0);
+      if (activeOperations > 0) throw new GameError(`Vassal devletle bağlantılı ${activeOperations} aktif karakter görevi var. İlhaktan önce görevler sonuçlandırılmalıdır.`);
+      const foundedPacts = Number((await client.query<{ count: number }>(
+        "SELECT COUNT(*)::integer AS count FROM diplomatic_pacts WHERE founder_country_id=$1", [vassal.id]
+      )).rows[0]?.count ?? 0);
+      if (foundedPacts > 0) throw new GameError(`Vassal devlet ${foundedPacts} paktın lideri. Önce pakt liderliği devredilmeli veya pakt dağıtılmalıdır.`);
+      const loanConflict = await client.query(
+        `SELECT 1 WHERE EXISTS (SELECT 1 FROM pantheon_loans WHERE country_id=$1 AND status='ACTIVE')
+          AND EXISTS (SELECT 1 FROM pantheon_loans WHERE country_id=$2 AND status='ACTIVE')`,
+        [vassal.id, overlord.id]
+      );
+      if (loanConflict.rowCount) throw new GameError("Her iki devletin de etkin Pantheon kredisi var. İlhaktan önce kredilerden biri kapatılmalıdır.");
+
+      const settlementIds = (await client.query<{ id: string }>(
+        "SELECT id FROM settlements WHERE country_id=$1 ORDER BY id FOR UPDATE", [vassal.id]
+      )).rows.map((row) => row.id);
+      const forceTotals = (await client.query<{ army: number; garrison: number }>(
+        `SELECT COALESCE(SUM(quantity) FILTER (WHERE force_type='ARMY'),0)::integer AS army,
+                COALESCE(SUM(quantity) FILTER (WHERE force_type='GARRISON'),0)::integer AS garrison
+           FROM unit_stacks WHERE settlement_id=ANY($1::uuid[])`, [settlementIds]
+      )).rows[0] ?? { army: 0, garrison: 0 };
+      const shipCount = Number((await client.query<{ count: number }>(
+        "SELECT COALESCE(SUM(quantity),0)::integer AS count FROM naval_units WHERE settlement_id=ANY($1::uuid[])", [settlementIds]
+      )).rows[0]?.count ?? 0);
+      const siegeAssetCount = Number((await client.query<{ count: number }>(
+        "SELECT COALESCE(SUM(quantity),0)::integer AS count FROM siege_assets WHERE country_id=$1", [vassal.id]
+      )).rows[0]?.count ?? 0);
+      const memberIds = (await client.query<{ discord_user_id: string }>(
+        "SELECT discord_user_id FROM country_members WHERE country_id=$1 ORDER BY discord_user_id", [vassal.id]
+      )).rows.map((row) => row.discord_user_id);
+
+      await client.query(
+        `UPDATE country_characters character SET name=LEFT(character.name,49)||' ['||LEFT(character.id::text,8)||']'
+          WHERE character.country_id=$1 AND EXISTS (
+            SELECT 1 FROM country_characters existing
+             WHERE existing.country_id=$2 AND LOWER(existing.name)=LOWER(character.name)
+          )`, [vassal.id, overlord.id]
+      );
+      await client.query(
+        `UPDATE armies army SET name=LEFT(army.name,49)||' ['||LEFT(army.id::text,8)||']'
+          WHERE army.country_id=$1 AND EXISTS (
+            SELECT 1 FROM armies existing WHERE existing.country_id=$2 AND LOWER(existing.name)=LOWER(army.name)
+          )`, [vassal.id, overlord.id]
+      );
+      await client.query(
+        `UPDATE fleets fleet SET name=LEFT(fleet.name,49)||' ['||LEFT(fleet.id::text,8)||']'
+          WHERE fleet.country_id=$1 AND EXISTS (
+            SELECT 1 FROM fleets existing WHERE existing.country_id=$2 AND LOWER(existing.name)=LOWER(fleet.name)
+          )`, [vassal.id, overlord.id]
+      );
+
+      const assimilationCharacters = settlementIds.length ? (await client.query<{ character_id: string }>(
+        "DELETE FROM settlement_assimilation_diplomats WHERE settlement_id=ANY($1::uuid[]) RETURNING character_id", [settlementIds]
+      )).rows.map((row) => row.character_id) : [];
+      if (assimilationCharacters.length) {
+        await client.query(
+          "UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL,assignment_ready_turn=NULL WHERE id=ANY($1::uuid[])",
+          [assimilationCharacters]
+        );
+      }
+      await client.query("UPDATE country_characters SET country_id=$2 WHERE country_id=$1", [vassal.id, overlord.id]);
+      await client.query("UPDATE academy_training_sessions SET country_id=$2 WHERE country_id=$1", [vassal.id, overlord.id]);
+      await client.query("UPDATE armies SET country_id=$2,updated_at=NOW() WHERE country_id=$1", [vassal.id, overlord.id]);
+      await client.query("UPDATE fleets SET country_id=$2,updated_at=NOW() WHERE country_id=$1", [vassal.id, overlord.id]);
+      await client.query("UPDATE settlements SET country_id=$2,is_conquered=FALSE,conquered_turn=NULL WHERE country_id=$1", [vassal.id, overlord.id]);
+      for (const table of ["recruitment_orders", "naval_orders", "siege_orders", "garrison_replenishment_orders", "siege_assets", "mercenary_contracts", "pantheon_loans", "purchase_agent_discounts"] as const) {
+        await client.query(`UPDATE ${table} SET country_id=$2 WHERE country_id=$1`, [vassal.id, overlord.id]);
+      }
+
+      if (memberIds.length) {
+        await client.query(
+          "INSERT INTO country_members(country_id,discord_user_id) SELECT $2,discord_user_id FROM country_members WHERE country_id=$1 ON CONFLICT DO NOTHING",
+          [vassal.id, overlord.id]
+        );
+      }
+      await client.query("DELETE FROM country_members WHERE country_id=$1", [vassal.id]);
+      await client.query("DELETE FROM pact_memberships WHERE country_id=$1", [vassal.id]);
+      await client.query("UPDATE country_alliances SET status=CASE WHEN status='ACTIVE' THEN 'ENDED' ELSE 'CANCELLED' END,ended_at=NOW() WHERE status IN ('PENDING','ACTIVE') AND (proposer_country_id=$1 OR receiver_country_id=$1)", [vassal.id]);
+      await client.query("UPDATE pact_invitations SET status='CANCELLED',responded_by=$2,responded_at=NOW() WHERE status='PENDING' AND (inviter_country_id=$1 OR receiver_country_id=$1)", [vassal.id, input.actorId]);
+      await client.query("UPDATE trade_agreements SET status='ENDED',ended_at=NOW() WHERE status IN ('PENDING','ACTIVE') AND (proposer_country_id=$1 OR receiver_country_id=$1)", [vassal.id]);
+      await client.query("UPDATE country_vassalages SET status='ENDED',ended_turn=$2,ended_by=$3,ended_at=NOW() WHERE status='ACTIVE' AND (overlord_country_id=$1 OR vassal_country_id=$1)", [vassal.id, guild.current_turn, input.actorId]);
+      await client.query("UPDATE countries SET treasury=(SELECT COALESCE(SUM(local_treasury),0) FROM settlements WHERE country_id=$1) WHERE id=$1", [overlord.id]);
+      await client.query(
+        `UPDATE countries SET status='YOK_EDİLDİ',treasury=0,destroyed_turn=$2,destroyed_reason=$3,
+          destroyed_by=$4,destroyed_at=NOW(),discord_role_id=NULL WHERE id=$1`,
+        [vassal.id, guild.current_turn, `${overlord.name} tarafından vassal ilhakı`, input.actorId]
+      );
+      await audit(client, input.guildId, input.actorId, "VASSAL_ANNEXED", "country_vassalage", relation.id, {
+        overlordCountryId: overlord.id, overlordName: overlord.name,
+        vassalCountryId: vassal.id, vassalName: vassal.name,
+        turn: guild.current_turn, settlementCount: settlementIds.length,
+        armyPersonnel: Number(forceTotals.army), garrisonPersonnel: Number(forceTotals.garrison),
+        shipCount, siegeAssetCount, transferredMembers: memberIds.length,
+        assimilationCost: 0, forcesPreserved: true
+      });
+      return {
+        overlordName: overlord.name, vassalName: vassal.name, turn: guild.current_turn,
+        settlementCount: settlementIds.length, armyPersonnel: Number(forceTotals.army),
+        garrisonPersonnel: Number(forceTotals.garrison), shipCount, siegeAssetCount, memberIds,
+        overlordDiscordRoleId: overlord.discord_role_id, vassalDiscordRoleId: vassal.discord_role_id
+      };
     });
   },
 

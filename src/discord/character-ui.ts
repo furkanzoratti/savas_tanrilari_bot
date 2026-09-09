@@ -37,6 +37,33 @@ const purchaseCategoryLabels:Record<string,string> = {
   UNITS:"Asker", SHIPS:"Gemi", BUILDING:"Bina", SIEGE:"Kuşatma Aleti"
 };
 
+export function characterAvailableForCommand(
+  character: Pick<CharacterView,"role"|"assignment"|"operation_status"|"character_status"|"doctrine"|"commander_victories"|"specialization">,
+  commandName: string,
+  subcommand: string
+): boolean {
+  if (character.character_status !== "ACTIVE") return false;
+  if (commandName === "komutan") {
+    if (character.role !== "COMMANDER") return false;
+    if (subcommand === "doktrin-sec") return character.doctrine === null;
+    if (subcommand === "uzmanlik-sec") return character.specialization === null && character.commander_victories >= 3;
+    return subcommand !== "baskomutan-sec" || character.assignment === "ARMY";
+  }
+  if (commandName === "tuccar") {
+    if (character.role !== "MERCHANT") return false;
+    if (subcommand === "gorev-baslat") return character.assignment === "NONE" && !character.operation_status;
+    if (subcommand === "gorev-bitir") return character.assignment.startsWith("MERCHANT_") || Boolean(character.operation_status);
+    return true;
+  }
+  if (commandName === "diplomat") {
+    if (character.role !== "DIPLOMAT") return false;
+    if (subcommand === "gorev-baslat") return character.assignment === "NONE" && !character.operation_status;
+    if (subcommand === "savunma-ata") return ["NONE","DIPLOMAT_DEFENSE"].includes(character.assignment) && !character.operation_status;
+    if (subcommand === "gorev-bitir") return character.assignment.startsWith("DIPLOMAT_") || Boolean(character.operation_status);
+  }
+  return true;
+}
+
 async function characterForLog(countryId:string,characterId:string):Promise<CharacterView|null> {
   return (await characterService.list(countryId)).find((character)=>character.id===characterId)??null;
 }
@@ -301,8 +328,8 @@ export async function handleCharacterCommand(interaction: ChatInputCommandIntera
     if (sub === "gorev-bitir") {
       const characterId = interaction.options.getString("tuccar",true);
       const merchant = await characterForLog(country.id,characterId);
-      await characterService.endMerchant({guildId:interaction.guildId,countryId:country.id,characterId});
-      await interaction.editReply("✅ Tüccar görevi sona erdirildi.");
+      const changed = await characterService.endMerchant({guildId:interaction.guildId,countryId:country.id,characterId});
+      await interaction.editReply(changed ? "✅ Tüccar görevi sona erdirildi; Tüccar aynı turda yeniden görevlendirilebilir." : "ℹ️ Tüccar zaten müsait durumda.");
       await logCharacterCommand(interaction,country.name,
         "🪙 Tüccar: **"+(merchant?.name??"Bilinmeyen Tüccar")+"** • Devlet: **"+country.name+"**\n"+
         "↳ Sonlandırılan görev: **"+(MERCHANT_TASK_LABELS[merchant?.operation_type as MerchantTask]??assignmentLabels[merchant?.assignment??""]??"Etkin Tüccar görevi")+"**\n"+
@@ -355,8 +382,8 @@ export async function handleCharacterCommand(interaction: ChatInputCommandIntera
   if (sub === "gorev-bitir") {
     const characterId = interaction.options.getString("diplomat",true);
     const diplomat = await characterForLog(country.id,characterId);
-    await characterService.endDiplomat({guildId:interaction.guildId,countryId:country.id,characterId});
-    await interaction.editReply("✅ Diplomat görevi sona erdirildi.");
+    const changed = await characterService.endDiplomat({guildId:interaction.guildId,countryId:country.id,characterId});
+    await interaction.editReply(changed ? "✅ Diplomat görevi sona erdirildi; Diplomat aynı turda yeniden görevlendirilebilir." : "ℹ️ Diplomat zaten müsait durumda.");
     await logCharacterCommand(interaction,country.name,
       "🤝 Diplomat: **"+(diplomat?.name??"Bilinmeyen Diplomat")+"** • Devlet: **"+country.name+"**\n"+
       "↳ Sonlandırılan görev: **"+(DIPLOMAT_TASK_LABELS[diplomat?.operation_type as DiplomatTask]??assignmentLabels[diplomat?.assignment??""]??"Etkin Diplomat görevi")+"**\n"+
@@ -416,8 +443,8 @@ export async function handleCharacterAutocomplete(interaction: AutocompleteInter
   if (["komutan","tuccar","diplomat"].includes(focused.name)) {
     const role = focused.name === "komutan" ? "COMMANDER" : focused.name === "tuccar" ? "MERCHANT" : "DIPLOMAT";
     const sub = interaction.options.getSubcommand(false);
-    let characters = (await characterService.list(country.id)).filter((item) => item.role === role);
-    if (sub === "gorev-baslat" || sub === "savunma-ata") characters = characters.filter((item) => item.assignment === "NONE");
+    const characters = (await characterService.list(country.id))
+      .filter((item) => item.role === role && characterAvailableForCommand(item,interaction.commandName,sub ?? ""));
     await interaction.respond(characters.filter((item) => !query || item.name.toLocaleLowerCase("tr-TR").includes(query)).slice(0,25)
       .map((item) => ({name:(item.name + " (+" + item.skill_bonus + ") • " + (assignmentLabels[item.assignment]??item.assignment)).slice(0,100),value:item.id})));
     return true;

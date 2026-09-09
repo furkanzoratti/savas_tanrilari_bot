@@ -28,7 +28,8 @@ describe("yönetim komutları", () => {
     expect(destroyed?.options?.map((option) => option.name)).toEqual(["listele", "geri-getir"]);
     expect(destroyed?.options?.find((option) => option.name === "geri-getir")?.options?.find((option) => option.name === "ulke")).toMatchObject({ required: true, autocomplete: true });
     const vassalage = commandBuilders.find((command) => command.name === "vassallik");
-    expect(vassalage?.options?.map((option) => option.name)).toEqual(["ayarla", "kaldir"]);
+    expect(vassalage?.options?.map((option) => option.name)).toEqual(["ayarla", "kaldir", "ilhak-et"]);
+    expect(vassalage?.options?.find((option) => option.name === "ilhak-et")?.options?.find((option) => option.name === "onay")).toMatchObject({ required: true });
   });
 
   it("hazine taşımayı kullanım sayısı yerine tur kotasıyla tanımlar ve gecikmeli fetih turunu destekler", () => {

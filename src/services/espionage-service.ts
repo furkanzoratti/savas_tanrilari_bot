@@ -8,6 +8,15 @@ import {
 } from "../domain/espionage.js";
 import { applyEspionageEffect, espionageTargetExists, type EspionageEffectOperation } from "./espionage-effects.js";
 import { GameError } from "./game-service.js";
+
+export const SPY_DEFENSE_ASSIGNMENTS = [
+  "COUNTERINTELLIGENCE_TRAVELING_COUNTRY", "COUNTERINTELLIGENCE_TRAVELING_SETTLEMENT",
+  "COUNTERINTELLIGENCE_COUNTRY", "COUNTERINTELLIGENCE_SETTLEMENT", "PERSONAL_GUARD"
+] as const;
+
+export function isSpyDefenseAssignment(assignment: string): boolean {
+  return (SPY_DEFENSE_ASSIGNMENTS as readonly string[]).includes(assignment);
+}
 import { logger } from "../logger.js";
 
 export type EspionageOperationStatus = "TRAVELING" | "RESOLVED" | "CANCELLED";
@@ -382,14 +391,15 @@ export const espionageService = {
     await withTransaction(async (client) => {
       await country(client,input.guildId,input.countryId);
       const state = await guild(client,input.guildId);
-      const spy = (await client.query<{ assignment: string }>("SELECT assignment FROM country_characters WHERE id=$1 AND country_id=$2 AND role='SPY' FOR UPDATE", [input.spyCharacterId,input.countryId])).rows[0];
+      const spy = (await client.query<{ assignment: string }>("SELECT assignment FROM country_characters WHERE id=$1 AND country_id=$2 AND role='SPY' AND character_status='ACTIVE' FOR UPDATE", [input.spyCharacterId,input.countryId])).rows[0];
       if (!spy) throw new GameError("Casus bulunamadı.");
-      if (spy.assignment !== "NONE") throw new GameError("Bu casus başka bir görevde. Mevcut karşı casusluk görevini önce kaldırın.");
+      if (spy.assignment !== "NONE" && !isSpyDefenseAssignment(spy.assignment)) throw new GameError("Bu casus başka bir görevde.");
       if (input.scope === "SETTLEMENT") {
         const valid = await client.query("SELECT 1 FROM settlements WHERE id=$1 AND country_id=$2", [input.settlementId,input.countryId]);
         if (!valid.rowCount) throw new GameError("Savunulacak şehir bu devlete ait değil.");
       }
       if (input.scope === "CHARACTER") {
+        if (input.characterId === input.spyCharacterId) throw new GameError("Casus kendi şahsi koruması olarak atanamaz.");
         const valid = await client.query("SELECT 1 FROM country_characters WHERE id=$1 AND country_id=$2 AND character_status='ACTIVE'",[input.characterId,input.countryId]);
         if (!valid.rowCount) throw new GameError("Korunacak karakter bu devlete ait değil.");
       }
@@ -400,11 +410,21 @@ export const espionageService = {
     });
   },
 
-  async removeDefense(input: { guildId: string; countryId: string; spyCharacterId: string }): Promise<void> {
-    await withTransaction(async (client) => {
+  async removeDefense(input: { guildId: string; countryId: string; spyCharacterId: string }): Promise<boolean> {
+    return withTransaction(async (client) => {
       await country(client,input.guildId,input.countryId);
-      const changed = await client.query("UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL,protected_character_id=NULL,assignment_ready_turn=NULL WHERE id=$1 AND country_id=$2 AND role='SPY' AND assignment IN ('COUNTERINTELLIGENCE_TRAVELING_COUNTRY','COUNTERINTELLIGENCE_TRAVELING_SETTLEMENT','COUNTERINTELLIGENCE_COUNTRY','COUNTERINTELLIGENCE_SETTLEMENT','PERSONAL_GUARD') RETURNING id", [input.spyCharacterId,input.countryId]);
-      if (!changed.rowCount) throw new GameError("Bu casus karşı casusluk görevinde değil.");
+      const spy = (await client.query<{ assignment: string }>(
+        "SELECT assignment FROM country_characters WHERE id=$1 AND country_id=$2 AND role='SPY' AND character_status='ACTIVE' FOR UPDATE",
+        [input.spyCharacterId,input.countryId]
+      )).rows[0];
+      if (!spy) throw new GameError("Casus bulunamadı.");
+      if (spy.assignment === "NONE") return false;
+      if (!isSpyDefenseAssignment(spy.assignment)) throw new GameError("Bu casus karşı casuslukta değil; devam eden farklı görevi bu komutla iptal edilemez.");
+      await client.query(
+        "UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL,protected_character_id=NULL,assignment_ready_turn=NULL WHERE id=$1",
+        [input.spyCharacterId]
+      );
+      return true;
     });
   },
 
