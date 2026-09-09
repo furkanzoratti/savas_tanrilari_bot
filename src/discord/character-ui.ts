@@ -37,6 +37,13 @@ const purchaseCategoryLabels:Record<string,string> = {
   UNITS:"Asker", SHIPS:"Gemi", BUILDING:"Bina", SIEGE:"Kuşatma Aleti"
 };
 
+const DIPLOMAT_TASK_BY_SUBCOMMAND: Partial<Record<string,DiplomatTask>> = {
+  "halkla-uzlas":"RECONCILIATION",
+  "kultur-degistir":"CULTURE_CHANGE",
+  "vassallastir":"VASSALIZE",
+  "vassal-entegre-et":"VASSAL_INTEGRATION"
+};
+
 export function characterAvailableForCommand(
   character: Pick<CharacterView,"role"|"assignment"|"operation_status"|"character_status"|"doctrine"|"commander_victories"|"specialization">,
   commandName: string,
@@ -57,7 +64,7 @@ export function characterAvailableForCommand(
   }
   if (commandName === "diplomat") {
     if (character.role !== "DIPLOMAT") return false;
-    if (subcommand === "gorev-baslat") return character.assignment === "NONE" && !character.operation_status;
+    if (DIPLOMAT_TASK_BY_SUBCOMMAND[subcommand]) return character.assignment === "NONE" && !character.operation_status;
     if (subcommand === "savunma-ata") return ["NONE","DIPLOMAT_DEFENSE"].includes(character.assignment) && !character.operation_status;
     if (subcommand === "gorev-bitir") return character.assignment.startsWith("DIPLOMAT_") || Boolean(character.operation_status);
   }
@@ -404,7 +411,8 @@ export async function handleCharacterCommand(interaction: ChatInputCommandIntera
     );
     return true;
   }
-  const task = interaction.options.getString("gorev",true) as DiplomatTask;
+  const task = DIPLOMAT_TASK_BY_SUBCOMMAND[sub];
+  if (!task) throw new GameError("Bilinmeyen Diplomat görevi.");
   const characterId = interaction.options.getString("diplomat",true);
   const diplomat = await characterForLog(country.id,characterId);
   const targetName = interaction.options.getString("hedef-ulke");

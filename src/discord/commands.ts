@@ -58,21 +58,23 @@ export const commandBuilders = [
       .addStringOption((o) => o.setName("tuccar").setDescription("Görevi bitecek Tüccar").setRequired(true).setAutocomplete(true))),
   new SlashCommandBuilder()
     .setName("diplomat").setDescription("Diplomat görevlerini ve diplomatik savunmayı yönetir")
-    .addSubcommand((sub) => sub.setName("gorev-baslat").setDescription("Diplomatı bir tur yolculukla göreve gönderir")
+    .addSubcommand((sub) => sub.setName("halkla-uzlas").setDescription("Diplomatı yerleşkedeki etkin bir olayı sona erdirmeye gönderir")
       .addStringOption((o) => o.setName("diplomat").setDescription("Müsait Diplomat").setRequired(true).setAutocomplete(true))
-      .addStringOption((o) => o.setName("gorev").setDescription("Görev türü").setRequired(true).addChoices(
-        { name: "Halkla Uzlaşma", value: "RECONCILIATION" },
-        { name: "Kültür Değiştirme", value: "CULTURE_CHANGE" },
-        { name: "Diplomatik Vassallaştırma", value: "VASSALIZE" },
-        { name: "Vassal Entegrasyonu", value: "VASSAL_INTEGRATION" }
-      ))
-      .addStringOption((o) => o.setName("hedef-ulke").setDescription("Görevin hedef devleti").setAutocomplete(true))
-      .addStringOption((o) => o.setName("hedef-sehir").setDescription("Görevin hedef yerleşkesi").setAutocomplete(true))
-      .addStringOption((o) => o.setName("olay").setDescription("Halkla Uzlaşmanın hedef olayı").addChoices(
+      .addStringOption((o) => o.setName("hedef-sehir").setDescription("Olayın bulunduğu kendi yerleşkeniz").setRequired(true).setAutocomplete(true))
+      .addStringOption((o) => o.setName("olay").setDescription("Sona erdirilecek etkin olay").setRequired(true).addChoices(
         { name: "Karaborsa", value: "BLACK_MARKET" }, { name: "Salgın", value: "EPIDEMIC" },
         { name: "Huzursuzluk", value: "UNREST" }, { name: "İsyan", value: "REBELLION" }
-      ))
-      .addStringOption((o) => o.setName("kultur").setDescription("Yerleşkeye kazandırılacak kültür").setAutocomplete(true)))
+      )))
+    .addSubcommand((sub) => sub.setName("kultur-degistir").setDescription("Asimile edilmiş bir yerleşkenin kültürünü değiştirmeye başlar")
+      .addStringOption((o) => o.setName("diplomat").setDescription("Müsait Diplomat").setRequired(true).setAutocomplete(true))
+      .addStringOption((o) => o.setName("hedef-sehir").setDescription("Kültürü değiştirilecek kendi yerleşkeniz").setRequired(true).setAutocomplete(true))
+      .addStringOption((o) => o.setName("kultur").setDescription("Yerleşkeye kazandırılacak kültür").setRequired(true).setAutocomplete(true)))
+    .addSubcommand((sub) => sub.setName("vassallastir").setDescription("Başka bir devleti diplomatik olarak vassallaştırmaya çalışır")
+      .addStringOption((o) => o.setName("diplomat").setDescription("Müsait Diplomat").setRequired(true).setAutocomplete(true))
+      .addStringOption((o) => o.setName("hedef-ulke").setDescription("Vassallaştırılmaya çalışılacak devlet").setRequired(true).setAutocomplete(true)))
+    .addSubcommand((sub) => sub.setName("vassal-entegre-et").setDescription("Etkin bir vassalın bağlılığını ilhak için ilerletir")
+      .addStringOption((o) => o.setName("diplomat").setDescription("Müsait Diplomat").setRequired(true).setAutocomplete(true))
+      .addStringOption((o) => o.setName("hedef-ulke").setDescription("Entegre edilecek etkin vassal devlet").setRequired(true).setAutocomplete(true)))
     .addSubcommand((sub) => sub.setName("savunma-ata").setDescription("Diplomatı devlet veya yerleşke diplomatik savunmasına atar")
       .addStringOption((o) => o.setName("diplomat").setDescription("Atanacak Diplomat").setRequired(true).setAutocomplete(true))
       .addStringOption((o) => o.setName("sehir").setDescription("Boş bırakılırsa ülke çapında savunma").setAutocomplete(true)))
