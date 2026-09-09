@@ -1550,9 +1550,24 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
       const live = new Set(contracts.filter((contract) => ["PENDING", "ACTIVE", "UNPAID"].includes(contract.status)).map((contract) => contract.company_key));
       companies = companies.filter(([companyKey]) => live.has(companyKey));
     }
+    let priceByCompany:Awaited<ReturnType<typeof gameService.mercenaryCompanyPrices>>|null = null;
+    if (interaction.commandName === "parali-asker" && subcommand === "kirala" && interaction.guildId) {
+      const requestedName = interaction.options.getString("ulke");
+      const priceCountry = gameMaster && requestedName
+        ? await gameService.countryByName(interaction.guildId,requestedName)
+        : await gameService.countryForUser(interaction.guildId,interaction.user.id);
+      if (priceCountry) priceByCompany = await gameService.mercenaryCompanyPrices(priceCountry.id);
+    }
     await interaction.respond(companies
       .filter(([key, company]) => !query || key.includes(query) || company.name.toLocaleLowerCase("tr-TR").includes(query))
-      .slice(0, 25).map(([value, company]) => ({ name: `${company.name} • ${gold(company.hireCost)} / bakım ${gold(company.turnUpkeep)}`.slice(0, 100), value })));
+      .slice(0, 25).map(([value, company]) => {
+        const terms = priceByCompany?.[value];
+        const hire = terms?.hireCost??company.hireCost;
+        const upkeep = terms?.turnUpkeep??company.turnUpkeep;
+        const hireDiscount = terms?.hireDiscountPercent ? ` (-%${terms.hireDiscountPercent})` : "";
+        const upkeepDiscount = terms?.upkeepDiscountPercent ? ` (-%${terms.upkeepDiscountPercent})` : "";
+        return { name:`${company.name} • ${gold(hire)}${hireDiscount} / bakım ${gold(upkeep)}${upkeepDiscount}`.slice(0,100),value };
+      }));
     return;
   }
   if (interaction.commandName === "parali-asker" && focused.name === "kalem") {

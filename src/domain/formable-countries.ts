@@ -29,6 +29,8 @@ export interface FormableModifiers {
   starvationBonus?: number;
   shipyardPointBonus?: Partial<Record<"kerkouros" | "trireme" | "quinquereme", number>>;
   siegeAssetDiscount?: number;
+  mercenaryHireDiscount?: number;
+  mercenaryUpkeepDiscount?: number;
   wallSiegeDamageMultiplier?: number;
   ruinStageTwoIncomeMultiplier?: number;
   slaveCampRates?: readonly [number, number, number];
@@ -91,7 +93,19 @@ export const FORMABLE_COUNTRIES = {
   THRACE: { name: "Trakya", emoji: "🗡️", buffs: ["Kara birlikleri %5 ucuzdur.", "Kara yağması zarlarına +1.", "Savaş Hazırlığı 250 ek milis verir."], modifiers: { unitDiscount: 0.05, warPreparationMilitia: 750 } },
   MACEDONIA: { name: "Makedonya", emoji: "☀️", buffs: ["Süvari alımı %5 ucuzdur.", "Akademiden yetişen Komutanlar +1 ek özellik puanı alır."], modifiers: { cavalryDiscount: 0.05, academyRoleSkillBonus: { COMMANDER: 1 } } },
   HELLAS: { name: "Hellas", emoji: "🏛️", buffs: ["Akademi bakımı 250 Altındır.", "Agora sabit geliri %10 artar.", "Her Tersane kapasitesine +1 Trireme ekler."], modifiers: { academyUpkeep: 250, buildingIncomePercent: { agora: 0.10 }, shipyardPointBonus: { trireme: 1 } } },
-  CARTHAGE: { name: "Kartaca", emoji: "🐘", buffs: ["Liman ve Agora gelirleri %5 artar.", "Her Tersane kapasitesine +2 Kerkouros ekler."], modifiers: { buildingIncomePercent: { port: 0.05, agora: 0.05 }, shipyardPointBonus: { kerkouros: 2 } } },
+  CARTHAGE: {
+    name: "Büyük Kartaca",
+    emoji: "🐘",
+    buffs: [
+      "Liman geliri %20 artar.",
+      "Paralı asker kiralama bedeli ve bakım giderleri %10 azalır."
+    ],
+    modifiers: {
+      buildingIncomePercent: { port: 0.20 },
+      mercenaryHireDiscount: 0.10,
+      mercenaryUpkeepDiscount: 0.10
+    }
+  },
   MAURETANIA: { name: "Mauretanya", emoji: "🦁", buffs: ["Bütün yerleşke gelirleri %2 artar.", "Liman geliri %10 artar.", "Haraplık ikinci aşama toparlanması %60 olur."], modifiers: { incomePercent: 0.02, buildingIncomePercent: { port: 0.10 }, ruinStageTwoIncomeMultiplier: 0.60 } },
   LIBYA: { name: "Libya", emoji: "🌴", buffs: ["Çiftlik, Su Kemeri ve Liman gelirleri %10 artar.", "Haraplık ikinci aşama toparlanması %75 olur.", "Su Kemeri %10 ucuzdur."], modifiers: { buildingIncomePercent: { farm: 0.10, aqueduct: 0.10, port: 0.10 }, buildingDiscount: 0.10, buildingDiscountTypes: ["aqueduct"], ruinStageTwoIncomeMultiplier: 0.75 } },
   EGYPT: { name: "Mısır", emoji: "𓂀", buffs: ["Çiftlik sabit geliri %20 artar.", "Bina ve doğal nüfus artışı %10 yükselir."], modifiers: { buildingIncomePercent: { farm: 0.20 }, populationGainPercent: 0.10 } },

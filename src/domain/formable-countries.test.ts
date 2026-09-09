@@ -49,6 +49,22 @@ describe("kurulabilir ülkeler", () => {
     expect(income.gross.seaTrade).toBe(600);
   });
 
+  it("Kartaca'nın liman ve paralı asker etkilerini uygular, otomatik gemi kapasitesi vermez", () => {
+    const definition = FORMABLE_COUNTRIES.CARTHAGE;
+    expect(definition.name).toBe("Büyük Kartaca");
+    expect(definition.buffs).toHaveLength(2);
+    expect(definition.modifiers).toMatchObject({
+      buildingIncomePercent:{ port:0.20 },mercenaryHireDiscount:0.10,mercenaryUpkeepDiscount:0.10
+    });
+    expect(definition.modifiers.shipyardPointBonus).toBeUndefined();
+    const income = calculateCategorizedIncome({
+      settlementIncome:0,taxIncome:0,landTradeIncome:0,seaTradeIncome:0,
+      manualFlatIncome:0,manualIncomePercent:0,ruinStage:0,
+      buildings:[{ buildingType:"port",level:1 }],formableKey:"CARTHAGE"
+    });
+    expect(income.gross.seaTrade).toBe(600);
+  });
+
   it("Büyük Britanya Britanya mirasını ve üç üst devlet bonusunu birlikte taşır", () => {
     const definition = FORMABLE_COUNTRIES.GREAT_BRITAIN;
     expect(definition.buffs).toHaveLength(6);

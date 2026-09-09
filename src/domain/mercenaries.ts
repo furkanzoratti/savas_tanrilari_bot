@@ -80,3 +80,27 @@ export function mercenaryTerminationUpkeep(input: {
     chargedTurns
   };
 }
+
+export interface MercenaryPriceTerms {
+  hireCost: number;
+  turnUpkeep: number;
+  hireDiscountPercent: number;
+  upkeepDiscountPercent: number;
+}
+
+export function mercenaryPriceTerms(input: {
+  company: MercenaryCompany;
+  hasGoldAccess?: boolean;
+  countryHireDiscount?: number;
+  countryUpkeepDiscount?: number;
+}): MercenaryPriceTerms {
+  const hireDiscount = Math.max(0,Math.min(0.90,
+    (input.hasGoldAccess ? 0.10 : 0)+(input.countryHireDiscount??0)));
+  const upkeepDiscount = Math.max(0,Math.min(0.90,input.countryUpkeepDiscount??0));
+  return {
+    hireCost:Math.ceil(input.company.hireCost*(1-hireDiscount)),
+    turnUpkeep:Math.ceil(input.company.turnUpkeep*(1-upkeepDiscount)),
+    hireDiscountPercent:Math.round(hireDiscount*100),
+    upkeepDiscountPercent:Math.round(upkeepDiscount*100)
+  };
+}

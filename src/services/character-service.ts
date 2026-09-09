@@ -74,6 +74,19 @@ export interface CharacterLogStatus {
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+export function merchantTradeIncomeBase(input: {
+  acquisitionLandTradeIncome: number | string | null;
+  acquisitionSeaTradeIncome: number | string | null;
+  baseLandTradeIncome: number | string;
+  legacySeaTradeIncome: number | string;
+}): number {
+  const hasAcquisitionBreakdown = input.acquisitionLandTradeIncome !== null
+    || input.acquisitionSeaTradeIncome !== null;
+  const land = hasAcquisitionBreakdown ? input.acquisitionLandTradeIncome : input.baseLandTradeIncome;
+  const sea = hasAcquisitionBreakdown ? input.acquisitionSeaTradeIncome : input.legacySeaTradeIncome;
+  return Math.max(0,Number(land??0)+Number(sea??0));
+}
+
 function assertUuid(value: string, label: string): void {
   if (!UUID_PATTERN.test(value)) {
     throw new GameError(label + " açılan listeden seçilmelidir.");
@@ -819,13 +832,16 @@ export async function processCharacterTurn(
         id: string; country_id: string; merchant_character_id: string; task_type: MerchantTask;
         target_settlement_id: string; home_settlement_id: string | null; merchant_name: string;
         skill_bonus: number; specialization: CharacterSpecialization | null; specialization_progress: number;
-        land_trade_income: number; sea_trade_income: number; besieged: boolean;
+        acquisition_land_trade_income: number | null; acquisition_sea_trade_income: number | null;
+        base_land_trade_income: number; legacy_sea_trade_income: number; besieged: boolean;
         country_name:string; target_name:string; target_country_name:string; home_name:string|null;
       }>(
         `SELECT operation.id,operation.country_id,operation.merchant_character_id,operation.task_type,
                 operation.target_settlement_id,operation.home_settlement_id,character.name AS merchant_name,
                 character.skill_bonus,character.specialization,character.specialization_progress,
-                target.land_trade_income,target.sea_trade_income,owner.name AS country_name,
+                income.acquisition_land_trade_income,income.acquisition_sea_trade_income,
+                target.base_land_trade_income,target.sea_trade_income AS legacy_sea_trade_income,
+                owner.name AS country_name,
                 target.name AS target_name,target_country.name AS target_country_name,home.name AS home_name,
                 EXISTS(
                   SELECT 1 FROM battles battle WHERE battle.defender_settlement_id=target.id
@@ -837,6 +853,14 @@ export async function processCharacterTurn(
            JOIN settlements target ON target.id=operation.target_settlement_id
            JOIN countries target_country ON target_country.id=target.country_id
            LEFT JOIN settlements home ON home.id=operation.home_settlement_id
+           LEFT JOIN LATERAL (
+             SELECT (ledger.details->>'landTradeIncome')::bigint AS acquisition_land_trade_income,
+                    (ledger.details->>'seaTradeIncome')::bigint AS acquisition_sea_trade_income
+               FROM transactions ledger
+              WHERE ledger.settlement_id=target.id AND ledger.turn=$2
+                AND ledger.kind='ACQUISITION_SETTLEMENT'
+              ORDER BY ledger.created_at DESC LIMIT 1
+           ) income ON TRUE
           WHERE operation.guild_id=$1 AND operation.status='ACTIVE'
             AND operation.task_type IN ('LOCAL_TRADE','FOREIGN_CONCESSION')
             AND (operation.last_processed_turn IS NULL OR operation.last_processed_turn<$2)
@@ -851,7 +875,12 @@ export async function processCharacterTurn(
           10,
           roll + skillBonus + specializationBonus
         );
-        const tradeIncome = Number(operation.land_trade_income)+Number(operation.sea_trade_income);
+        const tradeIncome = merchantTradeIncomeBase({
+          acquisitionLandTradeIncome:operation.acquisition_land_trade_income,
+          acquisitionSeaTradeIncome:operation.acquisition_sea_trade_income,
+          baseLandTradeIncome:operation.base_land_trade_income,
+          legacySeaTradeIncome:operation.legacy_sea_trade_income
+        });
         const amount = operation.besieged ? 0 : Math.min(1000,Math.floor(tradeIncome*effectivePercent/100));
         const destination = operation.home_settlement_id??operation.target_settlement_id;
         const inserted = await client.query(

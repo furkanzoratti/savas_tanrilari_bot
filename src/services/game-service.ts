@@ -9,8 +9,8 @@ import { currentRolePeriodRange, type RoleReportPeriod } from "../domain/role-pe
 import type { CultureGroup } from "../domain/cultures.js";
 import type { CharacterRole, ForceType, Mobilization, RuinStage, ShipStatus, UnitStatus } from "../domain/types.js";
 import { RESOURCES, buildingCostMultiplier, buildingDurationReduction, shipCostMultiplier, siegeCostMultiplier, unitCostMultiplier, type ResourceType } from "../domain/resources.js";
-import { settlementResourceAccess } from "./resource-service.js";
-import { MERCENARY_COMPANIES, MERCENARY_CONTRACT_LIMITS, importedMercenarySchedule, mercenaryContractSchedule, mercenaryTerminationUpkeep, type MercenaryCompanyKey } from "../domain/mercenaries.js";
+import { countryResourceAccess, settlementResourceAccess } from "./resource-service.js";
+import { MERCENARY_COMPANIES, MERCENARY_CONTRACT_LIMITS, importedMercenarySchedule, mercenaryContractSchedule, mercenaryPriceTerms, mercenaryTerminationUpkeep, type MercenaryCompanyKey, type MercenaryPriceTerms } from "../domain/mercenaries.js";
 import { cancelActiveGarrisonReplenishment, completeDueGarrisonReplenishments, scheduleAllMissingGarrisons, scheduleMandatoryGarrisonReplenishment, type GarrisonReplenishmentReason } from "./garrison-service.js";
 import { isSpecialUnitType, type SpecialUnitType } from "../domain/special-units.js";
 import { applyFormableShipUpkeepDiscount, FORMABLE_COUNTRIES, formableBuildingDiscount, formableModifiers, formableUnitDiscount, isFormableCountryKey, type FormableCountryKey } from "../domain/formable-countries.js";
@@ -458,6 +458,28 @@ async function collectMercenaryUpkeep(client: DbClient, guildId: string, turn: n
   return { paid, unpaid };
 }
 
+async function countryMercenaryPrices(client: DbClient, country: CountryRow): Promise<Record<MercenaryCompanyKey,MercenaryPriceTerms>> {
+  const resources = await countryResourceAccess(client,country.id);
+  const modifiers = formableModifiers(country.active_formable_key);
+  return Object.fromEntries((Object.entries(MERCENARY_COMPANIES) as Array<[MercenaryCompanyKey,(typeof MERCENARY_COMPANIES)[MercenaryCompanyKey]]>)
+    .map(([key,company])=>[key,mercenaryPriceTerms({
+      company,
+      hasGoldAccess:resources.includes("GOLD"),
+      countryHireDiscount:modifiers.mercenaryHireDiscount??0,
+      countryUpkeepDiscount:modifiers.mercenaryUpkeepDiscount??0
+    })])) as Record<MercenaryCompanyKey,MercenaryPriceTerms>;
+}
+
+async function syncCountryMercenaryUpkeep(client: DbClient, country: CountryRow): Promise<void> {
+  const prices = await countryMercenaryPrices(client,country);
+  for (const [companyKey,terms] of Object.entries(prices) as Array<[MercenaryCompanyKey,MercenaryPriceTerms]>) {
+    await client.query(
+      "UPDATE mercenary_contracts SET turn_upkeep=$1,updated_at=NOW() WHERE country_id=$2 AND company_key=$3 AND status IN ('PENDING','ACTIVE','UNPAID')",
+      [terms.turnUpkeep,country.id,companyKey]
+    );
+  }
+}
+
 async function loadMercenaryContracts(client: DbClient, countryId: string): Promise<MercenaryContractDocument[]> {
   const contracts = (await client.query<Omit<MercenaryContractDocument, "companyName" | "units" | "ships" | "assets">>(
     `SELECT mc.id,mc.company_key,mc.country_id,mc.settlement_id,s.name AS settlement_name,mc.status,
@@ -691,6 +713,7 @@ export const gameService = {
         if (await settlementIsBesieged(client, settlement.id)) throw new GameError(`**${settlement.name}** kuşatma altında olduğu için ülke formlanamaz.`);
       }
       await client.query("UPDATE countries SET name=$1,active_formable_key=$2 WHERE id=$3", [definition.name, formableKey, country.id]);
+      await syncCountryMercenaryUpkeep(client,{...country,name:definition.name,active_formable_key:formableKey});
       await client.query(`INSERT INTO country_formations(country_id,guild_id,previous_name,formable_key,formed_name,formed_turn,formed_by)
         VALUES($1,$2,$3,$4,$5,$6,$7)`, [country.id, input.guildId, country.name, formableKey, definition.name, guild.current_turn, input.actorId]);
       await audit(client, input.guildId, input.actorId, "COUNTRY_FORMED", "country", country.id, { previousName: country.name, formedName: definition.name, formableKey: formableKey, turn: guild.current_turn });
@@ -1033,6 +1056,14 @@ export const gameService = {
     return (Object.keys(MERCENARY_COMPANIES) as MercenaryCompanyKey[]).filter((companyKey) => !unavailable.has(companyKey));
   },
 
+  async mercenaryCompanyPrices(countryId: string): Promise<Record<MercenaryCompanyKey,MercenaryPriceTerms>> {
+    const client = await pool.connect();
+    try {
+      const country = await getCountry(client,countryId);
+      return await countryMercenaryPrices(client,country);
+    } finally { client.release(); }
+  },
+
   async hireMercenary(input: { guildId: string; actorId: string; countryId: string; settlementId: string; companyKey: MercenaryCompanyKey }): Promise<{ contract: MercenaryContractDocument; cost: number }> {
     return withTransaction(async (client) => {
       const guild = await getGuild(client, input.guildId);
@@ -1049,14 +1080,14 @@ export const gameService = {
       const currentContracts = await loadMercenaryContracts(client, country.id);
       const slotLimit = MERCENARY_CONTRACT_LIMITS[country.mobilization];
       if (currentContracts.length >= slotLimit) throw new GameError("Her devlet aynı anda en fazla 1 canlı paralı asker sözleşmesine sahip olabilir.");
-      const hasGold = Boolean((await client.query("SELECT 1 FROM settlements WHERE country_id=$1 AND resource_type='GOLD' LIMIT 1", [country.id])).rowCount);
-      const cost = Math.ceil(company.hireCost * (hasGold ? 0.90 : 1));
+      const terms = (await countryMercenaryPrices(client,country))[input.companyKey];
+      const cost = terms.hireCost;
       await adjustCountryLocalTreasuries(client, country.id, -cost);
       const { arrivalTurn } = mercenaryContractSchedule(guild.current_turn);
       const inserted = (await client.query<{ id: string }>(
         `INSERT INTO mercenary_contracts(guild_id,company_key,country_id,settlement_id,status,hired_turn,arrival_turn,hire_cost,turn_upkeep,created_by)
          VALUES($1,$2,$3,$4,'PENDING',$5,$6,$7,$8,$9) RETURNING id`,
-        [input.guildId,input.companyKey,country.id,settlement.id,guild.current_turn,arrivalTurn,cost,company.turnUpkeep,input.actorId]
+        [input.guildId,input.companyKey,country.id,settlement.id,guild.current_turn,arrivalTurn,cost,terms.turnUpkeep,input.actorId]
       )).rows[0]!;
       for (const [unitType, quantity] of Object.entries(company.land ?? {})) {
         await client.query("INSERT INTO mercenary_contract_units(contract_id,unit_type,initial_quantity,current_quantity) VALUES($1,$2,$3,$3)", [inserted.id,unitType,quantity]);
@@ -1083,6 +1114,7 @@ export const gameService = {
       if (!settlement) throw new GameError("Yerleşke bulunamadı.");
       const company = MERCENARY_COMPANIES[input.companyKey];
       if (!company) throw new GameError("Paralı asker şirketi bulunamadı.");
+      const terms = (await countryMercenaryPrices(client,country))[input.companyKey];
 
       const unavailable = await client.query("SELECT 1 FROM mercenary_contracts WHERE guild_id=$1 AND company_key=$2 AND status IN ('PENDING','ACTIVE','UNPAID') FOR UPDATE", [input.guildId, input.companyKey]);
       if (unavailable.rowCount) throw new GameError("Bu paralı asker grubu halen başka bir sözleşmeye bağlı.");
@@ -1094,7 +1126,7 @@ export const gameService = {
       const inserted = (await client.query<{ id: string }>(
         `INSERT INTO mercenary_contracts(guild_id,company_key,country_id,settlement_id,status,hired_turn,arrival_turn,hire_cost,turn_upkeep,last_upkeep_turn,created_by)
          VALUES($1,$2,$3,$4,'ACTIVE',$5,$6,0,$7,$6,$8) RETURNING id`,
-        [input.guildId, input.companyKey, country.id, settlement.id, hiredTurn, arrivalTurn, company.turnUpkeep, input.actorId]
+        [input.guildId, input.companyKey, country.id, settlement.id, hiredTurn, arrivalTurn, terms.turnUpkeep, input.actorId]
       )).rows[0]!;
       for (const [unitType, quantity] of Object.entries(company.land ?? {})) {
         await client.query("INSERT INTO mercenary_contract_units(contract_id,unit_type,initial_quantity,current_quantity) VALUES($1,$2,$3,$3)", [inserted.id, unitType, quantity]);

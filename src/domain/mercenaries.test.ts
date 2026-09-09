@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MERCENARY_COMPANIES, MERCENARY_CONTRACT_LIMITS, importedMercenarySchedule, mercenaryContractSchedule, mercenaryPersonnel, mercenaryTerminationUpkeep } from "./mercenaries.js";
+import { MERCENARY_COMPANIES, MERCENARY_CONTRACT_LIMITS, importedMercenarySchedule, mercenaryContractSchedule, mercenaryPersonnel, mercenaryPriceTerms, mercenaryTerminationUpkeep } from "./mercenaries.js";
 
 describe("paralı asker sözleşmeleri", () => {
   it("ikinci turda yapılan sözleşmenin ilk bakımını üçüncü tura koyar", () => {
@@ -27,5 +27,12 @@ describe("paralı asker sözleşmeleri", () => {
     expect(Object.keys(MERCENARY_COMPANIES)).toHaveLength(26);
     expect(MERCENARY_COMPANIES.hellas_breach_company.siege).toEqual({ ram: 1, ladder_group: 1, siege_tower: 1 });
     expect(mercenaryPersonnel(MERCENARY_COMPANIES.aegean_free_fleet)).toBe(500);
+  });
+
+  it("Altın erişimi ile ülke paralı asker indirimlerini kiralamada toplar, bakımda ülke etkisini uygular", () => {
+    expect(mercenaryPriceTerms({
+      company:{ name:"Test",category:"CHEAP",hireCost:10_000,turnUpkeep:2_000 },
+      hasGoldAccess:true,countryHireDiscount:0.10,countryUpkeepDiscount:0.10
+    })).toEqual({ hireCost:8_000,turnUpkeep:1_800,hireDiscountPercent:20,upkeepDiscountPercent:10 });
   });
 });
