@@ -345,6 +345,8 @@ export const armyService = {
     if (!character || character.role !== "COMMANDER") throw new GameError("Seçilen karakter bu devlete ait bir komutan değil.");
     const occupied = (await client.query<{ name: string }>("SELECT name FROM armies WHERE commander_character_id=$1 AND id<>$2", [character.id, armyId])).rows[0];
     if (occupied) throw new GameError(`Bu komutan hâlihazırda ${occupied.name} ordusunun başında.`);
+    const fleet = (await client.query<{ name: string }>("SELECT name FROM fleets WHERE commander_character_id=$1", [character.id])).rows[0];
+    if (fleet) throw new GameError(`Bu komutan hâlihazırda ${fleet.name} filosunun başında.`);
     const previous = (await client.query<{ commander_character_id: string | null }>("SELECT commander_character_id FROM armies WHERE id=$1 FOR UPDATE", [armyId])).rows[0];
     if (previous?.commander_character_id && previous.commander_character_id !== character.id) {
       await client.query("UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL WHERE id=$1", [previous.commander_character_id]);
@@ -387,9 +389,10 @@ export const armyService = {
 
   async commanders(countryId: string): Promise<Array<{ id: string; name: string; skill_bonus: number; army_name: string | null }>> {
     return (await pool.query<{ id: string; name: string; skill_bonus: number; army_name: string | null }>(
-      `SELECT cc.id,cc.name,cc.skill_bonus,a.name AS army_name FROM country_characters cc
+      `SELECT cc.id,cc.name,cc.skill_bonus,COALESCE(a.name,f.name) AS army_name FROM country_characters cc
        LEFT JOIN armies a ON a.commander_character_id=cc.id
-       WHERE cc.country_id=$1 AND cc.role='COMMANDER' ORDER BY cc.name`, [countryId]
+       LEFT JOIN fleets f ON f.commander_character_id=cc.id
+       WHERE cc.country_id=$1 AND cc.role='COMMANDER' AND cc.character_status='ACTIVE' ORDER BY cc.name`, [countryId]
     )).rows;
   }
 };

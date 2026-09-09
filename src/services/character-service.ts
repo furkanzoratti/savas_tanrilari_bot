@@ -29,6 +29,7 @@ export interface CharacterView {
   assigned_settlement_name: string | null;
   assigned_country_name: string | null;
   assigned_army_name: string | null;
+  assigned_fleet_name: string | null;
   operation_type: string | null;
   operation_status: string | null;
   operation_progress: number | null;
@@ -210,7 +211,7 @@ export const characterService = {
               character.commander_victories,character.specialization,character.specialization_progress,
               character.specialization_level,character.character_status,character.unavailable_until_turn,
               trained.name AS trained_settlement_name,assigned.name AS assigned_settlement_name,
-              assigned_country.name AS assigned_country_name,army.name AS assigned_army_name,
+              assigned_country.name AS assigned_country_name,army.name AS assigned_army_name,fleet.name AS assigned_fleet_name,
               COALESCE(merchant.task_type,diplomat.task_type,espionage.target_type) AS operation_type,
               COALESCE(merchant.status,diplomat.status,espionage.status) AS operation_status,
               diplomat.progress AS operation_progress,diplomat.goal AS operation_goal,
@@ -221,6 +222,7 @@ export const characterService = {
          LEFT JOIN settlements assigned ON assigned.id=character.assigned_settlement_id
          LEFT JOIN countries assigned_country ON assigned_country.id=assigned.country_id
          LEFT JOIN armies army ON army.commander_character_id=character.id
+         LEFT JOIN fleets fleet ON fleet.commander_character_id=character.id
          LEFT JOIN LATERAL (
            SELECT * FROM merchant_operations m WHERE m.merchant_character_id=character.id
              AND m.status IN ('PENDING_ACCEPTANCE','TRAVELING','ACTIVE','CONTROLLED')

@@ -11,6 +11,7 @@ import { TRADE_ROUTE_LABELS } from "../domain/trade.js";
 import type { CountryDocument } from "../services/game-service.js";
 import { TEMPLE_BANNER_URL } from "./assets.js";
 import { renderArmyEmbed } from "./army-embed.js";
+import { renderFleetEmbed } from "./fleet-embed.js";
 
 const ruinLabels = ["Normal", "Harap • sonraki Alım Turu %0", "Toparlanıyor • sonraki Alım Turu %50"];
 const phaseLabels: Record<string, string> = { OPEN: "Hareketler Açık", CLOSED: "Hareketler Kapalı", RESOLVING: "Olaylar Çözülüyor" };
@@ -309,6 +310,7 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
   });
 
   const armyEmbeds = (document.armies ?? []).map(renderArmyEmbed);
+  const fleetEmbeds = (document.fleets ?? []).map(renderFleetEmbed);
 
-  return [summary, ...settlementEmbeds, ...armyEmbeds];
+  return [summary, ...settlementEmbeds, ...armyEmbeds, ...fleetEmbeds];
 }

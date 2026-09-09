@@ -6,7 +6,7 @@ import {
 } from "discord.js";
 import { config } from "../config.js";
 import { logger } from "../logger.js";
-import { BATTLE_UNIT_STATS, type BattleSideKey, type BattleUnitType } from "../domain/battle.js";
+import { BATTLE_UNIT_STATS, type BattleSideKey, type BattleUnitType, type NavalUnitType } from "../domain/battle.js";
 import { BUILDING_CATEGORIES, BUILDINGS, CITY_POLICIES, MOBILIZATION_RULES, SHIPS, SIEGE_ASSETS, UNITS } from "../domain/catalog.js";
 import { gold, number } from "../domain/format.js";
 import { CULTURE_GROUPS, type CultureGroup } from "../domain/cultures.js";
@@ -24,6 +24,7 @@ import { RESOURCES, shipCostMultiplier, type ResourceType } from "../domain/reso
 import { buildingPurchaseTerms, unitPurchaseCost, gameService, GameError } from "../services/game-service.js";
 import { battleService } from "../services/battle-service.js";
 import { armyService, type MobileSiegeAssetType } from "../services/army-service.js";
+import { fleetService } from "../services/fleet-service.js";
 import { cityService } from "../services/city-service.js";
 import { commandLogService } from "../services/command-log-service.js";
 import { greatPowerService } from "../services/great-power-service.js";
@@ -41,6 +42,7 @@ import { BRAND_BANNER_PATH, BRAND_BANNER_NAME, TEMPLE_BANNER_PATH, TEMPLE_BANNER
 import { turnAnnouncement } from "./turn-announcements.js";
 import { handleBattleButton, handleBattleCommand, refreshActiveBattleCards } from "./battle-ui.js";
 import { handleArmyCommand } from "./army-ui.js";
+import { handleFleetCommand } from "./fleet-ui.js";
 import { handleCityButton, handleCityCommand, handleCityModal } from "./city-ui.js";
 import { addCountryRoleToMember, deleteCountryRole, ensureCountryRole, removeCountryRoleFromMember } from "./country-roles.js";
 import { handleSettlementEventSelect } from "./event-ui.js";
@@ -1138,6 +1140,8 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle(titles[period]).setDescription(text)] });
   } else if (interaction.commandName === "ordu") {
     await handleArmyCommand(interaction);
+  } else if (interaction.commandName === "filo") {
+    await handleFleetCommand(interaction);
   } else if (interaction.commandName === "savas") {
     await handleBattleCommand(interaction);
   } else if (interaction.commandName === "hos-geldin") {
@@ -1393,11 +1397,61 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
       return;
     }
   }
+  if (interaction.commandName === "filo") {
+    if (!interaction.guildId) { await interaction.respond([]); return; }
+    const country = await gameService.countryForUser(interaction.guildId,interaction.user.id);
+    if (!country) { await interaction.respond([]); return; }
+    const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
+    if (focused.name === "filo") {
+      const fleets = await fleetService.listCountry(country.id);
+      await interaction.respond(fleets.filter((fleet) => !query || fleet.name.toLocaleLowerCase("tr-TR").includes(query)).slice(0,25)
+        .map((fleet) => ({ name:`${fleet.name} • ${number(fleet.totalShips)} gemi • ${number(fleet.transportCapacity)} asker kapasitesi${fleet.active_battle_id ? " • Savaşta" : ""}`.slice(0,100),value:fleet.id })));
+      return;
+    }
+    if (focused.name === "komutan") {
+      const commanders = await fleetService.commanders(country.id);
+      await interaction.respond(commanders.filter((commander) => !query || commander.name.toLocaleLowerCase("tr-TR").includes(query)).slice(0,25)
+        .map((commander) => ({ name:`${commander.name} • Komutan +${commander.skill_bonus}${commander.assignment_name ? ` • ${commander.assignment_name}` : ""}`.slice(0,100),value:commander.id })));
+      return;
+    }
+    if (focused.name === "gemi") {
+      const sub = interaction.options.getSubcommand(false) ?? "";
+      const settlementValue = interaction.options.getString("yerleske");
+      if (!settlementValue || !["gemi-ekle","gemi-cikar"].includes(sub)) { await interaction.respond([]); return; }
+      let ships:Array<{ ship_type:NavalUnitType;quantity:number }>;
+      if (sub === "gemi-cikar") {
+        const fleetValue = interaction.options.getString("filo");
+        if (!fleetValue) { await interaction.respond([]); return; }
+        const fleet = await fleetService.get(country.id,fleetValue);
+        ships = fleet.ships.filter((ship) => ship.settlement_id === settlementValue || ship.settlement_name.toLocaleLowerCase("tr-TR") === settlementValue.toLocaleLowerCase("tr-TR"))
+          .map((ship) => ({ ship_type:ship.ship_type,quantity:ship.quantity }));
+      } else {
+        ships = (await fleetService.availableSettlementShips(country.id,settlementValue)).map((ship) => ({ ship_type:ship.ship_type,quantity:ship.available }));
+      }
+      await interaction.respond(ships.filter((ship) => !query || SHIPS[ship.ship_type].name.toLocaleLowerCase("tr-TR").includes(query)).slice(0,25)
+        .map((ship) => ({ name:`${SHIPS[ship.ship_type].name} • ${number(ship.quantity)} ${sub === "gemi-cikar" ? "filoda" : "müsait"}`.slice(0,100),value:ship.ship_type })));
+      return;
+    }
+    if (focused.name === "yerleske") {
+      const sub = interaction.options.getSubcommand(false) ?? "";
+      const fleetValue = interaction.options.getString("filo");
+      if (sub === "gemi-cikar" && fleetValue) {
+        const fleet = await fleetService.get(country.id,fleetValue);
+        const settlements = [...new Map(fleet.ships.map((ship) => [ship.settlement_id,ship.settlement_name])).entries()];
+        await interaction.respond(settlements.filter(([,name]) => !query || name.toLocaleLowerCase("tr-TR").includes(query)).slice(0,25).map(([value,name]) => ({ name,value })));
+      } else {
+        const settlements = await gameService.listSettlements(country.id);
+        await interaction.respond(settlements.filter((settlement) => settlement.is_coastal && (!query || settlement.name.toLocaleLowerCase("tr-TR").includes(query))).slice(0,25)
+          .map((settlement) => ({ name:settlement.name,value:settlement.id })));
+      }
+      return;
+    }
+  }
   if (interaction.commandName === "savas" && focused.name === "ulke") {
     if (!interaction.guildId || !isGameMaster(interaction)) { await interaction.respond([]); return; }
     let subcommand = "";
     try { subcommand = interaction.options.getSubcommand(false) ?? ""; } catch { subcommand = ""; }
-    if (!["ordu-ekle", "kadro-ayarla", "parali-asker-ayarla"].includes(subcommand)) { await interaction.respond([]); return; }
+    if (!["ordu-ekle", "filo-ekle", "kadro-ayarla", "parali-asker-ayarla"].includes(subcommand)) { await interaction.respond([]); return; }
     const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
     const participants = await battleService.listParticipantCountries({ guildId: interaction.guildId, channelId: interaction.channelId });
     await interaction.respond(participants
@@ -1414,6 +1468,16 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
     const armies = await battleService.listParticipantArmies({ guildId: interaction.guildId, channelId: interaction.channelId, countryName });
     await interaction.respond(armies.filter((army) => !query || `${army.country_name} ${army.name}`.toLocaleLowerCase("tr-TR").includes(query)).slice(0, 25)
       .map((army) => ({ name: `${army.country_name} • ${army.name} • ${number(army.total)} asker${army.assigned ? " • Eklendi" : ""}`.slice(0, 100), value: army.id })));
+    return;
+  }
+  if (interaction.commandName === "savas" && focused.name === "filo") {
+    if (!interaction.guildId || !isGameMaster(interaction)) { await interaction.respond([]); return; }
+    const countryName = interaction.options.getString("ulke");
+    if (!countryName) { await interaction.respond([]); return; }
+    const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
+    const fleets = await battleService.listParticipantFleets({ guildId:interaction.guildId,channelId:interaction.channelId,countryName });
+    await interaction.respond(fleets.filter((fleet) => !query || `${fleet.country_name} ${fleet.name}`.toLocaleLowerCase("tr-TR").includes(query)).slice(0,25)
+      .map((fleet) => ({ name:`${fleet.country_name} • ${fleet.name} • ${number(fleet.total)} gemi${fleet.assigned ? " • Eklendi" : ""}`.slice(0,100),value:fleet.id })));
     return;
   }
   if (interaction.commandName === "savas" && focused.name === "yerleske") {

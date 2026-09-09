@@ -226,7 +226,7 @@ export const cityService = {
       const settlement = await getSettlement(client, input.countryId, input.settlementId, true);
       if (!settlement.is_conquered || settlement.conquered_turn === null) throw new GameError("Diplomat yalnızca asimilasyonu süren fethedilmiş bir yerleşkeye gönderilebilir.");
       const character = (await client.query<CountryCharacter>(
-        "SELECT *,NULL::text AS assigned_settlement_name,NULL::text AS assigned_country_name,NULL::text AS assigned_army_name,NULL::text AS trained_settlement_name FROM country_characters WHERE country_id=$1 AND lower(name)=lower($2) FOR UPDATE",
+        "SELECT *,NULL::text AS assigned_settlement_name,NULL::text AS assigned_country_name,NULL::text AS assigned_army_name,NULL::text AS assigned_fleet_name,NULL::text AS trained_settlement_name FROM country_characters WHERE country_id=$1 AND lower(name)=lower($2) FOR UPDATE",
         [input.countryId, input.characterName.trim()]
       )).rows[0];
       if (!character) throw new GameError("Bu ülkede belirtilen karakter bulunamadı.");
@@ -255,7 +255,7 @@ export const cityService = {
       await getCountry(client, input.guildId, input.countryId);
       const character = (await client.query<CountryCharacter>("SELECT *,NULL::text AS assigned_settlement_name,NULL::text AS trained_settlement_name FROM country_characters WHERE country_id=$1 AND lower(name)=lower($2) FOR UPDATE", [input.countryId, input.characterName.trim()])).rows[0];
       if (!character) throw new GameError("Belirtilen karakter bulunamadı.");
-      if (["ARMY","ESPIONAGE","ESPIONAGE_RETURNING","CAPTURED","ASSIMILATION"].includes(character.assignment)) throw new GameError("Ordu, casusluk, esaret veya asimilasyon görevindeki karakter bu komutla görevden alınamaz.");
+      if (["ARMY","FLEET","ESPIONAGE","ESPIONAGE_RETURNING","CAPTURED","ASSIMILATION"].includes(character.assignment)) throw new GameError("Ordu, filo, casusluk, esaret veya asimilasyon görevindeki karakter bu komutla görevden alınamaz.");
       const result = await client.query<CountryCharacter>("UPDATE country_characters SET assigned_settlement_id=NULL,assignment='NONE' WHERE id=$1 RETURNING *,NULL::text AS assigned_settlement_name,NULL::text AS trained_settlement_name", [character.id]);
       await audit(client, input.guildId, input.actorId, "CHARACTER_UNASSIGN", "character", result.rows[0]!.id, {});
       return result.rows[0]!;

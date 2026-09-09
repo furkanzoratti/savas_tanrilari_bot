@@ -1,6 +1,6 @@
 import type { DbClient } from "../db/pool.js";
 import { pool, withTransaction } from "../db/pool.js";
-import { BUILD_DURATIONS, BUILDINGS, CITY_POLICIES, MAX_BUILDING_COST_DISCOUNT, MOBILIZATION_RULES, PORT_SHIP_CAPACITY, SHIPS, SIEGE_ASSETS, UNITS, buildingBaseCost, shipHarborRequirement, type CityPolicyKey } from "../domain/catalog.js";
+import { BUILD_DURATIONS, BUILDINGS, CITY_POLICIES, MAX_BUILDING_COST_DISCOUNT, MOBILIZATION_RULES, PORT_SHIP_CAPACITY, SHIPS, SIEGE_ASSETS, UNITS, buildingBaseCost, fleetTransportCapacity, shipCrewRequirement, shipHarborRequirement, type CityPolicyKey } from "../domain/catalog.js";
 import { buildingSlotLimit, calculatePopulationGain, calculateShipUpkeep, calculateUnitUpkeep, nextRuinStage } from "../domain/economy.js";
 import { addIncomeBreakdowns, applyIncomePenalty, calculateCategorizedIncome, incomeTotal, populationTaxIncome, scaleIncome, type IncomeBreakdown } from "../domain/income.js";
 import { createRecruitmentWaves, isAcquisitionTurn, militaryLimit, settlementMobilizationLimit, settlementTrainingCapacity } from "../domain/mobilization.js";
@@ -18,6 +18,7 @@ import { assessArmyComposition, type BattleComposition, type BattleUnitType } fr
 import { calculateTreasuryTransferQuota } from "../domain/treasury-transfer.js";
 import { assimilationCompletionTurn } from "../domain/assimilation.js";
 import type { ArmyView } from "./army-service.js";
+import type { FleetView } from "./fleet-service.js";
 
 export class GameError extends Error {}
 
@@ -64,8 +65,8 @@ export interface SettlementPolicyRow {
 export interface CountryCharacter {
   id: string; country_id: string; name: string; role: CharacterRole; skill_bonus: number;
   specialization: string | null; specialization_progress: number; specialization_level: number;
-  assignment: "NONE" | "CURIA" | "AGORA" | "ARMY" | "ESPIONAGE" | "ESPIONAGE_RETURNING" | "CAPTURED" | "COUNTERINTELLIGENCE_TRAVELING_COUNTRY" | "COUNTERINTELLIGENCE_TRAVELING_SETTLEMENT" | "COUNTERINTELLIGENCE_COUNTRY" | "COUNTERINTELLIGENCE_SETTLEMENT" | "ASSIMILATION"; assignment_ready_turn: number | null; trained_settlement_id: string | null;
-  assigned_settlement_id: string | null; assigned_settlement_name: string | null; assigned_country_name: string | null; assigned_army_name: string | null;
+  assignment: "NONE" | "CURIA" | "AGORA" | "ARMY" | "FLEET" | "ESPIONAGE" | "ESPIONAGE_RETURNING" | "CAPTURED" | "COUNTERINTELLIGENCE_TRAVELING_COUNTRY" | "COUNTERINTELLIGENCE_TRAVELING_SETTLEMENT" | "COUNTERINTELLIGENCE_COUNTRY" | "COUNTERINTELLIGENCE_SETTLEMENT" | "ASSIMILATION"; assignment_ready_turn: number | null; trained_settlement_id: string | null;
+  assigned_settlement_id: string | null; assigned_settlement_name: string | null; assigned_country_name: string | null; assigned_army_name: string | null; assigned_fleet_name: string | null;
   trained_settlement_name: string | null; trained_turn: number;
 }
 export interface AcademyTrainingSession {
@@ -178,6 +179,7 @@ export interface CountryDocument {
   specialUnitUnlocks?: SpecialUnitType[];
   characters: CountryCharacter[];
   armies: ArmyView[];
+  fleets: FleetView[];
   allies: Array<{ id: string; name: string }>;
   pacts: Array<{ id: string; name: string; purpose: string; founder_name: string }>;
   mercenaries: MercenaryContractDocument[];
@@ -1337,6 +1339,7 @@ export const gameService = {
       const enslavedGarrison = enslavedExistingGarrison + cancelledGarrisonTrainees;
       await client.query("DELETE FROM army_units WHERE settlement_id=$1", [settlement.id]);
       await client.query("DELETE FROM army_siege_assets WHERE settlement_id=$1", [settlement.id]);
+      await client.query("DELETE FROM fleet_ships WHERE settlement_id=$1", [settlement.id]);
       const removedStacks = (await client.query<{ quantity: number; force_type: "ARMY" | "GARRISON" }>(
         "DELETE FROM unit_stacks WHERE settlement_id=$1 RETURNING quantity,force_type", [settlement.id]
       )).rows;
@@ -1403,12 +1406,13 @@ export const gameService = {
         [settlementIds]
       )).rows : [];
       const characters = (await client.query<CountryCharacter>(
-        `SELECT cc.*,assigned.name AS assigned_settlement_name,assigned_country.name AS assigned_country_name,trained.name AS trained_settlement_name,army.name AS assigned_army_name
+        `SELECT cc.*,assigned.name AS assigned_settlement_name,assigned_country.name AS assigned_country_name,trained.name AS trained_settlement_name,army.name AS assigned_army_name,fleet.name AS assigned_fleet_name
            FROM country_characters cc
            LEFT JOIN settlements assigned ON assigned.id=cc.assigned_settlement_id
            LEFT JOIN countries assigned_country ON assigned_country.id=assigned.country_id
            LEFT JOIN settlements trained ON trained.id=cc.trained_settlement_id
            LEFT JOIN armies army ON army.commander_character_id=cc.id
+           LEFT JOIN fleets fleet ON fleet.commander_character_id=cc.id
           WHERE cc.country_id=$1 ORDER BY cc.role,cc.name`, [countryId]
       )).rows;
       const armyRows = (await client.query<{
@@ -1456,6 +1460,36 @@ export const gameService = {
           assessment: assessArmyComposition(composition, "FIELD"),
           composition_active: activationTurn === null || guild.current_turn >= activationTurn,
           composition_activation_turn: activationTurn
+        };
+      });
+      const fleetRows = (await client.query<{
+        id:string;guild_id:string;country_id:string;country_name:string;name:string;
+        commander_character_id:string|null;commander_name:string|null;commander_skill_bonus:number;
+        created_turn:number;active_battle_id:string|null;
+      }>(`SELECT f.id,f.guild_id,f.country_id,c.name AS country_name,f.name,f.commander_character_id,
+                  cc.name AS commander_name,COALESCE(cc.skill_bonus,0)::integer AS commander_skill_bonus,f.created_turn,
+                  (SELECT b.id FROM battle_fleet_assignments bfa JOIN battles b ON b.id=bfa.battle_id
+                    WHERE bfa.fleet_id=f.id AND b.status NOT IN ('FINISHED','CANCELLED') LIMIT 1) AS active_battle_id
+             FROM fleets f JOIN countries c ON c.id=f.country_id
+             LEFT JOIN country_characters cc ON cc.id=f.commander_character_id
+            WHERE f.country_id=$1 ORDER BY f.created_at,f.name`, [countryId])).rows;
+      const fleetShipRows = (await client.query<{
+        fleet_id:string;settlement_id:string;settlement_name:string;ship_type:keyof typeof SHIPS;quantity:number;
+      }>(`SELECT fs.fleet_id,fs.settlement_id,s.name AS settlement_name,fs.ship_type,fs.quantity
+             FROM fleet_ships fs JOIN settlements s ON s.id=fs.settlement_id
+            WHERE fs.fleet_id=ANY($1::uuid[]) ORDER BY s.name,fs.ship_type`, [fleetRows.map((fleet) => fleet.id)])).rows;
+      const transportMultiplier = formableModifiers(country.active_formable_key).shipTransportMultiplier ?? 1;
+      const fleets:FleetView[] = fleetRows.map((fleet) => {
+        const fleetShips = fleetShipRows.filter((ship) => ship.fleet_id === fleet.id)
+          .map(({ fleet_id:_fleetId,...ship }) => ({ ...ship,quantity:Number(ship.quantity) }));
+        const composition:Partial<Record<keyof typeof SHIPS,number>> = {};
+        for (const ship of fleetShips) composition[ship.ship_type] = (composition[ship.ship_type] ?? 0)+ship.quantity;
+        return {
+          ...fleet,commander_skill_bonus:Number(fleet.commander_skill_bonus),created_turn:Number(fleet.created_turn),
+          ships:fleetShips,composition,
+          totalShips:Object.values(composition).reduce<number>((sum,quantity) => sum+Number(quantity ?? 0),0),
+          crew:(Object.entries(composition) as Array<[keyof typeof SHIPS,number|undefined]>).reduce((sum,[shipType,quantity]) => sum+shipCrewRequirement(shipType,Number(quantity ?? 0)),0),
+          transportCapacity:fleetTransportCapacity(composition,transportMultiplier),transportMultiplier
         };
       });
       const units = settlementIds.length ? (await client.query<{ settlement_id: string; unit_type: keyof typeof UNITS; quantity: number; status: UnitStatus; force_type: ForceType }>("SELECT * FROM unit_stacks WHERE settlement_id = ANY($1::uuid[]) ORDER BY force_type,unit_type", [settlementIds])).rows : [];
@@ -1597,7 +1631,7 @@ export const gameService = {
           trainingCapacity,
           trainingUsed,
           trainingRemaining: Math.max(0, trainingCapacity - trainingUsed),
-          slotLimit: buildingSlotLimit(settlement.population),
+          slotLimit: buildingSlotLimit(settlement.population, activeBuildings.some((building) => building.buildingType === "port")),
           constructionLimit: activePolicies.includes("MASTER_ARCHITECTURE") ? 3 : 2,
           isBesieged: besiegedSettlementIds.has(settlement.id),
           incomePenalty,
@@ -1627,6 +1661,7 @@ export const gameService = {
         specialUnitUnlocks,
         characters,
         armies,
+        fleets,
         allies,
         pacts,
         mercenaries,
@@ -1920,7 +1955,8 @@ export const gameService = {
       if (existing?.status === "ACTIVE" && existing.level >= input.level) throw new GameError(`Bu yerleşkede ${definition.name} zaten Seviye ${existing.level}.`);
       if (!existing) {
         const slots = await client.query<{ count: number }>("SELECT COUNT(*)::integer AS count FROM buildings WHERE settlement_id=$1 AND (level>0 OR status='BUILDING')", [settlement.id]);
-        if ((slots.rows[0]?.count ?? 0) >= buildingSlotLimit(settlement.population)) throw new GameError("Yerleşkenin boş bina slotu yok.");
+        const hasActivePort = Boolean((await client.query("SELECT 1 FROM buildings WHERE settlement_id=$1 AND building_type='port' AND status='ACTIVE' AND level>0", [settlement.id])).rowCount);
+        if ((slots.rows[0]?.count ?? 0) >= buildingSlotLimit(settlement.population, hasActivePort)) throw new GameError("Yerleşkenin boş bina slotu yok.");
       }
       await client.query(
         `INSERT INTO buildings(settlement_id,building_type,level,target_level,status,started_turn,completion_turn,sabotaged_until_turn)
@@ -1965,7 +2001,8 @@ export const gameService = {
       }
       if (currentLevel === 0) {
         const slots = await client.query<{ count: number }>("SELECT COUNT(*)::integer AS count FROM buildings WHERE settlement_id=$1 AND (level>0 OR status='BUILDING')", [settlement.id]);
-        if ((slots.rows[0]?.count ?? 0) >= buildingSlotLimit(settlement.population)) throw new GameError("Yerleşkenin boş bina slotu yok.");
+        const hasActivePort = Boolean((await client.query("SELECT 1 FROM buildings WHERE settlement_id=$1 AND building_type='port' AND status='ACTIVE' AND level>0", [settlement.id])).rowCount);
+        if ((slots.rows[0]?.count ?? 0) >= buildingSlotLimit(settlement.population, hasActivePort)) throw new GameError("Yerleşkenin boş bina slotu yok.");
       }
       const effectiveResources = (await settlementResourceAccess(client, country.id)).get(settlement.id) ?? [settlement.resource_type];
       const terms = buildingPurchaseTerms(input.buildingType, targetLevel, effectiveResources, activePolicies, country.active_formable_key);

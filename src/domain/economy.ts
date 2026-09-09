@@ -72,8 +72,9 @@ export function calculateShipUpkeep(
   return Math.ceil(quantity * ship.upkeep * multiplier);
 }
 
-export function buildingSlotLimit(population: number): number {
-  return Math.min(6, 2 + Math.floor(Math.max(0, population - 20_000) / 10_000));
+export function buildingSlotLimit(population: number, hasActivePort = false): number {
+  const standardLimit = Math.min(8, 5 + Math.floor(Math.max(0, population) / 10_000));
+  return hasActivePort && population >= 150_000 ? 9 : standardLimit;
 }
 
 export function naturalPopulationGrowthRate(population: number): number {

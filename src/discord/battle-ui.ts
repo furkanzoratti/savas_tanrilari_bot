@@ -4,9 +4,11 @@ import { number } from "../domain/format.js";
 import { battleService, type BattleRoundResult, type BattleView, type SiegePhase } from "../services/battle-service.js";
 import { gameService, GameError } from "../services/game-service.js";
 import { armyService } from "../services/army-service.js";
+import { fleetService } from "../services/fleet-service.js";
 import { isGameMaster, requireGameMaster } from "./auth.js";
 import { battlefieldAsset } from "./assets.js";
 import { renderArmyEmbed } from "./army-embed.js";
+import { renderFleetEmbed } from "./fleet-embed.js";
 import { publishCharacterTurnLogs } from "./character-ui.js";
 
 const statusLabels: Record<string, string> = {
@@ -103,7 +105,7 @@ ${accessNote}` }
 
 function components(view: BattleView) {
   if (view.battle.status === "FINISHED") return [new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(`battle_armies|${view.battle.id}`).setLabel("Ordularımın Son Durumunu Gör").setEmoji("⚔️").setStyle(ButtonStyle.Secondary)
+    new ButtonBuilder().setCustomId(`battle_armies|${view.battle.id}`).setLabel(view.battle.terrain === "NAVAL" ? "Filolarımın Son Durumunu Gör" : "Ordularımın Son Durumunu Gör").setEmoji(view.battle.terrain === "NAVAL" ? "⚓" : "⚔️").setStyle(ButtonStyle.Secondary)
   )];
   if (["CANCELLED", "DRAFT"].includes(view.battle.status)) return [];
   const expected = expectedSide(view);
@@ -264,6 +266,18 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
     await interaction.editReply({
       content: `✅ **${result.countryName} • ${result.armyName}** savaş taslağ${action === "ADD" ? "ına eklendi" : "ından çıkarıldı"}. **${countryName} tarafının bulunduğu cephenin güncel toplamı:** ${number(result.view.sides[side].initial_total)}`,
     });
+  } else if (sub === "filo-ekle") {
+    requireGameMaster(interaction);
+    const countryName = interaction.options.getString("ulke",true);
+    const side = (await battleService.participantByCountry({ guildId:interaction.guildId,channelId:interaction.channelId,countryName })).side_key;
+    const action = interaction.options.getString("islem",true) as "ADD" | "REMOVE";
+    const result = await battleService.setFleetAssignment({
+      guildId:interaction.guildId,channelId:interaction.channelId,actorId:interaction.user.id,
+      side,action,fleetId:interaction.options.getString("filo",true)
+    });
+    await interaction.editReply({
+      content:`✅ **${result.countryName} • ${result.fleetName}** deniz savaşı taslağ${action === "ADD" ? "ına eklendi" : "ından çıkarıldı"}. **${countryName} tarafının bulunduğu cephenin güncel toplamı:** ${number(result.view.sides[side].initial_total)} gemi`
+    });
   } else if (sub === "birlik-ayarla") {
     requireGameMaster(interaction);
     const view = await battleService.setUnit({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id,
@@ -410,8 +424,12 @@ export async function handleBattleButton(interaction: ButtonInteraction): Promis
     const country = await gameService.countryForUser(interaction.guildId, interaction.user.id);
     if (!country) throw new GameError("Discord hesabına atanmış bir ülke bulunamadı.");
     const armies = await armyService.listBattleCountry(interaction.guildId, country.id, battleId);
-    if (!armies.length) throw new GameError("Bu savaşta devletinize ait kalıcı bir ordu bulunmuyor.");
-    await interaction.editReply({ content: "⚔️ Savaş kayıpları işlendi. Bu savaşa katılan ordularınızın ve kompozisyonlarının güncel hâli:", embeds: armies.slice(0, 10).map(renderArmyEmbed) });
+    const fleets = await fleetService.listBattleCountry(interaction.guildId,country.id,battleId);
+    if (!armies.length && !fleets.length) throw new GameError("Bu savaşta devletinize ait kalıcı bir ordu veya filo bulunmuyor.");
+    await interaction.editReply({
+      content:fleets.length ? "⚓ Savaş kayıpları işlendi. Bu savaşa katılan filolarınızın ve taşıma kapasitelerinin güncel hâli:" : "⚔️ Savaş kayıpları işlendi. Bu savaşa katılan ordularınızın ve kompozisyonlarının güncel hâli:",
+      embeds:[...armies.map(renderArmyEmbed),...fleets.map(renderFleetEmbed)].slice(0,10)
+    });
   } else if (interaction.customId.startsWith("battle_roll|")) {
     await interaction.deferReply();
     const result = await battleService.roll({ guildId: interaction.guildId, channelId: interaction.channelId, battleId, actorId: interaction.user.id, isGameMaster: isGameMaster(interaction) });

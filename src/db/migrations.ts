@@ -1766,5 +1766,57 @@ export const migrations = [
       CREATE INDEX IF NOT EXISTS transactions_settlement_idx
         ON transactions(settlement_id,turn,created_at) WHERE settlement_id IS NOT NULL;
     `
+  },
+  {
+    version: 54,
+    name: "persistent_fleets",
+    sql: `
+      CREATE TABLE IF NOT EXISTS fleets (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        guild_id TEXT NOT NULL REFERENCES guilds(discord_id) ON DELETE CASCADE,
+        country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        name TEXT NOT NULL CHECK (char_length(name) BETWEEN 2 AND 60),
+        commander_character_id UUID UNIQUE REFERENCES country_characters(id) ON DELETE SET NULL,
+        created_turn INTEGER NOT NULL CHECK (created_turn >= 0),
+        created_by TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS fleets_country_name_unique
+        ON fleets(country_id,lower(name));
+
+      CREATE TABLE IF NOT EXISTS fleet_ships (
+        fleet_id UUID NOT NULL REFERENCES fleets(id) ON DELETE CASCADE,
+        settlement_id UUID NOT NULL REFERENCES settlements(id) ON DELETE CASCADE,
+        ship_type TEXT NOT NULL CHECK (ship_type IN ('kerkouros','trireme','quinquereme')),
+        quantity INTEGER NOT NULL CHECK (quantity > 0),
+        PRIMARY KEY(fleet_id,settlement_id,ship_type)
+      );
+      CREATE INDEX IF NOT EXISTS fleet_ships_settlement_idx
+        ON fleet_ships(settlement_id,ship_type);
+
+      CREATE TABLE IF NOT EXISTS battle_fleet_assignments (
+        battle_id UUID NOT NULL REFERENCES battles(id) ON DELETE CASCADE,
+        side_key TEXT NOT NULL CHECK (side_key IN ('A','B')),
+        fleet_id UUID NOT NULL REFERENCES fleets(id) ON DELETE CASCADE,
+        country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        initial_composition JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY(battle_id,fleet_id)
+      );
+      CREATE INDEX IF NOT EXISTS battle_fleet_assignments_country_idx
+        ON battle_fleet_assignments(battle_id,country_id);
+
+      ALTER TABLE country_characters DROP CONSTRAINT IF EXISTS country_characters_assignment_check;
+      ALTER TABLE country_characters ADD CONSTRAINT country_characters_assignment_check CHECK (assignment IN (
+        'NONE','CURIA','AGORA','ARMY','FLEET','ESPIONAGE','ESPIONAGE_RETURNING','CAPTURED',
+        'COUNTERINTELLIGENCE_TRAVELING_COUNTRY','COUNTERINTELLIGENCE_TRAVELING_SETTLEMENT',
+        'COUNTERINTELLIGENCE_COUNTRY','COUNTERINTELLIGENCE_SETTLEMENT','PERSONAL_GUARD','ASSIMILATION',
+        'MERCHANT_LOCAL_TRAVELING','MERCHANT_LOCAL','MERCHANT_FOREIGN_PENDING','MERCHANT_FOREIGN_TRAVELING',
+        'MERCHANT_FOREIGN','MERCHANT_PURCHASE','MERCHANT_BLACK_MARKET_TRAVELING','MERCHANT_BLACK_MARKET',
+        'DIPLOMAT_TRAVELING','DIPLOMAT_RECONCILIATION','DIPLOMAT_CULTURE','DIPLOMAT_VASSALIZE',
+        'DIPLOMAT_INTEGRATE','DIPLOMAT_DEFENSE'
+      ));
+    `
   }
 ] as const;

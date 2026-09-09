@@ -15,10 +15,13 @@ const base = {
 };
 
 describe("yerleşke geliştirme ve politika dengesi", () => {
-  it("nüfus artsa bile yerleşke bina slotunu altıyla sınırlar", () => {
-    expect(buildingSlotLimit(20_000)).toBe(2);
-    expect(buildingSlotLimit(40_000)).toBe(4);
-    expect(buildingSlotLimit(200_000)).toBe(6);
+  it("normal yerleşkeyi sekiz slotta sınırlar ve büyük liman şehrine dokuzuncu slotu açar", () => {
+    expect(buildingSlotLimit(0)).toBe(5);
+    expect(buildingSlotLimit(20_000)).toBe(7);
+    expect(buildingSlotLimit(40_000)).toBe(8);
+    expect(buildingSlotLimit(200_000)).toBe(8);
+    expect(buildingSlotLimit(149_999,true)).toBe(8);
+    expect(buildingSlotLimit(150_000,true)).toBe(9);
   });
 
   it("Köle Kampı gelirini yerleşkenin köle nüfusu üzerinden hesaplar", () => {

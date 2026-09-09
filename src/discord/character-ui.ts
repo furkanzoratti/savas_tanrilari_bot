@@ -12,7 +12,7 @@ import { logger } from "../logger.js";
 import { requireGameMaster, resolveCountry } from "./auth.js";
 
 const assignmentLabels: Record<string,string> = {
-  NONE: "Görev bekliyor", CURIA: "Curia", AGORA: "Agora / Forum", ARMY: "Ordu komutanı",
+  NONE: "Görev bekliyor", CURIA: "Curia", AGORA: "Agora / Forum", ARMY: "Ordu komutanı", FLEET: "Filo komutanı",
   ESPIONAGE: "Casusluk görevine gidiyor", ESPIONAGE_RETURNING: "Casusluk görevinden dönüyor",
   CAPTURED: "Esir", COUNTERINTELLIGENCE_TRAVELING_COUNTRY: "Ülke karşı casusluğuna gidiyor",
   COUNTERINTELLIGENCE_TRAVELING_SETTLEMENT: "Yerleşke karşı casusluğuna gidiyor",
@@ -53,7 +53,7 @@ function characterLocation(character: CharacterView): string | null {
   if (character.assigned_country_name || character.assigned_settlement_name) {
     return [character.assigned_country_name,character.assigned_settlement_name].filter(Boolean).join(" • ");
   }
-  return character.assigned_army_name ?? null;
+  return character.assigned_army_name ?? character.assigned_fleet_name ?? null;
 }
 
 function characterLine(character: CharacterView): string {

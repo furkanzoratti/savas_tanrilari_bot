@@ -31,12 +31,14 @@ describe("yerleşke ekonomisi", () => {
   });
 
   it("nüfusa göre bina slotunu doğru hesaplar", () => {
-    expect(buildingSlotLimit(20_000)).toBe(2);
-    expect(buildingSlotLimit(29_999)).toBe(2);
-    expect(buildingSlotLimit(30_000)).toBe(3);
-    expect(buildingSlotLimit(50_000)).toBe(5);
-    expect(buildingSlotLimit(60_000)).toBe(6);
-    expect(buildingSlotLimit(175_000)).toBe(6);
+    expect(buildingSlotLimit(0)).toBe(5);
+    expect(buildingSlotLimit(9_999)).toBe(5);
+    expect(buildingSlotLimit(10_000)).toBe(6);
+    expect(buildingSlotLimit(20_000)).toBe(7);
+    expect(buildingSlotLimit(30_000)).toBe(8);
+    expect(buildingSlotLimit(149_999, true)).toBe(8);
+    expect(buildingSlotLimit(150_000, false)).toBe(8);
+    expect(buildingSlotLimit(150_000, true)).toBe(9);
   });
 
   it("lupanar, şifacı, su kemeri, haraplık ve seferberliği birlikte uygular", () => {
