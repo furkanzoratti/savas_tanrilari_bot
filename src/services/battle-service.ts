@@ -103,12 +103,12 @@ function mergeComposition(target: BattleComposition, source: BattleComposition):
   }
 }
 
-async function resolveParticipant(client: DbClient, battleId: string, side: BattleSideKey, countryName?: string | null): Promise<BattleParticipantRow> {
+async function resolveParticipant(client: DbClient, battleId: string, side: BattleSideKey | null, countryName?: string | null): Promise<BattleParticipantRow> {
   const rows = (await client.query<BattleParticipantRow>(
     `SELECT bsp.*,c.name AS country_name,source.name AS source_settlement_name FROM battle_side_participants bsp
        JOIN countries c ON c.id=bsp.country_id
        LEFT JOIN settlements source ON source.id=bsp.source_settlement_id
-      WHERE bsp.battle_id=$1 AND bsp.side_key=$2
+      WHERE bsp.battle_id=$1 AND ($2::text IS NULL OR bsp.side_key=$2)
       ORDER BY bsp.is_primary DESC,c.name FOR UPDATE OF bsp`,
     [battleId, side]
   )).rows;
@@ -1275,7 +1275,7 @@ export const battleService = {
     )).rows;
   },
 
-  async setRoster(input: { guildId: string; channelId: string; actorId: string; side: BattleSideKey; composition: BattleComposition; naval: boolean; countryName?: string | null; sourceSettlement?: string | null }): Promise<BattleView> {
+  async setRoster(input: { guildId: string; channelId: string; actorId: string; side?: BattleSideKey; composition: BattleComposition; naval: boolean; countryName?: string | null; sourceSettlement?: string | null }): Promise<BattleView> {
     return withTransaction(async (client) => {
       const battle = await activeInChannel(client, input.guildId, input.channelId);
       if (!battle || battle.status !== "DRAFT") throw new GameError("Bu kanalda düzenlenebilir bir savaş taslağı yok.");
@@ -1288,7 +1288,8 @@ export const battleService = {
         if (quantity > 0) clean[key as BattleForceType] = quantity;
       }
       if (!compositionTotal(clean)) throw new GameError("Kadroda en az bir birlik veya gemi bulunmalıdır.");
-      const participant = await resolveParticipant(client, battle.id, input.side, input.countryName);
+      const participant = await resolveParticipant(client, battle.id, input.side ?? null, input.countryName);
+      const participantSide = participant.side_key;
       if (await participantUsesArmies(client, battle.id, participant.country_id)) throw new GameError("Bu ülke savaşa kalıcı orduyla eklenmiş. Manuel kadro düzenlemek için önce orduları taslaktan çıkarın.");
       if (await participantUsesFleets(client, battle.id, participant.country_id)) throw new GameError("Bu ülke savaşa kalıcı filoyla eklenmiş. Manuel kadro düzenlemek için önce filoları taslaktan çıkarın.");
       let sourceSettlementId: string | null = participant.source_settlement_id;
@@ -1300,7 +1301,7 @@ export const battleService = {
         "UPDATE battle_side_participants SET composition=$1::jsonb,source_settlement_id=$2 WHERE battle_id=$3 AND country_id=$4",
         [JSON.stringify(clean), sourceSettlementId, battle.id, participant.country_id]
       );
-      await rebuildDraftSide(client, battle.id, input.side);
+      await rebuildDraftSide(client, battle.id, participantSide);
       return loadView(client, battle.id);
     });
   },

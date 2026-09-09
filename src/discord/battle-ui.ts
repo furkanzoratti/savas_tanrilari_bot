@@ -288,9 +288,8 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
   } else if (sub === "kadro-ayarla") {
     requireGameMaster(interaction);
     const countryName = interaction.options.getString("ulke", true);
-    const side = (await battleService.participantByCountry({ guildId: interaction.guildId, channelId: interaction.channelId, countryName })).side_key;
     const sourceSettlement = interaction.options.getString("yerleske");
-    const view = await battleService.setRoster({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id, side, naval: false, countryName, sourceSettlement,
+    const view = await battleService.setRoster({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id, naval: false, countryName, sourceSettlement,
       composition: {
         light_infantry: interaction.options.getInteger("hafif-piyade", true), slinger: interaction.options.getInteger("sapanci", true),
         spear: interaction.options.getInteger("mizrakli", true), archer: interaction.options.getInteger("okcu", true),
@@ -304,6 +303,9 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
         iberian_caetrati: interaction.options.getInteger("iber-caetratileri") ?? 0,
         germanic_shock_warrior: interaction.options.getInteger("cermen-sok-savascisi") ?? 0
       } });
+    const side = (["A","B"] as const).find((sideKey) => view.sides[sideKey].participants
+      .some((item) => item.country_name.toLocaleLowerCase("tr-TR") === countryName.trim().toLocaleLowerCase("tr-TR")));
+    if (!side) throw new GameError("Kadro kaydedildi ancak savaş tarafı yanıtı oluşturulamadı; savaş belgesini kontrol edin.");
     const participant = countryName?.trim()
       ? view.sides[side].participants.find((item) => item.country_name.toLocaleLowerCase("tr-TR") === countryName.trim().toLocaleLowerCase("tr-TR"))
       : view.sides[side].participants.find((item) => item.is_primary);
