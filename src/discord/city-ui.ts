@@ -76,9 +76,7 @@ export async function handleCityAutocomplete(interaction: AutocompleteInteractio
   if (focused.name === "karakter") {
     let characters = (await characterService.list(country.id))
       .filter((character) => character.character_status === "ACTIVE");
-    if (sub === "asimilasyona-gonder") {
-      characters = characters.filter((character) => character.role === "DIPLOMAT" && character.assignment === "NONE");
-    } else if (sub === "gorevden-al") {
+    if (sub === "gorevden-al") {
       characters = characters.filter((character) => ["CURIA", "AGORA"].includes(character.assignment));
     } else if (sub === "ata") {
       characters = characters.filter((character) => ["NONE", "CURIA", "AGORA"].includes(character.assignment));
@@ -97,8 +95,6 @@ export async function handleCityAutocomplete(interaction: AutocompleteInteractio
   let settlements = document.settlements;
   if (sub === "egit") {
     settlements = settlements.filter((item) => item.buildings.some((building) => building.building_type === "academy" && building.status === "ACTIVE"));
-  } else if (sub === "asimilasyona-gonder") {
-    settlements = settlements.filter((item) => item.is_conquered);
   } else if (sub === "ata" && assignment) {
     const buildingType = assignment === "CURIA" ? "curia" : "agora";
     settlements = settlements.filter((item) => item.buildings.some((building) => building.building_type === buildingType && building.status === "ACTIVE" && building.level >= 2));
@@ -175,15 +171,6 @@ export async function handleCityCommand(interaction: ChatInputCommandInteraction
       return true;
     }
     const settlement = await findSettlement(country.id, interaction.options.getString("yerleske", true));
-    if (sub === "asimilasyona-gonder") {
-      const result = await cityService.assignDiplomatToAssimilation({
-        guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id,
-        characterName: interaction.options.getString("karakter", true), settlementId: settlement.id
-      });
-      await interaction.editReply({ content: `🤝 **${result.characterName}**, **${result.settlementName}** asimilasyonuna gönderildi. Süre 1 tur kısaldı; yerleşke **Tur ${result.completionTurn}** başında otomatik asimile edilecek.` });
-      await logAcademyAction(interaction,country.name,"**"+result.characterName+"**, **"+result.settlementName+"** asimilasyonuna gönderildi.");
-      return true;
-    }
     if (sub === "ata") {
       const result = await cityService.assignCharacter({
         guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id,

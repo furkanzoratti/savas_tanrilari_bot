@@ -17,7 +17,7 @@ const availableCharacter = {
 describe("Akademi karakter komutları", () => {
   it("Akademi seçimlerinde karakter ve yerleşkeleri otomatik tamamlar", () => {
     const command = commandBuilders.find((item) => item.name === "akademi");
-    for (const subcommand of ["ata", "asimilasyona-gonder"]) {
+    for (const subcommand of ["ata"]) {
       const sub = command?.options?.find((item) => item.name === subcommand);
       expect(sub?.options?.find((item) => item.name === "karakter")).toMatchObject({autocomplete:true});
       expect(sub?.options?.find((item) => item.name === "yerleske")).toMatchObject({autocomplete:true});
@@ -28,6 +28,7 @@ describe("Akademi karakter komutları", () => {
 
   it("aynı turda yeniden görevlendirilebilen Diplomat ve Tüccarı doğru filtreler", () => {
     expect(characterAvailableForCommand(availableCharacter,"diplomat","vassallastir")).toBe(true);
+    expect(characterAvailableForCommand(availableCharacter,"diplomat","asimilasyon")).toBe(true);
     expect(characterAvailableForCommand({...availableCharacter,assignment:"DIPLOMAT_DEFENSE"},"diplomat","gorev-bitir")).toBe(true);
     expect(characterAvailableForCommand({...availableCharacter,assignment:"DIPLOMAT_DEFENSE"},"diplomat","vassallastir")).toBe(false);
     expect(characterAvailableForCommand({...availableCharacter,role:"MERCHANT",assignment:"MERCHANT_DOMESTIC"},"tuccar","gorev-bitir")).toBe(true);
@@ -37,17 +38,31 @@ describe("Akademi karakter komutları", () => {
   it("Diplomat görevlerinde yalnızca göreve ait seçenekleri gösterir", () => {
     const command = commandBuilders.find((item) => item.name === "diplomat");
     expect(command?.options?.map((item) => item.name)).toEqual([
-      "halkla-uzlas","kultur-degistir","vassallastir","vassal-entegre-et","savunma-ata","gorev-bitir"
+      "halkla-uzlas","kultur-degistir","asimilasyon","vassallastir","vassal-entegre-et","savunma-ata","gorev-bitir"
     ]);
     const reconciliation = command?.options?.find((item) => item.name === "halkla-uzlas");
     const culture = command?.options?.find((item) => item.name === "kultur-degistir");
     const vassalize = command?.options?.find((item) => item.name === "vassallastir");
-    expect(reconciliation?.options?.map((item) => item.name)).toEqual(["diplomat","hedef-sehir","olay"]);
+    expect(reconciliation?.options?.map((item) => item.name)).toEqual(["diplomat","olay","hedef-sehir"]);
     expect(reconciliation?.options?.find((item) => item.name === "olay")?.choices?.map((choice) => choice.value)).toEqual([
       "BLACK_MARKET","EPIDEMIC","UNREST","REBELLION"
     ]);
-    expect(culture?.options?.map((item) => item.name)).toEqual(["diplomat","hedef-sehir","kultur"]);
+    expect(culture?.options?.map((item) => item.name)).toEqual(["diplomat","kultur","hedef-sehir"]);
     expect(vassalize?.options?.map((item) => item.name)).toEqual(["diplomat","hedef-ulke"]);
+    expect(command?.options?.find((item) => item.name === "asimilasyon")?.options?.map((item) => item.name)).toEqual(["diplomat","hedef-sehir"]);
+  });
+
+  it("Tüccar görevlerinde yalnızca göreve ait seçenekleri gösterir", () => {
+    const command = commandBuilders.find((item) => item.name === "tuccar");
+    expect(command?.options?.map((item) => item.name)).toEqual([
+      "yerel-ticaret","ticari-imtiyaz","satin-alma-temsilciligi","karaborsa-tasfiyesi","imtiyaz-yanit","gorev-bitir"
+    ]);
+    expect(command?.options?.find((item) => item.name === "yerel-ticaret")?.options?.map((item) => item.name))
+      .toEqual(["tuccar","hedef-sehir"]);
+    expect(command?.options?.find((item) => item.name === "ticari-imtiyaz")?.options?.map((item) => item.name))
+      .toEqual(["tuccar","hedef-ulke","hedef-sehir","gelir-sehri"]);
+    expect(command?.options?.find((item) => item.name === "satin-alma-temsilciligi")?.options?.map((item) => item.name))
+      .toEqual(["tuccar","hedef-sehir","alim-kategorisi"]);
   });
 
   it("yöneticiye Akademi log kanalını ayarlama, denetleme ve test etme seçenekleri verir", () => {

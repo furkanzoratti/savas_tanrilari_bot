@@ -104,8 +104,8 @@ describe("NPC otomatik alım tekrar çalıştırma", () => {
     const second = await npcAutoPurchaseService.execute("guild", "gm");
 
     expect(first[0]).toMatchObject({ runNumber: 1, status: "COMPLETE", actualCost: 5_000 });
-    expect(second[0]).toMatchObject({ runNumber: 2, status: "COMPLETE", actualCost: 2_000 });
-    expect(second[0]!.unitActions.reduce((sum, action) => sum + action.quantity, 0)).toBe(2_000);
+    expect(second[0]).toMatchObject({ runNumber: 2, status: "COMPLETE", actualCost: 2_500 });
+    expect(second[0]!.unitActions.reduce((sum, action) => sum + action.quantity, 0)).toBe(2_500);
     expect(mocks.poolQuery.mock.calls.some(([sql]) => String(sql).includes("attempt_count=npc_auto_purchase_runs.attempt_count+1"))).toBe(true);
     expect(mocks.lockQuery).toHaveBeenCalledWith("SELECT pg_try_advisory_lock(hashtext($1)) AS locked", ["npc-auto-purchase:guild"]);
     expect(mocks.lockQuery).toHaveBeenCalledWith("SELECT pg_advisory_unlock(hashtext($1)) AS unlocked", ["npc-auto-purchase:guild"]);

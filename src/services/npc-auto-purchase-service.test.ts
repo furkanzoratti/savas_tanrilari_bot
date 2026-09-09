@@ -79,6 +79,16 @@ describe("NPC ek alım planlaması", () => {
     expect(plan.unitActions.reduce((sum, action) => sum + action.quantity, 0)).toBeGreaterThan(0);
   });
 
+  it("askerleri 100 kişilik paketlerle alır", () => {
+    const plan = planCountryPurchases(
+      document({ treasury: 10_000, militaryUsed: 9_500, trainingRemaining: 500 }),
+      { ...config, budgetPercent: 100 },
+      "ARMY_ONLY"
+    );
+    expect(plan.unitActions.reduce((sum, action) => sum + action.quantity, 0)).toBe(500);
+    expect(plan.unitActions.every((action) => action.quantity % 100 === 0)).toBe(true);
+  });
+
   it("Gemi Odaklı uygun tersanede önce gemi üretir", () => {
     const plan = planCountryPurchases(document({ treasury: 30_000, militaryUsed: 0, trainingRemaining: 10_000, naval: true }), { ...config, budgetPercent: 100 }, "NAVAL_FOCUS");
     expect(plan.shipActions.length).toBeGreaterThan(0);

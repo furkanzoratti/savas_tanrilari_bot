@@ -2,7 +2,7 @@ import { BUILDINGS, PORT_SHIP_CAPACITY, SHIPS, UNITS, shipHarborRequirement } fr
 import { assessArmyComposition, type BattleComposition, type BattleUnitType } from "../domain/battle.js";
 import { isAcquisitionTurn } from "../domain/mobilization.js";
 import {
-  NPC_AUTO_PURCHASE_DOCTRINES, npcBuildingLimit, npcBuildingPriority, npcDevelopmentOnly, npcPrioritizesShips, npcRecruitsUnits,
+  NPC_AUTO_PURCHASE_DOCTRINES, NPC_UNIT_PURCHASE_BATCH, npcBuildingLimit, npcBuildingPriority, npcDevelopmentOnly, npcPrioritizesShips, npcRecruitsUnits,
   type NpcAutoPurchaseDoctrine, type PurchasableUnitType
 } from "../domain/npc-auto-purchase.js";
 import { pool } from "../db/pool.js";
@@ -169,8 +169,8 @@ function compositionDistance(composition: BattleComposition): number {
 
 function orderedCompositionNeeds(composition: BattleComposition, candidates: readonly PurchasableUnitType[]): PurchasableUnitType[] {
   return [...candidates].sort((left, right) => {
-    const leftProjected = { ...composition, [left]: (composition[left] ?? 0) + 1_000 };
-    const rightProjected = { ...composition, [right]: (composition[right] ?? 0) + 1_000 };
+    const leftProjected = { ...composition, [left]: (composition[left] ?? 0) + NPC_UNIT_PURCHASE_BATCH };
+    const rightProjected = { ...composition, [right]: (composition[right] ?? 0) + NPC_UNIT_PURCHASE_BATCH };
     const scoreDifference = compositionDistance(leftProjected) - compositionDistance(rightProjected);
     if (Math.abs(scoreDifference) > 1e-9) return scoreDifference;
     const quantityDifference = (composition[left] ?? 0) - (composition[right] ?? 0);
@@ -213,7 +213,7 @@ export function planCountryPurchases(doc: CountryDocument, config: NpcAutoPurcha
     remainingBudget -= candidate.cost;
   }
 
-  const desiredMilitary = Math.floor((doc.militaryLimit * config.targetFillPercent / 100) / 1_000) * 1_000;
+  const desiredMilitary = Math.floor((doc.militaryLimit * config.targetFillPercent / 100) / NPC_UNIT_PURCHASE_BATCH) * NPC_UNIT_PURCHASE_BATCH;
   let remainingPersonnel = npcRecruitsUnits(doctrine)
     ? Math.max(0, desiredMilitary - doc.militaryUsed)
     : 0;
@@ -279,7 +279,7 @@ export function planCountryPurchases(doc: CountryDocument, config: NpcAutoPurcha
     }
     shipActions.push(...groupedShips.values());
   }
-  remainingPersonnel = Math.floor(remainingPersonnel / 1_000) * 1_000;
+  remainingPersonnel = Math.floor(remainingPersonnel / NPC_UNIT_PURCHASE_BATCH) * NPC_UNIT_PURCHASE_BATCH;
   const settlementCapacity = new Map<string, number>();
   for (const settlement of doc.settlements) {
     const plannedShipPersonnel = shipActions
@@ -289,7 +289,7 @@ export function planCountryPurchases(doc: CountryDocument, config: NpcAutoPurcha
       settlement.trainingRemaining,
       settlement.militaryLimit - settlement.militaryUsed - plannedShipPersonnel
     ));
-    settlementCapacity.set(settlement.id, Math.floor(capacity / 1_000) * 1_000);
+    settlementCapacity.set(settlement.id, Math.floor(capacity / NPC_UNIT_PURCHASE_BATCH) * NPC_UNIT_PURCHASE_BATCH);
   }
 
   const unlockedSpecials: readonly PurchasableUnitType[] = doc.specialUnitUnlocks ?? [];
@@ -297,15 +297,15 @@ export function planCountryPurchases(doc: CountryDocument, config: NpcAutoPurcha
   const unitCandidates = [...BASE_PURCHASABLE_UNITS, ...unlockedSpecials.filter((unitType) => !baseUnitSet.has(unitType))];
   const composition = currentArmyComposition(doc);
   const grouped = new Map<string, UnitAction>();
-  while (remainingPersonnel >= 1_000 && remainingBudget > 0) {
+  while (remainingPersonnel >= NPC_UNIT_PURCHASE_BATCH && remainingBudget > 0) {
     let selected: { settlement: CountryDocument["settlements"][number]; unitType: PurchasableUnitType; cost: number } | undefined;
     for (const unitType of orderedCompositionNeeds(composition, unitCandidates)) {
       const eligible = doc.settlements
-        .filter((settlement) => (settlementCapacity.get(settlement.id) ?? 0) >= 1_000)
+        .filter((settlement) => (settlementCapacity.get(settlement.id) ?? 0) >= NPC_UNIT_PURCHASE_BATCH)
         .map((settlement) => ({
           settlement,
           unitType,
-          cost: unitPurchaseCost(unitType, 1_000, settlement.effectiveResources, activePolicyKeys(settlement), doc.country.active_formable_key)
+          cost: unitPurchaseCost(unitType, NPC_UNIT_PURCHASE_BATCH, settlement.effectiveResources, activePolicyKeys(settlement), doc.country.active_formable_key)
         }))
         .filter(({ settlement, cost }) => cost <= remainingBudget && cost <= (localTreasury.get(settlement.id) ?? 0))
         .sort((left, right) => (settlementCapacity.get(right.settlement.id) ?? 0) - (settlementCapacity.get(left.settlement.id) ?? 0)
@@ -319,13 +319,13 @@ export function planCountryPurchases(doc: CountryDocument, config: NpcAutoPurcha
     const { settlement, unitType, cost } = selected;
     const key = `${settlement.id}:${unitType}`;
     const current = grouped.get(key) ?? { settlementId: settlement.id, settlementName: settlement.name, unitType, quantity: 0, cost: 0 };
-    current.quantity += 1_000;
+    current.quantity += NPC_UNIT_PURCHASE_BATCH;
     current.cost += cost;
     grouped.set(key, current);
-    composition[unitType] = (composition[unitType] ?? 0) + 1_000;
-    settlementCapacity.set(settlement.id, (settlementCapacity.get(settlement.id) ?? 0) - 1_000);
+    composition[unitType] = (composition[unitType] ?? 0) + NPC_UNIT_PURCHASE_BATCH;
+    settlementCapacity.set(settlement.id, (settlementCapacity.get(settlement.id) ?? 0) - NPC_UNIT_PURCHASE_BATCH);
     localTreasury.set(settlement.id, (localTreasury.get(settlement.id) ?? 0) - cost);
-    remainingPersonnel -= 1_000;
+    remainingPersonnel -= NPC_UNIT_PURCHASE_BATCH;
     remainingBudget -= cost;
   }
 

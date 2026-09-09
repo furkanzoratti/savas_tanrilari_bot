@@ -36,21 +36,24 @@ export const commandBuilders = [
       .addStringOption((o) => o.setName("komutan").setDescription("Ordusuyla bu savaşa katılan Komutan").setRequired(true).setAutocomplete(true))),
   new SlashCommandBuilder()
     .setName("tuccar").setDescription("Tüccar görevlerini tek merkezden yönetir")
-    .addSubcommand((sub) => sub.setName("gorev-baslat").setDescription("Tüccara yeni bir görev verir")
+    .addSubcommand((sub) => sub.setName("yerel-ticaret").setDescription("Tüccarı kendi yerleşkenizde gelir üretmeye gönderir")
       .addStringOption((o) => o.setName("tuccar").setDescription("Müsait Tüccar").setRequired(true).setAutocomplete(true))
-      .addStringOption((o) => o.setName("gorev").setDescription("Görev türü").setRequired(true).addChoices(
-        { name: "Yerel Ticaret", value: "LOCAL_TRADE" },
-        { name: "Yabancı Ticari İmtiyaz", value: "FOREIGN_CONCESSION" },
-        { name: "Satın Alma Temsilciliği", value: "PURCHASE_AGENT" },
-        { name: "Karaborsa Tasfiyesi", value: "BLACK_MARKET" }
-      ))
-      .addStringOption((o) => o.setName("hedef-ulke").setDescription("Yabancı imtiyazın hedef devleti").setAutocomplete(true))
-      .addStringOption((o) => o.setName("hedef-sehir").setDescription("Görev yapılacak yerleşke").setAutocomplete(true))
-      .addStringOption((o) => o.setName("gelir-sehri").setDescription("Yabancı imtiyaz gelirinin yazılacağı kendi yerleşkeniz").setAutocomplete(true))
-      .addStringOption((o) => o.setName("alim-kategorisi").setDescription("Satın Alma Temsilciliğinin uygulanacağı kategori").addChoices(
+      .addStringOption((o) => o.setName("hedef-sehir").setDescription("Tüccarın görev yapacağı kendi yerleşkeniz").setRequired(true).setAutocomplete(true)))
+    .addSubcommand((sub) => sub.setName("ticari-imtiyaz").setDescription("Başka bir devlete tek taraflı ticari imtiyaz teklifi yollar")
+      .addStringOption((o) => o.setName("tuccar").setDescription("Müsait Tüccar").setRequired(true).setAutocomplete(true))
+      .addStringOption((o) => o.setName("hedef-ulke").setDescription("İmtiyazın hedef devleti").setRequired(true).setAutocomplete(true))
+      .addStringOption((o) => o.setName("hedef-sehir").setDescription("Tüccarın görev yapacağı yabancı yerleşke").setRequired(true).setAutocomplete(true))
+      .addStringOption((o) => o.setName("gelir-sehri").setDescription("Kazancın aktarılacağı kendi yerleşkeniz").setRequired(true).setAutocomplete(true)))
+    .addSubcommand((sub) => sub.setName("satin-alma-temsilciligi").setDescription("Bir yerleşkeye sonraki sipariş için alım indirimi hazırlar")
+      .addStringOption((o) => o.setName("tuccar").setDescription("Müsait Tüccar").setRequired(true).setAutocomplete(true))
+      .addStringOption((o) => o.setName("hedef-sehir").setDescription("İndirimin uygulanacağı kendi yerleşkeniz").setRequired(true).setAutocomplete(true))
+      .addStringOption((o) => o.setName("alim-kategorisi").setDescription("İndirimin uygulanacağı kategori").setRequired(true).addChoices(
         { name: "Asker", value: "UNITS" }, { name: "Gemi", value: "SHIPS" },
         { name: "Bina", value: "BUILDING" }, { name: "Kuşatma Aleti", value: "SIEGE" }
       )))
+    .addSubcommand((sub) => sub.setName("karaborsa-tasfiyesi").setDescription("Tüccarı etkin Karaborsa olayını sona erdirmeye gönderir")
+      .addStringOption((o) => o.setName("tuccar").setDescription("Müsait Tüccar").setRequired(true).setAutocomplete(true))
+      .addStringOption((o) => o.setName("hedef-sehir").setDescription("Karaborsanın etkin olduğu kendi yerleşkeniz").setRequired(true).setAutocomplete(true)))
     .addSubcommand((sub) => sub.setName("imtiyaz-yanit").setDescription("Ülkenize gelen ticari imtiyaz teklifini yanıtlar")
       .addStringOption((o) => o.setName("teklif").setDescription("Bekleyen teklif").setRequired(true).setAutocomplete(true))
       .addBooleanOption((o) => o.setName("kabul").setDescription("Kabul edilsin mi?").setRequired(true)))
@@ -60,15 +63,18 @@ export const commandBuilders = [
     .setName("diplomat").setDescription("Diplomat görevlerini ve diplomatik savunmayı yönetir")
     .addSubcommand((sub) => sub.setName("halkla-uzlas").setDescription("Diplomatı yerleşkedeki etkin bir olayı sona erdirmeye gönderir")
       .addStringOption((o) => o.setName("diplomat").setDescription("Müsait Diplomat").setRequired(true).setAutocomplete(true))
-      .addStringOption((o) => o.setName("hedef-sehir").setDescription("Olayın bulunduğu kendi yerleşkeniz").setRequired(true).setAutocomplete(true))
       .addStringOption((o) => o.setName("olay").setDescription("Sona erdirilecek etkin olay").setRequired(true).addChoices(
         { name: "Karaborsa", value: "BLACK_MARKET" }, { name: "Salgın", value: "EPIDEMIC" },
         { name: "Huzursuzluk", value: "UNREST" }, { name: "İsyan", value: "REBELLION" }
-      )))
+      ))
+      .addStringOption((o) => o.setName("hedef-sehir").setDescription("Olayın bulunduğu kendi yerleşkeniz").setRequired(true).setAutocomplete(true)))
     .addSubcommand((sub) => sub.setName("kultur-degistir").setDescription("Asimile edilmiş bir yerleşkenin kültürünü değiştirmeye başlar")
       .addStringOption((o) => o.setName("diplomat").setDescription("Müsait Diplomat").setRequired(true).setAutocomplete(true))
-      .addStringOption((o) => o.setName("hedef-sehir").setDescription("Kültürü değiştirilecek kendi yerleşkeniz").setRequired(true).setAutocomplete(true))
-      .addStringOption((o) => o.setName("kultur").setDescription("Yerleşkeye kazandırılacak kültür").setRequired(true).setAutocomplete(true)))
+      .addStringOption((o) => o.setName("kultur").setDescription("Yerleşkeye kazandırılacak kültür").setRequired(true).setAutocomplete(true))
+      .addStringOption((o) => o.setName("hedef-sehir").setDescription("Kültürü değiştirilecek kendi yerleşkeniz").setRequired(true).setAutocomplete(true)))
+    .addSubcommand((sub) => sub.setName("asimilasyon").setDescription("Diplomatı fethedilmiş bir yerleşkenin asimilasyonuna gönderir")
+      .addStringOption((o) => o.setName("diplomat").setDescription("Müsait Diplomat").setRequired(true).setAutocomplete(true))
+      .addStringOption((o) => o.setName("hedef-sehir").setDescription("Asimilasyonu süren fethedilmiş yerleşke").setRequired(true).setAutocomplete(true)))
     .addSubcommand((sub) => sub.setName("vassallastir").setDescription("Başka bir devleti diplomatik olarak vassallaştırmaya çalışır")
       .addStringOption((o) => o.setName("diplomat").setDescription("Müsait Diplomat").setRequired(true).setAutocomplete(true))
       .addStringOption((o) => o.setName("hedef-ulke").setDescription("Vassallaştırılmaya çalışılacak devlet").setRequired(true).setAutocomplete(true)))
@@ -347,10 +353,6 @@ export const commandBuilders = [
       .addStringOption((o) => o.setName("karakter").setDescription("Atanacak müsait karakter").setRequired(true).setAutocomplete(true))
       .addStringOption((o) => o.setName("yerleske").setDescription("Atanacağı yerleşke").setRequired(true).setAutocomplete(true))
       .addStringOption((o) => o.setName("gorev-yeri").setDescription("Atanacağı bina").setRequired(true).addChoices({ name: "Curia", value: "CURIA" }, { name: "Agora / Forum", value: "AGORA" }))
-      .addStringOption(countryOption))
-    .addSubcommand((sub) => sub.setName("asimilasyona-gonder").setDescription("Diplomat yeteneğine göre yerleşke asimilasyonunu 1 veya 2 tur kısaltır")
-      .addStringOption((o) => o.setName("karakter").setDescription("Gönderilecek müsait Diplomat").setRequired(true).setAutocomplete(true))
-      .addStringOption((o) => o.setName("yerleske").setDescription("Asimilasyonu süren yerleşke").setRequired(true).setAutocomplete(true))
       .addStringOption(countryOption))
     .addSubcommand((sub) => sub.setName("gorevden-al").setDescription("Karakterin bina atamasını kaldırır")
       .addStringOption((o) => o.setName("karakter").setDescription("Curia veya Agora görevinden alınacak karakter").setRequired(true).setAutocomplete(true))

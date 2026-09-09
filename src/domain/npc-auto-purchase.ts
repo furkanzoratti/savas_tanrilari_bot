@@ -1,5 +1,7 @@
 import type { UNITS } from "./catalog.js";
 
+export const NPC_UNIT_PURCHASE_BATCH = 100;
+
 const STANDARD_BUILDING_PRIORITY = [
   "farm", "agora", "trade_guild", "aqueduct", "healer", "curia", "engineering",
   "academy", "pantheon", "port", "shipyard", "raw_material"

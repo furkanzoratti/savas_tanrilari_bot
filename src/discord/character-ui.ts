@@ -7,6 +7,7 @@ import {
 import { ESPIONAGE_TARGETS, type EspionageTarget } from "../domain/espionage.js";
 import { CULTURE_GROUPS, type CultureGroup } from "../domain/cultures.js";
 import { characterService, type CharacterView } from "../services/character-service.js";
+import { cityService } from "../services/city-service.js";
 import { gameService, GameError } from "../services/game-service.js";
 import { logger } from "../logger.js";
 import { requireGameMaster, resolveCountry } from "./auth.js";
@@ -44,6 +45,13 @@ const DIPLOMAT_TASK_BY_SUBCOMMAND: Partial<Record<string,DiplomatTask>> = {
   "vassal-entegre-et":"VASSAL_INTEGRATION"
 };
 
+const MERCHANT_TASK_BY_SUBCOMMAND: Partial<Record<string,MerchantTask>> = {
+  "yerel-ticaret":"LOCAL_TRADE",
+  "ticari-imtiyaz":"FOREIGN_CONCESSION",
+  "satin-alma-temsilciligi":"PURCHASE_AGENT",
+  "karaborsa-tasfiyesi":"BLACK_MARKET"
+};
+
 export function characterAvailableForCommand(
   character: Pick<CharacterView,"role"|"assignment"|"operation_status"|"character_status"|"doctrine"|"commander_victories"|"specialization">,
   commandName: string,
@@ -58,13 +66,13 @@ export function characterAvailableForCommand(
   }
   if (commandName === "tuccar") {
     if (character.role !== "MERCHANT") return false;
-    if (subcommand === "gorev-baslat") return character.assignment === "NONE" && !character.operation_status;
+    if (MERCHANT_TASK_BY_SUBCOMMAND[subcommand]) return character.assignment === "NONE" && !character.operation_status;
     if (subcommand === "gorev-bitir") return character.assignment.startsWith("MERCHANT_") || Boolean(character.operation_status);
     return true;
   }
   if (commandName === "diplomat") {
     if (character.role !== "DIPLOMAT") return false;
-    if (DIPLOMAT_TASK_BY_SUBCOMMAND[subcommand]) return character.assignment === "NONE" && !character.operation_status;
+    if (DIPLOMAT_TASK_BY_SUBCOMMAND[subcommand] || subcommand === "asimilasyon") return character.assignment === "NONE" && !character.operation_status;
     if (subcommand === "savunma-ata") return ["NONE","DIPLOMAT_DEFENSE"].includes(character.assignment) && !character.operation_status;
     if (subcommand === "gorev-bitir") return character.assignment.startsWith("DIPLOMAT_") || Boolean(character.operation_status);
   }
@@ -344,7 +352,8 @@ export async function handleCharacterCommand(interaction: ChatInputCommandIntera
       );
       return true;
     }
-    const task = interaction.options.getString("gorev",true) as MerchantTask;
+    const task = MERCHANT_TASK_BY_SUBCOMMAND[sub];
+    if (!task) throw new GameError("Bilinmeyen Tüccar görevi.");
     const characterId = interaction.options.getString("tuccar",true);
     const merchant = await characterForLog(country.id,characterId);
     const targetSettlementId = interaction.options.getString("hedef-sehir");
@@ -411,6 +420,22 @@ export async function handleCharacterCommand(interaction: ChatInputCommandIntera
     );
     return true;
   }
+  if (sub === "asimilasyon") {
+    const characterId = interaction.options.getString("diplomat",true);
+    const diplomat = await characterForLog(country.id,characterId);
+    if (!diplomat) throw new GameError("Seçilen Diplomat bulunamadı.");
+    const settlementId = interaction.options.getString("hedef-sehir",true);
+    const result = await cityService.assignDiplomatToAssimilation({
+      guildId:interaction.guildId,actorId:interaction.user.id,countryId:country.id,
+      characterName:diplomat.name,settlementId
+    });
+    await interaction.editReply(`🤝 **${result.characterName}**, **${result.settlementName}** asimilasyonuna gönderildi. Yerleşke **Tur ${result.completionTurn}** başında otomatik asimile edilecek.`);
+    await logCharacterCommand(interaction,country.name,
+      `🤝 Diplomat: **${result.characterName}** (+${diplomat.skill_bonus}) • Devlet: **${country.name}**\n`+
+      `↳ Görev: **Asimilasyon** • Hedef: **${result.settlementName}** • Tamamlanma: **Tur ${result.completionTurn}**`
+    );
+    return true;
+  }
   const task = DIPLOMAT_TASK_BY_SUBCOMMAND[sub];
   if (!task) throw new GameError("Bilinmeyen Diplomat görevi.");
   const characterId = interaction.options.getString("diplomat",true);
@@ -448,9 +473,9 @@ export async function handleCharacterAutocomplete(interaction: AutocompleteInter
   if (!country) { await interaction.respond([]); return true; }
   const focused = interaction.options.getFocused(true);
   const query = String(focused.value).toLocaleLowerCase("tr-TR");
+  const sub = interaction.options.getSubcommand(false);
   if (["komutan","tuccar","diplomat"].includes(focused.name)) {
     const role = focused.name === "komutan" ? "COMMANDER" : focused.name === "tuccar" ? "MERCHANT" : "DIPLOMAT";
-    const sub = interaction.options.getSubcommand(false);
     const characters = (await characterService.list(country.id))
       .filter((item) => item.role === role && characterAvailableForCommand(item,interaction.commandName,sub ?? ""));
     await interaction.respond(characters.filter((item) => !query || item.name.toLocaleLowerCase("tr-TR").includes(query)).slice(0,25)
@@ -484,7 +509,20 @@ export async function handleCharacterAutocomplete(interaction: AutocompleteInter
   if (["hedef-sehir","gelir-sehri","sehir"].includes(focused.name)) {
     const targetName = focused.name === "hedef-sehir" ? interaction.options.getString("hedef-ulke") : null;
     const target = targetName ? await gameService.countryByName(interaction.guildId,targetName) : country;
-    const settlements = target ? await gameService.listSettlements(target.id) : [];
+    let settlements = target ? await gameService.listSettlements(target.id) : [];
+    if (interaction.commandName === "diplomat" && sub === "asimilasyon") {
+      settlements = settlements.filter((item) => item.is_conquered);
+    } else if (interaction.commandName === "diplomat" && sub === "kultur-degistir") {
+      settlements = settlements.filter((item) => !item.is_conquered && !item.unrest_active && !item.rebellion_active);
+    } else if (interaction.commandName === "diplomat" && sub === "halkla-uzlas") {
+      const event = interaction.options.getString("olay");
+      if (event === "BLACK_MARKET") settlements = settlements.filter((item) => item.black_market_active);
+      if (event === "EPIDEMIC") settlements = settlements.filter((item) => item.epidemic_active);
+      if (event === "UNREST") settlements = settlements.filter((item) => item.unrest_active);
+      if (event === "REBELLION") settlements = settlements.filter((item) => item.rebellion_active);
+    } else if (interaction.commandName === "tuccar" && sub === "karaborsa-tasfiyesi") {
+      settlements = settlements.filter((item) => item.black_market_active);
+    }
     await interaction.respond(settlements.filter((item) => !query || item.name.toLocaleLowerCase("tr-TR").includes(query)).slice(0,25).map((item) => ({name:item.name,value:item.id})));
     return true;
   }
