@@ -232,3 +232,14 @@ describe("elli üçüncü migration", () => {
     expect(migration?.sql).toContain("ADD COLUMN IF NOT EXISTS balance_after");
   });
 });
+
+describe("elli beşinci migration", () => {
+  const migration = migrations.find((item) => item.version === 55);
+
+  it("devam eden diplomatik vassallaştırmaları on iki puana taşır", () => {
+    expect(migration?.name).toBe("twelve_point_diplomatic_vassalization");
+    expect(migration?.sql).toContain("SET goal=12");
+    expect(migration?.sql).toContain("task_type='VASSALIZE'");
+    expect(migration?.sql).toContain("'TRAVELING','ACTIVE','PAUSED'");
+  });
+});

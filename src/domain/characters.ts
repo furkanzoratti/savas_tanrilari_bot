@@ -110,3 +110,4 @@ export const DIPLOMAT_TASK_LABELS = {
 } as const;
 export type DiplomatTask = keyof typeof DIPLOMAT_TASK_LABELS;
 
+export const DIPLOMAT_VASSALIZATION_GOAL = 12;

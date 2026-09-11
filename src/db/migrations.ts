@@ -1818,5 +1818,16 @@ export const migrations = [
         'DIPLOMAT_INTEGRATE','DIPLOMAT_DEFENSE'
       ));
     `
+  },
+  {
+    version: 55,
+    name: "twelve_point_diplomatic_vassalization",
+    sql: `
+      UPDATE diplomat_operations
+         SET goal=12,updated_at=NOW()
+       WHERE task_type='VASSALIZE'
+         AND status IN ('TRAVELING','ACTIVE','PAUSED')
+         AND goal<12;
+    `
   }
 ] as const;

@@ -1,7 +1,7 @@
 import { randomInt } from "node:crypto";
 import { pool, withTransaction, type DbClient } from "../db/pool.js";
 import {
-  CHARACTER_SPECIALIZATIONS, COMMANDER_DOCTRINES, DIPLOMAT_TASK_LABELS, MERCHANT_TASK_LABELS, culturePopulationResistance,
+  CHARACTER_SPECIALIZATIONS, COMMANDER_DOCTRINES, DIPLOMAT_TASK_LABELS, DIPLOMAT_VASSALIZATION_GOAL, MERCHANT_TASK_LABELS, culturePopulationResistance,
   cultureProgressDelta, diplomaticPowerBonus, integrationProgressDelta,
   merchantBaseDiscount, specializationLevel, vassalizationProgressDelta,
   type CharacterSpecialization, type CommanderDoctrine, type DiplomatTask, type MerchantTask
@@ -506,7 +506,7 @@ export const characterService = {
         ? await settlement(client,input.targetSettlementId,input.targetCountryId??input.countryId)
         : null;
       const goal = input.task === "CULTURE_CHANGE" ? 8
-        : input.task === "VASSALIZE" ? 6
+        : input.task === "VASSALIZE" ? DIPLOMAT_VASSALIZATION_GOAL
         : input.task === "VASSAL_INTEGRATION" ? 18
         : 1;
       if (input.task === "RECONCILIATION") {

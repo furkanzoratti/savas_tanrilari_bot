@@ -40,6 +40,7 @@ export function espionageLogEmbed(operation: EspionageOperationView): EmbedBuild
   const attackBonus = Number(operation.attack_total??0)-Number(operation.attack_roll??0);
   const defenseBonus = Number(operation.defense_total??0)-Number(operation.defense_roll??0);
   const detectionBonus = Number(operation.detection_total??0)-Number(operation.detection_roll??0);
+  const validTargetDetail = operation.target_building_name ?? operation.target_building_type;
   return new EmbedBuilder()
     .setColor(operation.captured ? 0xed4245 : operation.severity === "HEAVY" ? 0x8b1e1e : operation.severity === "NONE" ? 0x747f8d : 0xc59b45)
     .setTitle(`🕵️ Casusluk Operasyonu • Tur ${operation.resolve_turn}`)
@@ -50,7 +51,7 @@ export function espionageLogEmbed(operation: EspionageOperationView): EmbedBuild
       operation.target_character_name ? `**Özel Hedef:** ${operation.target_character_name}` : operation.target_army_name ? `**Özel Hedef:** ${operation.target_army_name}` : null,
       `**Hazırlık:** ${ESPIONAGE_PREPARATIONS[operation.preparation].label} • ${gold(operation.preparation_cost)}`,
       "",
-      `**Geçerli Hedef:** ${operation.valid_target ? `Evet • ${operation.target_building_name ?? operation.target_building_type}` : "Hayır"}`,
+      `**Geçerli Hedef:** ${operation.valid_target ? `Evet${validTargetDetail ? ` • ${validTargetDetail}` : ""}` : "Hayır"}`,
       `**Başarı Zarı:** 1d20 **${operation.attack_roll}** + toplam bonus **${attackBonus}** = **${operation.attack_total}**`,
       `**Savunma Zarı:** 1d20 **${operation.defense_roll}** + toplam bonus **${defenseBonus}** = **${operation.defense_total}**`,
       `**Fark / Sonuç:** ${operation.margin} • **${ESPIONAGE_SEVERITY_LABELS[operation.severity ?? "NONE"]}**`,

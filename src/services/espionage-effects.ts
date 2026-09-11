@@ -1,6 +1,6 @@
 import { randomInt } from "node:crypto";
 import type { DbClient } from "../db/pool.js";
-import { BUILDINGS, buildingBaseCost } from "../domain/catalog.js";
+import { BUILDINGS, SHIPS, SIEGE_ASSETS, UNITS, buildingBaseCost } from "../domain/catalog.js";
 import type { EspionageSeverity, EspionageTarget } from "../domain/espionage.js";
 
 export interface EspionageEffectOperation {
@@ -17,6 +17,40 @@ const buildingTargets = new Set<EspionageTarget>(["ECONOMIC","MILITARY","PUBLIC"
 const percent = (severity: EspionageSeverity, light: number, medium: number, heavy: number): number =>
   severity === "LIGHT" ? light : severity === "MEDIUM" ? medium : heavy;
 
+interface RecruitmentWaveTarget {
+  id: string;
+  unit_type: string;
+  quantity: number;
+  due_turn: number;
+}
+
+interface ProductionOrderTarget {
+  kind: "SHIP" | "SIEGE";
+  id: string;
+  item_type: string;
+  quantity: number;
+  completion_turn: number;
+}
+
+function limitedDetails(details: string[]): string {
+  if (details.length <= 6) return details.join("; ");
+  return details.slice(0, 6).join("; ") + `; +${details.length - 6} emir daha`;
+}
+
+function catalogName(catalog: Record<string, { name: string }>, key: string): string {
+  return catalog[key]?.name ?? key;
+}
+
+export function recruitmentWaveLabel(wave: RecruitmentWaveTarget): string {
+  const unitName = catalogName(UNITS, wave.unit_type);
+  return `${Number(wave.quantity).toLocaleString("tr-TR")} ${unitName} (Tur ${wave.due_turn})`;
+}
+
+export function productionOrderLabel(order: ProductionOrderTarget): string {
+  const name = order.kind === "SHIP" ? catalogName(SHIPS, order.item_type) : catalogName(SIEGE_ASSETS, order.item_type);
+  return `${Number(order.quantity).toLocaleString("tr-TR")} ${name} (Tur ${order.completion_turn})`;
+}
+
 async function syncTreasury(client: DbClient, countryId: string): Promise<void> {
   await client.query(
     "UPDATE countries SET treasury=(SELECT COALESCE(SUM(local_treasury),0)::bigint FROM settlements WHERE country_id=$1) WHERE id=$1",
@@ -28,7 +62,7 @@ export async function espionageTargetExists(client: DbClient, operation: Espiona
   if (buildingTargets.has(operation.target_type)) return true;
   const queries: Partial<Record<EspionageTarget,string>> = {
     CONSTRUCTION: "SELECT 1 FROM buildings WHERE settlement_id=$1 AND status='BUILDING' LIMIT 1",
-    RECRUITMENT_SABOTAGE: "SELECT 1 FROM recruitment_orders WHERE settlement_id=$1 AND status='TRAINING' LIMIT 1",
+    RECRUITMENT_SABOTAGE: "SELECT 1 FROM recruitment_orders recruit JOIN recruitment_waves wave ON wave.order_id=recruit.id WHERE recruit.settlement_id=$1 AND recruit.status='TRAINING' AND wave.processed_at IS NULL LIMIT 1",
     PRODUCTION_SABOTAGE: "SELECT 1 FROM naval_orders WHERE settlement_id=$1 AND status='BUILDING' UNION ALL SELECT 1 FROM siege_orders WHERE settlement_id=$1 AND status='BUILDING' LIMIT 1",
     TRADE_COLLAPSE: "SELECT 1 FROM trade_agreements WHERE status='ACTIVE' AND (proposer_settlement_id=$1 OR receiver_settlement_id=$1) LIMIT 1",
     PARALYZE_GOVERNMENT: "SELECT 1 FROM settlement_policies WHERE settlement_id=$1 AND status='ACTIVE' LIMIT 1",
@@ -66,9 +100,10 @@ export async function applyEspionageEffect(
   if (severity === "NONE") return "Operasyon başarısız oldu; mekanik etki oluşmadı.";
   if (buildingTargets.has(operation.target_type) && selectedBuilding) {
     const name = BUILDINGS[selectedBuilding.building_type]?.name ?? selectedBuilding.building_type;
+    const targetName = `${name} Sv${selectedBuilding.level}`;
     if (severity === "LIGHT") {
       await client.query("UPDATE buildings SET status='SABOTAGED',sabotaged_until_turn=$1,sabotage_repair_cost=0 WHERE settlement_id=$2 AND building_type=$3", [turn+2,operation.target_settlement_id,selectedBuilding.building_type]);
-      return name+" 2 tur devre dışı bırakıldı.";
+      return targetName+" 2 tur devre dışı bırakıldı.";
     }
     if (severity === "MEDIUM") {
       await client.query("UPDATE buildings SET status='SABOTAGED',sabotaged_until_turn=$1,sabotage_repair_cost=0 WHERE settlement_id=$2 AND building_type=$3", [turn+3,operation.target_settlement_id,selectedBuilding.building_type]);
@@ -82,18 +117,19 @@ export async function applyEspionageEffect(
          VALUES($1,$2,$3,'ESPIONAGE_DAMAGE',$4,$5,$6,$7::jsonb)`,
         [operation.target_country_id,operation.target_settlement_id,turn,-charged,name+" sabotaj onarım zararı",balance,JSON.stringify({severity,targetType:operation.target_type})]
       );
-      return name+" 3 tur kapandı ve 1.000 Altın onarım gideri doğdu.";
+      return targetName+" 3 tur kapandı ve 1.000 Altın onarım gideri doğdu.";
     }
     const repair = Math.ceil(buildingBaseCost(selectedBuilding.building_type,Math.max(1,selectedBuilding.level))/2);
     await client.query("UPDATE buildings SET status='SABOTAGED',sabotaged_until_turn=NULL,sabotage_repair_cost=$1 WHERE settlement_id=$2 AND building_type=$3", [repair,operation.target_settlement_id,selectedBuilding.building_type]);
-    return name+" HASARLI duruma geçti; "+repair.toLocaleString("tr-TR")+" Altın ödenene kadar çalışmayacak.";
+    return targetName+" HASARLI duruma geçti; "+repair.toLocaleString("tr-TR")+" Altın ödenene kadar çalışmayacak.";
   }
   if (operation.target_type === "CONSTRUCTION" && selectedBuilding) {
     const name = BUILDINGS[selectedBuilding.building_type]?.name ?? selectedBuilding.building_type;
+    const targetName = `${name} Sv${selectedBuilding.target_level ?? selectedBuilding.level + 1}`;
     if (severity !== "HEAVY") {
       const delay = severity === "LIGHT" ? 2 : 3;
       await client.query("UPDATE buildings SET completion_turn=completion_turn+$1 WHERE settlement_id=$2 AND building_type=$3 AND status='BUILDING'", [delay,operation.target_settlement_id,selectedBuilding.building_type]);
-      return name+" inşaatı "+delay+" tur geciktirildi.";
+      return targetName+" inşaatı "+delay+" tur geciktirildi.";
     }
     const refund = Math.floor(Number(selectedBuilding.construction_paid_amount??0)/2);
     if (selectedBuilding.level > 0) {
@@ -109,40 +145,68 @@ export async function applyEspionageEffect(
        VALUES($1,$2,$3,'ESPIONAGE_REFUND',$4,$5,$6,$7::jsonb)`,
       [operation.target_country_id,operation.target_settlement_id,turn,refund,name+" sabotaj sonrası inşaat iadesi",balance,JSON.stringify({severity,targetType:operation.target_type})]
     );
-    return name+" inşaatı iptal edildi; "+refund.toLocaleString("tr-TR")+" Altın iade edildi.";
+    return targetName+" inşaatı iptal edildi; "+refund.toLocaleString("tr-TR")+" Altın iade edildi.";
   }
   if (operation.target_type === "RECRUITMENT_SABOTAGE") {
+    const waves = (await client.query<RecruitmentWaveTarget>(
+      `SELECT wave.id,recruit.unit_type,wave.quantity,wave.due_turn
+         FROM recruitment_waves wave
+         JOIN recruitment_orders recruit ON recruit.id=wave.order_id
+        WHERE recruit.settlement_id=$1 AND recruit.status='TRAINING' AND wave.processed_at IS NULL
+        ORDER BY wave.due_turn,recruit.created_at,wave.id
+        FOR UPDATE OF wave`,
+      [operation.target_settlement_id]
+    )).rows;
+    if (!waves.length) return "Uygun asker alım dalgası bulunamadı; mekanik etki oluşmadı.";
     if (severity === "LIGHT") {
-      await client.query("UPDATE recruitment_waves SET due_turn=due_turn+2 WHERE id=(SELECT wave.id FROM recruitment_waves wave JOIN recruitment_orders recruit ON recruit.id=wave.order_id WHERE recruit.settlement_id=$1 AND recruit.status='TRAINING' AND wave.processed_at IS NULL ORDER BY wave.due_turn LIMIT 1)", [operation.target_settlement_id]);
-      return "Bir asker alım dalgası 2 tur geciktirildi.";
+      const target = waves[0];
+      if (!target) return "Uygun asker alım dalgası bulunamadı; mekanik etki oluşmadı.";
+      await client.query("UPDATE recruitment_waves SET due_turn=due_turn+2 WHERE id=$1", [target.id]);
+      return `Etkilenen alım: ${recruitmentWaveLabel(target)} → teslim Tur ${target.due_turn + 2}.`;
     }
     if (severity === "HEAVY") {
       await client.query("UPDATE recruitment_waves wave SET quantity=GREATEST(1,FLOOR(wave.quantity*0.8)::integer),due_turn=due_turn+2 FROM recruitment_orders recruit WHERE recruit.id=wave.order_id AND recruit.settlement_id=$1 AND recruit.status='TRAINING' AND wave.processed_at IS NULL", [operation.target_settlement_id]);
       await client.query("UPDATE recruitment_orders recruit SET remaining_quantity=(SELECT COALESCE(SUM(wave.quantity),0)::integer FROM recruitment_waves wave WHERE wave.order_id=recruit.id AND wave.processed_at IS NULL) WHERE recruit.settlement_id=$1 AND recruit.status='TRAINING'", [operation.target_settlement_id]);
-      return "Bekleyen askerlerin %20'si kaybedildi; kalan alımlar 2 tur geciktirildi.";
+      const details = waves.map((wave) => {
+        const remaining = Math.max(1, Math.floor(Number(wave.quantity) * 0.8));
+        const lost = Number(wave.quantity) - remaining;
+        const unitName = catalogName(UNITS, wave.unit_type);
+        return `${unitName}: ${Number(wave.quantity).toLocaleString("tr-TR")}→${remaining.toLocaleString("tr-TR")} (${lost.toLocaleString("tr-TR")} kayıp), Tur ${wave.due_turn}→${wave.due_turn + 2}`;
+      });
+      return `Etkilenen alımlar: ${limitedDetails(details)}.`;
     }
     await client.query("UPDATE recruitment_waves wave SET due_turn=due_turn+2 FROM recruitment_orders recruit WHERE recruit.id=wave.order_id AND recruit.settlement_id=$1 AND recruit.status='TRAINING' AND wave.processed_at IS NULL", [operation.target_settlement_id]);
-    return "Şehirdeki bütün asker alımları 2 tur geciktirildi.";
+    return `Etkilenen alımlar: ${limitedDetails(waves.map((wave) => `${recruitmentWaveLabel(wave)}→Tur ${wave.due_turn + 2}`))}.`;
   }
   if (operation.target_type === "PRODUCTION_SABOTAGE") {
-    const orders = (await client.query<{ kind: "SHIP"|"SIEGE"; id: string }>(
-      "SELECT 'SHIP'::text AS kind,id FROM naval_orders WHERE settlement_id=$1 AND status='BUILDING' UNION ALL SELECT 'SIEGE'::text AS kind,id FROM siege_orders WHERE settlement_id=$1 AND status='BUILDING'",
+    const orders = (await client.query<ProductionOrderTarget>(
+      `SELECT 'SHIP'::text AS kind,id,ship_type AS item_type,quantity,completion_turn
+         FROM naval_orders WHERE settlement_id=$1 AND status='BUILDING'
+       UNION ALL
+       SELECT 'SIEGE'::text AS kind,id,asset_type AS item_type,quantity,completion_turn
+         FROM siege_orders WHERE settlement_id=$1 AND status='BUILDING'
+       ORDER BY completion_turn,id`,
       [operation.target_settlement_id]
     )).rows;
+    if (!orders.length) return "Uygun gemi veya kuşatma üretimi bulunamadı; mekanik etki oluşmadı.";
     const chosen = orders[randomInt(0,orders.length)];
     if (severity === "LIGHT" && chosen) {
       await client.query("UPDATE "+(chosen.kind==="SHIP"?"naval_orders":"siege_orders")+" SET completion_turn=completion_turn+2 WHERE id=$1", [chosen.id]);
-      return "Rastgele bir üretim emri 2 tur geciktirildi.";
+      return `Etkilenen üretim: ${productionOrderLabel(chosen)} → tamamlanma Tur ${chosen.completion_turn + 2}.`;
     }
     if (severity === "HEAVY" && chosen) {
       await client.query("UPDATE "+(chosen.kind==="SHIP"?"naval_orders":"siege_orders")+" SET status='CANCELLED' WHERE id=$1", [chosen.id]);
       await client.query("UPDATE naval_orders SET completion_turn=completion_turn+2 WHERE settlement_id=$1 AND status='BUILDING'", [operation.target_settlement_id]);
       await client.query("UPDATE siege_orders SET completion_turn=completion_turn+2 WHERE settlement_id=$1 AND status='BUILDING'", [operation.target_settlement_id]);
-      return "Rastgele bir üretim emri iadesiz yok edildi; diğer üretimler 2 tur geciktirildi.";
+      const delayed = orders.filter((order) => order.id !== chosen.id);
+      const delayedText = delayed.length
+        ? limitedDetails(delayed.map((order) => `${productionOrderLabel(order)}→Tur ${order.completion_turn + 2}`))
+        : "başka aktif üretim emri yok";
+      return `İadesiz yok edilen üretim: ${productionOrderLabel(chosen)}. Geciktirilen üretimler: ${delayedText}.`;
     }
     await client.query("UPDATE naval_orders SET completion_turn=completion_turn+2 WHERE settlement_id=$1 AND status='BUILDING'", [operation.target_settlement_id]);
     await client.query("UPDATE siege_orders SET completion_turn=completion_turn+2 WHERE settlement_id=$1 AND status='BUILDING'", [operation.target_settlement_id]);
-    return "Şehirdeki gemi ve kuşatma üretimleri 2 tur geciktirildi.";
+    return `Etkilenen üretimler: ${limitedDetails(orders.map((order) => `${productionOrderLabel(order)}→Tur ${order.completion_turn + 2}`))}.`;
   }
   if (operation.target_type === "INCOME_SABOTAGE") {
     const reduction = percent(severity,10,20,30);
