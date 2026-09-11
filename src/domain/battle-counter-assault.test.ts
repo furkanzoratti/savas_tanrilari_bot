@@ -31,6 +31,17 @@ describe("Mızraklı–Süvari karşılaşması", () => {
     expect(counter.coverage).toBe(1);
   });
 
+  it("Anadolu Kalkanlılarının yalnız yüzde 30'unu mızrak karşılığı sayar", () => {
+    const counter = spearCavalryCounter(
+      { anatolian_thureophoroi: 10_000 },
+      { heavy_cavalry: 5_000 }
+    );
+
+    expect(counter.effectiveSpears).toBe(3_000);
+    expect(counter.effectiveEnemyCavalry).toBe(5_000);
+    expect(counter.matched).toBe(3_000);
+  });
+
   it("Kartaca Savaş Fillerini mızrak karşılığında tam hareketli hedef sayar", () => {
     const counter = spearCavalryCounter(
       { spear: 1_000 },
@@ -79,11 +90,12 @@ describe("Hücum Birliği", () => {
       persian_immortal: 100,
       iberian_caetrati: 100,
       germanic_shock_warrior: 100,
+      anatolian_thureophoroi: 100,
       archer: 5_000,
       heavy_cavalry: 5_000
     };
 
-    expect(assaultUnitTotal(composition)).toBe(900);
+    expect(assaultUnitTotal(composition)).toBe(1_000);
     expect(hasAssaultForce(composition)).toBe(true);
   });
 

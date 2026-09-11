@@ -38,6 +38,14 @@ describe("ordu kompozisyonu ve güncel birlik dengesi", () => {
     expect(result.tier).toBe("LIMITED");
   });
 
+  it("Anadolu Kalkanlılarını yüzde 70 hat ve yüzde 30 mızraklı sayar", () => {
+    const result = assessArmyComposition({ anatolian_thureophoroi: 10_000 });
+    expect(result.roleShares.line).toBeCloseTo(0.70);
+    expect(result.roleShares.spear).toBeCloseTo(0.30);
+    expect(result.roleShares.ranged).toBe(0);
+    expect(result.roleShares.mobile).toBe(0);
+  });
+
   it("dengeli ve mükemmel karma orduları ayrı kademelendirir", () => {
     const balanced = assessArmyComposition({ light_infantry: 6_000, spear: 1_000, archer: 1_000, light_cavalry: 2_000 });
     expect(balanced.tier).toBe("BALANCED");

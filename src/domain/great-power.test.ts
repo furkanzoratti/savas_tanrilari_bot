@@ -41,14 +41,17 @@ describe("Büyük Güç puanı", () => {
     });
   });
 
-  it("fethedilmiş şehre yerleşke puanı ve bitmemiş binaya bina puanı vermez", () => {
+  it("fethedilmiş şehre, bitmemiş binaya ve kaldırılmış Lupanara puan vermez", () => {
     expect(calculateGreatPower({
       payableIncome: -500,
       settlements: [{
         is_conquered: true,
         temporaryMilitia: 0,
         units: [], ships: [], pendingRecruitment: [], pendingGarrison: [], mercenaries: [],
-        buildings: [{ building_type: "academy", level: 3, status: "BUILDING" }]
+        buildings: [
+          { building_type: "academy", level: 3, status: "BUILDING" },
+          { building_type: "lupanar", level: 3, status: "ACTIVE" }
+        ]
       }]
     })).toEqual({ land: 0, economy: 0, settlements: 0, navy: 0, buildings: 0, total: 0 });
   });

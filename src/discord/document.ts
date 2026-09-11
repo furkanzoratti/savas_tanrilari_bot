@@ -1,5 +1,5 @@
 import { EmbedBuilder } from "discord.js";
-import { BUILDINGS, CITY_POLICIES, MOBILIZATION_RULES, PORT_SHIP_CAPACITY, SHIPS, SIEGE_ASSETS, UNITS, fleetTransportCapacity, shipHarborRequirement } from "../domain/catalog.js";
+import { BUILDINGS, CITY_POLICIES, MOBILIZATION_RULES, SHIPS, SIEGE_ASSETS, UNITS, fleetTransportCapacity, portShipCapacity, shipHarborRequirement } from "../domain/catalog.js";
 import { CULTURE_GROUPS } from "../domain/cultures.js";
 import { calculateShipUpkeep, calculateUnitUpkeep } from "../domain/economy.js";
 import { SETTLEMENT_EVENT_TYPES, type SettlementEventType } from "../domain/events.js";
@@ -184,12 +184,14 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
         }).join("\n")
       : "Henüz bina bulunmuyor.";
 
-    const resourceDetails = settlement.effectiveResources.map((resource, index) => {
-      const source = index === 0 ? "Yerel üretim" : "Ticaret etkisi";
+    const resourceDetails = settlement.effectiveResources.map((resource) => {
+      const source = settlement.ownResourceActive && resource === settlement.resource_type ? "Yerel üretim" : "Ticaret etkisi";
       return `**${RESOURCES[resource].label}** • ${source}\n${RESOURCES[resource].effects.map((effect) => `• ${effect}`).join("\n")}`;
     }).join("\n\n");
 
-    const hasActivePort = settlement.buildings.some((building) => building.building_type === "port" && building.status === "ACTIVE" && building.level >= 1);
+    const portLevel = settlement.buildings.find((building) => building.building_type === "port"
+      && (building.status === "ACTIVE" || building.status === "BUILDING") && building.level >= 1)?.level ?? 0;
+    const hasActivePort = portLevel > 0;
     const incomeLines = [
       incomeLine("🏗️ Binalar", settlement.incomeBreakdown.building),
       incomeLine("👥 Halk Vergisi", settlement.incomeBreakdown.tax),
@@ -208,7 +210,15 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
       ].join("\n"))
       .addFields(
         { name: "🏺 Kültür", value: spacedSection(`**${culture}**`), inline: true },
-        { name: "📦 Yerel Hammadde", value: spacedSection(`**${producedResource}**`), inline: true },
+        {
+          name: "📦 Yerel Hammadde",
+          value: spacedSection([
+            `**${producedResource} ×${number(settlement.localResourceProduction)}**`,
+            `Ticarette: **${number(settlement.localResourceTradeUsage)}** • Kalan: **${number(settlement.localResourceRemaining)}**`,
+            settlement.ownResourceActive ? "✅ Yerel hammadde etkisi aktif" : "⛔ Yerel hammadde etkisi ticarette tüketildi"
+          ].join("\n")),
+          inline: true
+        },
         { name: "🏦 Yerel Hazine", value: spacedSection(`**${gold(settlement.local_treasury)}**`), inline: true },
         {
           name: "👥 Nüfus",
@@ -228,7 +238,7 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
         },
         { name: "💰 Gelir Kalemleri", value: spacedSection(incomes), inline: true },
         { name: "🧾 Yerleşke Giderleri", value: spacedSection(`Bina: ${gold(settlement.buildingUpkeep)}\nOrdu: ${gold(settlement.unitUpkeep)}\nDonanma: ${gold(settlement.shipUpkeep)}\n**Toplam: ${gold(settlement.totalSettlementUpkeep)}**`), inline: true },
-        { name: "🌐 Etkin Kaynaklar ve Etkileri", value: spacedSection(resourceDetails) },
+        { name: "🌐 Etkin Kaynaklar ve Etkileri", value: spacedSection(resourceDetails || "Etkin hammadde etkisi bulunmuyor.") },
         { name: "🏗️ Binalar ve İnşaatlar", value: spacedSection(buildings) }
       );
 
@@ -288,7 +298,7 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
         .reduce((sum, ship) => sum + shipHarborRequirement(ship.ship_type, ship.quantity), 0);
       embed.addFields({
         name: "⚓ Liman Kapasitesi",
-        value: spacedSection(`Kullanım: **${number(reserveHarbor + productionHarbor)}/${number(PORT_SHIP_CAPACITY)} rıhtım puanı**\nRezerv: ${number(reserveHarbor)} • Üretim: ${number(productionHarbor)}`),
+        value: spacedSection(`Kullanım: **${number(reserveHarbor + productionHarbor)}/${number(portShipCapacity(portLevel))} rıhtım puanı**\nRezerv: ${number(reserveHarbor)} • Üretim: ${number(productionHarbor)}`),
         inline: true
       });
     }

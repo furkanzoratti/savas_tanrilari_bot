@@ -21,6 +21,14 @@ describe("yönetim komutları", () => {
       expect(admin?.options?.find((option) => option.name === destructive)?.options?.find((option) => option.name === "onay")).toMatchObject({ required: true });
     }
     expect(admin?.options?.find((option) => option.name === "ulke-yok-et")?.options?.find((option) => option.name === "neden")).toMatchObject({ required: true });
+    const populationAdd = commandBuilders.find((command) => command.name === "nufus-ekle");
+    expect(populationAdd?.description).toContain("Yalnızca yönetici");
+    expect(populationAdd?.options?.map((option) => option.name)).toEqual(["ulke", "yerleske", "nufus-turu", "miktar"]);
+    expect(populationAdd?.options?.find((option) => option.name === "nufus-turu")?.choices?.map((choice) => choice.value)).toEqual(["FREE", "SLAVE"]);
+    expect(populationAdd?.options?.find((option) => option.name === "miktar")).toMatchObject({ required: true, min_value: 1 });
+    const militiaAdd = commandBuilders.find((command) => command.name === "milis-ekle");
+    expect(militiaAdd?.description).toContain("Yalnızca yönetici");
+    expect(militiaAdd?.options?.map((option) => option.name)).toEqual(["ulke", "yerleske", "miktar"]);
   });
 
   it("yok edilmiş devletleri listeleme, geri getirme ve vassallık yönetimini kaydeder", () => {
@@ -54,6 +62,13 @@ describe("yönetim komutları", () => {
     expect(command?.description).toContain("eksik devlet rollerini");
   });
 
+  it("Olay Yöneticisi rolünü üyeye verip kaldıran ayrı komutu kaydeder", () => {
+    const command = commandBuilders.find((item) => item.name === "olay-yoneticisi");
+    expect(command?.description).toContain("Yalnızca yönetici");
+    expect(command?.options?.map((option) => option.name)).toEqual(["uye", "islem"]);
+    expect(command?.options?.find((option) => option.name === "islem")?.choices?.map((choice) => choice.value)).toEqual(["grant", "revoke"]);
+  });
+
   it("hatalı alımları otomatik tamamlanan ayrı bir yönetici komutuyla iptal eder", () => {
     const command = commandBuilders.find((item) => item.name === "alim-iptal");
     const purchase = command?.options?.find((option) => option.name === "siparis");
@@ -83,4 +98,6 @@ describe("yönetim komutları", () => {
   it("aktif yerleşke olayları için müdahale paneli komutunu kaydeder", () => {
     const command = commandBuilders.find((item) => item.name === "olay");
     expect(command?.options?.some((option) => option.name === "aktif")).toBe(true);
+    const eventChoices = command?.options?.find((option) => option.name === "sec")?.options?.find((option) => option.name === "tur")?.choices?.map((choice) => choice.value);
+    expect(eventChoices).toEqual(expect.arrayContaining(["DROUGHT", "FAMINE", "BOUNTIFUL_HARVEST", "TRADE_BOOM", "MIGRATION_WAVE", "MASTER_CRAFTSMEN", "LOCAL_VOLUNTEERS"]));
   });

@@ -5,7 +5,7 @@ describe("savaş komutları", () => {
   it("taslak, gizli kadro, yayın, tur ve özel detay akışını kaydeder", () => {
     const battle = commandBuilders.find((command) => command.name === "savas");
     const names = battle?.options?.map((option) => option.name) ?? [];
-    expect(names).toEqual(expect.arrayContaining(["baslat", "taraf-ulke", "birlik-ayarla", "kadro-ayarla", "gemi-ayarla", "filo-ayarla", "kusatma-aleti-ayarla", "kusatma-asamasi", "bombardiman", "yayinla", "tur-oynat", "ordu-detay", "kayip-raporu", "bitir", "iptal"]));
+    expect(names).toEqual(expect.arrayContaining(["baslat", "taraf-ulke", "birlik-ayarla", "kadro-ayarla", "gemi-ayarla", "filo-ayarla", "kusatma-aleti-ayarla", "suvari-indir", "kusatma-asamasi", "bombardiman", "yayinla", "tur-oynat", "ordu-detay", "kayip-raporu", "bitir", "iptal"]));
   });
 
   it("koalisyon ülkesi ve ülke bazlı kadro seçeneklerini sunar", () => {
@@ -39,5 +39,14 @@ describe("savaş komutları", () => {
     const target = support?.options?.find((option) => option.name === "hedef");
     expect(target?.required).toBe(true);
     expect(target?.choices?.map((choice) => choice.value)).toEqual(expect.arrayContaining(["WALL", "GATE", "ARMY", "ASSAULT"]));
+  });
+  it("kuşatan tarafa dört indirilebilir süvari türü ve sıfırlama seçeneği sunar", () => {
+    const battle = commandBuilders.find((command) => command.name === "savas");
+    const command = battle?.options?.find((option) => option.name === "suvari-indir");
+    expect(command?.options?.find((option) => option.name === "birim")?.choices?.map((choice) => choice.value)).toEqual([
+      "light_cavalry", "heavy_cavalry", "horse_archer", "camel_cavalry"
+    ]);
+    expect(command?.options?.find((option) => option.name === "miktar")?.min_value).toBe(0);
+    expect(command?.options?.find((option) => option.name === "ulke")).toMatchObject({ required: false, autocomplete: true });
   });
 });

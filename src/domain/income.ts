@@ -74,28 +74,41 @@ export function calculateCategorizedIncome(input: {
     seaTrade: Math.max(0, input.seaTradeIncome + (input.agreementSeaIncome ?? 0))
   };
   let globalIncomePercent = input.manualIncomePercent;
+  let landTradeIncomePercent = 0;
+  let taxIncomePercent = 0;
   let seaIncomePercent = 0;
   let buildingUpkeep = 0;
+  const hasActivePort = input.buildings.some((building) => building.buildingType === "port" && building.level > 0);
   if (policies.has("MARKET_FAIRS")) gross.building += 250;
-  if (policies.has("INFRASTRUCTURE_ROADS")) gross.building += Math.min(600, input.buildings.length * 100);
+  if (policies.has("INFRASTRUCTURE_ROADS")) gross.building += Math.min(600, input.buildings.filter((building) => building.buildingType !== "lupanar").length * 100);
 
   for (const building of input.buildings) {
+    if (building.buildingType === "lupanar") continue;
+    if (building.buildingType === "customs_house" && !hasActivePort) continue;
     const effect = BUILDINGS[building.buildingType]?.levels[building.level];
     if (!effect) continue;
     buildingUpkeep += building.buildingType === "academy" && formable.academyUpkeep !== undefined ? formable.academyUpkeep : effect.upkeep ?? 0;
-    const silkMultiplier = resources.includes("SILK") && ["agora", "trade_guild"].includes(building.buildingType) ? 1.10 : 1;
+    const silkMultiplier = resources.includes("SILK")
+      && ["agora", "trade_guild", "caravanserai", "customs_house", "artisans_quarter"].includes(building.buildingType)
+      ? 1.10
+      : 1;
+    const wineMultiplier = resources.includes("WINE") && building.buildingType === "inns_baths"
+      ? 1 + building.level * 0.05
+      : 1;
     const formableBuildingMultiplier = 1 + (formable.buildingIncomePercent?.[building.buildingType] ?? 0);
-    const flatIncome = Math.floor((effect.flatIncome ?? 0) * silkMultiplier * formableBuildingMultiplier);
+    const flatIncome = Math.floor((effect.flatIncome ?? 0) * silkMultiplier * wineMultiplier * formableBuildingMultiplier);
     if (building.buildingType === "port") gross.seaTrade += flatIncome + (formable.portFlatIncome ?? 0);
     else gross.building += flatIncome + (building.buildingType === "curia" ? formable.curiaFlatIncome ?? 0 : 0);
     let buildingIncomePercent = (effect.incomePercent ?? 0) * silkMultiplier;
     if (building.buildingType === "trade_guild" && policies.has("MARKET_FAIRS")) buildingIncomePercent += 0.02;
-    if (["trade_guild", "lupanar"].includes(building.buildingType) && policies.has("MERCHANT_LICENSE")) buildingIncomePercent += 0.05;
-    if (resources.includes("WINE") && building.buildingType === "lupanar") buildingIncomePercent += 0.05;
+    if (building.buildingType === "trade_guild" && policies.has("MERCHANT_LICENSE")) buildingIncomePercent += 0.05;
     globalIncomePercent += buildingIncomePercent;
-    seaIncomePercent += effect.seaIncomePercent ?? 0;
+    landTradeIncomePercent += (effect.landTradePercent ?? 0) * silkMultiplier
+      + (building.buildingType === "caravanserai" && policies.has("MERCHANT_LICENSE") ? 0.05 : 0);
+    taxIncomePercent += effect.taxIncomePercent ?? 0;
+    seaIncomePercent += (effect.seaIncomePercent ?? 0) * silkMultiplier;
     if (building.buildingType === "slave_camp") {
-      const rates = formable.slaveCampRates ?? [0.15, 0.30, 0.50];
+      const rates = formable.slaveCampRates ?? [0.25, 0.40, 0.90];
       gross.building += Math.floor(Math.max(0, input.slavePopulation ?? 0) * (rates[building.level - 1] ?? 0));
     }
     if (building.buildingType === "agora" && building.level >= 2 && input.assignedMerchant) {
@@ -103,10 +116,18 @@ export function calculateCategorizedIncome(input: {
       globalIncomePercent += (formable.academyMerchantAgoraBonus ?? 0.10) + skillIncomePercent
         + (input.merchantAgoraMaster ? 0.02 : 0);
     }
-    if (resources.includes("GLASS") && ["healer", "aqueduct"].includes(building.buildingType)) gross.building += 100;
+    if (building.buildingType === "artisans_quarter") {
+      const eligibleResources = new Set<ResourceType>(["IRON", "TIMBER", "LEATHER", "GLASS", "MARBLE", "LEAD"]);
+      const distinctEligible = [...new Set(resources)].filter((resource) => eligibleResources.has(resource)).slice(0, 3).length;
+      const perResource = building.level >= 3 ? 600 : building.level >= 2 ? 400 : 250;
+      gross.building += Math.floor(distinctEligible * perResource * silkMultiplier);
+    }
+    if (resources.includes("GLASS") && ["healer", "aqueduct", "inns_baths"].includes(building.buildingType)) gross.building += 100;
     if (resources.includes("AMBER") && building.buildingType === "pantheon") gross.building += 300;
   }
 
+  if (landTradeIncomePercent > 0) gross.landTrade += Math.floor(gross.landTrade * landTradeIncomePercent);
+  if (taxIncomePercent > 0) gross.tax += Math.floor(gross.tax * taxIncomePercent);
   if (seaIncomePercent > 0) gross.seaTrade += Math.floor(gross.seaTrade * seaIncomePercent);
   const resourceMultiplier = (resources.includes("GOLD") ? 1.10 : 1) * (resources.includes("SPICES") ? 1.20 : 1);
   const totalPercent = Math.max(0, Math.min(MAX_SETTLEMENT_PERCENT_BONUS, globalIncomePercent + resourceMultiplier - 1 + (formable.incomePercent ?? 0)));

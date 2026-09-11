@@ -93,7 +93,7 @@ Kara savaşında her tam **1.000 asker**, türünün zarlarını bir kez üretir
 • Milis: **1d4 / 1d4 — Düşük**
 • Sapancı: **1d6 / 1d8 — Düşük**
 • Mızraklı Piyade: **1d8 / 1d6 — Orta**
-• Okçu: **1d8 / 1d10 — Düşük**
+• Okçu: **1d8 / 1d12 — Düşük**
 • Ağır Piyade: **2d8 / 2d8 — Yüksek**
 • Hafif Süvari: **2d6 / 1d8 — Orta**
 • Ağır Süvari: **2d10 / 2d10 — Yüksek**
@@ -113,11 +113,12 @@ Dayanıklılık zar toplamını değiştirmez. Rakibin ham hasarı birlik türle
 • Hoplit: **2d8 / 1d10 — Yüksek**
 • Atlı Okçu: **2d8 / 2d8 — Orta**
 • Deve Süvarisi: **2d8 / 1d10 — Orta**
-• Briton Uzun Yaycıları: **1d10 / 2d10 — Düşük**
+• Briton Uzun Yaycıları: **1d12 / 2d12 — Düşük**
 • Pers Ölümsüzleri: **2d8 / 2d10 — Yüksek**
-• Kartaca Savaş Filleri: **3d8 / 2d10 — Yüksek**
+• Kartaca Savaş Filleri: **3d10 / 2d10 — Yüksek**
 • İber Caetratileri: **2d6 / 2d8 — Düşük**
 • Cermen Şok Savaşçıları: **2d10 / 2d8 — Düşük**
+• Anadolu Kalkanlıları (Thureophoroi): **2d6 / 1d10 — Orta**; kompozisyonda %70 Hat, %30 Mızraklı sayılır.
 
 Özel birliklerin savaş zarları standart birliklerle aynı hesap akışına girer. Bir ülke, yalnız DM tarafından kendisine açılmış özel birlikleri satın alabilir; fakat savaş kadrosuna kayıtlı mevcudunun tamamını koyabilir.
 
@@ -126,8 +127,8 @@ Dayanıklılık zar toplamını değiştirmez. Rakibin ham hasarı birlik türle
 Kompozisyon, ordunun tamamından değil **o tur cepheye giren birliklerden** hesaplanır. Yedekler cepheye girene kadar değerlendirmeyi etkilemez.
 
 **Roller:**
-• Hat: Hafif Piyade, Milis, Ağır Piyade, Lejyoner, Pers Ölümsüzleri, İber Caetratileri, Cermen Şok Savaşçıları
-• Mızrak: Mızraklı %100; Hoplit %50 Mızrak + %50 Hat
+• Hat: Hafif Piyade, Milis, Ağır Piyade, Lejyoner, Pers Ölümsüzleri, İber Caetratileri, Cermen Şok Savaşçıları; Anadolu Kalkanlılarının %70'i
+• Mızrak: Mızraklı %100; Hoplit %50 Mızrak + %50 Hat; Anadolu Kalkanlıları %30 Mızrak + %70 Hat
 • Menzilli: Sapancı, Okçu, Briton Uzun Yaycıları; Atlı Okçu %50 Menzilli + %50 Hareketli
 • Hareketli: Hafif/Ağır/Deve Süvarisi ve Kartaca Savaş Filleri; Atlı Okçu %50 Hareketli
 
@@ -169,6 +170,7 @@ Bu kural yalnız **kuşatma dışındaki kara savaşlarında** uygulanır.
 **Mızrak Gücü:**
 • 1 Mızraklı = 1
 • 1 Hoplit = 0,5
+• 1 Anadolu Kalkanlısı = 0,3
 
 **Süvari Gücü:**
 • 1 Hafif, Ağır veya Deve Süvarisi = 1
@@ -284,9 +286,9 @@ Sur ve kapı birlikte sağlamken bütün saldıran ordu doğrudan savaşamaz:
 • Kuleler kapasite hesabında önce, merdivenler kalan alanda değerlendirilir.
 • Sur veya kapı kırılırsa saldıranın normal 15.000 kişilik cephesi açılır.
 
-**Hücum Birlikleri:** Hafif Piyade, Milis, Mızraklı, Ağır Piyade, Lejyoner, Hoplit, Pers Ölümsüzleri, İber Caetratileri ve Cermen Şok Savaşçılarıdır.
+**Hücum Birlikleri:** Hafif Piyade, Milis, Mızraklı, Ağır Piyade, Lejyoner, Hoplit, Pers Ölümsüzleri, İber Caetratileri, Cermen Şok Savaşçıları ve Anadolu Kalkanlılarıdır.
 
-Sadece menzilli veya atlı birliklerden oluşan ordu şehir alamaz. Hücum Birliği kalmazsa kuşatan taraf otomatik geri çekilir. Sur ve kapı sağlamken saldıran süvariler cepheye ve kayıp havuzuna girmez; Atlı Okçular menzilli destek verebilir. Sur veya kapı kırılınca normal cepheye geçilir.
+Sadece menzilli veya atlı birliklerden oluşan ordu şehir alamaz. Hücum Birliği kalmazsa kuşatan taraf otomatik geri çekilir. Sur ve kapı sağlamken saldıran süvariler normalde cepheye ve kayıp havuzuna girmez; Atlı Okçular menzilli destek verebilir, ayrıca aşağıdaki yaya hücum emri kullanılabilir. Sur veya kapı kırılınca normal cepheye geçilir.
 
 Savunucu süvariler kuşatma boyunca attan inerek savaşır:
 • Hafif Süvari → Hafif Piyade zarları
@@ -295,6 +297,8 @@ Savunucu süvariler kuşatma boyunca attan inerek savaşır:
 • Deve Süvarisi → Mızraklı Piyade zarları
 
 Kayıplar belgede özgün birlik adından düşülür.
+
+Kuşatan taraf, sur ve kapı birlikte sağlamken `/savas suvari-indir` ile kendi Hafif Süvari, Ağır Süvari, Atlı Okçu veya Deve Süvarilerinin istediği kısmını aynı yaya karşılıklarıyla hücuma hazırlayabilir. Emir tur zarları başlamadan değiştirilebilir ve **0** girilerek kaldırılır. İndirilen birlikler yaya birimin savaş ve dayanıklılık değerlerini kullanır; kayıp yine özgün süvari kaydından düşer. Surda gedik açılır veya kapı kırılırsa bütün saldırgan süvariler normal atlı değerlerine döner. Kartaca Savaş Filleri attan indirilemez.
 
 ## MESAJ 17/20 — 🚨 KUŞATMA BASKISI, AÇLIK VE ŞEHRİN DÜŞMESİ
 
@@ -380,6 +384,7 @@ Bot savaş sonu kayıplarını belgelere yalnız bir kez işler:
 • `/savas kadro-ayarla`, `/savas filo-ayarla`
 • `/savas parali-asker-ayarla`
 • `/savas kusatma-aleti-ayarla`, `/savas saha-aleti-al`, `/savas kusatma-asamasi`, `/savas bombardiman`
+• `/savas suvari-indir` — kuşatan oyuncu kendi ülkesinde, DM ise istediği saldırgan ülkede kullanabilir
 • `/savas yayinla`, `/savas tur-oynat`
 • `/savas ordu-detay`, `/savas kayip-raporu`
 • `/savas bitir`, `/savas iptal`

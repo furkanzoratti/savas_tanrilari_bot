@@ -9,7 +9,8 @@ const UNIT_TYPE_ALIASES = {
   persian_immortal: "pi",
   carthaginian_war_elephant: "cwe",
   iberian_caetrati: "ic",
-  germanic_shock_warrior: "gsw"
+  germanic_shock_warrior: "gsw",
+  anatolian_thureophoroi: "ath"
 } as const;
 
 const UNIT_TYPE_BY_ALIAS = Object.fromEntries(

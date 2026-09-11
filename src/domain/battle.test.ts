@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BASE_SIEGE_STARVATION_TURNS, MAX_BOMBARDMENTS_PER_GAME_TURN, activeSiegeAssaultAssets, advantageTier, remainingBombardments, baseRetreatRate, battleEnds, commanderClashBonus, compositionTotal, engagedComposition, orderState, resolveRound, rollBattlePool, rollNavalPool, rollSiegeSupport, siegeAssaultAccess, siegeAssaultComposition, siegeDefenderCaptured, siegeDefenderComposition, siegeDefenseModifiers, siegeLineBreaks, siegeOrderState, siegePressureAfterRound } from "./battle.js";
+import { BASE_SIEGE_STARVATION_TURNS, MAX_BOMBARDMENTS_PER_GAME_TURN, activeSiegeAssaultAssets, advantageTier, remainingBombardments, baseRetreatRate, battleEnds, commanderClashBonus, compositionTotal, engagedComposition, orderState, resolveRound, restoreSiegeAttackerCasualtyTypes, rollBattlePool, rollNavalPool, rollSiegeSupport, siegeAssaultAccess, siegeAssaultComposition, siegeAttackerDismountedComposition, siegeDefenderCaptured, siegeDefenderComposition, siegeDefenseModifiers, siegeLineBreaks, siegeOrderState, siegePressureAfterRound } from "./battle.js";
 
 describe("savaş motoru", () => {
   it("kuşatma açlığının temel süresini altı oyun turu kabul eder", () => {
@@ -15,6 +15,17 @@ describe("savaş motoru", () => {
       spear: 400
     });
     expect(original.light_cavalry).toBe(100);
+  });
+
+  it("kuşatma saldırganının seçtiği süvarileri yaya hesaplar, kayıpları özgün türlerine geri yazar", () => {
+    const original = { heavy_infantry: 1_000, heavy_cavalry: 2_000, archer: 500, horse_archer: 1_000 } as const;
+    const dismounted = { heavy_cavalry: 1_000, horse_archer: 500 } as const;
+    expect(siegeAttackerDismountedComposition(original, dismounted)).toEqual({
+      heavy_infantry: 2_000, heavy_cavalry: 1_000, archer: 1_000, horse_archer: 500
+    });
+    expect(restoreSiegeAttackerCasualtyTypes(original, { heavy_infantry: 1_000, archer: 500 }, dismounted)).toEqual({
+      heavy_infantry: 500, heavy_cavalry: 500, archer: 250, horse_archer: 250
+    });
   });
 
   it("atanmış Komutanın özellik puanını küçük ve sınırlı çarpışma bonusuna çevirir", () => {

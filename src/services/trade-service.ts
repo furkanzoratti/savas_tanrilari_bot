@@ -1,6 +1,7 @@
 import { pool, withTransaction, type DbClient } from "../db/pool.js";
 import { TRADE_INCOME_PER_COUNTRY, type TradeRoute, type TradeStatus } from "../domain/trade.js";
 import { RESOURCES, tradeAgreementLimit, type ResourceType } from "../domain/resources.js";
+import { rawMaterialProduction } from "../domain/catalog.js";
 import { countryResourceAccess } from "./resource-service.js";
 import { GameError } from "./game-service.js";
 
@@ -24,6 +25,26 @@ export interface TradeAgreementView {
 async function assertSettlement(client: DbClient, settlementId: string, countryId: string): Promise<void> {
   const result = await client.query("SELECT 1 FROM settlements WHERE id=$1 AND country_id=$2", [settlementId, countryId]);
   if (!result.rowCount) throw new GameError("Seçilen yerleşke bu ülkeye ait değil.");
+}
+
+async function assertSettlementResourceCapacity(client: DbClient, settlementId: string): Promise<void> {
+  const rawMaterialLevel = Number((await client.query<{ level: number }>(
+    `SELECT level FROM buildings
+      WHERE settlement_id=$1 AND building_type='raw_material'
+        AND status IN ('ACTIVE','BUILDING') AND level>0
+      LIMIT 1`,
+    [settlementId]
+  )).rows[0]?.level ?? 0);
+  const capacity = rawMaterialProduction(rawMaterialLevel);
+  const used = Number((await client.query<{ count: number }>(
+    `SELECT COUNT(*)::integer AS count FROM trade_agreements
+      WHERE status IN ('PENDING','ACTIVE')
+        AND (proposer_settlement_id=$1 OR receiver_settlement_id=$1)`,
+    [settlementId]
+  )).rows[0]?.count ?? 0);
+  if (used >= capacity) {
+    throw new GameError(`Yerleşkenin hammadde ticaret kapasitesi dolu (${used}/${capacity}). Hammadde İşletmesi kapasiteyi artırır.`);
+  }
 }
 
 async function assertPort(client: DbClient, settlementId: string): Promise<void> {
@@ -68,6 +89,8 @@ export const tradeService = {
       if (!receiver.rowCount) throw new GameError("Hedef ülke bulunamadı.");
       await assertSettlement(client, input.proposerSettlementId, input.proposerCountryId);
       await assertSettlement(client, input.receiverSettlementId, input.receiverCountryId);
+      await assertSettlementResourceCapacity(client, input.proposerSettlementId);
+      await assertSettlementResourceCapacity(client, input.receiverSettlementId);
       await assertTradeCapacity(client, input.proposerCountryId);
       await assertTradeCapacity(client, input.receiverCountryId);
       if (input.route === "SEA") {

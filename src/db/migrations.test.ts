@@ -243,3 +243,35 @@ describe("elli beşinci migration", () => {
     expect(migration?.sql).toContain("'TRAVELING','ACTIVE','PAUSED'");
   });
 });
+
+describe("elli altıncı migration", () => {
+  const migration = migrations.find((item) => item.version === 56);
+
+  it("kuşatma saldırganının ülke bazlı yaya süvari tercihini saklar", () => {
+    expect(migration?.name).toBe("siege_attacker_cavalry_dismount");
+    expect(migration?.sql).toContain("ADD COLUMN IF NOT EXISTS dismounted_composition JSONB");
+    expect(migration?.sql).toContain("DEFAULT '{}'::jsonb");
+  });
+});
+
+describe("elli yedinci migration", () => {
+  const migration = migrations.find((item) => item.version === 57);
+
+  it("beş olumlu olay ile Kuraklık ve Kıtlık kayıtlarını ekler", () => {
+    expect(migration?.name).toBe("expanded_settlement_events");
+    expect(migration?.sql).toContain("drought_active BOOLEAN NOT NULL DEFAULT FALSE");
+    expect(migration?.sql).toContain("famine_active BOOLEAN NOT NULL DEFAULT FALSE");
+    expect(migration?.sql).toContain("bountiful_harvest_active BOOLEAN NOT NULL DEFAULT FALSE");
+    expect(migration?.sql).toContain("LOCAL_VOLUNTEERS");
+  });
+});
+
+describe("elli sekizinci migration", () => {
+  const migration = migrations.find((item) => item.version === 58);
+
+  it("Anadolu Kalkanlılarını ülke bazlı özel birlik izinlerine ekler", () => {
+    expect(migration?.name).toBe("anatolian_thureophoroi_special_unit");
+    expect(migration?.sql).toContain("DROP CONSTRAINT IF EXISTS country_special_unit_unlocks_unit_type_check");
+    expect(migration?.sql).toContain("anatolian_thureophoroi");
+  });
+});

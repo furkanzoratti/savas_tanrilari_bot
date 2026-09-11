@@ -1,5 +1,5 @@
 import { ChannelType, SlashCommandBuilder } from "discord.js";
-import { BUILDINGS, CHARACTER_ROLES, CITY_POLICIES, MOBILIZATION_RULES, SHIPS, SIEGE_ASSETS, UNITS } from "../domain/catalog.js";
+import { BUILDABLE_BUILDINGS, CHARACTER_ROLES, CITY_POLICIES, MOBILIZATION_RULES, SHIPS, SIEGE_ASSETS, UNITS } from "../domain/catalog.js";
 import { RESOURCE_CHOICES } from "../domain/resources.js";
 import { SETTLEMENT_EVENT_TYPES } from "../domain/events.js";
 import { BATTLE_TERRAINS, BATTLE_UNIT_STATS, NAVAL_UNIT_STATS, SIEGE_ASSET_BATTLE_STATS } from "../domain/battle.js";
@@ -546,6 +546,7 @@ export const commandBuilders = [
       .addIntegerOption((o) => o.setName("kartaca-savas-fili").setDescription("Kartaca Savaş Filleri").setMinValue(0))
       .addIntegerOption((o) => o.setName("iber-caetratileri").setDescription("İber Caetratileri").setMinValue(0))
       .addIntegerOption((o) => o.setName("cermen-sok-savascisi").setDescription("Cermen Şok Savaşçıları").setMinValue(0))
+      .addIntegerOption((o) => o.setName("anadolu-kalkanlilari").setDescription("Anadolu Kalkanlıları (Thureophoroi)").setMinValue(0))
       .addStringOption((o) => o.setName("yerleske").setDescription("İsteğe bağlı: kadronun ve kayıpların kaynak yerleşkesi").setAutocomplete(true)))
     .addSubcommand((sub) => sub.setName("gemi-ayarla").setDescription("Deniz savaşı taslağının gizli gemi kadrosunu düzenler")
       .addStringOption((o) => o.setName("taraf").setDescription("Savaş tarafı").setRequired(true).addChoices({ name: "A Tarafı", value: "A" }, { name: "B Tarafı", value: "B" }))
@@ -574,6 +575,15 @@ export const commandBuilders = [
         { name: "Koçbaşı", value: "ram" }
       ))
       .addIntegerOption((o) => o.setName("miktar").setDescription("Alınacak grup/adet").setMinValue(1).setRequired(true)))
+    .addSubcommand((sub) => sub.setName("suvari-indir").setDescription("Kuşatan süvarilerin seçilen kısmını yaya olarak hücuma hazırlar")
+      .addStringOption((o) => o.setName("birim").setDescription("Attan indirilecek süvari türü").setRequired(true).addChoices(
+        { name: "Hafif Süvari → Hafif Piyade", value: "light_cavalry" },
+        { name: "Ağır Süvari → Ağır Piyade", value: "heavy_cavalry" },
+        { name: "Atlı Okçu → Okçu", value: "horse_archer" },
+        { name: "Deve Süvarisi → Mızraklı Piyade", value: "camel_cavalry" }
+      ))
+      .addIntegerOption((o) => o.setName("miktar").setDescription("Yaya savaşacak mevcut; seçimi kaldırmak için 0").setMinValue(0).setRequired(true))
+      .addStringOption((o) => o.setName("ulke").setDescription("Yönetici için isteğe bağlı saldırgan ülke").setAutocomplete(true)))
     .addSubcommand((sub) => sub.setName("kusatma-asamasi").setDescription("Kuşatmayı bombardıman veya hücum durumuna geçirir")
       .addStringOption((o) => o.setName("asama").setDescription("Yeni kuşatma durumu").setRequired(true).addChoices(
         { name: "Bombardıman — yalnız Katapultlar sura ateş eder", value: "BOMBARDMENT" },
@@ -618,8 +628,21 @@ export const commandBuilders = [
     .setName("tamamlanmis-bina-ekle").setDescription("Yalnızca yönetici: binayı ödeme ve yapım süresi olmadan tamamlanmış ekler")
     .addStringOption((o) => o.setName("ulke").setDescription("Binanın ekleneceği ülke").setRequired(true))
     .addStringOption((o) => o.setName("yerleske").setDescription("Binanın ekleneceği yerleşke").setRequired(true))
-    .addStringOption((o) => o.setName("bina").setDescription("Tamamlanmış bina").setRequired(true).addChoices(...Object.values(BUILDINGS).map((building) => ({ name: building.name, value: building.key }))))
+    .addStringOption((o) => o.setName("bina").setDescription("Tamamlanmış bina").setRequired(true).addChoices(...BUILDABLE_BUILDINGS.map((building) => ({ name: building.name, value: building.key }))))
     .addIntegerOption((o) => o.setName("seviye").setDescription("Doğrudan uygulanacak bina seviyesi").setMinValue(1).setMaxValue(3).setRequired(true)),
+  new SlashCommandBuilder()
+    .setName("nufus-ekle").setDescription("Yalnızca yönetici: yerleşkeye özgür veya köle nüfusu ekler")
+    .addStringOption((o) => o.setName("ulke").setDescription("Yerleşkenin bağlı olduğu ülke").setRequired(true))
+    .addStringOption((o) => o.setName("yerleske").setDescription("Nüfusun ekleneceği yerleşke").setRequired(true))
+    .addStringOption((o) => o.setName("nufus-turu").setDescription("Eklenecek nüfus türü").setRequired(true).addChoices(
+      { name: "Özgür Nüfus", value: "FREE" }, { name: "Köle Nüfusu", value: "SLAVE" }
+    ))
+    .addIntegerOption((o) => o.setName("miktar").setDescription("Eklenecek nüfus miktarı").setMinValue(1).setRequired(true)),
+  new SlashCommandBuilder()
+    .setName("milis-ekle").setDescription("Yalnızca yönetici: yerleşkeye ücretsiz ve anında Milis ekler")
+    .addStringOption((o) => o.setName("ulke").setDescription("Yerleşkenin bağlı olduğu ülke").setRequired(true))
+    .addStringOption((o) => o.setName("yerleske").setDescription("Milis eklenecek yerleşke").setRequired(true))
+    .addIntegerOption((o) => o.setName("miktar").setDescription("Eklenecek Milis miktarı").setMinValue(1).setRequired(true)),
   new SlashCommandBuilder()
     .setName("yonetim").setDescription("Oyun yöneticisi komutları")
     .addSubcommand((sub) => sub.setName("ulke-olustur").setDescription("Yeni ülke oluşturur")
@@ -708,6 +731,12 @@ export const commandBuilders = [
       .addStringOption((o) => o.setName("islem").setDescription("İşlem").setRequired(true).addChoices({ name: "Ekle", value: "add" }, { name: "Kaldır", value: "remove" }))
       .addChannelOption((o) => o.setName("kanal").setDescription("Rol kanalı").addChannelTypes(ChannelType.GuildText).setRequired(true))),
   new SlashCommandBuilder()
+    .setName("olay-yoneticisi").setDescription("Yalnızca yönetici: bir üyeye Olay Yöneticisi rolü verir veya kaldırır")
+    .addUserOption((o) => o.setName("uye").setDescription("Yetkisi değiştirilecek üye").setRequired(true))
+    .addStringOption((o) => o.setName("islem").setDescription("Yapılacak işlem").setRequired(true).addChoices(
+      { name: "Rolü ver", value: "grant" }, { name: "Rolü kaldır", value: "revoke" }
+    )),
+  new SlashCommandBuilder()
     .setName("casusluk").setDescription("Casusluk görevlerini ve karşı casusluğu yönetir")
     .addSubcommand((sub) => sub.setName("gorev-baslat").setDescription("Bir casusu bir tur yolculukla sabotaj görevine gönderir")
       .addStringOption((o) => o.setName("casus").setDescription("Gönderilecek müsait casus").setRequired(true).setAutocomplete(true))
@@ -751,6 +780,6 @@ export const commandBuilders = [
     .addSubcommand((sub) => sub.setName("puanlar").setDescription("Tüm devletlerin kesin güç puanlarını yalnızca sana gösterir"))
 ].map((builder) => builder.toJSON());
 
-export const buildingChoices = Object.values(BUILDINGS);
+export const buildingChoices = BUILDABLE_BUILDINGS;
 export const unitChoices = Object.entries(UNITS).filter(([key]) => !["observer", "militia"].includes(key));
 export const shipChoices = Object.entries(SHIPS);

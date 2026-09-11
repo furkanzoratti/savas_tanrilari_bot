@@ -7,7 +7,8 @@ export const SPECIAL_UNITS = {
   persian_immortal: { name: "Pers Ölümsüzleri", price: 5_000, upkeep: 500 },
   carthaginian_war_elephant: { name: "Kartaca Savaş Filleri", price: 6_500, upkeep: 650 },
   iberian_caetrati: { name: "İber Caetratileri", price: 3_000, upkeep: 300 },
-  germanic_shock_warrior: { name: "Cermen Şok Savaşçıları", price: 3_500, upkeep: 350 }
+  germanic_shock_warrior: { name: "Cermen Şok Savaşçıları", price: 3_500, upkeep: 350 },
+  anatolian_thureophoroi: { name: "Anadolu Kalkanlıları (Thureophoroi)", price: 3_000, upkeep: 300 }
 } as const;
 
 export type SpecialUnitType = keyof typeof SPECIAL_UNITS;

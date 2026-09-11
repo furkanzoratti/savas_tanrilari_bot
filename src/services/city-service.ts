@@ -37,7 +37,10 @@ async function guildState(client: DbClient, guildId: string): Promise<GuildRow> 
 }
 
 async function activeBuildingLevel(client: DbClient, settlementId: string, type: string): Promise<number> {
-  return (await client.query<{ level: number }>("SELECT level FROM buildings WHERE settlement_id=$1 AND building_type=$2 AND status='ACTIVE'", [settlementId, type])).rows[0]?.level ?? 0;
+  return (await client.query<{ level: number }>(
+    "SELECT level FROM buildings WHERE settlement_id=$1 AND building_type=$2 AND status IN ('ACTIVE','BUILDING') AND level>0",
+    [settlementId, type]
+  )).rows[0]?.level ?? 0;
 }
 
 async function audit(client: DbClient, guildId: string, actorId: string, action: string, entity: string, id: string, details: unknown): Promise<void> {
@@ -274,7 +277,7 @@ export const cityService = {
     });
   },
 
-  async rollDisease(input: { guildId: string; actorId: string; countryId: string; settlementId: string; baseChance: number }): Promise<{ baseChance: number; chance: number; roll: number; triggered: boolean; oliveProtected: boolean; pantheonProtected: boolean }> {
+  async rollDisease(input: { guildId: string; actorId: string; countryId: string; settlementId: string; baseChance: number }): Promise<{ baseChance: number; chance: number; roll: number; triggered: boolean; oliveProtected: boolean; pantheonProtected: boolean; innsReduction: number }> {
     return withTransaction(async (client) => {
       const country = await getCountry(client, input.guildId, input.countryId);
       const settlement = await getSettlement(client, input.countryId, input.settlementId, true);
@@ -283,15 +286,17 @@ export const cityService = {
       const oliveProtected = resources.includes("OLIVE");
       const requiredPantheonLevel = country.active_formable_key === "KUSH" ? 1 : 2;
       const pantheonProtected = (await activeBuildingLevel(client, settlement.id, "pantheon")) >= requiredPantheonLevel;
-      const chance = Math.max(0, Math.floor((input.baseChance - (oliveProtected ? 10 : 0)) * (pantheonProtected ? 0.50 : 1)));
+      const innsLevel = await activeBuildingLevel(client, settlement.id, "inns_baths");
+      const innsReduction = innsLevel * 2;
+      const chance = Math.max(0, Math.floor((input.baseChance - (oliveProtected ? 10 : 0) - innsReduction) * (pantheonProtected ? 0.50 : 1)));
       const roll = randomInt(1, 101);
       const triggered = roll <= chance;
       const guild = await guildState(client, input.guildId);
       await client.query("INSERT INTO settlement_events(settlement_id,turn,event_type,chance,roll,triggered,details) VALUES($1,$2,'EPIDEMIC',$3,$4,$5,$6::jsonb)",
-        [settlement.id, guild.current_turn, chance, roll, triggered, JSON.stringify({ baseChance: input.baseChance, oliveProtected, pantheonProtected })]);
+        [settlement.id, guild.current_turn, chance, roll, triggered, JSON.stringify({ baseChance: input.baseChance, oliveProtected, pantheonProtected, innsReduction })]);
       if (triggered) await client.query("UPDATE settlements SET epidemic_active=TRUE WHERE id=$1", [settlement.id]);
       await audit(client, input.guildId, input.actorId, "SETTLEMENT_EPIDEMIC_ROLL", "settlement", settlement.id, { baseChance: input.baseChance, chance, roll, triggered });
-      return { baseChance: input.baseChance, chance, roll, triggered, oliveProtected, pantheonProtected };
+      return { baseChance: input.baseChance, chance, roll, triggered, oliveProtected, pantheonProtected, innsReduction };
     });
   },
 

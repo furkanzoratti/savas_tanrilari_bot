@@ -22,7 +22,8 @@ export const UNIT_POWER: Record<keyof typeof UNITS, number> = {
   persian_immortal: 3.10,
   carthaginian_war_elephant: 4.40,
   iberian_caetrati: 2.10,
-  germanic_shock_warrior: 2.80
+  germanic_shock_warrior: 2.80,
+  anatolian_thureophoroi: 2.20
 };
 
 export const SHIP_POWER: Record<keyof typeof SHIPS, number> = {
@@ -112,6 +113,7 @@ export function calculateGreatPower(input: GreatPowerInput): GreatPowerBreakdown
 
     for (const building of settlement.buildings) {
       if (building.status !== "ACTIVE" || building.level <= 0) continue;
+      if (building.building_type === "lupanar") continue;
       const definition = BUILDINGS[building.building_type];
       if (!definition) continue;
       buildingScore += BUILDING_POWER[definition.category][building.level] ?? 0;

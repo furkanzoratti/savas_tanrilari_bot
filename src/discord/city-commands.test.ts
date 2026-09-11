@@ -41,7 +41,7 @@ describe("şehir geliştirme ve Akademi komutları", () => {
     const select = events?.options?.find((option) => option.name === "sec");
     expect(select?.options?.find((option) => option.name === "tur")).toMatchObject({ required: true });
     expect(select?.options?.find((option) => option.name === "ulke")).not.toMatchObject({ required: true });
-    expect(select?.options?.find((option) => option.name === "tur")?.choices?.length).toBe(4);
+    expect(select?.options?.find((option) => option.name === "tur")?.choices?.length).toBe(11);
     const apply = events?.options?.find((option) => option.name === "uygula");
     expect(apply?.options?.find((option) => option.name === "ulke")).not.toMatchObject({ required: true });
     expect(apply?.options?.find((option) => option.name === "yerleske")).not.toMatchObject({ required: true });

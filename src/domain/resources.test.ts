@@ -10,8 +10,40 @@ describe("hammadde etkileri", () => {
   it("üretim maliyeti indirimlerini yerleşke kaynaklarına göre biriktirir", () => {
     expect(buildingCostMultiplier("curia", ["TIMBER", "MARBLE"])).toBe(0.8);
     expect(buildingDurationReduction("curia", ["MARBLE"])).toBe(1);
+    expect(buildingCostMultiplier("inns_baths", ["TIMBER", "MARBLE", "GLASS"])).toBe(0.7);
+    expect(buildingCostMultiplier("customs_house", ["MARBLE"])).toBe(0.9);
+    expect(buildingCostMultiplier("census_tax_office", ["MARBLE"])).toBe(0.9);
+    expect(buildingDurationReduction("inns_baths", ["MARBLE"])).toBe(1);
+    expect(buildingDurationReduction("customs_house", ["MARBLE"])).toBe(1);
+    expect(buildingDurationReduction("census_tax_office", ["MARBLE"])).toBe(1);
     expect(unitCostMultiplier("heavy_cavalry", ["IRON", "HORSES"])).toBe(0.8);
     expect(shipCostMultiplier(["TIMBER"])).toBe(0.9);
+  });
+
+  it("Şarap, Cam ve İpek etkilerini yeni ekonomi binalarına uygular", () => {
+    const inns = calculateCategorizedIncome({
+      settlementIncome: 0, taxIncome: 0, landTradeIncome: 0, seaTradeIncome: 0,
+      manualFlatIncome: 0, manualIncomePercent: 0,
+      buildings: [{ buildingType: "inns_baths", level: 2 }], ruinStage: 0,
+      resources: ["WINE", "GLASS"]
+    });
+    expect(inns.gross.building).toBe(2_025);
+
+    const commerce = calculateCategorizedIncome({
+      settlementIncome: 0, taxIncome: 0, landTradeIncome: 1_000, seaTradeIncome: 0,
+      manualFlatIncome: 0, manualIncomePercent: 0,
+      buildings: [{ buildingType: "caravanserai", level: 1 }], ruinStage: 0,
+      resources: ["SILK"]
+    });
+    expect(commerce.gross).toEqual({ building: 550, tax: 0, landTrade: 1_165, seaTrade: 0 });
+
+    const artisans = calculateCategorizedIncome({
+      settlementIncome: 0, taxIncome: 0, landTradeIncome: 0, seaTradeIncome: 0,
+      manualFlatIncome: 0, manualIncomePercent: 0,
+      buildings: [{ buildingType: "artisans_quarter", level: 1 }], ruinStage: 0,
+      resources: ["SILK", "IRON"]
+    });
+    expect(artisans.gross.building).toBe(1_100);
   });
 
   it("Tahıl bakım ve nüfus etkisini uygular", () => {

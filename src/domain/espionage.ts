@@ -1,7 +1,7 @@
 export const ESPIONAGE_TARGETS = {
-  ECONOMIC: { label: "Bina Sabotajı • Ekonomik", buildingTypes: ["trade_guild", "lupanar", "farm", "slave_camp", "agora"], group: "SABOTEUR" },
+  ECONOMIC: { label: "Bina Sabotajı • Ekonomik", buildingTypes: ["trade_guild", "farm", "slave_camp", "agora", "inns_baths", "caravanserai", "customs_house", "artisans_quarter", "census_tax_office", "raw_material"], group: "SABOTEUR" },
   MILITARY: { label: "Bina Sabotajı • Askerî", buildingTypes: ["engineering"], group: "SABOTEUR" },
-  PUBLIC: { label: "Bina Sabotajı • Kamu ve Altyapı", buildingTypes: ["healer", "academy", "curia", "pantheon", "aqueduct", "raw_material"], group: "SABOTEUR" },
+  PUBLIC: { label: "Bina Sabotajı • Kamu ve Altyapı", buildingTypes: ["healer", "academy", "curia", "pantheon", "aqueduct"], group: "SABOTEUR" },
   NAVAL: { label: "Bina Sabotajı • Denizcilik", buildingTypes: ["port", "shipyard"], group: "SABOTEUR" },
   CONSTRUCTION: { label: "İnşaat Sabotajı", buildingTypes: [], group: "SABOTEUR" },
   RECRUITMENT_SABOTAGE: { label: "Asker Alımı Sabotajı", buildingTypes: [], group: "SABOTEUR" },

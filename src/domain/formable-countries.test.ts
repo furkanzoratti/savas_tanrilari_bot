@@ -46,7 +46,7 @@ describe("kurulabilir ülkeler", () => {
       buildings: [{ buildingType: "port", level: 1 }],
       formableKey: "BRITANNIA"
     });
-    expect(income.gross.seaTrade).toBe(600);
+    expect(income.gross.seaTrade).toBe(900);
   });
 
   it("Kartaca'nın liman ve paralı asker etkilerini uygular, otomatik gemi kapasitesi vermez", () => {
@@ -62,7 +62,7 @@ describe("kurulabilir ülkeler", () => {
       manualFlatIncome:0,manualIncomePercent:0,ruinStage:0,
       buildings:[{ buildingType:"port",level:1 }],formableKey:"CARTHAGE"
     });
-    expect(income.gross.seaTrade).toBe(600);
+    expect(income.gross.seaTrade).toBe(900);
   });
 
   it("Büyük Britanya Britanya mirasını ve üç üst devlet bonusunu birlikte taşır", () => {

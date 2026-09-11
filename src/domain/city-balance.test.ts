@@ -30,7 +30,7 @@ describe("yerleşke geliştirme ve politika dengesi", () => {
       slavePopulation: 2_000,
       buildings: [{ buildingType: "slave_camp", level: 2 }]
     });
-    expect(result.gross.building).toBe(600);
+    expect(result.gross.building).toBe(800);
   });
 
   it("Vergi Sıkılaştırmasını yalnızca halk vergisine uygular", () => {
@@ -51,8 +51,8 @@ describe("yerleşke geliştirme ve politika dengesi", () => {
       buildings: [{ buildingType: "trade_guild", level: 1 }],
       activePolicies: ["MARKET_FAIRS"]
     });
-    expect(result.gross.building).toBe(400);
-    expect(incomeTotal(result.gross)).toBe(1_400);
+    expect(result.gross.building).toBe(1_240);
+    expect(incomeTotal(result.gross)).toBe(2_240);
   });
 
   it("Agora tüccar atamasını şehir gelirine yüzde on olarak işler", () => {
@@ -63,8 +63,8 @@ describe("yerleşke geliştirme ve politika dengesi", () => {
       buildings: [{ buildingType: "agora", level: 2 }],
       assignedMerchant: true
     });
-    expect(result.gross.building).toBe(1_300);
-    expect(incomeTotal(result.gross)).toBe(3_300);
+    expect(result.gross.building).toBe(1_575);
+    expect(incomeTotal(result.gross)).toBe(3_575);
   });
 
   it("Tüccarın her özellik puanını Agora gelirine iki yüzde puan ekler", () => {
@@ -76,8 +76,8 @@ describe("yerleşke geliştirme ve politika dengesi", () => {
       assignedMerchant: true,
       merchantSkillBonus: 1
     });
-    expect(result.gross.building).toBe(1_360);
-    expect(incomeTotal(result.gross)).toBe(3_360);
+    expect(result.gross.building).toBe(1_640);
+    expect(incomeTotal(result.gross)).toBe(3_640);
   });
 
   it("Tersane Sv3 bonusunu yalnızca deniz ticaretine uygular", () => {
@@ -91,7 +91,7 @@ describe("yerleşke geliştirme ve politika dengesi", () => {
       ]
     });
     expect(result.gross.landTrade).toBe(1_000);
-    expect(result.gross.seaTrade).toBe(1_725);
+    expect(result.gross.seaTrade).toBe(2_012);
     expect(result.gross.building).toBe(0);
   });
 
@@ -101,16 +101,58 @@ describe("yerleşke geliştirme ve politika dengesi", () => {
       taxIncome: 1_000,
       landTradeIncome: 1_000,
       seaTradeIncome: 1_000,
+      manualIncomePercent: 0.20,
       buildings: [
         { buildingType: "trade_guild", level: 3 },
-        { buildingType: "lupanar", level: 3 },
         { buildingType: "agora", level: 3 }
       ],
       resources: ["GOLD", "SPICES"],
       assignedMerchant: true
     });
-    expect(result.gross.building).toBe(7_500);
-    expect(incomeTotal(result.gross)).toBe(10_500);
+    expect(result.gross.building).toBe(11_525);
+    expect(incomeTotal(result.gross)).toBe(14_525);
+  });
+
+  it("Kervansaray bonusunu yalnız kara ticaretine uygular", () => {
+    const result = calculateCategorizedIncome({
+      ...base,
+      taxIncome: 1_000,
+      landTradeIncome: 1_000,
+      buildings: [{ buildingType: "caravanserai", level: 1 }]
+    });
+    expect(result.gross).toEqual({ building: 500, tax: 1_000, landTrade: 1_150, seaTrade: 0 });
+  });
+
+  it("Gümrükhane etkilerini yalnız etkin Liman varken uygular", () => {
+    const withoutPort = calculateCategorizedIncome({
+      ...base,
+      buildings: [{ buildingType: "customs_house", level: 2 }]
+    });
+    const withPort = calculateCategorizedIncome({
+      ...base,
+      buildings: [{ buildingType: "port", level: 1 }, { buildingType: "customs_house", level: 2 }]
+    });
+    expect(withoutPort.gross).toEqual({ building: 0, tax: 0, landTrade: 0, seaTrade: 0 });
+    expect(withPort.gross).toEqual({ building: 1_000, tax: 0, landTrade: 0, seaTrade: 1_050 });
+  });
+
+  it("Zanaatkârlar Mahallesini en fazla üç uygun hammaddeden besler", () => {
+    const result = calculateCategorizedIncome({
+      ...base,
+      buildings: [{ buildingType: "artisans_quarter", level: 3 }],
+      resources: ["IRON", "TIMBER", "LEATHER", "GLASS", "GRAIN"]
+    });
+    expect(result.gross.building).toBe(4_300);
+  });
+
+  it("Sayım ve Vergi Dairesi bonusunu yalnız halk vergisine uygular", () => {
+    const result = calculateCategorizedIncome({
+      ...base,
+      taxIncome: 1_000,
+      landTradeIncome: 1_000,
+      buildings: [{ buildingType: "census_tax_office", level: 3 }]
+    });
+    expect(result.gross).toEqual({ building: 2_000, tax: 1_500, landTrade: 1_000, seaTrade: 0 });
   });
 
   it("Sv3 atölye bonusunu yalnızca güçlendirilmiş topçu adedine uygular", () => {

@@ -19,7 +19,7 @@ describe("ikinci sürüm yerleşke ekonomisi", () => {
       buildings: [{ buildingType: "trade_guild", level: 1 }],
       ruinStage: 0
     });
-    expect(result.gross).toEqual({ building: 1_000, tax: 3_000, landTrade: 7_000, seaTrade: 0 });
+    expect(result.gross).toEqual({ building: 1_825, tax: 3_000, landTrade: 7_000, seaTrade: 0 });
   });
 
   it("deniz ticareti başlangıçta sıfırdır ve Liman geliriyle açılır", () => {
@@ -32,7 +32,7 @@ describe("ikinci sürüm yerleşke ekonomisi", () => {
       manualFlatIncome: 0, manualIncomePercent: 0, buildings: [{ buildingType: "port", level: 1 }], ruinStage: 0
     });
     expect(withoutPort.gross.seaTrade).toBe(0);
-    expect(withPort.gross.seaTrade).toBe(500);
+    expect(withPort.gross.seaTrade).toBe(750);
   });
 });
 

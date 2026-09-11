@@ -8,7 +8,7 @@ import { gold } from "../domain/format.js";
 import { cityService } from "../services/city-service.js";
 import { characterService } from "../services/character-service.js";
 import { gameService, GameError, type AcademyTrainingSession } from "../services/game-service.js";
-import { assertCountryAccess, isGameMaster, requireGameMaster, resolveCountry } from "./auth.js";
+import { assertCountryAccess, isGameMaster, requireEventManager, requireGameMaster, resolveCountry } from "./auth.js";
 import { charactersEmbed, queueCharacterLog } from "./character-ui.js";
 import { handleSettlementEventButton, handleSettlementEventCommand } from "./event-ui.js";
 
@@ -109,19 +109,27 @@ export async function handleCityCommand(interaction: ChatInputCommandInteraction
   if (!["politika", "akademi", "panteon", "olay"].includes(interaction.commandName)) return false;
   if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
   if (interaction.commandName === "olay") {
-    requireGameMaster(interaction);
+    requireEventManager(interaction);
     if (await handleSettlementEventCommand(interaction)) return true;
   }
   const sub = interaction.options.getSubcommand();
   const publicReply = interaction.commandName === "olay" || (interaction.commandName === "akademi" && sub === "egit");
   await interaction.deferReply({ ephemeral: !publicReply });
-  const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
+  const requestedCountry = interaction.options.getString("ulke");
+  const country = interaction.commandName === "olay" && requestedCountry
+    ? await gameService.countryByName(interaction.guildId, requestedCountry)
+    : await resolveCountry(interaction, requestedCountry);
+  if (!country) throw new GameError("Belirtilen ülke bulunamadı.");
 
   if (interaction.commandName === "olay") {
     const settlement = await findSettlement(country.id, interaction.options.getString("yerleske", true));
     if (sub === "salgin") {
       const result = await cityService.rollDisease({ guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id, settlementId: settlement.id, baseChance: interaction.options.getInteger("baz-risk", true) });
-      const protections = [result.oliveProtected ? "Zeytin: −10 puan" : null, result.pantheonProtected ? "Panteon Sv2+: kalan risk yarıya iner" : null].filter(Boolean).join(" • ") || "Koruyucu bina veya kaynak yok";
+      const protections = [
+        result.oliveProtected ? "Zeytin: −10 puan" : null,
+        result.innsReduction > 0 ? `Hanlar ve Hamamlar: −${result.innsReduction} puan` : null,
+        result.pantheonProtected ? "Panteon Sv2+: kalan risk yarıya iner" : null
+      ].filter(Boolean).join(" • ") || "Koruyucu bina veya kaynak yok";
       await interaction.editReply({ content: `🦠 **${settlement.name}** • Temel risk: **%${result.baseChance}** • Nihai risk: **%${result.chance}**\n🎲 **1d100 → ${result.roll}**\n🛡️ ${protections}\n${result.triggered ? "⚠️ Salgın olayı tetiklendi." : "✅ Salgın engellendi."}` });
     } else if (sub === "salgin-iyilesme") {
       const result = await cityService.rollDiseaseRecovery({ guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id, settlementId: settlement.id });

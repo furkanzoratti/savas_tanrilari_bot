@@ -9,9 +9,12 @@ export type CharacterRole = "SPY" | "MERCHANT" | "COMMANDER" | "DIPLOMAT";
 export interface BuildingEffect {
   flatIncome?: number;
   incomePercent?: number;
+  landTradePercent?: number;
+  taxIncomePercent?: number;
   seaIncomePercent?: number;
   upkeep?: number;
   populationFlat?: number;
+  populationRate?: number;
   populationPercent?: number;
 }
 

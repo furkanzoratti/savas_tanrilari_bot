@@ -30,6 +30,7 @@ export function calculateSettlementEconomy(input: {
   let buildingUpkeep = 0;
 
   for (const building of input.buildings) {
+    if (building.buildingType === "lupanar") continue;
     const definition = BUILDINGS[building.buildingType];
     const effect = definition?.levels[building.level];
     if (!effect) continue;
@@ -96,21 +97,21 @@ export function calculatePopulationGain(input: {
 }): number {
   let healerGrowth = 0;
   let growthPercent = 0;
-  let lupanarLevel = 0;
 
   for (const building of input.buildings) {
+    if (building.buildingType === "lupanar") continue;
     const effect = BUILDINGS[building.buildingType]?.levels[building.level];
     if (!effect) continue;
-    if (building.buildingType === "healer") healerGrowth = (effect.populationFlat ?? 0) * (input.resources?.includes("OLIVE") ? 1.2 : 1);
-    if (building.buildingType === "aqueduct") growthPercent += effect.populationPercent ?? 0;
-    if (building.buildingType === "lupanar") lupanarLevel = building.level;
+    if (building.buildingType === "healer") {
+      const baseHealerGrowth = effect.populationRate !== undefined
+        ? Math.max(0, input.population) * effect.populationRate
+        : effect.populationFlat ?? 0;
+      healerGrowth = baseHealerGrowth * (input.resources?.includes("OLIVE") ? 1.2 : 1);
+    }
+    growthPercent += effect.populationPercent ?? 0;
   }
 
   let rawGrowth = Math.max(0, input.population) * naturalPopulationGrowthRate(input.population) + healerGrowth;
-  if (lupanarLevel === 1) rawGrowth = healerGrowth > 0 ? rawGrowth * 0.5 : 0;
-  if (lupanarLevel === 2) rawGrowth *= 0.3;
-  if (lupanarLevel === 3) rawGrowth = healerGrowth;
-
   rawGrowth *= 1 + growthPercent;
   if (input.resources?.includes("GRAIN")) rawGrowth *= 1.10;
   if (input.resources?.includes("SPICES")) rawGrowth *= 1.05;

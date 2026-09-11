@@ -44,7 +44,11 @@ Bir gemi savaşta kaybedildiğinde bütün zorunlu mürettebatı da kaybedilmiş
 
 ### **🛟 LİMAN RIHTIM KAPASİTESİ**
 
-• Her aktif Liman **30 rıhtım puanı** sağlar.
+• **Liman Sv1:** 30 rıhtım puanı sağlar.
+
+• **Liman Sv2:** 40 rıhtım puanı sağlar.
+
+• **Liman Sv3:** 50 rıhtım puanı sağlar.
 
 • Limandaki rezerv gemiler ile devam eden gemi üretimleri rıhtım kapasitesine dâhildir.
 
@@ -52,7 +56,7 @@ Bir gemi savaşta kaybedildiğinde bütün zorunlu mürettebatı da kaybedilmiş
 
 • Kerkouros 1, Trireme 2, Quinquereme 4 rıhtım puanı kullanır.
 
-• Yeni sipariş, mevcut rezerv ve üretimdeki gemilerle birlikte 30 puanı aşamaz.
+• Yeni sipariş, mevcut rezerv ve üretimdeki gemilerle birlikte Limanın seviyesine ait rıhtım sınırını aşamaz.
 
 • Kapasiteyi aşan eski filolar silinmez; kullanım sınırın altına inene kadar yeni gemi siparişi verilemez.
 
@@ -88,4 +92,4 @@ Oyuncular aynı Alım Turunda farklı gemi türlerini birlikte sipariş edebilir
 
 • **Toplam: 15/15 üretim puanı**
 
-Siparişlerin toplam üretim puanı Tersane sınırını, toplam rıhtım puanı ise Limanın 30 puanlık sınırını aşamaz.
+Siparişlerin toplam üretim puanı Tersane sınırını, toplam rıhtım puanı ise Limanın seviyesine ait kapasiteyi aşamaz.

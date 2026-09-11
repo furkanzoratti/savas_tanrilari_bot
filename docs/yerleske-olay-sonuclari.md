@@ -1,11 +1,12 @@
-# 🚨 Savaş Tanrıları Role Play: Yerleşke Olayı Sonuçları
+# 🗺️ Savaş Tanrıları Role Play: Yerleşke Olayı Sonuçları
 
-Bu sonuçlar bot tarafından otomatik uygulanmaz. Olayın şiddetini ve sayısal sonuçlarını oyun yöneticisi belirler; bot yalnız olayın aktif durumunu, süreli gelir cezasını ve yapılan yönetici işlemlerini saklar.
+Bu sonuçlar bot tarafından otomatik uygulanmaz. Olayın şiddetini ve sayısal sonuçlarını oyun yöneticisi belirler; bot yalnız olayın seçimini, aktif durumunu ve yapılan yönetici işlemlerini saklar.
 
 ## ⚖️ Genel uygulama kuralları
 
 - Olay başladıktan sonra DM **Hafif, Orta, Ağır veya Özel** sonuç seçer ve oyunculara açıklar.
-- Nüfus kaybı `/yonetim nufus-sil`, yerel hazine kaybı `/yonetim yerleske-hazinesi`, süreli gelir kaybı `/gelir-cezasi uygula` ile işlenir.
+- Nüfus kaybı `/yonetim nufus-sil`, nüfus kazanımı `/nufus-ekle`, yerel hazine değişimi `/yonetim yerleske-hazinesi`, süreli gelir kaybı `/gelir-cezasi uygula` ve gönüllü Milis `/milis-ekle` ile elle işlenir.
+- Olay başlatmak tek başına gelir, hazine, nüfus veya birlik değiştirmez.
 - Gelir cezası bütün gelir kalemlerine aynı oranda uygulanır; bakım giderlerini azaltmaz.
 - Bir yerleşkedeki yeni gelir cezası mevcut cezayı değiştirir. Birden fazla olay varsa DM birleşik nihai yüzdeyi tek komutla girmelidir.
 - Olay `/olay sonlandir` ile kaldırılana kadar belgede aktif görünür.
@@ -101,9 +102,37 @@ DM; grev, mezhep çatışması, hanedan krizi veya vergi ayaklanmasına uygun ö
 
 DM; ayrılıkçı hareket, taht iddiası veya dış destekli isyana uygun nüfus, hazine, gelir ve haraplık sonuçlarını ilan eder.
 
+## 🏜️ Kuraklık
+
+Kuraklık; özellikle Çiftlik, Su Kemeri/Sarnıç ve Tahıl erişimi bulunmayan yerleşkelerde daha yüksek ağırlıkla seçilir. Kuşatma ve haraplık riski artırır. DM olayın şiddetine göre gelir, hazine veya nüfus sonucunu elle uygular. Kuraklık kendi başına otomatik olarak Kıtlık başlatmaz.
+
+## 🥣 Kıtlık
+
+Kıtlık ayrı bir kötü olaydır. Aktif Kuraklık, kuşatma, haraplık ve gıda altyapısının zayıflığı seçim ağırlığını yükseltir. Çiftlik, Su Kemeri/Sarnıç ve Tahıl erişimi riski düşürür. DM gelir, hazine ve nüfus kayıplarını elle uygular.
+
+## 🌾 Bereketli Hasat
+
+Çiftlik, Su Kemeri/Sarnıç ve Tahıl erişimi seçim ağırlığını artırır. DM uygun gördüğü gelir, yerel hazine veya nüfus kazanımını elle uygular.
+
+## 🪙 Ticari Canlanma
+
+Agora, Liman, Ticaret Loncası ve görevli Tüccar seçim ağırlığını artırır. DM gelir veya yerel hazine kazanımını elle uygular. Aktif Karaborsa ve Huzursuzluk olayın ağırlığını azaltır.
+
+## 🧳 Göç Dalgası
+
+İstikrarlı ve gelişmeye açık yerleşkelere yeni nüfus gelmesini temsil eder. Fethedilmiş, kuşatma altında, salgınlı veya açık isyanlı yerleşkeler bu olayın havuzuna girmez. Kazanılan özgür veya köle nüfusu DM `/nufus-ekle` ile işler.
+
+## 🛠️ Usta Zanaatkârların Gelişi
+
+Mühendislik Atölyesi, Agora, Ticaret Loncası ile Kereste, Demir veya Mermer erişimi seçim ağırlığını artırır. İnşaat süresi, maliyet iadesi veya başka bir ekonomik sonuç DM tarafından elle uygulanır; olay hiçbir binayı otomatik tamamlamaz.
+
+## 🛡️ Yerel Gönüllüler
+
+Savaş Hazırlığı, Garnizon Güçlendirme, Curia ve kuşatma tehdidi seçim ağırlığını artırır. Verilecek Milis miktarını DM belirler ve `/milis-ekle` ile ücretsiz, anında ekler. Bu manuel komut nüfus veya hazine düşürmez.
+
 ## 🎲 Olay kontrolü
 
-Aktif olay için her oyun turunun sonunda DM açık şekilde **1d20** atar:
+Aktif kötü olay için her oyun turunun sonunda DM açık şekilde **1d20** atar. Olumlu olaylar açıklanan ödül elle uygulandıktan sonra `/olay sonlandir` ile kapatılır:
 
 - **Hafif:** Kontrol hedefi **8**.
 - **Orta:** Kontrol hedefi **12**.

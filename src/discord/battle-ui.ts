@@ -1,5 +1,5 @@
 import { ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, type ButtonInteraction, type ChatInputCommandInteraction, type Client } from "discord.js";
-import { BATTLE_TERRAINS, BATTLE_UNIT_STATS, LADDER_GROUP_ASSAULT_CAPACITY, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, SIEGE_ASSET_BATTLE_STATS, SIEGE_ASSAULT_FRONTAGE, SIEGE_TOWER_ASSAULT_CAPACITY, assessArmyComposition, orderState, remainingBombardments, siegeAssaultAccess, siegeDefenderComposition, siegeDefenseModifiers, siegeOrderState, type ArmyCompositionContext, type BattleComposition, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain, type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeTarget } from "../domain/battle.js";
+import { BATTLE_TERRAINS, BATTLE_UNIT_STATS, LADDER_GROUP_ASSAULT_CAPACITY, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, SIEGE_ASSET_BATTLE_STATS, SIEGE_ASSAULT_FRONTAGE, SIEGE_ATTACKER_DISMOUNT_MAP, SIEGE_TOWER_ASSAULT_CAPACITY, assessArmyComposition, orderState, remainingBombardments, siegeAssaultAccess, siegeAttackerDismountedComposition, siegeDefenderComposition, siegeDefenseModifiers, siegeOrderState, type ArmyCompositionContext, type BattleComposition, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain, type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeDismountUnitType, type SiegeTarget } from "../domain/battle.js";
 import { number } from "../domain/format.js";
 import { battleService, type BattleRoundResult, type BattleView, type SiegePhase } from "../services/battle-service.js";
 import { gameService, GameError } from "../services/game-service.js";
@@ -23,9 +23,19 @@ function currentCompositionLabel(view: BattleView, side: BattleSideKey): string 
     && (view.battle.wall_current_hp ?? 0) > 0
     && (view.battle.gate_current_hp ?? 0) > 0;
   const context: ArmyCompositionContext = restricted ? "SIEGE_RESTRICTED" : "FIELD";
+  const selectedDismountments: BattleComposition = {};
+  if (restricted && side === "A") {
+    for (const participant of view.sides.A.participants) {
+      for (const source of Object.keys(SIEGE_ATTACKER_DISMOUNT_MAP) as SiegeDismountUnitType[]) {
+        selectedDismountments[source] = (selectedDismountments[source] ?? 0) + Number(participant.dismounted_composition?.[source] ?? 0);
+      }
+    }
+  }
   const composition: BattleComposition = view.battle.terrain === "SIEGE" && side === "B"
     ? siegeDefenderComposition(view.sides[side].composition)
-    : view.sides[side].composition;
+    : restricted && side === "A"
+      ? siegeAttackerDismountedComposition(view.sides.A.composition, selectedDismountments)
+      : view.sides[side].composition;
   return assessArmyComposition(composition,context).label;
 }
 
@@ -229,7 +239,7 @@ function casualtyReportEmbed(view: BattleView, rows: Array<{ side_key: BattleSid
 export async function handleBattleCommand(interaction: ChatInputCommandInteraction): Promise<void> {
   if (!interaction.guildId || !interaction.channelId) throw new GameError("Savaş komutları yalnızca bir sunucu kanalında kullanılabilir.");
   const sub = interaction.options.getSubcommand();
-  if (sub !== "saha-aleti-al") requireGameMaster(interaction);
+  if (!["saha-aleti-al", "suvari-indir"].includes(sub)) requireGameMaster(interaction);
   const publicCommands = new Set(["bombardiman", "yayinla", "tur-oynat", "bitir", "iptal"]);
   await interaction.deferReply({ ephemeral: !publicCommands.has(sub) });
   if (sub === "baslat") {
@@ -301,7 +311,8 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
         persian_immortal: interaction.options.getInteger("pers-olumsuzleri") ?? 0,
         carthaginian_war_elephant: interaction.options.getInteger("kartaca-savas-fili") ?? 0,
         iberian_caetrati: interaction.options.getInteger("iber-caetratileri") ?? 0,
-        germanic_shock_warrior: interaction.options.getInteger("cermen-sok-savascisi") ?? 0
+        germanic_shock_warrior: interaction.options.getInteger("cermen-sok-savascisi") ?? 0,
+        anatolian_thureophoroi: interaction.options.getInteger("anadolu-kalkanlilari") ?? 0
       } });
     const side = (["A","B"] as const).find((sideKey) => view.sides[sideKey].participants
       .some((item) => item.country_name.toLocaleLowerCase("tr-TR") === countryName.trim().toLocaleLowerCase("tr-TR")));
@@ -351,6 +362,19 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
     await interaction.editReply({
       content: `🛠️ **${result.view.sides.A.country_name}**, **${result.settlementName}** hazinesinden **${number(result.cost)} Altın** ödeyerek ${quantity} **${assetName}** hazırladı. Alet kuşatma düzenine anında eklendi; mevcut savaş kartı güncellendi.`,
     });
+  } else if (sub === "suvari-indir") {
+    const unitType = interaction.options.getString("birim", true) as SiegeDismountUnitType;
+    const quantity = interaction.options.getInteger("miktar", true);
+    const result = await battleService.setSiegeDismount({
+      guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id,
+      isGameMaster: isGameMaster(interaction), countryName: interaction.options.getString("ulke"), unitType, quantity
+    });
+    await refreshBattleCard(interaction.client, result.view);
+    const sourceLabel = BATTLE_UNIT_STATS[unitType].label;
+    const targetLabel = BATTLE_UNIT_STATS[result.targetType].label;
+    await interaction.editReply({ content: quantity > 0
+      ? `✅ **${result.countryName}** ülkesinin **${number(quantity)} ${sourceLabel}** birliği kuşatma hücumunda **${targetLabel}** olarak yaya savaşacak. Kayıplar yine ${sourceLabel} kaydından düşecek.`
+      : `✅ **${result.countryName}** ülkesinin **${sourceLabel}** için attan inme emri kaldırıldı.` });
   } else if (sub === "kusatma-asamasi") {
     requireGameMaster(interaction);
     const result = await battleService.setSiegePhase({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id, phase: interaction.options.getString("asama", true) as SiegePhase });
@@ -395,7 +419,12 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
       }).join("\n") || "Birlik veya gemi yok.";
       const support = Object.entries(view.sides[key].support_assets ?? {}).filter(([, q]) => (q ?? 0) > 0)
         .map(([asset, q]) => `• ${SIEGE_ASSET_BATTLE_STATS[asset as SiegeAssetType]?.label ?? asset}: **${number(q ?? 0)}** • Hedef: **${view.sides[key].support_targets?.[asset as SiegeAssetType] ?? "ASSAULT"}**`).join("\n");
-      return `**${key} — ${view.sides[key].country_name}**\n${lines}${support ? `\n**Kuşatma Desteği**\n${support}` : ""}\nBasınç: ${view.sides[key].pressure}`;
+      const dismounted = key === "A" ? view.sides.A.participants.flatMap((participant) =>
+        Object.entries(participant.dismounted_composition ?? {}).filter(([, quantity]) => Number(quantity) > 0).map(([source, quantity]) => {
+          const sourceType = source as SiegeDismountUnitType;
+          return `• ${participant.country_name}: ${number(Number(quantity))} ${BATTLE_UNIT_STATS[sourceType].label} → ${BATTLE_UNIT_STATS[SIEGE_ATTACKER_DISMOUNT_MAP[sourceType]].label}`;
+        })) : [];
+      return `**${key} — ${view.sides[key].country_name}**\n${lines}${support ? `\n**Kuşatma Desteği**\n${support}` : ""}${dismounted.length ? `\n**Yaya Hücum Emri**\n${dismounted.join("\n")}` : ""}\nBasınç: ${view.sides[key].pressure}`;
     }).join("\n\n");
     await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x333333).setTitle("🔒 Gizli Ordu Detayı").setDescription(detail)] });
   } else if (sub === "kayip-raporu") {

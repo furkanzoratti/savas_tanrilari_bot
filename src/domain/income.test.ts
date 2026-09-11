@@ -14,16 +14,15 @@ describe("gelir kalemleri", () => {
       manualIncomePercent: 0,
       buildings: [
         { buildingType: "farm", level: 1 },
-        { buildingType: "lupanar", level: 1 },
         { buildingType: "trade_guild", level: 1 },
         { buildingType: "port", level: 1 }
       ],
       ruinStage: 0
     });
 
-    expect(result.gross).toEqual({ building: 1_680, tax: 2_000, landTrade: 1_750, seaTrade: 1_050 });
-    expect(result.buildingBonuses).toEqual({ building: 1_680, tax: 0, landTrade: 0, seaTrade: 0 });
-    expect(incomeTotal(result.payable)).toBe(6_480);
+    expect(result.gross).toEqual({ building: 2_265, tax: 2_000, landTrade: 1_750, seaTrade: 1_300 });
+    expect(result.buildingBonuses).toEqual({ building: 2_265, tax: 0, landTrade: 0, seaTrade: 0 });
+    expect(incomeTotal(result.payable)).toBe(7_315);
   });
 
   it("süreli gelir cezasını bütün gelir kalemlerine aynı yüzdeyle uygular", () => {
@@ -44,5 +43,40 @@ describe("gelir kalemleri", () => {
       ruinStage: 2
     });
     expect(result.payable).toEqual({ building: 0, tax: 500, landTrade: 1_000, seaTrade: 500 });
+  });
+
+  it("eski Lupanar kaydını gelir hesabında tamamen etkisiz bırakır", () => {
+    const result = calculateCategorizedIncome({
+      settlementIncome: 1_000,
+      taxIncome: 1_000,
+      landTradeIncome: 0,
+      seaTradeIncome: 0,
+      manualFlatIncome: 0,
+      manualIncomePercent: 0,
+      buildings: [{ buildingType: "lupanar", level: 3 }],
+      ruinStage: 0
+    });
+
+    expect(result.gross).toEqual({ building: 0, tax: 1_000, landTrade: 1_000, seaTrade: 0 });
+  });
+
+  it("Tüccar Loncası İznini Ticaret Loncası ve Kervansaraya ayrı ayrı uygular", () => {
+    const result = calculateCategorizedIncome({
+      settlementIncome: 1_000,
+      taxIncome: 0,
+      landTradeIncome: 0,
+      seaTradeIncome: 0,
+      manualFlatIncome: 0,
+      manualIncomePercent: 0,
+      buildings: [
+        { buildingType: "trade_guild", level: 1 },
+        { buildingType: "caravanserai", level: 1 }
+      ],
+      activePolicies: ["MERCHANT_LICENSE"],
+      ruinStage: 0
+    });
+
+    expect(result.gross.landTrade).toBe(1_200);
+    expect(result.gross.building).toBe(1_617);
   });
 });

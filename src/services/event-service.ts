@@ -25,15 +25,11 @@ interface EventSettlementRow extends SettlementEventState {
 }
 
 
-interface ActiveSettlementRow {
+interface ActiveSettlementRow extends SettlementEventState {
   id: string;
   country_id: string;
   country_name: string;
   name: string;
-  black_market_active: boolean;
-  epidemic_active: boolean;
-  unrest_active: boolean;
-  rebellion_active: boolean;
 }
 interface EventDrawRow {
   id: string;
@@ -138,7 +134,9 @@ async function riskReport(client: DbClient, guildId: string, type: SettlementEve
 
   const rows = (await client.query<EventSettlementRow>(
     `SELECT s.id,s.country_id,c.name AS country_name,s.name,s.population,s.slave_population,s.ruin_stage,
-            s.is_conquered,s.resource_type,s.black_market_active,s.epidemic_active,s.unrest_active,s.rebellion_active,c.active_formable_key,
+            s.is_conquered,s.resource_type,s.black_market_active,s.epidemic_active,s.unrest_active,s.rebellion_active,
+            s.drought_active,s.famine_active,s.bountiful_harvest_active,s.trade_boom_active,s.migration_wave_active,
+            s.master_craftsmen_active,s.local_volunteers_active,c.active_formable_key,
             EXISTS(SELECT 1 FROM battles b WHERE b.defender_settlement_id=s.id AND b.terrain='SIEGE'
                        AND b.status NOT IN ('FINISHED','CANCELLED')) AS besieged
        FROM settlements s JOIN countries c ON c.id=s.country_id
@@ -154,7 +152,7 @@ async function riskReport(client: DbClient, guildId: string, type: SettlementEve
 
   const ids = rows.map((settlement) => settlement.id);
   const buildingRows = (await client.query<{ settlement_id: string; building_type: string; level: number }>(
-    "SELECT settlement_id,building_type,level FROM buildings WHERE settlement_id=ANY($1::uuid[]) AND status='ACTIVE' AND level>0", [ids]
+    "SELECT settlement_id,building_type,level FROM buildings WHERE settlement_id=ANY($1::uuid[]) AND status IN ('ACTIVE','BUILDING') AND level>0", [ids]
   )).rows;
   const policyRows = (await client.query<{ settlement_id: string; policy_key: CityPolicyKey }>(
     "SELECT settlement_id,policy_key FROM settlement_policies WHERE settlement_id=ANY($1::uuid[]) AND status='ACTIVE'", [ids]
@@ -253,10 +251,14 @@ export const eventService = {
       if (!guild) throw new GameError("Sunucu oyun ayarları bulunamadı.");
       const settlements = (await client.query<ActiveSettlementRow>(
         `SELECT s.id,s.country_id,c.name AS country_name,s.name,
-                s.black_market_active,s.epidemic_active,s.unrest_active,s.rebellion_active
+                s.black_market_active,s.epidemic_active,s.unrest_active,s.rebellion_active,
+                s.drought_active,s.famine_active,s.bountiful_harvest_active,s.trade_boom_active,s.migration_wave_active,
+                s.master_craftsmen_active,s.local_volunteers_active
            FROM settlements s JOIN countries c ON c.id=s.country_id
           WHERE c.guild_id=$1 AND c.status='ACTIVE'
-            AND (s.black_market_active OR s.epidemic_active OR s.unrest_active OR s.rebellion_active)
+            AND (s.black_market_active OR s.epidemic_active OR s.unrest_active OR s.rebellion_active
+              OR s.drought_active OR s.famine_active OR s.bountiful_harvest_active OR s.trade_boom_active
+              OR s.migration_wave_active OR s.master_craftsmen_active OR s.local_volunteers_active)
           ORDER BY c.name,s.name,s.id`,
         [input.guildId]
       )).rows;

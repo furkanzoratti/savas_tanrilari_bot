@@ -2,16 +2,16 @@ export const RESOURCES = {
   GRAIN: { label: "Tahıl", effects: ["Nüfus artış hızı +%10", "Ordu bakım maliyeti -%10"] },
   IRON: { label: "Demir", effects: ["Mızraklı, Ağır Piyade ve Ağır Süvari yetiştirme maliyeti -%10", "Koçbaşı, Katapult ve Balista üretim maliyeti -%10"] },
   TIMBER: { label: "Kereste", effects: ["Bina inşa maliyeti -%10", "Gemi üretim maliyeti -%10"] },
-  MARBLE: { label: "Mermer", effects: ["Curia, Panteon, Agora ve Akademi inşa maliyeti -%10", "Bu binaların inşa süresi -1 Tur"] },
+  MARBLE: { label: "Mermer", effects: ["Curia, Panteon, Agora, Akademi, Hanlar ve Hamamlar, Gümrükhane ile Sayım ve Vergi Dairesi inşa maliyeti -%10", "Bu binaların inşa süresi -1 Tur"] },
   HORSES: { label: "At", effects: ["Hafif Süvari, Ağır Süvari ve Atlı Okçu yetiştirme maliyeti -%10", "Ordu hareket hızı +%25"] },
   LEATHER: { label: "Deri", effects: ["Hafif Piyade, Okçu ve Sapancı yetiştirme maliyeti -%10", "Mantlet, Koçbaşı ve Kuşatma Kulesi maliyeti -%10"] },
-  WINE: { label: "Şarap", effects: ["Huzursuzluk ihtimali -%10; asimilasyon süresi -1 Tur", "Lupanar gelir yüzdesi her seviyede +%5"] },
+  WINE: { label: "Şarap", effects: ["Huzursuzluk ihtimali -%10; asimilasyon süresi -1 Tur", "Hanlar ve Hamamların sabit geliri bina seviyesi başına %5 artar"] },
   OLIVE: { label: "Zeytin", effects: ["Şifacı Evi nüfus getirisi +%20", "Salgın hastalık ihtimali -%10"] },
-  GLASS: { label: "Cam", effects: ["Şifacı Evi ve Su Kemeri ayrı ayrı +100 Altın gelir sağlar", "Şifacı Evi ve Su Kemeri inşa maliyeti -%10"] },
+  GLASS: { label: "Cam", effects: ["Şifacı Evi, Su Kemeri ve Hanlar ve Hamamlar ayrı ayrı +100 Altın gelir sağlar", "Bu üç binanın inşa maliyeti -%10"] },
   GOLD: { label: "Altın", effects: ["Yerleşkenin toplam geliri +%10", "Paralı asker kontrat maliyeti -%10"] },
   LEAD: { label: "Kurşun", effects: ["Sapancı yetiştirme maliyeti -%10", "Katapult ve Balista üretim maliyeti -%10"] },
   AMBER: { label: "Kehribar", effects: ["Panteon +300 Altın ek gelir sağlar", "İsyan ihtimali -%10"] },
-  SILK: { label: "İpek", effects: ["Agora ve Ticaret Loncası gelirleri +%10", "Akademide yetiştirilen karakterlerin zarlarına +1"] },
+  SILK: { label: "İpek", effects: ["Agora, Ticaret Loncası, Kervansaray, Gümrükhane ve Zanaatkârlar Mahallesi gelirleri +%10", "Akademide yetiştirilen karakterlerin zarlarına +1"] },
   SPICES: { label: "Baharat", effects: ["Yerleşkenin toplam geliri +%20", "Nüfus artış hızı +%5"] },
   PURPLE_DYE: { label: "Mor Boya", effects: ["Curia'nın ikinci politika sınırını geliştirir", "Ülkenin ticaret sözleşmesi sınırı +1"] }
 } as const;
@@ -34,13 +34,13 @@ function cappedDiscount(count: number): number {
 
 export function buildingCostMultiplier(buildingType: string, resources: readonly ResourceType[]): number {
   let discounts = has(resources, "TIMBER") ? 1 : 0;
-  if (has(resources, "MARBLE") && ["curia", "pantheon", "agora", "academy"].includes(buildingType)) discounts++;
-  if (has(resources, "GLASS") && ["healer", "aqueduct"].includes(buildingType)) discounts++;
+  if (has(resources, "MARBLE") && ["curia", "pantheon", "agora", "academy", "inns_baths", "customs_house", "census_tax_office"].includes(buildingType)) discounts++;
+  if (has(resources, "GLASS") && ["healer", "aqueduct", "inns_baths"].includes(buildingType)) discounts++;
   return Math.max(0.70, 1 - discounts * 0.10);
 }
 
 export function buildingDurationReduction(buildingType: string, resources: readonly ResourceType[]): number {
-  return has(resources, "MARBLE") && ["curia", "pantheon", "agora", "academy"].includes(buildingType) ? 1 : 0;
+  return has(resources, "MARBLE") && ["curia", "pantheon", "agora", "academy", "inns_baths", "customs_house", "census_tax_office"].includes(buildingType) ? 1 : 0;
 }
 
 export function unitCostMultiplier(unitType: string, resources: readonly ResourceType[]): number {
@@ -71,4 +71,3 @@ export function siegeCostMultiplier(assetType: string, resources: readonly Resou
 export function tradeAgreementLimit(resources: readonly ResourceType[]): number {
   return 2 + (has(resources, "PURPLE_DYE") ? 1 : 0);
 }
-

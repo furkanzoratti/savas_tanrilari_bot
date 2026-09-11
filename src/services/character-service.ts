@@ -7,6 +7,7 @@ import {
   type CharacterSpecialization, type CommanderDoctrine, type DiplomatTask, type MerchantTask
 } from "../domain/characters.js";
 import type { CharacterRole } from "../domain/types.js";
+import { caravanseraiForeignConcessionBonus } from "../domain/catalog.js";
 import { greatPowerService } from "./great-power-service.js";
 import { GameError } from "./game-service.js";
 
@@ -857,6 +858,7 @@ export async function processCharacterTurn(
         skill_bonus: number; specialization: CharacterSpecialization | null; specialization_progress: number;
         acquisition_land_trade_income: number | null; acquisition_sea_trade_income: number | null;
         base_land_trade_income: number; legacy_sea_trade_income: number; besieged: boolean;
+        home_caravanserai_level: number;
         country_name:string; target_name:string; target_country_name:string; home_name:string|null;
       }>(
         `SELECT operation.id,operation.country_id,operation.merchant_character_id,operation.task_type,
@@ -864,6 +866,13 @@ export async function processCharacterTurn(
                 character.skill_bonus,character.specialization,character.specialization_progress,
                 income.acquisition_land_trade_income,income.acquisition_sea_trade_income,
                 target.base_land_trade_income,target.sea_trade_income AS legacy_sea_trade_income,
+                COALESCE((
+                  SELECT building.level FROM buildings building
+                   WHERE building.settlement_id=operation.home_settlement_id
+                     AND building.building_type='caravanserai'
+                     AND building.status IN ('ACTIVE','BUILDING') AND building.level>0
+                   LIMIT 1
+                ),0)::integer AS home_caravanserai_level,
                 owner.name AS country_name,
                 target.name AS target_name,target_country.name AS target_country_name,home.name AS home_name,
                 EXISTS(
@@ -904,7 +913,11 @@ export async function processCharacterTurn(
           baseLandTradeIncome:operation.base_land_trade_income,
           legacySeaTradeIncome:operation.legacy_sea_trade_income
         });
-        const amount = operation.besieged ? 0 : Math.min(1000,Math.floor(tradeIncome*effectivePercent/100));
+        const baseAmount = operation.besieged ? 0 : Math.min(1000,Math.floor(tradeIncome*effectivePercent/100));
+        const concessionBonus = operation.task_type === "FOREIGN_CONCESSION"
+          ? caravanseraiForeignConcessionBonus(Number(operation.home_caravanserai_level))
+          : 0;
+        const amount = Math.floor(baseAmount * (1 + concessionBonus));
         const destination = operation.home_settlement_id??operation.target_settlement_id;
         const inserted = await client.query(
           `INSERT INTO merchant_income_results(operation_id,acquisition_turn,roll,effective_percent,amount)
@@ -925,7 +938,7 @@ export async function processCharacterTurn(
             `INSERT INTO transactions(country_id,settlement_id,turn,kind,amount,description,balance_after,details)
              VALUES($1,$2,$3,'MERCHANT_INCOME',$4,$5,$6,$7::jsonb)`,
             [operation.country_id,destination,turn,amount,operation.merchant_name+" Tüccar görevi geliri",
-              Number(destinationBalance??0),JSON.stringify({roll,effectivePercent,task:operation.task_type,targetSettlementId:operation.target_settlement_id})]
+              Number(destinationBalance??0),JSON.stringify({roll,effectivePercent,task:operation.task_type,targetSettlementId:operation.target_settlement_id,baseAmount,concessionBonus})]
           );
         }
         await client.query("UPDATE merchant_operations SET last_processed_turn=$1,updated_at=NOW() WHERE id=$2", [turn,operation.id]);
@@ -939,6 +952,7 @@ export async function processCharacterTurn(
           "↳ Görev yeri: **"+operation.target_country_name+" / "+operation.target_name+"** • Gelir merkezi: **"+(operation.home_name??operation.target_name)+"**\n"+
           "↳ Zar hesabı: 1d10 **"+roll+"** + yetenek **"+skillBonus+"** + uzmanlık **"+specializationBonus+"** = etkin oran **%"+effectivePercent+"**\n"+
           "↳ Ticaret geliri tabanı: "+tradeIncome.toLocaleString("tr-TR")+" Altın • Kazanç: **"+amount.toLocaleString("tr-TR")+" Altın**"+
+          (concessionBonus > 0 ? " • Kervansaray: **+%"+Math.round(concessionBonus*100)+"**" : "")+
           (operation.besieged?" • Kuşatma nedeniyle gelir sıfırlandı.":"")
         );
       }

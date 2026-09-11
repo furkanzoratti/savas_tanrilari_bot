@@ -4,7 +4,7 @@ import {
   calculateShipUpkeep, calculateUnitUpkeep, nextRuinStage
 } from "./economy.js";
 import { createRecruitmentWaves, isAcquisitionTurn, militaryLimit } from "./mobilization.js";
-import { PORT_SHIP_CAPACITY, SHIPS, fleetTransportCapacity, shipCrewRequirement, shipHarborRequirement } from "./catalog.js";
+import { PORT_SHIP_CAPACITY, SHIPS, fleetTransportCapacity, portShipCapacity, shipCrewRequirement, shipHarborRequirement } from "./catalog.js";
 
 describe("yerleşke ekonomisi", () => {
   it("bina gelirlerini her hesapta sıfırdan türetir", () => {
@@ -19,7 +19,17 @@ describe("yerleşke ekonomisi", () => {
       ],
       ruinStage: 0
     });
-    expect(result).toMatchObject({ grossIncome: 5_400, payableIncome: 5_400, buildingUpkeep: 500 });
+    expect(result).toMatchObject({ grossIncome: 7_680, payableIncome: 7_680, buildingUpkeep: 500 });
+  });
+
+  it("kaldırılmış Lupanarı genel ekonomi hesabında da etkisiz sayar", () => {
+    expect(calculateSettlementEconomy({
+      baseIncome: 1_000,
+      manualFlatIncome: 0,
+      manualIncomePercent: 0,
+      buildings: [{ buildingType: "lupanar", level: 3 }],
+      ruinStage: 0
+    }).grossIncome).toBe(1_000);
   });
 
   it("harap iyileşmesini ilk alımda 0, ikincide yüzde 50, üçüncüde tam uygular", () => {
@@ -41,7 +51,7 @@ describe("yerleşke ekonomisi", () => {
     expect(buildingSlotLimit(150_000, true)).toBe(9);
   });
 
-  it("lupanar, şifacı, su kemeri, haraplık ve seferberliği birlikte uygular", () => {
+  it("kaldırılmış Lupanarı etkisiz sayıp şifacı, su kemeri, haraplık ve seferberliği uygular", () => {
     expect(calculatePopulationGain({
       population: 100_000,
       buildings: [
@@ -51,7 +61,7 @@ describe("yerleşke ekonomisi", () => {
       ],
       ruinStage: 2,
       mobilization: "PARTIAL"
-    })).toBe(1_125);
+    })).toBe(5_250);
   });
 
   it("doğal nüfus artışını güncel nüfus dilimine göre hesaplar", () => {
@@ -66,6 +76,15 @@ describe("yerleşke ekonomisi", () => {
     expect(naturalPopulationGrowthRate(249_999)).toBe(0.04);
     expect(naturalPopulationGrowthRate(250_000)).toBe(0.05);
     expect(naturalPopulationGrowthRate(1_000_000)).toBe(0.05);
+  });
+
+  it("Hanlar ve Hamamların nüfus artışı çarpanını uygular", () => {
+    expect(calculatePopulationGain({
+      population: 100_000,
+      buildings: [{ buildingType: "inns_baths", level: 3 }],
+      ruinStage: 0,
+      mobilization: "PEACE"
+    })).toBe(2_300);
   });
 });
 
@@ -103,6 +122,10 @@ describe("seferberlik ve bakım", () => {
     expect(shipCrewRequirement("trireme", 3)).toBe(300);
     expect(shipCrewRequirement("quinquereme", 3)).toBe(450);
     expect(PORT_SHIP_CAPACITY).toBe(30);
+    expect(portShipCapacity(0)).toBe(0);
+    expect(portShipCapacity(1)).toBe(30);
+    expect(portShipCapacity(2)).toBe(40);
+    expect(portShipCapacity(3)).toBe(50);
     expect(shipHarborRequirement("quinquereme", 3)).toBe(12);
     expect(fleetTransportCapacity({ kerkouros: 2, trireme: 1, quinquereme: 1 })).toBe(1_700);
     expect(fleetTransportCapacity({ trireme: 3 }, 1.10)).toBe(1_650);

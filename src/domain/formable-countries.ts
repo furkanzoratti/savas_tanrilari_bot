@@ -89,7 +89,7 @@ export const FORMABLE_COUNTRIES = {
   ALPINE_UNION: { name: "Alp Birliği", emoji: "🏔️", buffs: ["Gözcüler dağ cezasını yok sayar.", "Yerleşkeler açlığa +2 tur dayanır.", "Mühendislik Atölyesi ve savaş aletleri %10 ucuzdur."], modifiers: { starvationBonus: 2, buildingDiscount: 0.10, buildingDiscountTypes: ["engineering"], siegeAssetDiscount: 0.10 } },
   PANNONIA: { name: "Pannonia", emoji: "🐎", buffs: ["Gözcü için gerekli süvari 100'e düşer.", "Süvari alımı %5 ucuzdur.", "Savaş Hazırlığı milisi 750 olur."], modifiers: { observerManpower: 100, cavalryDiscount: 0.05, warPreparationMilitia: 750 } },
   ILLYRIA: { name: "İllirya", emoji: "🌊", buffs: ["Her Tersane kapasitesine +2 Kerkouros ekler.", "Kıyı yağması zarlarına +1.", "Gemi taşıma kapasitesi %10 artar."], modifiers: { shipyardPointBonus: { kerkouros: 2 }, shipTransportMultiplier: 1.10 } },
-  DACIA: { name: "Dakya", emoji: "🐺", buffs: ["Köle Kampı isyan ihtimali 5 puan azalır.", "Köle Kampı gelir oranları %20/%35/%55 olur.", "Çiftlik geliri %10 artar."], modifiers: { slaveCampRates: [0.20, 0.35, 0.55], buildingIncomePercent: { farm: 0.10 } } },
+  DACIA: { name: "Dakya", emoji: "🐺", buffs: ["Köle Kampı isyan ihtimali 5 puan azalır.", "Köle Kampı gelir oranları %30/%45/%95 olur.", "Çiftlik geliri %10 artar."], modifiers: { slaveCampRates: [0.30, 0.45, 0.95], buildingIncomePercent: { farm: 0.10 } } },
   THRACE: { name: "Trakya", emoji: "🗡️", buffs: ["Kara birlikleri %5 ucuzdur.", "Kara yağması zarlarına +1.", "Savaş Hazırlığı 250 ek milis verir."], modifiers: { unitDiscount: 0.05, warPreparationMilitia: 750 } },
   MACEDONIA: { name: "Makedonya", emoji: "☀️", buffs: ["Süvari alımı %5 ucuzdur.", "Akademiden yetişen Komutanlar +1 ek özellik puanı alır."], modifiers: { cavalryDiscount: 0.05, academyRoleSkillBonus: { COMMANDER: 1 } } },
   HELLAS: { name: "Hellas", emoji: "🏛️", buffs: ["Akademi bakımı 250 Altındır.", "Agora sabit geliri %10 artar.", "Her Tersane kapasitesine +1 Trireme ekler."], modifiers: { academyUpkeep: 250, buildingIncomePercent: { agora: 0.10 }, shipyardPointBonus: { trireme: 1 } } },
@@ -147,7 +147,7 @@ export function applyFormableShipUpkeepDiscount(baseUpkeep: number, key: Formabl
   return Math.ceil(Math.max(0, baseUpkeep) * (1 - discount));
 }
 
-const infantry = new Set(["light_infantry", "slinger", "spear", "archer", "heavy_infantry", "legionary", "hoplite", "briton_longbow", "persian_immortal", "iberian_caetrati", "germanic_shock_warrior"]);
+const infantry = new Set(["light_infantry", "slinger", "spear", "archer", "heavy_infantry", "legionary", "hoplite", "briton_longbow", "persian_immortal", "iberian_caetrati", "germanic_shock_warrior", "anatolian_thureophoroi"]);
 const cavalry = new Set(["light_cavalry", "heavy_cavalry", "horse_archer", "camel_cavalry", "carthaginian_war_elephant"]);
 
 export function formableUnitDiscount(key: FormableCountryKey | null | undefined, unitType: string): number {

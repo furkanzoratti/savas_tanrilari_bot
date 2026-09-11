@@ -44,7 +44,7 @@ export const BATTLE_UNIT_STATS: Record<BattleUnitType, {
   militia: { label: "Milis", clashDice: 1, clashSides: 4, damageDice: 1, damageSides: 4, durability: 1 },
   slinger: { label: "Sapancı", clashDice: 1, clashSides: 6, damageDice: 1, damageSides: 8, durability: 1 },
   spear: { label: "Mızraklı Piyade", clashDice: 1, clashSides: 8, damageDice: 1, damageSides: 6, durability: 2 },
-  archer: { label: "Okçu", clashDice: 1, clashSides: 8, damageDice: 1, damageSides: 10, durability: 1 },
+  archer: { label: "Okçu", clashDice: 1, clashSides: 8, damageDice: 1, damageSides: 12, durability: 1 },
   heavy_infantry: { label: "Ağır Piyade", clashDice: 2, clashSides: 8, damageDice: 2, damageSides: 8, durability: 3 },
   light_cavalry: { label: "Hafif Süvari", clashDice: 2, clashSides: 6, damageDice: 1, damageSides: 8, durability: 2 },
   heavy_cavalry: { label: "Ağır Süvari", clashDice: 2, clashSides: 10, damageDice: 2, damageSides: 10, durability: 3 },
@@ -52,11 +52,12 @@ export const BATTLE_UNIT_STATS: Record<BattleUnitType, {
   hoplite: { label: "Hoplit", clashDice: 2, clashSides: 8, damageDice: 1, damageSides: 10, durability: 3 },
   horse_archer: { label: "Atlı Okçu", clashDice: 2, clashSides: 8, damageDice: 2, damageSides: 8, durability: 2 },
   camel_cavalry: { label: "Deve Süvarisi", clashDice: 2, clashSides: 8, damageDice: 1, damageSides: 10, durability: 2 },
-  briton_longbow: { label: "Briton Uzun Yaycıları", clashDice: 1, clashSides: 10, damageDice: 2, damageSides: 10, durability: 1 },
+  briton_longbow: { label: "Briton Uzun Yaycıları", clashDice: 1, clashSides: 12, damageDice: 2, damageSides: 12, durability: 1 },
   persian_immortal: { label: "Pers Ölümsüzleri", clashDice: 2, clashSides: 8, damageDice: 2, damageSides: 10, durability: 3 },
-  carthaginian_war_elephant: { label: "Kartaca Savaş Filleri", clashDice: 3, clashSides: 8, damageDice: 2, damageSides: 10, durability: 3 },
+  carthaginian_war_elephant: { label: "Kartaca Savaş Filleri", clashDice: 3, clashSides: 10, damageDice: 2, damageSides: 10, durability: 3 },
   iberian_caetrati: { label: "İber Caetratileri", clashDice: 2, clashSides: 6, damageDice: 2, damageSides: 8, durability: 1 },
-  germanic_shock_warrior: { label: "Cermen Şok Savaşçıları", clashDice: 2, clashSides: 10, damageDice: 2, damageSides: 8, durability: 1 }
+  germanic_shock_warrior: { label: "Cermen Şok Savaşçıları", clashDice: 2, clashSides: 10, damageDice: 2, damageSides: 8, durability: 1 },
+  anatolian_thureophoroi: { label: "Anadolu Kalkanlıları (Thureophoroi)", clashDice: 2, clashSides: 6, damageDice: 1, damageSides: 10, durability: 2 }
 };
 
 export const NAVAL_UNIT_STATS: Record<NavalUnitType, {
@@ -126,7 +127,7 @@ export const compositionTotal = (composition: BattleComposition): number => Obje
 
 export const ASSAULT_UNIT_TYPES = [
   "light_infantry", "militia", "spear", "heavy_infantry", "legionary", "hoplite",
-  "persian_immortal", "iberian_caetrati", "germanic_shock_warrior"
+  "persian_immortal", "iberian_caetrati", "germanic_shock_warrior", "anatolian_thureophoroi"
 ] as const satisfies readonly BattleUnitType[];
 
 export const CAVALRY_UNIT_TYPES = [
@@ -144,6 +145,65 @@ const SIEGE_DEFENDER_DISMOUNT_MAP = {
   horse_archer: "archer",
   camel_cavalry: "spear"
 } as const satisfies Partial<Record<BattleUnitType, BattleUnitType>>;
+
+export const SIEGE_ATTACKER_DISMOUNT_MAP = {
+  light_cavalry: "light_infantry",
+  heavy_cavalry: "heavy_infantry",
+  horse_archer: "archer",
+  camel_cavalry: "spear"
+} as const satisfies Partial<Record<BattleUnitType, BattleUnitType>>;
+export type SiegeDismountUnitType = keyof typeof SIEGE_ATTACKER_DISMOUNT_MAP;
+
+function dismountedQuantity(
+  composition: BattleComposition,
+  dismounted: BattleComposition,
+  source: SiegeDismountUnitType
+): number {
+  return Math.min(
+    Math.max(0, Math.floor(composition[source] ?? 0)),
+    Math.max(0, Math.floor(dismounted[source] ?? 0))
+  );
+}
+
+export function siegeAttackerDismountedComposition(
+  composition: BattleComposition,
+  dismounted: BattleComposition
+): BattleComposition {
+  const effective: BattleComposition = { ...composition };
+  for (const [source, target] of Object.entries(SIEGE_ATTACKER_DISMOUNT_MAP) as Array<[SiegeDismountUnitType, BattleUnitType]>) {
+    const quantity = dismountedQuantity(composition, dismounted, source);
+    if (quantity <= 0) continue;
+    const mountedRemaining = Math.max(0, (effective[source] ?? 0) - quantity);
+    if (mountedRemaining > 0) effective[source] = mountedRemaining;
+    else delete effective[source];
+    effective[target] = (effective[target] ?? 0) + quantity;
+  }
+  return effective;
+}
+
+export function restoreSiegeAttackerCasualtyTypes(
+  original: BattleComposition,
+  effectiveCasualties: BattleComposition,
+  dismounted: BattleComposition
+): BattleComposition {
+  const restored: BattleComposition = { ...effectiveCasualties };
+  for (const [source, target] of Object.entries(SIEGE_ATTACKER_DISMOUNT_MAP) as Array<[SiegeDismountUnitType, BattleUnitType]>) {
+    const converted = dismountedQuantity(original, dismounted, source);
+    if (converted <= 0) continue;
+    const native = Math.max(0, original[target] ?? 0);
+    const targetTotal = native + converted;
+    const engagedTarget = Math.max(0, effectiveCasualties[target] ?? 0);
+    const convertedEngaged = targetTotal > 0
+      ? Math.min(converted, Math.max(0, Math.round(engagedTarget * converted / targetTotal)))
+      : 0;
+    const nativeEngaged = Math.max(0, engagedTarget - convertedEngaged);
+    if (nativeEngaged > 0) restored[target] = nativeEngaged;
+    else delete restored[target];
+    if (convertedEngaged > 0) restored[source] = convertedEngaged;
+    else delete restored[source];
+  }
+  return restored;
+}
 
 export function siegeDefenderComposition(composition: BattleComposition): BattleComposition {
   const dismounted: BattleComposition = { ...composition };
@@ -174,12 +234,14 @@ const roleWeights: Record<BattleUnitType, Partial<Record<keyof ArmyCompositionAs
   slinger: { ranged: 1 }, archer: { ranged: 1 }, briton_longbow: { ranged: 1 },
   light_cavalry: { mobile: 1 }, heavy_cavalry: { mobile: 1 }, camel_cavalry: { mobile: 1 }, carthaginian_war_elephant: { mobile: 1 },
   horse_archer: { ranged: 0.5, mobile: 0.5 },
-  iberian_caetrati: { line: 1 }, germanic_shock_warrior: { line: 1 }
+  iberian_caetrati: { line: 1 }, germanic_shock_warrior: { line: 1 },
+  anatolian_thureophoroi: { line: 0.70, spear: 0.30 }
 };
 
 const spearCounterWeights: Partial<Record<BattleUnitType, number>> = {
   spear: 1,
-  hoplite: 0.5
+  hoplite: 0.5,
+  anatolian_thureophoroi: 0.3
 };
 
 const cavalryCounterWeights: Partial<Record<BattleUnitType, number>> = {
@@ -481,10 +543,18 @@ const multipliers = {
   CLEAR: { winner: 1.15, loser: 0.50 }, CRUSHING: { winner: 1.30, loser: 0.30 }
 } as const;
 
-function applyLoss(composition: BattleComposition, rawDamage: number, mode: "LAND" | "NAVAL"): { remaining: BattleComposition; loss: number } {
+type CasualtyDurabilityOverrides = Partial<Record<BattleForceType, 1 | 2 | 3>>;
+
+function applyLoss(
+  composition: BattleComposition,
+  rawDamage: number,
+  mode: "LAND" | "NAVAL",
+  durabilityOverrides: CasualtyDurabilityOverrides = {}
+): { remaining: BattleComposition; loss: number } {
   const result: BattleComposition = { ...composition };
   const keys: BattleForceType[] = mode === "NAVAL" ? navalKeys : unitKeys;
-  const durabilityFor = (key: BattleForceType) => mode === "NAVAL" ? NAVAL_UNIT_STATS[key as NavalUnitType].durability : BATTLE_UNIT_STATS[key as BattleUnitType].durability;
+  const durabilityFor = (key: BattleForceType) => durabilityOverrides[key]
+    ?? (mode === "NAVAL" ? NAVAL_UNIT_STATS[key as NavalUnitType].durability : BATTLE_UNIT_STATS[key as BattleUnitType].durability);
   const weights = keys.map((key) => {
     const quantity = composition[key] ?? 0;
     const durability = durabilityFor(key);
@@ -507,7 +577,8 @@ function applyLossWithinComposition(
   fullComposition: BattleComposition,
   casualtyComposition: BattleComposition,
   rawDamage: number,
-  mode: "LAND" | "NAVAL"
+  mode: "LAND" | "NAVAL",
+  durabilityOverrides: CasualtyDurabilityOverrides = {}
 ): { remaining: BattleComposition; loss: number } {
   const keys: BattleForceType[] = mode === "NAVAL" ? navalKeys : unitKeys;
   const eligible: BattleComposition = {};
@@ -515,7 +586,7 @@ function applyLossWithinComposition(
     const quantity = Math.min(Math.max(0, fullComposition[key] ?? 0), Math.max(0, casualtyComposition[key] ?? 0));
     if (quantity > 0) eligible[key] = quantity;
   }
-  const applied = applyLoss(eligible, rawDamage, mode);
+  const applied = applyLoss(eligible, rawDamage, mode, durabilityOverrides);
   const remaining: BattleComposition = { ...fullComposition };
   let loss = 0;
   for (const key of keys) {
@@ -532,16 +603,17 @@ function applyDamageWithCounter(
   casualtyComposition: BattleComposition | undefined,
   totalDamage: number,
   antiCavalryDamage: number,
-  mode: "LAND" | "NAVAL"
+  mode: "LAND" | "NAVAL",
+  durabilityOverrides: CasualtyDurabilityOverrides = {}
 ): { remaining: BattleComposition; loss: number } {
   const targetedDamage = mode === "LAND" ? Math.min(Math.max(0, totalDamage), Math.max(0, antiCavalryDamage)) : 0;
   const normalDamage = Math.max(0, totalDamage - targetedDamage);
   const normal = casualtyComposition
-    ? applyLossWithinComposition(fullComposition, casualtyComposition, normalDamage, mode)
-    : applyLoss(fullComposition, normalDamage, mode);
+    ? applyLossWithinComposition(fullComposition, casualtyComposition, normalDamage, mode, durabilityOverrides)
+    : applyLoss(fullComposition, normalDamage, mode, durabilityOverrides);
   if (targetedDamage <= 0) return normal;
   const cavalryCasualties = cavalryOnly(normal.remaining, casualtyComposition);
-  const counter = applyLossWithinComposition(normal.remaining, cavalryCasualties, targetedDamage, "LAND");
+  const counter = applyLossWithinComposition(normal.remaining, cavalryCasualties, targetedDamage, "LAND", durabilityOverrides);
   return { remaining: counter.remaining, loss: normal.loss + counter.loss };
 }
 
@@ -551,6 +623,8 @@ export function resolveRound(
     mode?: "LAND" | "NAVAL"; damageFactorA?: number; damageFactorB?: number;
     pressureClashA?: number; pressureClashB?: number;
     casualtyCompositionA?: BattleComposition | undefined; casualtyCompositionB?: BattleComposition | undefined;
+    casualtyDurabilityOverridesA?: CasualtyDurabilityOverrides | undefined;
+    casualtyDurabilityOverridesB?: CasualtyDurabilityOverrides | undefined;
   } = {}
 ): RoundResolution {
   const mode = options.mode ?? "LAND";
@@ -564,11 +638,11 @@ export function resolveRound(
   const scale = mode === "NAVAL" ? 0.012 : 20;
   const againstB = applyDamageWithCounter(
     compositionB, options.casualtyCompositionB, rollA.damage * scale * factorA,
-    (rollA.antiCavalryDamage ?? 0) * scale * factorA, mode
+    (rollA.antiCavalryDamage ?? 0) * scale * factorA, mode, options.casualtyDurabilityOverridesB
   );
   const againstA = applyDamageWithCounter(
     compositionA, options.casualtyCompositionA, rollB.damage * scale * factorB,
-    (rollB.antiCavalryDamage ?? 0) * scale * factorB, mode
+    (rollB.antiCavalryDamage ?? 0) * scale * factorB, mode, options.casualtyDurabilityOverridesA
   );
   const pressure = pressureOutcome.tier === "MINOR" ? 1 : pressureOutcome.tier === "CLEAR" ? 2 : pressureOutcome.tier === "CRUSHING" ? 3 : 0;
   return {

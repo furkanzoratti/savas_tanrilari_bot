@@ -1,4 +1,4 @@
-import { BUILDINGS, PORT_SHIP_CAPACITY, SHIPS, UNITS, shipHarborRequirement } from "../domain/catalog.js";
+import { BUILDINGS, SHIPS, UNITS, portShipCapacity, shipHarborRequirement } from "../domain/catalog.js";
 import { assessArmyComposition, type BattleComposition, type BattleUnitType } from "../domain/battle.js";
 import { isAcquisitionTurn } from "../domain/mobilization.js";
 import {
@@ -115,8 +115,8 @@ function validBuildingCandidates(doc: CountryDocument, doctrine: NpcAutoPurchase
       if (targetLevel > definition.maxLevel) continue;
       if (!current && occupiedSlots >= settlement.slotLimit) continue;
       if (buildingType === "port" && !settlement.is_coastal) continue;
-      if (buildingType === "shipyard") {
-        const hasPort = settlement.buildings.some((building) => building.building_type === "port" && building.status === "ACTIVE" && building.level >= 1);
+      if (buildingType === "shipyard" || buildingType === "customs_house") {
+        const hasPort = settlement.buildings.some((building) => building.building_type === "port" && (building.status === "ACTIVE" || building.status === "BUILDING") && building.level >= 1);
         if (!hasPort) continue;
       }
       const terms = buildingPurchaseTerms(buildingType, targetLevel, settlement.effectiveResources, policies, doc.country.active_formable_key);
@@ -226,7 +226,9 @@ export function planCountryPurchases(doc: CountryDocument, config: NpcAutoPurcha
     const harborRemaining = new Map<string, number>();
     const shipyardLevels = new Map<string, number>();
     for (const settlement of doc.settlements) {
-      const portActive = settlement.buildings.some((building) => building.building_type === "port" && building.status === "ACTIVE" && building.level >= 1);
+      const portLevel = settlement.buildings.find((building) => building.building_type === "port"
+        && (building.status === "ACTIVE" || building.status === "BUILDING") && building.level >= 1)?.level ?? 0;
+      const portActive = portLevel > 0;
       const shipyardLevel = settlement.buildings.find((building) => building.building_type === "shipyard" && building.status === "ACTIVE")?.level ?? 0;
       if (settlement.is_conquered || settlement.isBesieged || !portActive || shipyardLevel <= 0) continue;
       const basePoints = shipyardLevel === 1 ? 5 : shipyardLevel === 2 ? 10 : 15;
@@ -239,7 +241,7 @@ export function planCountryPurchases(doc: CountryDocument, config: NpcAutoPurcha
         .reduce((sum, ship) => sum + shipHarborRequirement(ship.ship_type, ship.quantity), 0)
         + settlement.pendingShips.reduce((sum, ship) => sum + shipHarborRequirement(ship.ship_type, ship.quantity), 0);
       productionRemaining.set(settlement.id, Math.max(0, basePoints + bonusPoints + pontusBonus - usedProduction));
-      harborRemaining.set(settlement.id, Math.max(0, PORT_SHIP_CAPACITY - usedHarbor));
+      harborRemaining.set(settlement.id, Math.max(0, portShipCapacity(portLevel) - usedHarbor));
       shipyardLevels.set(settlement.id, shipyardLevel);
     }
     const groupedShips = new Map<string, ShipAction>();

@@ -6,7 +6,7 @@ import { EVENT_COOLDOWN_TURNS, SETTLEMENT_EVENT_TYPES, type SettlementEventType 
 import { number } from "../domain/format.js";
 import { eventService, type ActiveSettlementEvent, type SettlementEventApplication, type SettlementEventDraw, type SettlementEventRiskReport } from "../services/event-service.js";
 import { gameService, GameError } from "../services/game-service.js";
-import { isGameMaster } from "./auth.js";
+import { isEventManager } from "./auth.js";
 
 function selectedType(interaction: ChatInputCommandInteraction): SettlementEventType {
   const type = interaction.options.getString("tur", true);
@@ -32,12 +32,13 @@ async function findEventSettlement(countryId: string, name: string): Promise<{ i
 
 function drawEmbed(draw: SettlementEventDraw): EmbedBuilder {
   const definition = SETTLEMENT_EVENT_TYPES[draw.type];
+  const good = definition.kind === "GOOD";
   const likelihood = ((draw.selectedWeight / draw.totalWeight) * 100).toLocaleString("tr-TR", { maximumFractionDigits: 2 });
   const factors = draw.factors
     .map((factor) => `• ${factor.label}: **${factor.adjustment > 0 ? "+" : ""}${factor.adjustment}**`)
     .join("\n");
   return new EmbedBuilder()
-    .setColor(0xc59b45)
+    .setColor(good ? 0x3f8f62 : 0xc59b45)
     .setTitle(`${definition.emoji} ${definition.label} • Ağırlıklı Yerleşke Seçimi`)
     .setDescription([
       `**Seçilen Devlet:** ${draw.countryName}`,
@@ -46,17 +47,18 @@ function drawEmbed(draw: SettlementEventDraw): EmbedBuilder {
       "",
       `🎲 **1d${number(draw.totalWeight)} → ${number(draw.roll)}**`,
       `🎯 **Yerleşke Aralığı:** ${number(draw.rangeStart)}–${number(draw.rangeEnd)}`,
-      `⚖️ **Risk Ağırlığı:** ${draw.selectedWeight} • Seçilme olasılığı: %${likelihood}`
+      `⚖️ **${good ? "Fırsat" : "Risk"} Ağırlığı:** ${draw.selectedWeight} • Seçilme olasılığı: %${likelihood}`
     ].join("\n"))
     .addFields(
       { name: "🗺️ Taranan Yerleşkeler", value: `Toplam: **${number(draw.candidateCount)}**\nUygun: **${number(draw.eligibleCount)}**\nHavuz dışı: **${number(draw.excludedCount)}**`, inline: true },
-      { name: "📊 Risk Etkenleri", value: (factors || "Temel yerleşke ağırlığı.").slice(0, 1024), inline: true }
+      { name: `📊 ${good ? "Fırsat" : "Risk"} Etkenleri`, value: (factors || "Temel yerleşke ağırlığı.").slice(0, 1024), inline: true }
     )
     .setFooter({ text: "Olay henüz uygulanmadı. Onay düğmesini veya /olay uygula komutunu kullanın." });
 }
 
 function riskEmbed(report: SettlementEventRiskReport, scopeName: string | null): EmbedBuilder {
   const definition = SETTLEMENT_EVENT_TYPES[report.type];
+  const good = definition.kind === "GOOD";
   const eligible = report.candidates.filter((candidate) => candidate.weight > 0);
   const excluded = report.candidates.filter((candidate) => candidate.weight <= 0);
   const lines = eligible.slice(0, 18).map((candidate, index) => {
@@ -72,7 +74,7 @@ function riskEmbed(report: SettlementEventRiskReport, scopeName: string | null):
 
   const embed = new EmbedBuilder()
     .setColor(0x53779a)
-    .setTitle(`${definition.emoji} ${definition.label} • Genel Risk Hesaplaması`)
+    .setTitle(`${definition.emoji} ${definition.label} • Genel ${good ? "Fırsat" : "Risk"} Hesaplaması`)
     .setDescription([
       `**Kapsam:** ${scopeName ?? "Sunucudaki bütün devletler ve yerleşkeler"}`,
       `**Oyun Turu:** ${report.currentTurn}`,
@@ -89,13 +91,13 @@ function riskEmbed(report: SettlementEventRiskReport, scopeName: string | null):
 function applicationEmbed(result: SettlementEventApplication, resolved = false): EmbedBuilder {
   const definition = SETTLEMENT_EVENT_TYPES[result.type];
   return new EmbedBuilder()
-    .setColor(resolved ? 0x3f7f5f : 0xa74c40)
-    .setTitle(`${resolved ? "✅" : definition.emoji} ${definition.label} ${resolved ? "Sona Erdi" : "Olayı Başladı"}`)
+    .setColor(resolved ? 0x3f7f5f : definition.kind === "GOOD" ? 0x3f8f62 : 0xa74c40)
+    .setTitle(`${resolved ? "✅" : definition.emoji} ${definition.label} ${resolved ? "Sona Erdi" : "Başladı"}`)
     .setDescription([
       `**Devlet:** ${result.countryName}`,
       `**Yerleşke:** ${result.settlementName}`,
       `**Oyun Turu:** ${result.currentTurn}`,
-      resolved ? "Olay yerleşke belgesinden kaldırıldı." : "Olay yerleşke belgesine işlendi. Sonuçlarını oyun yöneticisi belirler."
+      resolved ? "Olay yerleşke belgesinden kaldırıldı." : "Olay yerleşke belgesine işlendi. Gelir, hazine, nüfus ve birlik sonuçlarını oyun yöneticisi elle uygular."
     ].join("\n"));
 }
 
@@ -126,23 +128,23 @@ export async function handleSettlementEventCommand(interaction: ChatInputCommand
   if (interaction.commandName !== "olay" || !interaction.guildId) return false;
   const sub = interaction.options.getSubcommand();
   if (!["sec", "riskler", "uygula", "sonlandir", "aktif"].includes(sub)) return false;
-  if (!isGameMaster(interaction)) throw new GameError("Bu komut yalnızca oyun yöneticileri tarafından kullanılabilir.");
+  if (!isEventManager(interaction)) throw new GameError("Bu komut yalnızca oyun yöneticileri veya Olay Yöneticileri tarafından kullanılabilir.");
 
   if (sub === "aktif") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply();
     const report = await eventService.active({ guildId: interaction.guildId });
     const pages: ActiveSettlementEvent[][] = [];
     for (let index = 0; index < report.events.length; index += 25) pages.push(report.events.slice(index, index + 25));
     if (!pages.length) pages.push([]);
     await interaction.editReply(activeEventsPanel(pages[0]!, report.currentTurn, 1, pages.length));
     for (let index = 1; index < pages.length; index += 1) {
-      await interaction.followUp({ ...activeEventsPanel(pages[index]!, report.currentTurn, index + 1, pages.length), ephemeral: true });
+      await interaction.followUp(activeEventsPanel(pages[index]!, report.currentTurn, index + 1, pages.length));
     }
     return true;
   }
 
   const type = selectedType(interaction);
-  await interaction.deferReply({ ephemeral: sub === "sec" || sub === "riskler" });
+  await interaction.deferReply();
   const country = await optionalCountry(interaction);
 
   if (sub === "sec") {
@@ -186,7 +188,7 @@ export async function handleSettlementEventCommand(interaction: ChatInputCommand
 
 export async function handleSettlementEventButton(interaction: ButtonInteraction): Promise<boolean> {
   if (!interaction.customId.startsWith("settlement_event_apply|")) return false;
-  if (!interaction.guildId || !isGameMaster(interaction)) throw new GameError("Bu olayı yalnızca oyun yöneticisi uygulayabilir.");
+  if (!interaction.guildId || !isEventManager(interaction)) throw new GameError("Bu olayı yalnızca oyun yöneticisi veya Olay Yöneticisi uygulayabilir.");
   const [, drawId] = interaction.customId.split("|");
   if (!drawId) throw new GameError("Olay seçimi geçersiz.");
   await interaction.deferReply();
@@ -198,7 +200,7 @@ export async function handleSettlementEventButton(interaction: ButtonInteraction
 
 export async function handleSettlementEventSelect(interaction: StringSelectMenuInteraction): Promise<boolean> {
   if (interaction.customId !== "settlement_event_resolve") return false;
-  if (!interaction.guildId || !isGameMaster(interaction)) throw new GameError("Bu olayı yalnızca oyun yöneticisi sonlandırabilir.");
+  if (!interaction.guildId || !isEventManager(interaction)) throw new GameError("Bu olayı yalnızca oyun yöneticisi veya Olay Yöneticisi sonlandırabilir.");
   const [typeValue, countryId, settlementId] = interaction.values[0]?.split("|") ?? [];
   if (!typeValue || !(typeValue in SETTLEMENT_EVENT_TYPES) || !countryId || !settlementId) throw new GameError("Olay seçimi geçersiz.");
   await interaction.deferUpdate();

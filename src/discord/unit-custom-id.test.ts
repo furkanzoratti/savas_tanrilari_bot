@@ -11,6 +11,8 @@ describe("asker alım modalı kimlikleri", () => {
   });
 
   it("eski kısa birim anahtarlarıyla açılmış formları da çözmeye devam eder", () => {
+    expect(encodeUnitTypeForCustomId("anatolian_thureophoroi")).toBe("ath");
+    expect(decodeUnitTypeFromCustomId("ath")).toBe("anatolian_thureophoroi");
     expect(decodeUnitTypeFromCustomId("heavy_infantry")).toBe("heavy_infantry");
     expect(decodeUnitTypeFromCustomId("bilinmeyen_birim")).toBeNull();
   });

@@ -2,10 +2,10 @@ import { createHash, randomUUID } from "node:crypto";
 import type { DbClient } from "../db/pool.js";
 import { pool, withTransaction } from "../db/pool.js";
 import {
-  BASE_SIEGE_STARVATION_TURNS, BATTLE_TERRAINS, BATTLE_UNIT_STATS, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, activeSiegeAssaultAssets, assaultUnitTotal, baseRetreatRate, battleEnds, commanderClashBonus, compositionTotal, hasAssaultForce, orderState, resolveRound, siegeAssaultAccess, siegeAssaultComposition, siegeDefenderCaptured, siegeDefenderComposition, siegeDefenseModifiers, siegeLineBreaks, siegeOrderState, siegePressureAfterRound,
+  BASE_SIEGE_STARVATION_TURNS, BATTLE_TERRAINS, BATTLE_UNIT_STATS, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, SIEGE_ATTACKER_DISMOUNT_MAP, activeSiegeAssaultAssets, assaultUnitTotal, baseRetreatRate, battleEnds, commanderClashBonus, compositionTotal, hasAssaultForce, orderState, resolveRound, restoreSiegeAttackerCasualtyTypes, siegeAssaultAccess, siegeAssaultComposition, siegeAttackerDismountedComposition, siegeDefenderCaptured, siegeDefenderComposition, siegeDefenseModifiers, siegeLineBreaks, siegeOrderState, siegePressureAfterRound,
   rollBattlePool, rollNavalPool, rollSiegeSupport,
   type BattleComposition, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain,
-  type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeComposition, type SiegeTarget, type SiegeTargets
+  type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeComposition, type SiegeDismountUnitType, type SiegeTarget, type SiegeTargets
 } from "../domain/battle.js";
 import { SIEGE_ASSETS, shipCrewRequirement } from "../domain/catalog.js";
 import { allocateLossBySource } from "../domain/loss-sources.js";
@@ -34,6 +34,7 @@ export interface BattleParticipantRow {
   battle_id: string; side_key: BattleSideKey; country_id: string; country_name: string; is_primary: boolean;
   source_settlement_id: string | null; source_settlement_name: string | null;
   composition: BattleComposition; initial_composition: BattleComposition;
+  dismounted_composition: BattleComposition;
 }
 
 export interface BattleParticipantChoice {
@@ -62,7 +63,11 @@ export interface BattleRow {
 export interface BattleRollRow {
   side_key: BattleSideKey; roller_user_id: string; clash_total: number; damage_total: number;
   is_proxy: boolean; manual: boolean; wall_damage: number; gate_damage: number;
-  detail: { __spear_cavalry?: { antiCavalryDamage?: number; clashBonus?: number; matched?: number }; __commander?: { clash?: number } } | null;
+  detail: {
+    __spear_cavalry?: { antiCavalryDamage?: number; clashBonus?: number; matched?: number };
+    __commander?: { clash?: number };
+    __dismounted?: BattleComposition;
+  } | null;
 }
 
 export interface CasualtyApplication {
@@ -117,6 +122,24 @@ async function resolveParticipant(client: DbClient, battleId: string, side: Batt
     : rows.find((row) => row.is_primary);
   if (!participant) throw new GameError(countryName?.trim() ? `${countryName.trim()} bu savaş tarafına ekli değil.` : "Savaş tarafının ana ülkesi bulunamadı.");
   return participant;
+}
+
+function attackerDismountments(side: BattleSideRow): BattleComposition {
+  const total: BattleComposition = {};
+  for (const participant of side.participants) mergeComposition(total, participant.dismounted_composition ?? {});
+  for (const source of Object.keys(SIEGE_ATTACKER_DISMOUNT_MAP) as SiegeDismountUnitType[]) {
+    total[source] = Math.min(Math.max(0, side.composition[source] ?? 0), Math.max(0, total[source] ?? 0));
+    if (!total[source]) delete total[source];
+  }
+  return total;
+}
+
+function dismountedDurabilityOverrides(dismounted: BattleComposition): Partial<Record<BattleForceType, 1 | 2 | 3>> {
+  const overrides: Partial<Record<BattleForceType, 1 | 2 | 3>> = {};
+  for (const [source, target] of Object.entries(SIEGE_ATTACKER_DISMOUNT_MAP) as Array<[SiegeDismountUnitType, BattleUnitType]>) {
+    if ((dismounted[source] ?? 0) > 0) overrides[source] = BATTLE_UNIT_STATS[target].durability;
+  }
+  return overrides;
 }
 
 async function validateParticipantAvailability(
@@ -885,7 +908,7 @@ export const battleService = {
       let currentTurn: number | null = null;
       if (defenderSettlementId) {
         const structures = (await client.query<{ building_type: string; level: number }>(
-          "SELECT building_type,level FROM buildings WHERE settlement_id=$1 AND status='ACTIVE' AND building_type IN ('farm','aqueduct')", [defenderSettlementId]
+          "SELECT building_type,level FROM buildings WHERE settlement_id=$1 AND status IN ('ACTIVE','BUILDING') AND level>0 AND building_type IN ('farm','aqueduct')", [defenderSettlementId]
         )).rows;
         const farmLevel = structures.find((item) => item.building_type === "farm")?.level ?? 0;
         const aqueductLevel = structures.find((item) => item.building_type === "aqueduct")?.level ?? 0;
@@ -893,7 +916,7 @@ export const battleService = {
           "SELECT 1 FROM settlement_policies WHERE settlement_id=$1 AND policy_key='GARRISON_REINFORCEMENT' AND status='ACTIVE'", [defenderSettlementId]
         )).rowCount);
         const defenderFormable = (await client.query<{ active_formable_key: FormableCountryKey | null }>("SELECT c.active_formable_key FROM settlements s JOIN countries c ON c.id=s.country_id WHERE s.id=$1", [defenderSettlementId])).rows[0]?.active_formable_key;
-        const bonus = Math.min(8, (farmLevel >= 3 ? 3 : farmLevel >= 2 ? 1 : 0) + (aqueductLevel >= 2 ? 2 : 0) + (reinforced ? 1 : 0) + (formableModifiers(defenderFormable).starvationBonus ?? 0));
+        const bonus = Math.min(8, (farmLevel >= 3 ? 3 : farmLevel >= 2 ? 1 : 0) + (aqueductLevel >= 2 ? 1 : 0) + (reinforced ? 1 : 0) + (formableModifiers(defenderFormable).starvationBonus ?? 0));
         starvationCapacity = BASE_SIEGE_STARVATION_TURNS + bonus;
         currentTurn = (await client.query<{ current_turn: number }>("SELECT current_turn FROM guilds WHERE discord_id=$1", [input.guildId])).rows[0]?.current_turn ?? 0;
       }
@@ -960,7 +983,7 @@ export const battleService = {
   },
   async listParticipantCountries(input: { guildId: string; channelId: string }): Promise<BattleParticipantChoice[]> {
     const battle = (await pool.query<BattleRow>(
-      "SELECT * FROM battles WHERE guild_id=$1 AND channel_id=$2 AND status='DRAFT' ORDER BY created_at DESC LIMIT 1",
+      "SELECT * FROM battles WHERE guild_id=$1 AND channel_id=$2 AND status NOT IN ('FINISHED','CANCELLED') ORDER BY created_at DESC LIMIT 1",
       [input.guildId, input.channelId]
     )).rows[0];
     if (!battle) return [];
@@ -1364,7 +1387,7 @@ export const battleService = {
         const workshop = await client.query("SELECT 1 FROM buildings WHERE settlement_id=$1 AND building_type='engineering' AND status IN ('ACTIVE','BUILDING') AND level>=1", [settlement.id]);
         if (!workshop.rowCount) throw new GameError("Koçbaşı için ödeme yerleşkesinde Mühendislik Atölyesi Sv1 gerekir.");
       }
-      const resources = (await settlementResourceAccess(client, settlement.country_id)).get(settlement.id) ?? [settlement.resource_type];
+      const resources = (await settlementResourceAccess(client, settlement.country_id)).get(settlement.id) ?? [];
       const asset = SIEGE_ASSETS[input.assetType];
       const formableKey = (await client.query<{ active_formable_key: FormableCountryKey | null }>("SELECT active_formable_key FROM countries WHERE id=$1", [settlement.country_id])).rows[0]?.active_formable_key;
       const cost = Math.ceil(asset.price * input.quantity * Math.max(0.5, siegeCostMultiplier(input.assetType, resources) - (formableModifiers(formableKey).siegeAssetDiscount ?? 0)));
@@ -1391,7 +1414,8 @@ export const battleService = {
       if (view.battle.status !== "WAITING_FIRST_ROLL") throw new GameError("Tur zarları başladıktan sonra kuşatma aşaması değiştirilemez.");
       if (view.rolls.length) throw new GameError("Mevcut turun zarları başladıktan sonra kuşatma aşaması değiştirilemez.");
       if (view.battle.siege_phase === input.phase) throw new GameError(`Kuşatma zaten ${input.phase === "BOMBARDMENT" ? "Bombardıman" : "Hücum"} aşamasında.`);
-      if (input.phase === "ASSAULT" && !hasAssaultForce(view.sides.A.composition)) {
+      const attackerEffective = siegeAttackerDismountedComposition(view.sides.A.composition, attackerDismountments(view.sides.A));
+      if (input.phase === "ASSAULT" && !hasAssaultForce(attackerEffective)) {
         throw new GameError("Kuşatan orduda şehri ele geçirebilecek Hücum Birliği bulunmuyor.");
       }
       if (input.phase === "BOMBARDMENT") {
@@ -1403,6 +1427,78 @@ export const battleService = {
       const shouldReveal = siegePhaseShouldReveal(view.battle, input.phase);
       await client.query(`UPDATE battles SET siege_phase=$1,${revealColumn}=TRUE,updated_at=NOW() WHERE id=$2`, [input.phase, battle.id]);
       return { view: await loadView(client, battle.id), shouldReveal };
+    });
+  },
+
+  async setSiegeDismount(input: {
+    guildId: string; channelId: string; actorId: string; isGameMaster: boolean;
+    countryName?: string | null; unitType: SiegeDismountUnitType; quantity: number;
+  }): Promise<{ view: BattleView; countryName: string; targetType: BattleUnitType; maximum: number }> {
+    if (!Number.isSafeInteger(input.quantity) || input.quantity < 0) throw new GameError("Miktar sıfır veya pozitif bir tam sayı olmalıdır.");
+    const targetType = SIEGE_ATTACKER_DISMOUNT_MAP[input.unitType];
+    if (!targetType) throw new GameError("Seçilen birlik kuşatmada attan indirilemez.");
+    return withTransaction(async (client) => {
+      const battle = await activeInChannel(client, input.guildId, input.channelId);
+      if (!battle || battle.terrain !== "SIEGE") throw new GameError("Bu kanalda etkin bir kuşatma savaşı yok.");
+      if (!['DRAFT', 'WAITING_FIRST_ROLL'].includes(battle.status)) throw new GameError("Savaş turunun zarları başladıktan sonra süvari düzeni değiştirilemez.");
+      const view = await loadView(client, battle.id, true);
+      if (view.rolls.length) throw new GameError("Mevcut turun zarları başladıktan sonra süvari düzeni değiştirilemez.");
+      if ((view.battle.wall_current_hp ?? 0) <= 0 || (view.battle.gate_current_hp ?? 0) <= 0) {
+        throw new GameError("Surda gedik veya açık kapı bulunduğu için süvariler artık atlı hâlleriyle savaşa katılır.");
+      }
+      if (view.sides.A.controller === "GM" && !input.isGameMaster) {
+        throw new GameError("Kuşatan taraf NPC olarak yönetiliyor; süvari düzenini yalnız oyun yöneticisi değiştirebilir.");
+      }
+
+      let participant: BattleParticipantRow | undefined;
+      if (input.isGameMaster) {
+        participant = await resolveParticipant(client, battle.id, "A", input.countryName ?? null);
+      } else {
+        const memberships = (await client.query<BattleParticipantRow>(
+          `SELECT bsp.*,c.name AS country_name,source.name AS source_settlement_name
+             FROM battle_side_participants bsp
+             JOIN countries c ON c.id=bsp.country_id
+             JOIN country_members cm ON cm.country_id=bsp.country_id
+             LEFT JOIN settlements source ON source.id=bsp.source_settlement_id
+            WHERE bsp.battle_id=$1 AND bsp.side_key='A' AND cm.discord_user_id=$2
+            ORDER BY bsp.is_primary DESC,c.name FOR UPDATE OF bsp`,
+          [battle.id, input.actorId]
+        )).rows;
+        participant = input.countryName?.trim()
+          ? memberships.find((row) => row.country_name.toLocaleLowerCase("tr-TR") === input.countryName!.trim().toLocaleLowerCase("tr-TR"))
+          : memberships[0];
+        if (!participant) throw new GameError("Yalnız kuşatan taraftaki kendi ülkenizin süvarilerini attan indirebilirsiniz.");
+      }
+
+      const mercenaryQuantity = Number((await client.query<{ quantity: number }>(
+        `SELECT COALESCE(SUM(COALESCE((bma.initial_land->>$3)::integer,0)),0)::integer AS quantity
+           FROM battle_mercenary_assignments bma
+           JOIN mercenary_contracts mc ON mc.id=bma.contract_id
+          WHERE bma.battle_id=$1 AND bma.side_key='A' AND mc.country_id=$2`,
+        [battle.id, participant.country_id, input.unitType]
+      )).rows[0]?.quantity ?? 0);
+      const countryAvailable = Math.max(0, Number(participant.composition?.[input.unitType] ?? 0) + mercenaryQuantity);
+      const selectedByOthers = view.sides.A.participants
+        .filter((row) => row.country_id !== participant!.country_id)
+        .reduce((sum, row) => sum + Math.max(0, Number(row.dismounted_composition?.[input.unitType] ?? 0)), 0);
+      const sideRemaining = Math.max(0, Number(view.sides.A.composition[input.unitType] ?? 0));
+      const maximum = Math.min(countryAvailable, Math.max(0, sideRemaining - selectedByOthers));
+      if (input.quantity > maximum) {
+        throw new GameError(`${participant.country_name} için bu türden en fazla ${maximum.toLocaleString("tr-TR")} süvari attan indirilebilir.`);
+      }
+
+      const next: BattleComposition = { ...(participant.dismounted_composition ?? {}) };
+      if (input.quantity > 0) next[input.unitType] = input.quantity;
+      else delete next[input.unitType];
+      await client.query(
+        "UPDATE battle_side_participants SET dismounted_composition=$1::jsonb WHERE battle_id=$2 AND country_id=$3",
+        [JSON.stringify(next), battle.id, participant.country_id]
+      );
+      await client.query(
+        "INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'battle.siege_dismount','battle',$3,$4::jsonb)",
+        [input.guildId, input.actorId, battle.id, JSON.stringify({ countryId: participant.country_id, countryName: participant.country_name, unitType: input.unitType, targetType, quantity: input.quantity, maximum })]
+      );
+      return { view: await loadView(client, battle.id), countryName: participant.country_name, targetType, maximum };
     });
   },
 
@@ -1447,7 +1543,8 @@ export const battleService = {
       if (!battle || battle.status !== "DRAFT") throw new GameError("Yayımlanabilir savaş taslağı bulunamadı.");
       const view = await loadView(client, battle.id, true);
       if (!view.sides.A.initial_total || !view.sides.B.initial_total) throw new GameError("İki taraf için de gizli ordu veya filo bileşimi girilmelidir.");
-      if (battle.terrain === "SIEGE" && battle.siege_phase === "ASSAULT" && !hasAssaultForce(view.sides.A.composition)) {
+      const attackerEffective = siegeAttackerDismountedComposition(view.sides.A.composition, attackerDismountments(view.sides.A));
+      if (battle.terrain === "SIEGE" && battle.siege_phase === "ASSAULT" && !hasAssaultForce(attackerEffective)) {
         throw new GameError("Kuşatan orduda şehri ele geçirebilecek Hücum Birliği bulunmadan Hücum aşaması yayımlanamaz.");
       }
       if (battle.terrain === "SIEGE" && battle.defender_settlement_id) {
@@ -1500,7 +1597,13 @@ export const battleService = {
       if (!active || active.id !== input.battleId) throw new GameError("Bu düğme artık geçerli değil; güncel savaş kartını kullanın.");
       const view = await loadView(client, active.id, true);
       if (view.battle.terrain === "SIEGE" && view.battle.siege_phase === "BOMBARDMENT") throw new GameError("Ordular henüz temas etmiyor. Önce kuşatma aşamasını Hücum olarak değiştirin.");
-      if (view.battle.terrain === "SIEGE" && !hasAssaultForce(view.sides.A.composition)) throw new GameError("Kuşatan orduda Hücum Birliği kalmadığı için hücum zarı atılamaz.");
+      const currentRestrictedSiege = view.battle.terrain === "SIEGE"
+        && (view.battle.wall_current_hp ?? 0) > 0 && (view.battle.gate_current_hp ?? 0) > 0;
+      const currentAttackerDismounted = currentRestrictedSiege ? attackerDismountments(view.sides.A) : {};
+      const currentAttackerEffective = currentRestrictedSiege
+        ? siegeAttackerDismountedComposition(view.sides.A.composition, currentAttackerDismounted)
+        : view.sides.A.composition;
+      if (view.battle.terrain === "SIEGE" && !hasAssaultForce(currentAttackerEffective)) throw new GameError("Kuşatan orduda Hücum Birliği kalmadığı için hücum zarı atılamaz.");
       if (!["WAITING_FIRST_ROLL", "WAITING_SECOND_ROLL"].includes(view.battle.status)) throw new GameError("Savaş şu anda zar beklemiyor.");
       const side = expectedSide(view), target = view.sides[side];
       const member = await isSideMember(client, active.id, side, input.actorId);
@@ -1539,6 +1642,7 @@ export const battleService = {
       const navalClashBonus = Math.max(0, ...formableKeys.map((key) => formableModifiers(key).navalClashBonus ?? 0));
       const longbowDamageRate = Math.max(0, ...formableKeys.map((key) => formableModifiers(key).britonLongbowDamageBonusPerThousand ?? 0));
       let wallDamage = 0, gateDamage = 0;
+      let rolledDismounted: BattleComposition = {};
       const activationTurn = view.battle.army_composition_activation_turn;
       const compositionEnabled = activationTurn !== null && activationTurn !== undefined && (view.battle.game_turn ?? 0) >= activationTurn;
       let roll;
@@ -1558,10 +1662,15 @@ export const battleService = {
         }
         const wallAfterSupport = Math.max(0, (view.battle.wall_current_hp ?? 0) - wallDamage);
         const gateAfterSupport = Math.max(0, (view.battle.gate_current_hp ?? 0) - gateDamage);
-        const rollComposition = side === "A"
-          ? siegeAssaultComposition(target.composition, target.support_assets, wallAfterSupport, gateAfterSupport, terrain.frontageA)
-          : siegeDefenderComposition(target.composition);
         const restrictedSiege = wallAfterSupport > 0 && gateAfterSupport > 0;
+        const dismounted = side === "A" && restrictedSiege ? attackerDismountments(target) : {};
+        rolledDismounted = dismounted;
+        const effectiveComposition = side === "A" && restrictedSiege
+          ? siegeAttackerDismountedComposition(target.composition, dismounted)
+          : target.composition;
+        const rollComposition = side === "A"
+          ? siegeAssaultComposition(effectiveComposition, target.support_assets, wallAfterSupport, gateAfterSupport, terrain.frontageA)
+          : siegeDefenderComposition(target.composition);
         roll = rollBattlePool(rollComposition, frontage, undefined, restrictedSiege ? "SIEGE_RESTRICTED" : "FIELD", undefined, compositionEnabled);
         roll.clash += support.clash; roll.damage += support.damage;
         roll.detail.__siege = { engaged: 0, clash: support.clash, damage: support.damage };
@@ -1646,6 +1755,7 @@ export const battleService = {
         ...roll.detail,
         ...(roll.composition ? { __composition: roll.composition } : {}),
         ...(roll.counter ? { __spear_cavalry: roll.counter } : {}),
+        ...(Object.keys(rolledDismounted).length ? { __dismounted: rolledDismounted } : {}),
         ...(commanderBonus > 0 ? { __commander: { engaged: 0, clash: commanderBonus, damage: 0 } } : {}),
         ...(navalClashBonus > 0 && view.battle.terrain === "NAVAL" ? { __royal_navy: { engaged: 0, clash: navalClashBonus, damage: 0 } } : {})
         ,...((temporaryClash < 1 || temporaryDamage < 1) ? { __supply_sabotage: { engaged:0,clash:temporaryClash,damage:temporaryDamage,doctrineDisabled } } : {})
@@ -1692,12 +1802,20 @@ export const battleService = {
       const attackerAntiCavalryDamage = Number(rollA.detail?.__spear_cavalry?.antiCavalryDamage ?? 0);
       const defenderAntiCavalryDamage = Math.ceil(Number(rollB.detail?.__spear_cavalry?.antiCavalryDamage ?? 0) * defense.defenderDamage);
       const mantletDefense = siege ? Math.min(0.50, (view.sides.A.support_assets.mantlet ?? 0) * 0.05) : 0;
-      const attackerCasualtyComposition = siege
+      const restrictedSiege = siege && (wallAfter ?? 0) > 0 && (gateAfter ?? 0) > 0;
+      const attackerDismounted = restrictedSiege ? attackerDismountments(view.sides.A) : {};
+      const attackerEffectiveComposition = restrictedSiege
+        ? siegeAttackerDismountedComposition(view.sides.A.composition, attackerDismounted)
+        : view.sides.A.composition;
+      const effectiveAttackerCasualtyComposition = siege
         ? siegeAssaultComposition(
-          view.sides.A.composition, view.sides.A.support_assets,
+          attackerEffectiveComposition, view.sides.A.support_assets,
           wallAfter ?? 0, gateAfter ?? 0, BATTLE_TERRAINS.SIEGE.frontageA
         )
         : undefined;
+      const attackerCasualtyComposition = restrictedSiege && effectiveAttackerCasualtyComposition
+        ? restoreSiegeAttackerCasualtyTypes(view.sides.A.composition, effectiveAttackerCasualtyComposition, attackerDismounted)
+        : effectiveAttackerCasualtyComposition;
       const resolution = resolveRound(view.sides.A.composition, view.sides.B.composition,
         { clash: rollA.clash_total, damage: attackerEffectiveDamage, antiCavalryDamage: attackerAntiCavalryDamage, detail: {} },
         { clash: defenderEffectiveClash, damage: defenderEffectiveDamage, antiCavalryDamage: defenderAntiCavalryDamage, detail: {} },
@@ -1705,7 +1823,8 @@ export const battleService = {
           mode: naval ? "NAVAL" : "LAND", damageFactorA: defense.attackerDamage, damageFactorB: siege ? 1 - mantletDefense : 1,
           ...(siege ? {
             pressureClashA: rollA.clash_total, pressureClashB: rollB.clash_total,
-            casualtyCompositionA: attackerCasualtyComposition
+            casualtyCompositionA: attackerCasualtyComposition,
+            ...(restrictedSiege ? { casualtyDurabilityOverridesA: dismountedDurabilityOverrides(attackerDismounted) } : {})
           } : {})
         });
       let attackerPressureDelta = resolution.pressureDeltaA;
@@ -1740,8 +1859,11 @@ export const battleService = {
       const pressureB = siegePressureB?.pressure ?? Math.max(0, view.sides.B.pressure + defenderPressureDelta);
       let orderA = siege ? siegeOrderState(pressureA, totalA) : orderState(pressureA, view.sides.A.initial_total, totalA);
       let orderB = siege ? siegeOrderState(pressureB, totalB) : orderState(pressureB, view.sides.B.initial_total, totalB);
-      const assaultInfantry = assaultUnitTotal(resolution.remainingA);
-      const forcedAssaultRetreat = siege && !hasAssaultForce(resolution.remainingA);
+      const remainingAttackerEffective = restrictedSiege
+        ? siegeAttackerDismountedComposition(resolution.remainingA, attackerDismounted)
+        : resolution.remainingA;
+      const assaultInfantry = assaultUnitTotal(remainingAttackerEffective);
+      const forcedAssaultRetreat = siege && !hasAssaultForce(remainingAttackerEffective);
       const attackerBroken = siege
         ? forcedAssaultRetreat || siegeLineBreaks(view.sides.A.pressure, pressureA, resolution.pressureWinner === "B", totalA, siegePressureA?.hasUsableReserve ?? false)
         : battleEnds(pressureA, view.sides.A.initial_total, totalA);

@@ -45,6 +45,7 @@ import { handleArmyCommand } from "./army-ui.js";
 import { handleFleetCommand } from "./fleet-ui.js";
 import { handleCityAutocomplete, handleCityButton, handleCityCommand, handleCityModal } from "./city-ui.js";
 import { addCountryRoleToMember, deleteCountryRole, ensureCountryRole, removeCountryRoleFromMember } from "./country-roles.js";
+import { setEventManagerRole } from "./event-manager-role.js";
 import { handleSettlementEventSelect } from "./event-ui.js";
 import { handleEspionageAutocomplete, handleEspionageCommand, publishPendingEspionageLogs } from "./espionage-ui.js";
 import { espionageService, resolveDueEspionageOperations } from "../services/espionage-service.js";
@@ -899,6 +900,22 @@ async function handleGreatPowerCommand(interaction: ChatInputCommandInteraction)
   await interaction.editReply(`✅ Güncel **${snapshot.rows.length} devletlik Büyük Güçler sıralaması** <#${channelId}> kanalında paylaşıldı.`);
 }
 async function handleCommand(interaction: ChatInputCommandInteraction): Promise<void> {
+  if (interaction.commandName === "olay-yoneticisi") {
+    requireGameMaster(interaction);
+    if (!interaction.guild) throw new GameError("Sunucu bulunamadı.");
+    await interaction.deferReply({ ephemeral: true });
+    const user = interaction.options.getUser("uye", true);
+    const grant = interaction.options.getString("islem", true) === "grant";
+    const result = await setEventManagerRole({ guild: interaction.guild, actorId: interaction.user.id, userId: user.id, grant });
+    if (grant) {
+      await interaction.editReply(`${result.changed ? "✅" : "ℹ️"} <@${user.id}> ${result.changed ? "artık" : "zaten"} **Olay Yöneticisi** rolüne sahip.${result.created ? " Rol sunucuda otomatik oluşturuldu." : ""}\nBu yetki yalnızca **/olay** komutlarını ve olay müdahale bileşenlerini açar.`);
+    } else {
+      await interaction.editReply(result.changed
+        ? `✅ <@${user.id}> kullanıcısının **Olay Yöneticisi** rolü kaldırıldı.`
+        : `ℹ️ <@${user.id}> kullanıcısında kaldırılabilecek **Olay Yöneticisi** rolü bulunmuyor.`);
+    }
+    return;
+  }
   if (interaction.commandName === "karakter-yonetim" && interaction.options.getSubcommand() === "tur-gorevlerini-isle") {
     await handleCharacterTurnRecovery(interaction);
     return;
@@ -1152,6 +1169,40 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     await handleSpecialUnitAccess(interaction);
   } else if (interaction.commandName === "npc-devlet-oto-alim") {
     await handleNpcAutoPurchase(interaction);
+  } else if (interaction.commandName === "nufus-ekle") {
+    requireGameMaster(interaction);
+    if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
+    await interaction.deferReply({ ephemeral: true });
+    const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
+    if (!country) throw new GameError("Ülke bulunamadı.");
+    const settlement = await findSettlement(country.id, interaction.options.getString("yerleske", true));
+    const populationType = interaction.options.getString("nufus-turu", true) as "FREE" | "SLAVE";
+    const amount = interaction.options.getInteger("miktar", true);
+    const result = await gameService.addSettlementPopulation({
+      guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id,
+      settlementId: settlement.id, populationType, amount
+    });
+    await interaction.editReply(
+      `✅ **${country.name} / ${settlement.name}** yerleşkesine **${number(amount)} ${populationType === "FREE" ? "özgür" : "köle"} nüfus** eklendi.\n` +
+      `Önceki: **${number(result.previous)}** • Yeni toplam: **${number(result.remaining)}**`
+    );
+  } else if (interaction.commandName === "milis-ekle") {
+    requireGameMaster(interaction);
+    if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
+    await interaction.deferReply({ ephemeral: true });
+    const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
+    if (!country) throw new GameError("Ülke bulunamadı.");
+    const settlement = await findSettlement(country.id, interaction.options.getString("yerleske", true));
+    const amount = interaction.options.getInteger("miktar", true);
+    const result = await gameService.addSettlementMilitia({
+      guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id,
+      settlementId: settlement.id, amount
+    });
+    await interaction.editReply(
+      `✅ **${country.name} / ${settlement.name}** yerleşkesine **${number(amount)} Milis** eklendi.\n` +
+      `Önceki: **${number(result.previous)}** • Yeni toplam: **${number(result.total)}**\n` +
+      "Bu manuel işlem hazineden veya nüfustan düşüm yapmadı."
+    );
   } else if (interaction.commandName === "tamamlanmis-bina-ekle") {
     requireGameMaster(interaction);
     if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
@@ -1209,7 +1260,8 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
     if (!settlement) throw new GameError("Yerleşke bulunamadı.");
     const activePolicies = settlement.policies.filter((policy) => policy.status === "ACTIVE").map((policy) => policy.policy_key);
     const occupiedSlots = settlement.buildings.filter((building) => building.level > 0 || building.status === "BUILDING").length;
-    const hasPort = settlement.buildings.some((building) => building.building_type === "port" && building.status === "ACTIVE" && building.level >= 1);
+    const hasPort = settlement.buildings.some((building) => building.building_type === "port"
+      && (building.status === "ACTIVE" || building.status === "BUILDING") && building.level >= 1);
     const options = buildingChoices.flatMap((building) => {
       const current = settlement.buildings.find((item) => item.building_type === building.key);
       const next = (current?.level ?? 0) + 1;
@@ -1217,6 +1269,7 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
       if (!current && occupiedSlots >= settlement.slotLimit) return [];
       if (building.key === "port" && !settlement.is_coastal) return [];
       if (building.key === "shipyard" && !hasPort) return [];
+      if (building.key === "customs_house" && !hasPort) return [];
       const terms = buildingPurchaseTerms(building.key, next, settlement.effectiveResources, activePolicies, doc.country.active_formable_key);
       return [{
         label: `${building.name} Sv${next}`.slice(0, 100),
@@ -1452,7 +1505,7 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
     if (!interaction.guildId || !isGameMaster(interaction)) { await interaction.respond([]); return; }
     let subcommand = "";
     try { subcommand = interaction.options.getSubcommand(false) ?? ""; } catch { subcommand = ""; }
-    if (!["ordu-ekle", "filo-ekle", "kadro-ayarla", "parali-asker-ayarla"].includes(subcommand)) { await interaction.respond([]); return; }
+    if (!["ordu-ekle", "filo-ekle", "kadro-ayarla", "parali-asker-ayarla", "suvari-indir"].includes(subcommand)) { await interaction.respond([]); return; }
     const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
     const participants = await battleService.listParticipantCountries({ guildId: interaction.guildId, channelId: interaction.channelId });
     await interaction.respond(participants

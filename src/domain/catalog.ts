@@ -25,7 +25,7 @@ export const CITY_POLICIES = {
   CONSCRIPTION: { label: "Zorunlu Askerlik / Dilectus", category: "Askerî", minCuriaLevel: 3, description: "Bir defa 5.000 nüfus karşılığında 5.000 kalıcı milis; asker alımı -%10." },
   MARKET_FAIRS: { label: "Pazar Panayırları / Nundinae", category: "Ekonomi", minCuriaLevel: 1, description: "+250 Altın; Ticaret Loncası gelir bonusu +2 puan." },
   STRICT_TAXATION: { label: "Vergi Sıkılaştırması", category: "Ekonomi", minCuriaLevel: 2, description: "Halk vergisi +%20; her Alım Turunda +%10 isyan riski." },
-  MERCHANT_LICENSE: { label: "Tüccar Loncası İzni", category: "Ekonomi", minCuriaLevel: 3, description: "Ticaret Loncası ve Lupanar bonusları ayrı ayrı +5 puan." },
+  MERCHANT_LICENSE: { label: "Tüccar Loncası İzni", category: "Ekonomi", minCuriaLevel: 3, description: "Ticaret Loncasının toplam gelir ve Kervansarayın kara ticareti bonusu ayrı ayrı +5 puan." },
   ACCELERATED_CONSTRUCTION: { label: "Hızlandırılmış İnşa", category: "Altyapı", minCuriaLevel: 1, description: "İnşa süresi -1 tur; bina maliyeti -%5." },
   INFRASTRUCTURE_ROADS: { label: "Altyapı ve Yol Gelişimi", category: "Altyapı", minCuriaLevel: 2, description: "Tamamlanmış bina başına +100 Altın; azami +600." },
   MASTER_ARCHITECTURE: { label: "Usta Mimarlık Programı", category: "Altyapı", minCuriaLevel: 3, description: "Sv2/Sv3 inşaatı -3 tur; bina maliyeti -%10; eşzamanlı 3 inşaat." }
@@ -41,7 +41,7 @@ export function buildingBaseCost(buildingType: string, level: number): number {
 export const BUILDINGS: Record<string, BuildingDefinition> = {
   trade_guild: {
     key: "trade_guild", name: "Ticaret Loncası", category: "PERCENT_ECONOMY", maxLevel: 3,
-    levels: { 1: { incomePercent: 0.10 }, 2: { incomePercent: 0.20, flatIncome: 500 }, 3: { incomePercent: 0.30, flatIncome: 1_000 } }
+    levels: { 1: { incomePercent: 0.10, flatIncome: 750 }, 2: { incomePercent: 0.20, flatIncome: 1_400 }, 3: { incomePercent: 0.30, flatIncome: 2_800 } }
   },
   lupanar: {
     key: "lupanar", name: "Lupanar", category: "PERCENT_ECONOMY", maxLevel: 3,
@@ -49,11 +49,11 @@ export const BUILDINGS: Record<string, BuildingDefinition> = {
   },
   farm: {
     key: "farm", name: "Çiftlik", category: "FLAT_ECONOMY", maxLevel: 3,
-    levels: { 1: { flatIncome: 500 }, 2: { flatIncome: 1_000 }, 3: { flatIncome: 2_000 } }
+    levels: { 1: { flatIncome: 750 }, 2: { flatIncome: 1_500 }, 3: { flatIncome: 3_000 } }
   },
   healer: {
     key: "healer", name: "Şifacı Evi", category: "PUBLIC_INFRASTRUCTURE", maxLevel: 3,
-    levels: { 1: { populationFlat: 1_000 }, 2: { populationFlat: 3_000 }, 3: { populationFlat: 5_000 } }
+    levels: { 1: { populationRate: 0.02, flatIncome: 250 }, 2: { populationRate: 0.05, flatIncome: 500 }, 3: { populationRate: 0.10, flatIncome: 1_500 } }
   },
   academy: {
     key: "academy", name: "Akademi", category: "PUBLIC_INFRASTRUCTURE", maxLevel: 3,
@@ -61,15 +61,15 @@ export const BUILDINGS: Record<string, BuildingDefinition> = {
   },
   curia: {
     key: "curia", name: "Curia", category: "PUBLIC_INFRASTRUCTURE", maxLevel: 3,
-    levels: { 1: {}, 2: { flatIncome: 300 }, 3: { flatIncome: 300 } }
+    levels: { 1: {}, 2: { flatIncome: 500 }, 3: { flatIncome: 750 } }
   },
   slave_camp: {
-    key: "slave_camp", name: "Köle Kampı", category: "PERCENT_ECONOMY", maxLevel: 3,
+    key: "slave_camp", name: "Köle Kampı", category: "FLAT_ECONOMY", maxLevel: 3,
     levels: { 1: {}, 2: {}, 3: {} }
   },
   pantheon: {
     key: "pantheon", name: "Panteon", category: "PUBLIC_INFRASTRUCTURE", maxLevel: 3,
-    levels: { 1: {}, 2: { flatIncome: 300 }, 3: { flatIncome: 300 } }
+    levels: { 1: {}, 2: { flatIncome: 500 }, 3: { flatIncome: 750 } }
   },
   engineering: {
     key: "engineering", name: "Mühendislik Atölyesi", category: "MILITARY_NAVAL", maxLevel: 3,
@@ -77,25 +77,79 @@ export const BUILDINGS: Record<string, BuildingDefinition> = {
   },
   aqueduct: {
     key: "aqueduct", name: "Su Kemerleri ve Sarnıç", category: "PUBLIC_INFRASTRUCTURE", maxLevel: 3,
-    levels: { 1: { populationPercent: 0.50 }, 2: { populationPercent: 0.50, flatIncome: 200 }, 3: { populationPercent: 1.00, flatIncome: 500 } }
+    levels: { 1: { populationPercent: 0.50 }, 2: { populationPercent: 0.50, flatIncome: 500 }, 3: { populationPercent: 1.00, flatIncome: 750 } }
   },
   agora: {
     key: "agora", name: "Agora / Forum", category: "FLAT_ECONOMY", maxLevel: 3,
-    levels: { 1: { flatIncome: 500 }, 2: { flatIncome: 1_000 }, 3: { flatIncome: 2_000 } }
+    levels: { 1: { flatIncome: 500 }, 2: { flatIncome: 1_250 }, 3: { flatIncome: 2_500 } }
+  },
+  inns_baths: {
+    key: "inns_baths", name: "Hanlar ve Hamamlar", category: "FLAT_ECONOMY", maxLevel: 3,
+    levels: {
+      1: { flatIncome: 750, populationPercent: 0.05 },
+      2: { flatIncome: 1_750, populationPercent: 0.10 },
+      3: { flatIncome: 3_000, populationPercent: 0.15 }
+    }
+  },
+  caravanserai: {
+    key: "caravanserai", name: "Kervansaray", category: "PERCENT_ECONOMY", maxLevel: 3,
+    levels: {
+      1: { flatIncome: 500, landTradePercent: 0.15 },
+      2: { flatIncome: 1_000, landTradePercent: 0.30 },
+      3: { flatIncome: 1_500, landTradePercent: 0.45 }
+    }
+  },
+  customs_house: {
+    key: "customs_house", name: "Gümrükhane", category: "PERCENT_ECONOMY", maxLevel: 3,
+    levels: {
+      1: { flatIncome: 500, seaIncomePercent: 0.20 },
+      2: { flatIncome: 1_000, seaIncomePercent: 0.40 },
+      3: { flatIncome: 1_500, seaIncomePercent: 0.60 }
+    }
+  },
+  artisans_quarter: {
+    key: "artisans_quarter", name: "Zanaatkârlar Mahallesi", category: "FLAT_ECONOMY", maxLevel: 3,
+    levels: { 1: { flatIncome: 750 }, 2: { flatIncome: 1_500 }, 3: { flatIncome: 2_500 } }
+  },
+  census_tax_office: {
+    key: "census_tax_office", name: "Sayım ve Vergi Dairesi", category: "PERCENT_ECONOMY", maxLevel: 3,
+    levels: {
+      1: { flatIncome: 500, taxIncomePercent: 0.15 },
+      2: { flatIncome: 1_000, taxIncomePercent: 0.30 },
+      3: { flatIncome: 2_000, taxIncomePercent: 0.50 }
+    }
   },
   port: {
-    key: "port", name: "Liman", category: "MILITARY_NAVAL", maxLevel: 1,
-    levels: { 1: { flatIncome: 500 } }
+    key: "port", name: "Liman", category: "MILITARY_NAVAL", maxLevel: 3,
+    levels: { 1: { flatIncome: 750 }, 2: { flatIncome: 1_500 }, 3: { flatIncome: 3_000 } }
   },
   shipyard: {
     key: "shipyard", name: "Tersane", category: "MILITARY_NAVAL", maxLevel: 3,
     levels: { 1: {}, 2: {}, 3: { seaIncomePercent: 0.15 } }
   },
   raw_material: {
-    key: "raw_material", name: "Hammadde İşletmesi", category: "PUBLIC_INFRASTRUCTURE", maxLevel: 3,
+    key: "raw_material", name: "Hammadde İşletmesi", category: "FLAT_ECONOMY", maxLevel: 3,
     levels: { 1: {}, 2: {}, 3: {} }
   }
 };
+
+export const BUILDABLE_BUILDINGS = Object.values(BUILDINGS).filter((building) => building.key !== "lupanar");
+
+export const RAW_MATERIAL_BASE_PRODUCTION = 2;
+
+export function rawMaterialProduction(level: number): number {
+  if (level >= 3) return 8;
+  if (level >= 2) return 6;
+  if (level >= 1) return 4;
+  return RAW_MATERIAL_BASE_PRODUCTION;
+}
+
+export function caravanseraiForeignConcessionBonus(level: number): number {
+  if (level >= 3) return 0.15;
+  if (level >= 2) return 0.10;
+  if (level >= 1) return 0.05;
+  return 0;
+}
 
 export const UNITS = {
   light_infantry: { name: "Hafif Piyade / Ciritçi", price: 1_000, upkeep: 100 },
@@ -110,7 +164,15 @@ export const UNITS = {
   militia: { name: "Milis", price: 0, upkeep: 100 }
 } as const;
 
-export const PORT_SHIP_CAPACITY = 30;
+export const PORT_SHIP_CAPACITY_BY_LEVEL = { 1: 30, 2: 40, 3: 50 } as const;
+export const PORT_SHIP_CAPACITY = PORT_SHIP_CAPACITY_BY_LEVEL[1];
+
+export function portShipCapacity(level: number): number {
+  if (level >= 3) return PORT_SHIP_CAPACITY_BY_LEVEL[3];
+  if (level >= 2) return PORT_SHIP_CAPACITY_BY_LEVEL[2];
+  if (level >= 1) return PORT_SHIP_CAPACITY_BY_LEVEL[1];
+  return 0;
+}
 
 export const SHIPS = {
   kerkouros: { name: "Kerkouros", price: 750, upkeep: 75, manpower: 50, buildTurns: 2, transportCapacity: 200, productionPoints: 1, harborPoints: 1 },

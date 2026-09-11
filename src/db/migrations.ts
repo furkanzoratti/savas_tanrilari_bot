@@ -1829,5 +1829,47 @@ export const migrations = [
          AND status IN ('TRAVELING','ACTIVE','PAUSED')
          AND goal<12;
     `
+  },
+  {
+    version: 56,
+    name: "siege_attacker_cavalry_dismount",
+    sql: `
+      ALTER TABLE battle_side_participants
+        ADD COLUMN IF NOT EXISTS dismounted_composition JSONB NOT NULL DEFAULT '{}'::jsonb;
+    `
+  },
+  {
+    version: 57,
+    name: "expanded_settlement_events",
+    sql: `
+      ALTER TABLE settlements ADD COLUMN IF NOT EXISTS drought_active BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE settlements ADD COLUMN IF NOT EXISTS famine_active BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE settlements ADD COLUMN IF NOT EXISTS bountiful_harvest_active BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE settlements ADD COLUMN IF NOT EXISTS trade_boom_active BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE settlements ADD COLUMN IF NOT EXISTS migration_wave_active BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE settlements ADD COLUMN IF NOT EXISTS master_craftsmen_active BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE settlements ADD COLUMN IF NOT EXISTS local_volunteers_active BOOLEAN NOT NULL DEFAULT FALSE;
+
+      ALTER TABLE settlement_event_draws DROP CONSTRAINT IF EXISTS settlement_event_draws_event_type_check;
+      ALTER TABLE settlement_event_draws ADD CONSTRAINT settlement_event_draws_event_type_check CHECK (event_type IN (
+        'BLACK_MARKET','EPIDEMIC','UNREST','REBELLION','DROUGHT','FAMINE','BOUNTIFUL_HARVEST',
+        'TRADE_BOOM','MIGRATION_WAVE','MASTER_CRAFTSMEN','LOCAL_VOLUNTEERS'
+      ));
+    `
+  },
+  {
+    version: 58,
+    name: "anatolian_thureophoroi_special_unit",
+    sql: `
+      ALTER TABLE country_special_unit_unlocks
+        DROP CONSTRAINT IF EXISTS country_special_unit_unlocks_unit_type_check;
+      ALTER TABLE country_special_unit_unlocks
+        ADD CONSTRAINT country_special_unit_unlocks_unit_type_check
+        CHECK (unit_type IN (
+          'legionary','hoplite','horse_archer','camel_cavalry','briton_longbow',
+          'persian_immortal','carthaginian_war_elephant','iberian_caetrati',
+          'germanic_shock_warrior','anatolian_thureophoroi'
+        ));
+    `
   }
 ] as const;

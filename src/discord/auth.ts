@@ -4,10 +4,18 @@ import { gameService, GameError } from "../services/game-service.js";
 
 type GuildInteraction = AutocompleteInteraction | ChatInputCommandInteraction | MessageComponentInteraction | ModalSubmitInteraction;
 
+export const EVENT_MANAGER_ROLE_NAME = "Olay Yöneticisi";
+
 export function isGameMaster(interaction: GuildInteraction): boolean {
   if (interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) return true;
   const member = interaction.member as GuildMember | null;
   return member ? member.roles.cache.some((role) => config.adminRoleIds.has(role.id)) : false;
+}
+
+export function isEventManager(interaction: GuildInteraction): boolean {
+  if (isGameMaster(interaction)) return true;
+  const member = interaction.member as GuildMember | null;
+  return member ? member.roles.cache.some((role) => role.name === EVENT_MANAGER_ROLE_NAME) : false;
 }
 
 export async function resolveCountry(interaction: ChatInputCommandInteraction, requestedName?: string | null) {
@@ -31,4 +39,8 @@ export async function assertCountryAccess(interaction: GuildInteraction, country
 
 export function requireGameMaster(interaction: ChatInputCommandInteraction): void {
   if (!isGameMaster(interaction)) throw new GameError("Bu komut yalnızca oyun yöneticileri tarafından kullanılabilir.");
+}
+
+export function requireEventManager(interaction: GuildInteraction): void {
+  if (!isEventManager(interaction)) throw new GameError(`Bu komut yalnızca oyun yöneticileri veya **${EVENT_MANAGER_ROLE_NAME}** rolüne sahip görevliler tarafından kullanılabilir.`);
 }
