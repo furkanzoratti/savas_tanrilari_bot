@@ -311,6 +311,22 @@ export const greatGamesService = {
         [season.id, input.gameType, input.countryId]
       )).rows[0];
       if (!entry) throw new GameError("Önce bu oyuna katılmalısın.");
+      if (input.gameType === "CARAVAN") {
+        if (!entry.room_key) throw new GameError("Bu devlet henüz bir kervan takımına yerleştirilmemiş.");
+        await client.query(
+          "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
+          [`${season.id}:CARAVAN:${season.current_round}:${entry.room_key}`]
+        );
+        const existingChoice = (await client.query<{ country_id: string }>(
+          `SELECT a.country_id FROM great_games_actions a
+           JOIN great_games_entries e ON e.season_id=a.season_id AND e.game_type=a.game_type AND e.country_id=a.country_id
+           WHERE a.season_id=$1 AND a.game_type='CARAVAN' AND a.round=$2 AND a.action_type=$3
+             AND a.resolved=FALSE AND e.room_key=$4
+           ORDER BY a.updated_at DESC LIMIT 1`,
+          [season.id, season.current_round, input.actionType, entry.room_key]
+        )).rows[0];
+        if (existingChoice && existingChoice.country_id !== input.countryId) throw new GameError(`${entry.metadata.teamName ?? entry.room_key} için ortak rota takım arkadaşın tarafından seçildi.`);
+      }
       if (input.gameType === "CHARIOT" && input.payload.tactic === "SQUEEZE") {
         const targetCountryId = String(input.payload.targetCountryId ?? "");
         if (!targetCountryId || targetCountryId === input.countryId) throw new GameError("Sıkıştırma taktiğinde yarışan başka bir devlet hedeflenmelidir.");
@@ -391,7 +407,8 @@ export const greatGamesService = {
       const list = (await entries(client, season.id, gameType)).filter((entry) => entry.status === "ACTIVE");
       const actions = (await client.query<{ country_id: string; action_type: string; payload: Record<string, unknown> }>(
         `SELECT country_id,action_type,payload FROM great_games_actions
-         WHERE season_id=$1 AND game_type=$2 AND round=$3 AND resolved=FALSE`, [season.id, gameType, season.current_round]
+         WHERE season_id=$1 AND game_type=$2 AND round=$3 AND resolved=FALSE
+         ORDER BY updated_at DESC`, [season.id, gameType, season.current_round]
       )).rows;
       const summary: string[] = [];
       let finished = false;
@@ -414,11 +431,11 @@ export const greatGamesService = {
         }
         if (teams.size < 2 || [...teams.values()].some((team) => team.length < 2 || team.length > 4)) throw new GameError("Kervanlarda en az iki takım ve takım başına 2–4 devlet gerekir.");
         for (const [teamName, members] of teams) {
-          const teamActions = members.map((member) => actions.find((action) => action.country_id === member.country_id));
-          if (teamActions.some((action) => !action)) throw new GameError(`${teamName} kervanının bütün ortakları bu aşamanın ortak rotasını onaylamadı.`);
-          const routes = [...new Set(teamActions.map((action) => String(action!.payload.route) as CaravanRoute))];
-          if (routes.length !== 1 || !(routes[0]! in CARAVAN_ROUTES)) throw new GameError(`${teamName} kervanı ortak bir rota seçmelidir.`);
-          const route = routes[0]!;
+          const memberIds = new Set(members.map((member) => member.country_id));
+          const teamAction = actions.find((action) => memberIds.has(action.country_id));
+          if (!teamAction) throw new GameError(`${teamName} kervanı için bir takım üyesi ortak rota seçmelidir.`);
+          const route = String(teamAction.payload.route) as CaravanRoute;
+          if (!(route in CARAVAN_ROUTES)) throw new GameError(`${teamName} kervanının ortak rotası geçersiz.`);
           const roles = members.map((member) => member.metadata.role as CaravanRole);
           const financierUsed = members.some((member) => member.metadata.financierUsed === true);
           const result = resolveCaravanStage({ route, roles, financierUsed, useFinancier: true });
