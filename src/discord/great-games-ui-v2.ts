@@ -108,10 +108,6 @@ async function adminDashboardPayload(guildId: string) {
   const controls = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId("gg2|admin-home").setLabel("Yenile").setEmoji("🔄").setStyle(ButtonStyle.Primary)
   );
-  if (!data.season) controls.addComponents(new ButtonBuilder().setCustomId("gg2|open").setLabel("Oyunları Aç").setStyle(ButtonStyle.Success));
-  else if (!["FINISHED", "CANCELLED"].includes(data.season.status)) controls.addComponents(
-    new ButtonBuilder().setCustomId("gg2|cancel").setLabel("İptal ve İade").setStyle(ButtonStyle.Danger)
-  );
   return { embeds: [embed], components: [games, controls], ephemeral: true as const };
 }
 
@@ -202,6 +198,7 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
   const subcommand = interaction.options.getSubcommand();
   if (subcommand === "panel") {
     if (!isGameMaster(interaction)) throw new GameError("Büyük Oyunlar yönetim panelini yalnızca oyun yöneticisi açabilir.");
+    await greatGamesService.openSeason(interaction.guildId, interaction.user.id);
     await interaction.reply(await adminDashboardPayload(interaction.guildId));
     return true;
   }
@@ -249,10 +246,12 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
   const [, action, rawType] = interaction.customId.split("|");
   if (action === "admin-home") {
     if (!isGameMaster(interaction)) throw new GameError("Bu panel yalnızca oyun yöneticisine açıktır.");
+    await greatGamesService.openSeason(interaction.guildId, interaction.user.id);
     await interaction.update(await adminDashboardPayload(interaction.guildId)); return true;
   }
   if (action === "admin-view") {
     if (!isGameMaster(interaction)) throw new GameError("Bu panel yalnızca oyun yöneticisine açıktır.");
+    await greatGamesService.openSeason(interaction.guildId, interaction.user.id);
     await interaction.update(await adminGamePayload(interaction.guildId, gameId(rawType!))); return true;
   }
   if (action === "open") {
@@ -261,10 +260,7 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
     await interaction.update(await adminDashboardPayload(interaction.guildId)); return true;
   }
   if (action === "cancel") {
-    if (!isGameMaster(interaction)) throw new GameError("Yalnızca oyun yöneticisi iptal edebilir.");
-    await interaction.deferUpdate();
-    const refunded = await greatGamesService.cancelSeason(interaction.guildId);
-    await interaction.editReply({ ...(await adminDashboardPayload(interaction.guildId)), content: `İptal tamamlandı; ${gold(refunded)} iade edildi.` }); return true;
+    throw new GameError("Büyük Oyunlar sabit olarak açık tutulur; sezon bütünüyle iptal edilemez.");
   }
   if (action === "choose") {
     if (!isGameMaster(interaction)) throw new GameError("Katılımcıları yalnızca oyun yöneticisi seçebilir.");

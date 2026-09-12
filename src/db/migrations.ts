@@ -2067,5 +2067,38 @@ export const migrations = [
       ALTER TABLE great_games_entries ADD CONSTRAINT great_games_entries_status_check
         CHECK (status IN ('REGISTERED','SELECTED','ACTIVE','FINISHED','CANCELLED'));
     `
+  },
+  {
+    version: 63,
+    name: "great_games_always_open",
+    sql: `
+      UPDATE great_games_entries e
+      SET status='REGISTERED',room_key=NULL,updated_at=NOW()
+      FROM great_games_seasons s
+      WHERE e.season_id=s.id AND s.status='CANCELLED' AND e.status='CANCELLED';
+
+      UPDATE great_games_seasons
+      SET status='OPEN',current_game=NULL,current_round=0,updated_at=NOW()
+      WHERE status='CANCELLED';
+
+      INSERT INTO great_games_entries(season_id,game_type,country_id,discord_user_id,stake,score,metadata)
+      SELECT
+        w.season_id,
+        games.game_type,
+        w.country_id,
+        w.joined_by,
+        0,
+        CASE WHEN games.game_type='CARAVAN' THEN 3 ELSE 0 END,
+        CASE WHEN games.game_type='CHARIOT'
+          THEN jsonb_build_object('autoEnrolled',TRUE,'driverName',LEFT(c.name || ' Sürücüsü',40))
+          ELSE jsonb_build_object('autoEnrolled',TRUE)
+        END
+      FROM great_games_wallets w
+      JOIN great_games_seasons s ON s.id=w.season_id AND s.status='OPEN'
+      JOIN countries c ON c.id=w.country_id
+      CROSS JOIN (VALUES ('AUCTION'),('CHARIOT'),('CARAVAN'),('KINGS_BET'),('DIPLOMACY')) AS games(game_type)
+      WHERE w.closed_at IS NULL
+      ON CONFLICT(season_id,game_type,country_id) DO NOTHING;
+    `
   }
 ] as const;

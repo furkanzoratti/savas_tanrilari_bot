@@ -37,4 +37,13 @@ describe("Büyük Oyunlar migration", () => {
     expect(migration?.sql).toContain("'REGISTERED','SELECTED','ACTIVE','FINISHED','CANCELLED'");
     expect(migration?.sql).toContain("DROP CONSTRAINT IF EXISTS great_games_entries_status_check");
   });
+  it("iptal edilmiş Büyük Oyunları ve aday kayıtlarını yeniden açar", () => {
+    const migration = migrations.find((item) => item.version === 63);
+    expect(migration?.name).toBe("great_games_always_open");
+    expect(migration?.sql).toContain("SET status='REGISTERED',room_key=NULL");
+    expect(migration?.sql).toContain("SET status='OPEN',current_game=NULL,current_round=0");
+    expect(migration?.sql).toContain("WHERE status='CANCELLED'");
+    expect(migration?.sql).toContain("CROSS JOIN (VALUES ('AUCTION'),('CHARIOT'),('CARAVAN'),('KINGS_BET'),('DIPLOMACY'))");
+    expect(migration?.sql).toContain("ON CONFLICT(season_id,game_type,country_id) DO NOTHING");
+  });
 });

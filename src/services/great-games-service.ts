@@ -219,8 +219,39 @@ export const greatGamesService = {
       await currentTurn(client, guildId);
       const season = (await client.query<GreatGamesSeasonRow>(
         `INSERT INTO great_games_seasons(guild_id,game_turn,created_by) VALUES($1,$2,$3)
-         ON CONFLICT(guild_id,game_turn) DO UPDATE SET updated_at=NOW() RETURNING *`, [guildId, GREAT_GAMES_TURN, actorId]
+         ON CONFLICT(guild_id,game_turn) DO UPDATE SET
+           status=CASE WHEN great_games_seasons.status='CANCELLED' THEN 'OPEN' ELSE great_games_seasons.status END,
+           current_game=CASE WHEN great_games_seasons.status='CANCELLED' THEN NULL ELSE great_games_seasons.current_game END,
+           current_round=CASE WHEN great_games_seasons.status='CANCELLED' THEN 0 ELSE great_games_seasons.current_round END,
+           updated_at=NOW()
+         RETURNING *`, [guildId, GREAT_GAMES_TURN, actorId]
       )).rows[0]!;
+      if (season.status === "OPEN") {
+        await client.query(
+          "UPDATE great_games_entries SET status='REGISTERED',room_key=NULL,updated_at=NOW() WHERE season_id=$1 AND status='CANCELLED'",
+          [season.id]
+        );
+        await client.query(
+          `INSERT INTO great_games_entries(season_id,game_type,country_id,discord_user_id,stake,score,metadata)
+           SELECT
+             w.season_id,
+             games.game_type,
+             w.country_id,
+             w.joined_by,
+             0,
+             CASE WHEN games.game_type='CARAVAN' THEN 3 ELSE 0 END,
+             CASE WHEN games.game_type='CHARIOT'
+               THEN jsonb_build_object('autoEnrolled',TRUE,'driverName',LEFT(c.name || ' Sürücüsü',40))
+               ELSE jsonb_build_object('autoEnrolled',TRUE)
+             END
+           FROM great_games_wallets w
+           JOIN countries c ON c.id=w.country_id
+           CROSS JOIN (VALUES ('AUCTION'),('CHARIOT'),('CARAVAN'),('KINGS_BET'),('DIPLOMACY')) AS games(game_type)
+           WHERE w.season_id=$1 AND w.closed_at IS NULL
+           ON CONFLICT(season_id,game_type,country_id) DO NOTHING`,
+          [season.id]
+        );
+      }
       let order = 0;
       for (const [rewardType, title] of Object.entries(AUCTION_REWARDS)) {
         order += 1;
