@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   allocatePool, caravanMultiplier, resolveCaravanStage, resolveChariotRound,
-  resolveDiplomacyVote, resolveKingsRound
+  parseKingsDecision, resolveDiplomacyVote, resolveKingsRound
 } from "./great-games.js";
 
 function sequence(values: number[]): () => number {
@@ -66,5 +66,13 @@ describe("15. Tur Büyük Oyunları", () => {
     expect(result.primaryWinnerId).toBe("b");
     expect(result.influenceRolls).toEqual({ a: 5, b: 17, c: 9 });
     expect(result.secondaryWinnerId).toBeNull();
+  });
+
+  it("Kralların Bahsi kararlarını Türkçe ve eski İngilizce değerlerle okuyabilir", () => {
+    expect(parseKingsDecision("İşbirliği")).toBe("COOPERATE");
+    expect(parseKingsDecision("iş birliği")).toBe("COOPERATE");
+    expect(parseKingsDecision("İhanet")).toBe("BETRAY");
+    expect(parseKingsDecision("betrayal")).toBe("BETRAY");
+    expect(parseKingsDecision("bilinmeyen")).toBeNull();
   });
 });

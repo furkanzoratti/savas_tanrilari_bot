@@ -11,6 +11,14 @@ export const GREAT_GAME_TYPES = {
 export type GreatGameType = keyof typeof GREAT_GAME_TYPES;
 export type ChariotTactic = "AGGRESSIVE" | "BALANCED" | "CAUTIOUS" | "SQUEEZE";
 export type KingsDecision = "COOPERATE" | "BETRAY";
+
+export function parseKingsDecision(value: string): KingsDecision | null {
+  const normalized = value.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase().replace(/[\s_-]+/g, "");
+  if (normalized === "ISBIRLIGI" || normalized === "COOPERATE") return "COOPERATE";
+  if (normalized === "IHANET" || normalized === "BETRAY" || normalized === "BETRAYAL") return "BETRAY";
+  return null;
+}
 export type CaravanRoute = "SAFE" | "BALANCED" | "DANGEROUS";
 export type CaravanChallenge = "TRADE" | "SECURITY" | "TRAVEL";
 export type CaravanRole = "MERCHANT" | "GUARD" | "GUIDE" | "FINANCIER";

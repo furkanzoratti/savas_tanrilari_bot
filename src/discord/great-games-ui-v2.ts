@@ -5,7 +5,7 @@ import {
 } from "discord.js";
 import {
   CARAVAN_ROUTES, CHARIOT_TACTICS, GREAT_GAME_TYPES,
-  type CaravanRoute, type ChariotTactic, type GreatGameType, type KingsDecision
+  parseKingsDecision, type CaravanRoute, type ChariotTactic, type GreatGameType, type KingsDecision
 } from "../domain/great-games.js";
 import { gold } from "../domain/format.js";
 import { greatGamesService, type GreatGamesDashboard, type GreatGamesEntryRow } from "../services/great-games-service.js";
@@ -60,6 +60,10 @@ function statusLabel(data: GreatGamesDashboard, type: GreatGameType, entries: Gr
 
 function clip(value: string, maximum = 1_020): string {
   return value.length <= maximum ? value : `${value.slice(0, maximum - 1)}…`;
+}
+
+function kingsDecisionLabel(value: KingsDecision): string {
+  return value === "COOPERATE" ? "İşbirliği" : "İhanet";
 }
 
 function caravanFields(entries: GreatGamesEntryRow[], round: number) {
@@ -150,6 +154,30 @@ async function publicGamePayload(guildId: string, type: GreatGameType, content?:
     embed.addFields({ name: "Katılan Devletler", value: clip(ranked.map((entry, index) => `${index + 1}. **${entry.country_name}**${Number(entry.score) ? ` — ${entry.score} puan` : ""}`).join("\n") || "Katılımcı bulunmuyor.") });
   }
 
+  if ((type === "KINGS_BET" || type === "CHARIOT") && data.season?.status === "ACTIVE" && activeForType) {
+    const readiness = await greatGamesFlowService.roundReadiness(guildId, type);
+    if (type === "CHARIOT") {
+      const racers = readiness.rooms.flatMap((room) => room.countries);
+      const submitted = racers.filter((country) => country.submitted).length;
+      const lines = racers.map((country) => `${country.submitted ? "✅" : "⏳"} **${country.countryName}** — ${country.submitted ? "Taktiğini tamamladı" : "Taktik bekleniyor"}`);
+      embed.addFields({
+        name: `🔒 Gizli Taktikler • Etap ${readiness.round}`,
+        value: clip(`${lines.join("\n") || "Henüz yarışçı bulunmuyor."}\n\n**Hazır:** ${submitted}/${racers.length}${submitted === racers.length && racers.length ? " • Yönetici etabı çözebilir." : ""}`)
+      });
+    } else {
+      const lines = readiness.rooms.map((room, index) => {
+        const countries = room.countries.map((country) => `${country.submitted ? "✅" : "⏳"} ${country.countryName}`).join(" • ");
+        const submitted = room.countries.filter((country) => country.submitted).length;
+        const complete = room.countries.length === 2 && submitted === 2;
+        return `**Eşleşme ${index + 1}:** ${countries}\n↳ ${complete ? "İki taraf da seçimini tamamladı; çözüm bekleniyor." : `${submitted}/2 seçim tamamlandı.`}`;
+      });
+      embed.addFields({
+        name: `🔒 Gizli Seçimler • Aşama ${readiness.round}`,
+        value: clip(lines.join("\n") || "Henüz eşleşme bulunmuyor.")
+      });
+    }
+  }
+
   const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(`gg2|public-refresh|${type}`).setLabel("Yenile").setEmoji("🔄").setStyle(ButtonStyle.Secondary)
   );
@@ -182,8 +210,8 @@ function actionModal(type: GreatGameType): ModalBuilder {
     new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("route").setLabel("Ortak rota: SAFE/BALANCED/DANGEROUS").setStyle(TextInputStyle.Short).setRequired(true))
   );
   if (type === "KINGS_BET") return modal.addComponents(
-    new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("decision").setLabel("Karar: COOPERATE veya BETRAY").setStyle(TextInputStyle.Short).setRequired(true)),
-    new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("prediction").setLabel("Rakip tahmini: COOPERATE veya BETRAY").setStyle(TextInputStyle.Short).setRequired(true))
+    new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("decision").setLabel("Kararın: İşbirliği veya İhanet").setPlaceholder("İşbirliği").setStyle(TextInputStyle.Short).setRequired(true)),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("prediction").setLabel("Rakip tahmini: İşbirliği veya İhanet").setPlaceholder("İhanet").setStyle(TextInputStyle.Short).setRequired(true))
   );
   if (type === "DIPLOMACY") return modal.addComponents(
     new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("primary").setLabel("Ana kazanan devlet adı").setStyle(TextInputStyle.Short).setRequired(true)),
@@ -384,9 +412,9 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
     if (!(route in CARAVAN_ROUTES)) throw new GameError("Kervan rotası geçersiz.");
     payload = { route };
   } else if (type === "KINGS_BET") {
-    const decision = interaction.fields.getTextInputValue("decision").trim().toUpperCase() as KingsDecision;
-    const prediction = interaction.fields.getTextInputValue("prediction").trim().toUpperCase() as KingsDecision;
-    if (!(["COOPERATE", "BETRAY"] as string[]).includes(decision) || !(["COOPERATE", "BETRAY"] as string[]).includes(prediction)) throw new GameError("Karar veya tahmin geçersiz.");
+    const decision = parseKingsDecision(interaction.fields.getTextInputValue("decision"));
+    const prediction = parseKingsDecision(interaction.fields.getTextInputValue("prediction"));
+    if (!decision || !prediction) throw new GameError("Karar ve tahmin `İşbirliği` veya `İhanet` olmalıdır.");
     payload = { decision, prediction };
   } else if (type === "DIPLOMACY") {
     const primaryName = interaction.fields.getTextInputValue("primary").trim();
@@ -397,6 +425,16 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
     payload = { primary: primary.id, secondary: secondary?.id ?? null };
   } else throw new GameError("Bu oyun için oyuncu hamlesi bulunmuyor.");
   await greatGamesService.submitAction({ guildId: interaction.guildId, countryId: country.id, gameType: type, actionType: "ROUND", payload });
-  await interaction.reply({ content: `✅ ${GREAT_GAME_TYPES[type].label} gizli hamlen kaydedildi.`, ephemeral: true });
+  const confirmation = type === "KINGS_BET"
+    ? `✅ Kralların Bahsi seçimin gizlice kaydedildi.\n**Kararın:** ${kingsDecisionLabel(payload.decision as KingsDecision)}\n**Rakip tahminin:** ${kingsDecisionLabel(payload.prediction as KingsDecision)}`
+    : type === "CHARIOT"
+      ? `✅ Savaş Arabaları taktiğin gizlice kaydedildi.\n**Taktiğin:** ${CHARIOT_TACTICS[payload.tactic as ChariotTactic].label}${payload.targetCountryId ? "\n**Sıkıştırma hedefin de kaydedildi.**" : ""}`
+    : `✅ ${GREAT_GAME_TYPES[type].label} gizli hamlen kaydedildi.`;
+  if (interaction.isFromMessage()) {
+    await interaction.update(await publicGamePayload(interaction.guildId, type));
+    await interaction.followUp({ content: confirmation, ephemeral: true });
+  } else {
+    await interaction.reply({ content: confirmation, ephemeral: true });
+  }
   return true;
 }

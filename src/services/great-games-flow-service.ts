@@ -1,5 +1,5 @@
 import type { DbClient } from "../db/pool.js";
-import { withTransaction } from "../db/pool.js";
+import { pool, withTransaction } from "../db/pool.js";
 import {
   DIPLOMACY_DEVELOPMENTS, DIPLOMACY_SCENARIOS, GREAT_GAMES_TURN, GREAT_GAME_TYPES, rollDie,
   type GreatGameType
@@ -14,6 +14,16 @@ interface SelectionResult {
   count: number;
   countries: string[];
   rooms: string[];
+}
+
+export interface GreatGamesRoomReadiness {
+  roomKey: string;
+  countries: Array<{ countryName: string; submitted: boolean }>;
+}
+
+export interface GreatGamesRoundReadiness {
+  round: number;
+  rooms: GreatGamesRoomReadiness[];
 }
 
 async function lockedSeason(client: DbClient, guildId: string): Promise<GreatGamesSeasonRow> {
@@ -211,5 +221,43 @@ export const greatGamesFlowService = {
       );
       return { count: selected.length, countries: selected.map((entry) => entry.country_name), rooms: roomsOf(selected) };
     });
+  },
+
+  async roundReadiness(guildId: string, gameType: GreatGameType): Promise<GreatGamesRoundReadiness> {
+    const season = (await pool.query<{
+      id: string; status: GreatGamesSeasonRow["status"]; current_game: GreatGameType | null; current_round: number;
+    }>(
+      "SELECT id,status,current_game,current_round FROM great_games_seasons WHERE guild_id=$1 AND game_turn=$2",
+      [guildId, GREAT_GAMES_TURN]
+    )).rows[0];
+    if (!season || season.status !== "ACTIVE" || season.current_game !== gameType) return { round: 0, rooms: [] };
+
+    const rows = (await pool.query<{
+      room_key: string | null; country_name: string; submitted: boolean; selection_order: number;
+    }>(
+      `SELECT e.room_key,c.name AS country_name,
+         EXISTS(
+           SELECT 1 FROM great_games_actions a
+           WHERE a.season_id=e.season_id AND a.game_type=e.game_type
+             AND a.country_id=e.country_id AND a.round=$3
+             AND a.action_type='ROUND' AND a.resolved=FALSE
+         ) AS submitted,
+         COALESCE((e.metadata->>'selectionOrder')::integer,0) AS selection_order
+       FROM great_games_entries e
+       JOIN countries c ON c.id=e.country_id
+       WHERE e.season_id=$1 AND e.game_type=$2 AND e.status='ACTIVE'
+       ORDER BY e.room_key,selection_order,c.name`,
+      [season.id, gameType, season.current_round]
+    )).rows;
+
+    const grouped = new Map<string, GreatGamesRoomReadiness["countries"]>();
+    for (const row of rows) {
+      const key = row.room_key ?? "Tek Grup";
+      grouped.set(key, [...(grouped.get(key) ?? []), { countryName: row.country_name, submitted: row.submitted }]);
+    }
+    return {
+      round: season.current_round,
+      rooms: [...grouped.entries()].map(([roomKey, countries]) => ({ roomKey, countries }))
+    };
   }
 };
