@@ -134,6 +134,9 @@ async function adminGamePayload(guildId: string, type: GreatGameType) {
   if (data.season?.status === "PUBLISHED" && data.season.current_game === type) row.addComponents(
     new ButtonBuilder().setCustomId(`gg2|publish|${type}`).setLabel("Formu Yeniden Yayınla").setEmoji("📣").setStyle(ButtonStyle.Success)
   );
+  if (data.season?.current_game === type && ["PUBLISHED", "ACTIVE"].includes(data.season.status)) row.addComponents(
+    new ButtonBuilder().setCustomId(`gg2|recover|${type}`).setLabel("Formu Kurtar").setEmoji("🛠️").setStyle(ButtonStyle.Danger)
+  );
   return { embeds: [embed], components: [row], ephemeral: true as const };
 }
 
@@ -253,6 +256,14 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
     await interaction.reply({ embeds: [new EmbedBuilder().setColor(0xd6ad3c).setTitle("🏛️ Büyük Oyunlar • Katılımcı Ülkeler").setDescription(clip(lines.join("\n"), 3_900))], ephemeral: true });
     return true;
   }
+  if (subcommand === "kurtar") {
+    if (!isGameMaster(interaction)) throw new GameError("Bu komut yalnızca oyun yöneticileri tarafından kullanılabilir.");
+    const data = await greatGamesService.dashboard(interaction.guildId);
+    const type = data.season?.current_game;
+    if (!type || !data.season || !["PUBLISHED", "ACTIVE"].includes(data.season.status)) throw new GameError("Kurtarılabilecek yayında veya etkin bir oyun bulunmuyor.");
+    await interaction.reply(await publicGamePayload(interaction.guildId, type, "🛠️ Aktif oyun formu kayıtlar korunarak yeniden oluşturuldu."));
+    return true;
+  }
   if (subcommand === "yonetici-bitir") {
     if (!isGameMaster(interaction)) throw new GameError("Bu komut yalnızca oyun yöneticileri tarafından kullanılabilir.");
     await interaction.deferReply({ ephemeral: true });
@@ -296,6 +307,16 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
     if (!isGameMaster(interaction)) throw new GameError("Bu panel yalnızca oyun yöneticisine açıktır.");
     await greatGamesService.openSeason(interaction.guildId, interaction.user.id);
     await interaction.update(await adminGamePayload(interaction.guildId, gameId(rawType!))); return true;
+  }
+  if (action === "recover") {
+    if (!isGameMaster(interaction)) throw new GameError("Oyunu yalnızca oyun yöneticisi kurtarabilir.");
+    const type = gameId(rawType!);
+    const data = await greatGamesService.dashboard(interaction.guildId);
+    if (!data.season || data.season.current_game !== type || !["PUBLISHED", "ACTIVE"].includes(data.season.status)) throw new GameError("Bu oyun artık kurtarılabilir durumda değil.");
+    await interaction.deferUpdate();
+    await interaction.editReply(await adminGamePayload(interaction.guildId, type));
+    await interaction.followUp({ ...(await publicGamePayload(interaction.guildId, type, "🛠️ Aktif oyun formu kayıtlar korunarak yeniden oluşturuldu.")), ephemeral: false });
+    return true;
   }
   if (action === "open") {
     if (!isGameMaster(interaction)) throw new GameError("Yalnızca oyun yöneticisi kayıtları açabilir.");

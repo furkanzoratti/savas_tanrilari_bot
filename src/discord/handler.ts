@@ -1751,7 +1751,8 @@ async function reportError(interaction: Interaction, error: unknown): Promise<vo
   const payload = { content: `❌ ${message}`, components: [] as ActionRowBuilder<any>[], ephemeral: true };
   if (!interaction.isRepliable()) return;
   try {
-    if (interaction.deferred) await interaction.editReply({ content: payload.content, components: [] });
+    if (interaction.deferred && interaction.isMessageComponent()) await interaction.followUp(payload);
+    else if (interaction.deferred) await interaction.editReply({ content: payload.content, components: [] });
     else if (interaction.replied) await interaction.followUp(payload);
     else await interaction.reply(payload);
   } catch (responseError) {
