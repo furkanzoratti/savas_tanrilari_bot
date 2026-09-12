@@ -1871,5 +1871,162 @@ export const migrations = [
           'germanic_shock_warrior','anatolian_thureophoroi'
         ));
     `
+  },
+  {
+    version: 59,
+    name: "great_games",
+    sql: `
+      CREATE TABLE IF NOT EXISTS great_games_seasons (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        guild_id TEXT NOT NULL REFERENCES guilds(discord_id) ON DELETE CASCADE,
+        game_turn INTEGER NOT NULL DEFAULT 15,
+        status TEXT NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN','ACTIVE','FINISHED','CANCELLED')),
+        current_game TEXT,
+        current_round INTEGER NOT NULL DEFAULT 0,
+        prize_pool BIGINT NOT NULL DEFAULT 0 CHECK (prize_pool >= 0),
+        created_by TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (guild_id, game_turn)
+      );
+
+      CREATE TABLE IF NOT EXISTS great_games_entries (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        season_id UUID NOT NULL REFERENCES great_games_seasons(id) ON DELETE CASCADE,
+        game_type TEXT NOT NULL CHECK (game_type IN ('AUCTION','CHARIOT','CARAVAN','KINGS_BET','DIPLOMACY')),
+        country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        discord_user_id TEXT NOT NULL,
+        stake BIGINT NOT NULL DEFAULT 0 CHECK (stake >= 0),
+        score INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'REGISTERED' CHECK (status IN ('REGISTERED','ACTIVE','FINISHED','CANCELLED')),
+        room_key TEXT,
+        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (season_id, game_type, country_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS great_games_actions (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        season_id UUID NOT NULL REFERENCES great_games_seasons(id) ON DELETE CASCADE,
+        game_type TEXT NOT NULL CHECK (game_type IN ('AUCTION','CHARIOT','CARAVAN','KINGS_BET','DIPLOMACY')),
+        country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        round INTEGER NOT NULL,
+        action_type TEXT NOT NULL,
+        payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+        resolved BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (season_id, game_type, country_id, round, action_type)
+      );
+
+      CREATE TABLE IF NOT EXISTS great_games_auction_lots (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        season_id UUID NOT NULL REFERENCES great_games_seasons(id) ON DELETE CASCADE,
+        reward_type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        lot_order INTEGER NOT NULL,
+        phase TEXT NOT NULL DEFAULT 'SEALED' CHECK (phase IN ('SEALED','FINAL','FINISHED','CANCELLED')),
+        winning_country_id UUID REFERENCES countries(id) ON DELETE SET NULL,
+        winning_bid BIGINT,
+        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+        UNIQUE (season_id, lot_order)
+      );
+
+      CREATE TABLE IF NOT EXISTS great_games_auction_bids (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        lot_id UUID NOT NULL REFERENCES great_games_auction_lots(id) ON DELETE CASCADE,
+        country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        discord_user_id TEXT NOT NULL,
+        amount BIGINT NOT NULL CHECK (amount BETWEEN 500 AND 5000),
+        phase TEXT NOT NULL DEFAULT 'SEALED' CHECK (phase IN ('SEALED','FINAL')),
+        reserved_amount BIGINT NOT NULL DEFAULT 0 CHECK (reserved_amount >= 0),
+        tie_roll INTEGER,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (lot_id, country_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS great_games_points (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        season_id UUID NOT NULL REFERENCES great_games_seasons(id) ON DELETE CASCADE,
+        country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        game_type TEXT NOT NULL,
+        points INTEGER NOT NULL CHECK (points >= 0),
+        reason TEXT NOT NULL,
+        dedupe_key TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (season_id, dedupe_key)
+      );
+
+      CREATE TABLE IF NOT EXISTS great_games_money (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        season_id UUID NOT NULL REFERENCES great_games_seasons(id) ON DELETE CASCADE,
+        country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        game_type TEXT NOT NULL,
+        amount BIGINT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('STAKE','BID_RESERVE','REFUND','PAYOUT')),
+        source_key TEXT NOT NULL,
+        description TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (season_id, source_key)
+      );
+
+      CREATE TABLE IF NOT EXISTS great_games_bets (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        season_id UUID NOT NULL REFERENCES great_games_seasons(id) ON DELETE CASCADE,
+        game_type TEXT NOT NULL DEFAULT 'CHARIOT' CHECK (game_type='CHARIOT'),
+        bettor_country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        target_country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        amount BIGINT NOT NULL CHECK (amount BETWEEN 1 AND 2000),
+        status TEXT NOT NULL DEFAULT 'LOCKED' CHECK (status IN ('LOCKED','WON','LOST','REFUNDED')),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (season_id,game_type,bettor_country_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS great_games_entries_season_game_idx
+        ON great_games_entries (season_id, game_type, status);
+      CREATE INDEX IF NOT EXISTS great_games_actions_pending_idx
+        ON great_games_actions (season_id, game_type, round, resolved);
+      CREATE INDEX IF NOT EXISTS great_games_money_country_idx
+        ON great_games_money (season_id, country_id);
+    `
+  },
+  {
+    version: 60,
+    name: "great_games_wallets",
+    sql: `
+      CREATE TABLE IF NOT EXISTS great_games_wallets (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        season_id UUID NOT NULL REFERENCES great_games_seasons(id) ON DELETE CASCADE,
+        country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
+        balance BIGINT NOT NULL DEFAULT 5000 CHECK (balance >= 0),
+        initial_grant BIGINT NOT NULL DEFAULT 5000 CHECK (initial_grant >= 0),
+        joined_by TEXT NOT NULL,
+        joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        closed_at TIMESTAMPTZ,
+        UNIQUE (season_id,country_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS great_games_wallet_movements (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        wallet_id UUID NOT NULL REFERENCES great_games_wallets(id) ON DELETE CASCADE,
+        amount BIGINT NOT NULL,
+        balance_after BIGINT NOT NULL CHECK (balance_after >= 0),
+        kind TEXT NOT NULL CHECK (kind IN (
+          'INITIAL_GRANT','TREASURY_TRANSFER','GAME_STAKE','BID_RESERVE',
+          'REFUND','PAYOUT','FINAL_SETTLEMENT'
+        )),
+        source_key TEXT NOT NULL,
+        description TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (wallet_id,source_key)
+      );
+
+      CREATE INDEX IF NOT EXISTS great_games_wallets_season_idx
+        ON great_games_wallets(season_id,closed_at);
+      CREATE INDEX IF NOT EXISTS great_games_wallet_movements_wallet_idx
+        ON great_games_wallet_movements(wallet_id,created_at);
+    `
   }
 ] as const;

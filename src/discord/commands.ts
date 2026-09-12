@@ -14,6 +14,15 @@ const SETTLEMENT_EVENT_CHOICES = Object.entries(SETTLEMENT_EVENT_TYPES).map(([va
 
 export const commandBuilders = [
   new SlashCommandBuilder()
+    .setName("oyunlar").setDescription("15. Tur Büyük Oyunlarını ve oyun cüzdanını yönetir")
+    .addSubcommand((sub) => sub.setName("panel").setDescription("Büyük Oyunlar panelini açar"))
+    .addSubcommand((sub) => sub.setName("katil").setDescription("Etkinliğe katılır ve 5.000 Altınlık oyun cüzdanını açar"))
+    .addSubcommand((sub) => sub.setName("cuzdan").setDescription("Oyun cüzdanı bakiyeni gösterir"))
+    .addSubcommand((sub) => sub.setName("para-aktar").setDescription("Rastgele uygun bir yerleşkenden oyun cüzdanına Altın aktarır")
+      .addIntegerOption((o) => o.setName("miktar").setDescription("Aktarılacak Altın").setRequired(true).setMinValue(1)))
+    .addSubcommand((sub) => sub.setName("katilimci-ulkeler").setDescription("Yalnızca yönetici: katılan ülkeleri ve cüzdan bakiyelerini gösterir"))
+    .addSubcommand((sub) => sub.setName("yonetici-bitir").setDescription("Yalnızca yönetici: bütün cüzdanları rastgele yerleşkelere aktarır")),
+  new SlashCommandBuilder()
     .setName("hazine-hareketleri").setDescription("Yalnızca yönetici: bir ülkenin tur içindeki bütün mali hareketlerini gösterir")
     .addStringOption((o) => o.setName("ulke").setDescription("Mali dökümü görüntülenecek ülke").setRequired(true))
     .addIntegerOption((o) => o.setName("tur").setDescription("Boş bırakılırsa mevcut tur").setMinValue(0)),

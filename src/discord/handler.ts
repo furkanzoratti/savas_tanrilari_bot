@@ -54,6 +54,7 @@ import { characterService, processCharacterTurn } from "../services/character-se
 import { handleDiplomacyButton, handleDiplomacyCommand } from "./diplomacy-ui.js";
 import { handleWarDeclarationButton, handleWarDeclarationCommand, handleWarDeclarationModal } from "./war-declaration-ui.js";
 import { mercenaryCompanyAutocompleteAllowed, mercenarySubcommandRequiresGameMaster } from "./mercenary-access.js";
+import { handleGreatGamesButton, handleGreatGamesCommand, handleGreatGamesModal, handleGreatGamesSelect } from "./great-games-ui.js";
 import { decodeUnitTypeFromCustomId, encodeUnitTypeForCustomId } from "./unit-custom-id.js";
 
 function settlementSelect(customId: string, settlements: Array<{ id: string; name: string; population: number }>, placeholder: string) {
@@ -900,6 +901,7 @@ async function handleGreatPowerCommand(interaction: ChatInputCommandInteraction)
   await interaction.editReply(`✅ Güncel **${snapshot.rows.length} devletlik Büyük Güçler sıralaması** <#${channelId}> kanalında paylaşıldı.`);
 }
 async function handleCommand(interaction: ChatInputCommandInteraction): Promise<void> {
+  if (await handleGreatGamesCommand(interaction)) return;
   if (interaction.commandName === "olay-yoneticisi") {
     requireGameMaster(interaction);
     if (!interaction.guild) throw new GameError("Sunucu bulunamadı.");
@@ -1223,6 +1225,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
 }
 
 async function handleSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+  if (await handleGreatGamesSelect(interaction)) return;
   if (await handleSettlementEventSelect(interaction)) return;
   const [kind, countryId, settlementIdFromId] = interaction.customId.split("|");
   if (!countryId) throw new GameError("Etkileşim bilgisi bozuk.");
@@ -1302,6 +1305,7 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
 }
 
 async function handleButton(interaction: ButtonInteraction): Promise<void> {
+  if (await handleGreatGamesButton(interaction)) return;
   if (await handleWarDeclarationButton(interaction)) return;
   if (await handleDiplomacyButton(interaction)) return;
   if (await handleBattleButton(interaction)) return;
@@ -1339,6 +1343,7 @@ async function handleButton(interaction: ButtonInteraction): Promise<void> {
 }
 
 async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
+  if (await handleGreatGamesModal(interaction)) return;
   if (await handleWarDeclarationModal(interaction)) return;
   if (await handleCityModal(interaction)) return;
   const [kind, countryId, settlementId, itemType] = interaction.customId.split("|");
