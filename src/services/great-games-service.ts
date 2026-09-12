@@ -12,7 +12,7 @@ import { settleChariotBets } from "./great-games-bet-service.js";
 
 export interface GreatGamesSeasonRow {
   id: string; guild_id: string; game_turn: number; status: "OPEN" | "PUBLISHED" | "ACTIVE" | "FINISHED" | "CANCELLED";
-  current_game: GreatGameType | null; current_round: number; prize_pool: number;
+  current_game: GreatGameType | null; current_round: number; current_run: number; prize_pool: number;
 }
 
 export interface GreatGamesEntryRow {
@@ -22,6 +22,21 @@ export interface GreatGamesEntryRow {
 }
 
 export type GreatGamesMatchingMode = "ALPHABETICAL" | "RANDOM" | "MANUAL";
+
+export function greatGamesEntryRunNumber(entry: Pick<GreatGamesEntryRow, "metadata">): number {
+  const runNumber = Number(entry.metadata.runNumber ?? 0);
+  return Number.isSafeInteger(runNumber) && runNumber > 0 ? runNumber : 0;
+}
+
+export function greatGamesEntrySourceKey(
+  entry: Pick<GreatGamesEntryRow, "game_type" | "country_id" | "metadata">,
+  kind: string
+): string {
+  const runNumber = greatGamesEntryRunNumber(entry);
+  return runNumber > 0
+    ? `${entry.game_type}:run:${runNumber}:${kind}:${entry.country_id}`
+    : `${entry.game_type}:${kind}:${entry.country_id}`;
+}
 
 const CARAVAN_AUTO_ROLES: CaravanRole[] = ["MERCHANT", "GUARD", "GUIDE", "FINANCIER"];
 
@@ -143,13 +158,21 @@ async function recordMoney(client: DbClient, input: {
      VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(season_id,source_key) DO NOTHING RETURNING id`,
     [input.season.id, input.countryId, input.gameType, input.amount, input.kind, input.sourceKey, input.description]
   );
-  if (!inserted.rowCount) return false;
-  await adjustGreatGamesWallet(client, {
-    seasonId: input.season.id, countryId: input.countryId, amount: input.amount,
+  let ledgerAmount = input.amount;
+  if (!inserted.rowCount) {
+    const existing = (await client.query<{ amount: number }>(
+      "SELECT amount FROM great_games_money WHERE season_id=$1 AND source_key=$2",
+      [input.season.id, input.sourceKey]
+    )).rows[0];
+    if (!existing) throw new GameError("Büyük Oyun para kaydı doğrulanamadı.");
+    ledgerAmount = Number(existing.amount);
+  }
+  const movement = await adjustGreatGamesWallet(client, {
+    seasonId: input.season.id, countryId: input.countryId, amount: ledgerAmount,
     kind: input.kind === "STAKE" ? "GAME_STAKE" : input.kind,
     sourceKey: input.sourceKey, description: input.description
   });
-  return true;
+  return Boolean(inserted.rowCount) || movement.changed;
 }
 
 async function entries(client: DbClient, seasonId: string, gameType?: GreatGameType): Promise<GreatGamesEntryRow[]> {
@@ -171,7 +194,8 @@ async function addPlacementPoints(client: DbClient, seasonId: string, gameType: 
     await client.query(
       `INSERT INTO great_games_points(season_id,country_id,game_type,points,reason,dedupe_key)
        VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(season_id,dedupe_key) DO NOTHING`,
-      [seasonId, ranked[index]!.country_id, gameType, points, `${index + 1}. sıra`, `${gameType}:placement:${index + 1}`]
+      [seasonId, ranked[index]!.country_id, gameType, points, `${index + 1}. sıra`,
+        `${gameType}${greatGamesEntryRunNumber(ranked[index]!) > 0 ? `:run:${greatGamesEntryRunNumber(ranked[index]!)}` : ""}:placement:${index + 1}`]
     );
   }
 }
@@ -186,7 +210,7 @@ async function payRankedPool(client: DbClient, season: GreatGamesSeasonRow, game
     if (!amount) continue;
     await recordMoney(client, {
       season, countryId: winners[index]!.country_id, gameType, amount, kind: "PAYOUT",
-      sourceKey: `${gameType}:final-payout:${winners[index]!.country_id}`,
+      sourceKey: greatGamesEntrySourceKey(winners[index]!, "final-payout"),
       description: `${GREAT_GAME_TYPES[gameType].label} ${index + 1}. sıra ödülü`
     });
   }
@@ -491,8 +515,10 @@ export const greatGamesService = {
           const result = resolveDiplomacyVote(table.map((entry) => entry.country_id), primary, secondary);
           await client.query("UPDATE great_games_entries SET score=score+5 WHERE season_id=$1 AND game_type=$2 AND country_id=$3", [season.id, gameType, result.primaryWinnerId]);
           if (result.secondaryWinnerId) await client.query("UPDATE great_games_entries SET score=score+2 WHERE season_id=$1 AND game_type=$2 AND country_id=$3", [season.id, gameType, result.secondaryWinnerId]);
-          await client.query(`INSERT INTO great_games_points(season_id,country_id,game_type,points,reason,dedupe_key) VALUES($1,$2,$3,5,$4,$5) ON CONFLICT(season_id,dedupe_key) DO NOTHING`, [season.id, result.primaryWinnerId, gameType, `${room} ana hedef`, `DIPLOMACY:${room}:primary`]);
-          if (result.secondaryWinnerId) await client.query(`INSERT INTO great_games_points(season_id,country_id,game_type,points,reason,dedupe_key) VALUES($1,$2,$3,2,$4,$5) ON CONFLICT(season_id,dedupe_key) DO NOTHING`, [season.id, result.secondaryWinnerId, gameType, `${room} ikincil hedef`, `DIPLOMACY:${room}:secondary`]);
+          const runNumber = greatGamesEntryRunNumber(table[0]!);
+          const runKey = runNumber > 0 ? `:run:${runNumber}` : "";
+          await client.query(`INSERT INTO great_games_points(season_id,country_id,game_type,points,reason,dedupe_key) VALUES($1,$2,$3,5,$4,$5) ON CONFLICT(season_id,dedupe_key) DO NOTHING`, [season.id, result.primaryWinnerId, gameType, `${room} ana hedef`, `DIPLOMACY${runKey}:${room}:primary`]);
+          if (result.secondaryWinnerId) await client.query(`INSERT INTO great_games_points(season_id,country_id,game_type,points,reason,dedupe_key) VALUES($1,$2,$3,2,$4,$5) ON CONFLICT(season_id,dedupe_key) DO NOTHING`, [season.id, result.secondaryWinnerId, gameType, `${room} ikincil hedef`, `DIPLOMACY${runKey}:${room}:secondary`]);
           summary.push(`${room}: Ana kazanan ${table.find((entry) => entry.country_id === result.primaryWinnerId)?.country_name}; ikincil ${table.find((entry) => entry.country_id === result.secondaryWinnerId)?.country_name ?? "yok"}`);
         }
         finished = true;
@@ -530,9 +556,11 @@ export const greatGamesService = {
             for (let memberIndex = 0; memberIndex < team.members.length; memberIndex += 1) {
               const member = team.members[memberIndex]!;
               const amount = memberPayouts[memberIndex] ?? 0;
-              if (amount) await recordMoney(client, { season, countryId: member.country_id, gameType, amount, kind: "PAYOUT", sourceKey: `CARAVAN:payout:${member.country_id}`, description: `${team.name} kervanı havuz payı` });
+              if (amount) await recordMoney(client, { season, countryId: member.country_id, gameType, amount, kind: "PAYOUT", sourceKey: greatGamesEntrySourceKey(member, "payout"), description: `${team.name} kervanı havuz payı` });
               const points = rankPoints(teamIndex);
-              if (points) await client.query(`INSERT INTO great_games_points(season_id,country_id,game_type,points,reason,dedupe_key) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(season_id,dedupe_key) DO NOTHING`, [season.id, member.country_id, gameType, points, `${teamIndex + 1}. kervan takımı`, `CARAVAN:placement:${teamIndex + 1}:${member.country_id}`]);
+              const runNumber = greatGamesEntryRunNumber(member);
+              const runKey = runNumber > 0 ? `:run:${runNumber}` : "";
+              if (points) await client.query(`INSERT INTO great_games_points(season_id,country_id,game_type,points,reason,dedupe_key) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(season_id,dedupe_key) DO NOTHING`, [season.id, member.country_id, gameType, points, `${teamIndex + 1}. kervan takımı`, `CARAVAN${runKey}:placement:${teamIndex + 1}:${member.country_id}`]);
             }
           }
         }
@@ -550,6 +578,70 @@ export const greatGamesService = {
         await client.query("UPDATE great_games_seasons SET current_round=current_round+1,updated_at=NOW() WHERE id=$1", [season.id]);
       }
       return { gameType, round: season.current_round, summary, finished };
+    });
+  },
+
+  async repairFinishedCaravanPayments(guildId: string): Promise<{
+    totalStake: number; totalPayout: number; countries: Array<{ countryName: string; before: number; after: number; stake: number; payout: number }>;
+  }> {
+    return withTransaction(async (client) => {
+      const season = await lockedSeason(client, guildId);
+      if (season.status === "ACTIVE" && season.current_game === "CARAVAN") throw new GameError("Ticaret Kervanı hâlâ devam ediyor; önce son aşamayı tamamlayın.");
+      const finished = (await entries(client, season.id, "CARAVAN")).filter((entry) => entry.status === "FINISHED");
+      if (!finished.length) throw new GameError("Ödemesi denetlenecek tamamlanmış Ticaret Kervanı bulunmuyor.");
+
+      const before = new Map<string, number>();
+      const stakes = new Map<string, number>();
+      for (const entry of finished) {
+        const wallet = (await client.query<{ balance: number }>(
+          "SELECT balance FROM great_games_wallets WHERE season_id=$1 AND country_id=$2 AND closed_at IS NULL FOR UPDATE",
+          [season.id, entry.country_id]
+        )).rows[0];
+        if (!wallet) throw new GameError(`${entry.country_name} için açık oyun cüzdanı bulunamadı.`);
+        before.set(entry.country_id, Number(wallet.balance));
+        const stake = Number(entry.stake) > 0 ? Number(entry.stake) : 1_000;
+        stakes.set(entry.country_id, stake);
+        if (Number(entry.stake) !== stake) await client.query("UPDATE great_games_entries SET stake=$1,updated_at=NOW() WHERE id=$2", [stake, entry.id]);
+        await recordMoney(client, {
+          season, countryId: entry.country_id, gameType: "CARAVAN", amount: -stake, kind: "STAKE",
+          sourceKey: greatGamesEntrySourceKey(entry, "stake"), description: "Ticaret Kervanı katılım/yatırım bedeli"
+        });
+      }
+
+      const teams = new Map<string, GreatGamesEntryRow[]>();
+      for (const entry of finished) {
+        const key = String(entry.metadata.teamName ?? entry.room_key ?? "Kervan").toLocaleLowerCase("tr-TR");
+        teams.set(key, [...(teams.get(key) ?? []), entry]);
+      }
+      const teamRows = [...teams.entries()].map(([name, members]) => ({
+        name, members, stake: members.reduce((sum, member) => sum + (stakes.get(member.country_id) ?? 0), 0), score: Number(members[0]?.score ?? 0)
+      })).sort((left, right) => right.score - left.score || left.name.localeCompare(right.name, "tr"));
+      const totalStake = teamRows.reduce((sum, team) => sum + team.stake, 0);
+      const teamPayouts = allocatePool(totalStake, teamRows.map((team) => team.stake * caravanMultiplier(team.score)));
+      const payouts = new Map<string, number>();
+      for (let teamIndex = 0; teamIndex < teamRows.length; teamIndex += 1) {
+        const team = teamRows[teamIndex]!;
+        const customWeights = team.members.map((member) => Math.max(0, Number(member.metadata.shareWeight ?? 0)));
+        const memberPayouts = allocatePool(teamPayouts[teamIndex] ?? 0, customWeights.some((weight) => weight > 0) ? customWeights : team.members.map((member) => stakes.get(member.country_id) ?? 0));
+        for (let memberIndex = 0; memberIndex < team.members.length; memberIndex += 1) {
+          const member = team.members[memberIndex]!;
+          const amount = memberPayouts[memberIndex] ?? 0;
+          payouts.set(member.country_id, amount);
+          if (amount > 0) await recordMoney(client, {
+            season, countryId: member.country_id, gameType: "CARAVAN", amount, kind: "PAYOUT",
+            sourceKey: greatGamesEntrySourceKey(member, "payout"), description: `${team.name} kervanı havuz payı`
+          });
+        }
+      }
+
+      const countries = [];
+      for (const entry of finished) {
+        const after = Number((await client.query<{ balance: number }>(
+          "SELECT balance FROM great_games_wallets WHERE season_id=$1 AND country_id=$2", [season.id, entry.country_id]
+        )).rows[0]!.balance);
+        countries.push({ countryName: entry.country_name, before: before.get(entry.country_id) ?? after, after, stake: stakes.get(entry.country_id) ?? 0, payout: payouts.get(entry.country_id) ?? 0 });
+      }
+      return { totalStake, totalPayout: [...payouts.values()].reduce((sum, amount) => sum + amount, 0), countries };
     });
   },
 

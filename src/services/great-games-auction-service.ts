@@ -4,7 +4,7 @@ import { GREAT_GAMES_TURN, rollDie } from "../domain/great-games.js";
 import { GameError } from "./game-service.js";
 import { adjustGreatGamesWallet } from "./great-games-wallet-service.js";
 
-interface Season { id: string; guild_id: string; game_turn: number; status: string; current_game: string | null; current_round: number; }
+interface Season { id: string; guild_id: string; game_turn: number; status: string; current_game: string | null; current_round: number; current_run: number; }
 export interface AuctionLot {
   id: string; title: string; reward_type: string; lot_order: number; phase: "SEALED" | "FINAL" | "FINISHED" | "CANCELLED";
   winning_country_id: string | null; winning_country_name: string | null; winning_bid: number | null;
@@ -51,12 +51,19 @@ async function moneyOnce(client: DbClient, data: {
      VALUES($1,$2,'AUCTION',$3,$4,$5,$6) ON CONFLICT(season_id,source_key) DO NOTHING RETURNING id`,
     [data.seasonId, data.countryId, data.amount, data.kind, data.sourceKey, data.description]
   );
-  if (!inserted.rowCount) return false;
-  await adjustGreatGamesWallet(client, {
-    seasonId: data.seasonId, countryId: data.countryId, amount: data.amount,
+  let ledgerAmount = data.amount;
+  if (!inserted.rowCount) {
+    const existing = (await client.query<{ amount: number }>(
+      "SELECT amount FROM great_games_money WHERE season_id=$1 AND source_key=$2", [data.seasonId, data.sourceKey]
+    )).rows[0];
+    if (!existing) throw new GameError("Büyük Oyun müzayede kaydı doğrulanamadı.");
+    ledgerAmount = Number(existing.amount);
+  }
+  const movement = await adjustGreatGamesWallet(client, {
+    seasonId: data.seasonId, countryId: data.countryId, amount: ledgerAmount,
     kind: data.kind, sourceKey: data.sourceKey, description: data.description
   });
-  return true;
+  return Boolean(inserted.rowCount) || movement.changed;
 }
 
 async function refundBid(client: DbClient, seasonId: string, bid: { id: string; country_id: string; reserved_amount: number }, reason: string): Promise<number> {
@@ -115,7 +122,7 @@ export const greatGamesAuctionService = {
       if (difference < 0) throw new GameError("Teklif düşürülemez.");
       if (difference > 0) await moneyOnce(client, {
         seasonId: active.id, countryId: input.countryId, amount: -difference, kind: "BID_RESERVE",
-        sourceKey: `auction-reserve:${lot.id}:${input.countryId}:${input.amount}`,
+        sourceKey: `${Number(active.current_run ?? 0) > 0 ? `auction:run:${active.current_run}:reserve` : "auction-reserve"}:${lot.id}:${input.countryId}:${input.amount}`,
         description: `${lot.title} için ${lot.phase === "SEALED" ? "kapalı" : "açık final"} teklif rezervi`
       });
       await client.query(

@@ -22,6 +22,7 @@ export const commandBuilders = [
       .addIntegerOption((o) => o.setName("miktar").setDescription("Aktarılacak Altın").setRequired(true).setMinValue(1)))
     .addSubcommand((sub) => sub.setName("katilimci-ulkeler").setDescription("Yalnızca yönetici: katılan ülkeleri ve cüzdan bakiyelerini gösterir"))
     .addSubcommand((sub) => sub.setName("kurtar").setDescription("Yalnızca yönetici: aktif oyunun çalışır formunu yeniden yayımlar"))
+    .addSubcommand((sub) => sub.setName("cuzdan-onar").setDescription("Yalnızca yönetici: biten Kervan oyununun eksik cüzdan ödemelerini tamamlar"))
     .addSubcommand((sub) => sub.setName("yonetici-bitir").setDescription("Yalnızca yönetici: bütün cüzdanları rastgele yerleşkelere aktarır")),
   new SlashCommandBuilder()
     .setName("hazine-hareketleri").setDescription("Yalnızca yönetici: bir ülkenin tur içindeki bütün mali hareketlerini gösterir")

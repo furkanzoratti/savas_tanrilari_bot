@@ -4,7 +4,7 @@ import { GREAT_GAMES_TURN, allocatePool } from "../domain/great-games.js";
 import { GameError } from "./game-service.js";
 import { adjustGreatGamesWallet } from "./great-games-wallet-service.js";
 
-interface Season { id: string; game_turn: number; status: string; current_game: string | null; }
+interface Season { id: string; game_turn: number; status: string; current_game: string | null; current_run: number; }
 
 async function moveTreasury(client: DbClient, countryId: string, amount: number, description: string): Promise<void> {
   const rows = (await client.query<{ id: string; local_treasury: number }>(
@@ -31,12 +31,19 @@ async function moneyOnce(client: DbClient, data: { seasonId: string; countryId: 
      VALUES($1,$2,'CHARIOT',$3,$4,$5,$6) ON CONFLICT(season_id,source_key) DO NOTHING RETURNING id`,
     [data.seasonId, data.countryId, data.amount, data.kind, data.sourceKey, data.description]
   );
-  if (!result.rowCount) return false;
-  await adjustGreatGamesWallet(client, {
-    seasonId: data.seasonId, countryId: data.countryId, amount: data.amount,
+  let ledgerAmount = data.amount;
+  if (!result.rowCount) {
+    const existing = (await client.query<{ amount: number }>(
+      "SELECT amount FROM great_games_money WHERE season_id=$1 AND source_key=$2", [data.seasonId, data.sourceKey]
+    )).rows[0];
+    if (!existing) throw new GameError("Büyük Oyun bahis kaydı doğrulanamadı.");
+    ledgerAmount = Number(existing.amount);
+  }
+  const movement = await adjustGreatGamesWallet(client, {
+    seasonId: data.seasonId, countryId: data.countryId, amount: ledgerAmount,
     kind: data.kind === "STAKE" ? "GAME_STAKE" : data.kind, sourceKey: data.sourceKey, description: data.description
   });
-  return true;
+  return Boolean(result.rowCount) || movement.changed;
 }
 
 export async function settleChariotBets(client: DbClient, season: { id: string }, winnerCountryId: string): Promise<void> {
@@ -78,7 +85,8 @@ export const greatGamesBetService = {
         "SELECT id FROM great_games_bets WHERE season_id=$1 AND bettor_country_id=$2 FOR UPDATE", [active.id, input.bettorCountryId]
       )).rows[0];
       if (existing) throw new GameError("Bu devlet yarış için bahis hakkını zaten kullandı.");
-      await moneyOnce(client, { seasonId: active.id, countryId: input.bettorCountryId, amount: -input.amount, kind: "STAKE", sourceKey: `CHARIOT:bet:${input.bettorCountryId}`, description: `${target.country_name} sürücüsüne Savaş Arabaları bahsi` });
+      const runKey = Number(active.current_run ?? 0) > 0 ? `CHARIOT:run:${active.current_run}` : "CHARIOT";
+      await moneyOnce(client, { seasonId: active.id, countryId: input.bettorCountryId, amount: -input.amount, kind: "STAKE", sourceKey: `${runKey}:bet:${input.bettorCountryId}`, description: `${target.country_name} sürücüsüne Savaş Arabaları bahsi` });
       await client.query("INSERT INTO great_games_bets(season_id,bettor_country_id,target_country_id,amount) VALUES($1,$2,$3,$4)", [active.id, input.bettorCountryId, target.country_id, input.amount]);
     });
   }

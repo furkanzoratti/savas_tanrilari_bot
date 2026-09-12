@@ -37,6 +37,11 @@ describe("Büyük Oyunlar migration", () => {
     expect(migration?.sql).toContain("'REGISTERED','SELECTED','ACTIVE','FINISHED','CANCELLED'");
     expect(migration?.sql).toContain("DROP CONSTRAINT IF EXISTS great_games_entries_status_check");
   });
+  it("her oyun tekrarını ayrı bir oynatım numarasıyla izler", () => {
+    const migration = migrations.find((item) => item.version === 64);
+    expect(migration?.name).toBe("great_games_repeat_runs");
+    expect(migration?.sql).toContain("ADD COLUMN IF NOT EXISTS current_run INTEGER NOT NULL DEFAULT 0");
+  });
   it("iptal edilmiş Büyük Oyunları ve aday kayıtlarını yeniden açar", () => {
     const migration = migrations.find((item) => item.version === 63);
     expect(migration?.name).toBe("great_games_always_open");

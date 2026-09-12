@@ -5,7 +5,7 @@ import {
   type GreatGameType
 } from "../domain/great-games.js";
 import { GameError } from "./game-service.js";
-import { automaticCaravanAssignments, type GreatGamesEntryRow, type GreatGamesSeasonRow } from "./great-games-service.js";
+import { automaticCaravanAssignments, greatGamesEntrySourceKey, type GreatGamesEntryRow, type GreatGamesSeasonRow } from "./great-games-service.js";
 import { adjustGreatGamesWallet } from "./great-games-wallet-service.js";
 
 export type GreatGamesSelectionMode = "RANDOM" | "MANUAL";
@@ -93,24 +93,26 @@ async function chargeStake(client: DbClient, season: GreatGamesSeasonRow, entry:
   const requiredStake = entry.game_type === "CARAVAN"
     ? (Number(entry.stake) > 0 ? Number(entry.stake) : 1_000)
     : GREAT_GAME_TYPES[entry.game_type].stake;
-  if (Number(entry.stake) > 0 || requiredStake === 0) return;
-  const sourceKey = `${entry.game_type}:stake:${entry.country_id}`;
+  if (requiredStake === 0) return;
+  const sourceKey = greatGamesEntrySourceKey(entry, "stake");
   const inserted = await client.query(
     `INSERT INTO great_games_money(season_id,country_id,game_type,amount,kind,source_key,description)
      VALUES($1,$2,$3,$4,'STAKE',$5,$6)
      ON CONFLICT(season_id,source_key) DO NOTHING RETURNING id`,
     [season.id, entry.country_id, entry.game_type, -requiredStake, sourceKey, `${GREAT_GAME_TYPES[entry.game_type].label} katılım/yatırım bedeli`]
   );
-  if (inserted.rowCount) {
-    await adjustGreatGamesWallet(client, {
-      seasonId: season.id,
-      countryId: entry.country_id,
-      amount: -requiredStake,
-      kind: "GAME_STAKE",
-      sourceKey,
-      description: `${GREAT_GAME_TYPES[entry.game_type].label} katılım/yatırım bedeli`
-    });
+  let ledgerAmount = -requiredStake;
+  if (!inserted.rowCount) {
+    const existing = (await client.query<{ amount: number }>(
+      "SELECT amount FROM great_games_money WHERE season_id=$1 AND source_key=$2", [season.id, sourceKey]
+    )).rows[0];
+    if (!existing) throw new GameError("Büyük Oyun katılım kaydı doğrulanamadı.");
+    ledgerAmount = Number(existing.amount);
   }
+  await adjustGreatGamesWallet(client, {
+    seasonId: season.id, countryId: entry.country_id, amount: ledgerAmount, kind: "GAME_STAKE", sourceKey,
+    description: `${GREAT_GAME_TYPES[entry.game_type].label} katılım/yatırım bedeli`
+  });
   await client.query("UPDATE great_games_entries SET stake=$1 WHERE id=$2", [requiredStake, entry.id]);
   entry.stake = requiredStake;
 }
@@ -126,9 +128,43 @@ export const greatGamesFlowService = {
     return withTransaction(async (client) => {
       const season = await lockedSeason(client, input.guildId);
       if (season.status !== "OPEN") throw new GameError("Katılımcılar yalnızca başka bir oyun yayında veya etkin değilken seçilebilir.");
-      const allEntries = await gameEntries(client, season.id, input.gameType);
-      if (allEntries.some((entry) => entry.status === "FINISHED")) throw new GameError("Bu oyun daha önce tamamlandı.");
-      const candidates = allEntries.filter((entry) => entry.status === "REGISTERED" || entry.status === "SELECTED");
+      let allEntries = await gameEntries(client, season.id, input.gameType);
+      const continuingSelection = season.current_game === input.gameType
+        && allEntries.some((entry) => entry.status === "SELECTED");
+      const runNumber = continuingSelection
+        ? Math.max(1, Number(season.current_run ?? 0))
+        : Number(season.current_run ?? 0) + 1;
+
+      if (!continuingSelection) {
+        await client.query(
+          `UPDATE great_games_entries
+             SET status='REGISTERED',room_key=NULL,stake=0,
+                 score=CASE WHEN game_type='CARAVAN' THEN 3 ELSE 0 END,
+                 metadata=metadata-'selectionOrder'-'runNumber'-'scenario'-'crisis'-'primaryGoal'-'secondaryGoal'-'development'
+                                  -'teamName'-'role'-'route'-'shareWeight'-'financierUsed',
+                 updated_at=NOW()
+           WHERE season_id=$1 AND game_type=$2`,
+          [season.id, input.gameType]
+        );
+        await client.query("DELETE FROM great_games_actions WHERE season_id=$1 AND game_type=$2", [season.id, input.gameType]);
+        if (input.gameType === "CHARIOT") {
+          await client.query("DELETE FROM great_games_bets WHERE season_id=$1", [season.id]);
+        }
+        if (input.gameType === "AUCTION") {
+          await client.query(
+            "DELETE FROM great_games_auction_bids WHERE lot_id IN (SELECT id FROM great_games_auction_lots WHERE season_id=$1)",
+            [season.id]
+          );
+          await client.query(
+            `UPDATE great_games_auction_lots
+               SET phase='SEALED',winning_country_id=NULL,winning_bid=NULL,metadata=metadata-'finalists',updated_at=NOW()
+             WHERE season_id=$1`,
+            [season.id]
+          );
+        }
+        allEntries = await gameEntries(client, season.id, input.gameType);
+      }
+      const candidates = allEntries.filter((entry) => ["REGISTERED", "SELECTED", "FINISHED"].includes(entry.status));
       if (!candidates.length) throw new GameError("Bu oyuna aday kayıtlı devlet bulunmuyor.");
 
       let selected: GreatGamesEntryRow[];
@@ -153,15 +189,15 @@ export const greatGamesFlowService = {
       for (let index = 0; index < selected.length; index += 1) {
         const entry = selected[index]!;
         entry.room_key = roomKey(input.gameType, index, entry);
-        entry.metadata = { ...entry.metadata, selectionOrder: index };
+        entry.metadata = { ...entry.metadata, selectionOrder: index, runNumber };
         await client.query(
           "UPDATE great_games_entries SET status='SELECTED',room_key=$1,metadata=$2::jsonb,updated_at=NOW() WHERE id=$3",
           [entry.room_key, JSON.stringify(entry.metadata), entry.id]
         );
       }
       await client.query(
-        "UPDATE great_games_seasons SET current_game=$1,current_round=0,updated_at=NOW() WHERE id=$2",
-        [input.gameType, season.id]
+        "UPDATE great_games_seasons SET current_game=$1,current_round=0,current_run=$2,updated_at=NOW() WHERE id=$3",
+        [input.gameType, runNumber, season.id]
       );
       return { count: selected.length, countries: selected.map((entry) => entry.country_name), rooms: roomsOf(selected) };
     });

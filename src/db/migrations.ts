@@ -2100,5 +2100,13 @@ export const migrations = [
       WHERE w.closed_at IS NULL
       ON CONFLICT(season_id,game_type,country_id) DO NOTHING;
     `
+  },
+  {
+    version: 64,
+    name: "great_games_repeat_runs",
+    sql: `
+      ALTER TABLE great_games_seasons
+      ADD COLUMN IF NOT EXISTS current_run INTEGER NOT NULL DEFAULT 0;
+    `
   }
 ] as const;

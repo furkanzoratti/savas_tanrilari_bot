@@ -264,6 +264,14 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
     await interaction.reply(await publicGamePayload(interaction.guildId, type, "🛠️ Aktif oyun formu kayıtlar korunarak yeniden oluşturuldu."));
     return true;
   }
+  if (subcommand === "cuzdan-onar") {
+    if (!isGameMaster(interaction)) throw new GameError("Bu komut yalnızca oyun yöneticileri tarafından kullanılabilir.");
+    await interaction.deferReply({ ephemeral: true });
+    const result = await greatGamesService.repairFinishedCaravanPayments(interaction.guildId);
+    const lines = result.countries.map((item) => `**${item.countryName}:** ${gold(item.before)} → ${gold(item.after)} • Katılım −${gold(item.stake)} • Ödül +${gold(item.payout)}`);
+    await interaction.editReply({ content: clip(`✅ Ticaret Kervanı cüzdan denetimi tamamlandı.\n**Toplam katılım havuzu:** ${gold(result.totalStake)} • **Dağıtılan:** ${gold(result.totalPayout)}\n\n${lines.join("\n")}`, 1_990) });
+    return true;
+  }
   if (subcommand === "yonetici-bitir") {
     if (!isGameMaster(interaction)) throw new GameError("Bu komut yalnızca oyun yöneticileri tarafından kullanılabilir.");
     await interaction.deferReply({ ephemeral: true });

@@ -5,9 +5,18 @@ vi.mock("./game-service.js", () => ({ GameError: class GameError extends Error {
 vi.mock("./great-games-bet-service.js", () => ({ settleChariotBets: vi.fn() }));
 vi.mock("./great-games-wallet-service.js", () => ({ adjustGreatGamesWallet: vi.fn() }));
 
-import { automaticCaravanAssignments } from "./great-games-service.js";
+import { automaticCaravanAssignments, greatGamesEntrySourceKey } from "./great-games-service.js";
 
 describe("Büyük Oyunlar otomatik katılımı", () => {
+  it("aynı oyunun her oynatımına bağımsız para anahtarı verir", () => {
+    const entry = { game_type: "CARAVAN" as const, country_id: "country-1", metadata: {} as Record<string, unknown> };
+    expect(greatGamesEntrySourceKey(entry, "stake")).toBe("CARAVAN:stake:country-1");
+    entry.metadata.runNumber = 4;
+    expect(greatGamesEntrySourceKey(entry, "stake")).toBe("CARAVAN:run:4:stake:country-1");
+    entry.metadata.runNumber = 5;
+    expect(greatGamesEntrySourceKey(entry, "stake")).toBe("CARAVAN:run:5:stake:country-1");
+  });
+
   it("kervan katılımcılarını tek kişilik takım bırakmadan otomatik gruplar", () => {
     const participants = Array.from({ length: 7 }, (_, index) => ({
       id: `id-${index}`,
