@@ -2028,5 +2028,44 @@ export const migrations = [
       CREATE INDEX IF NOT EXISTS great_games_wallet_movements_wallet_idx
         ON great_games_wallet_movements(wallet_id,created_at);
     `
+  },
+  {
+    version: 61,
+    name: "great_games_auto_enrollment",
+    sql: `
+      INSERT INTO great_games_entries(
+        season_id,game_type,country_id,discord_user_id,stake,score,metadata
+      )
+      SELECT
+        w.season_id,
+        games.game_type,
+        w.country_id,
+        w.joined_by,
+        0,
+        CASE WHEN games.game_type='CARAVAN' THEN 3 ELSE 0 END,
+        CASE WHEN games.game_type='CHARIOT'
+          THEN jsonb_build_object('autoEnrolled',TRUE,'driverName',LEFT(c.name || ' Sürücüsü',40))
+          ELSE jsonb_build_object('autoEnrolled',TRUE)
+        END
+      FROM great_games_wallets w
+      JOIN great_games_seasons s ON s.id=w.season_id AND s.status='OPEN'
+      JOIN countries c ON c.id=w.country_id
+      CROSS JOIN (VALUES ('AUCTION'),('CHARIOT'),('CARAVAN'),('KINGS_BET'),('DIPLOMACY')) AS games(game_type)
+      WHERE w.closed_at IS NULL
+      ON CONFLICT(season_id,game_type,country_id) DO NOTHING;
+    `
+  },
+  {
+    version: 62,
+    name: "great_games_published_selection",
+    sql: `
+      ALTER TABLE great_games_seasons DROP CONSTRAINT IF EXISTS great_games_seasons_status_check;
+      ALTER TABLE great_games_seasons ADD CONSTRAINT great_games_seasons_status_check
+        CHECK (status IN ('OPEN','PUBLISHED','ACTIVE','FINISHED','CANCELLED'));
+
+      ALTER TABLE great_games_entries DROP CONSTRAINT IF EXISTS great_games_entries_status_check;
+      ALTER TABLE great_games_entries ADD CONSTRAINT great_games_entries_status_check
+        CHECK (status IN ('REGISTERED','SELECTED','ACTIVE','FINISHED','CANCELLED'));
+    `
   }
 ] as const;

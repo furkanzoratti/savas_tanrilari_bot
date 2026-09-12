@@ -40,7 +40,7 @@ async function dashboardPayload(guildId: string, userId: string, gm: boolean) {
   const embed = new EmbedBuilder().setColor(0xd6ad3c).setTitle("🏛️ 15. Tur Büyük Oyunları")
     .setDescription([
       `**Oyun turu:** ${data.currentTurn} • **Durum:** ${status}`,
-      "Etkinliğe katılan her devlet 5.000 Altın başlangıç bakiyeli ayrı bir oyun cüzdanı kullanır. Oyun sonunda kalan cüzdan bakiyesi devletin rastgele bir yerleşkesine aktarılır.",
+      "`/oyunlar katil` kullanan devlet beş oyunun tamamına kaydolur ve 5.000 Altın başlangıç bakiyeli ayrı bir oyun cüzdanı kullanır. Oyunları yalnızca yönetici başlatır. Oyun sonunda kalan bakiye devletin rastgele bir yerleşkesine aktarılır.",
       data.points.length ? `\n**Büyük Oyunlar Puanı**\n${data.points.slice(0, 10).map((row, index) => `${index + 1}. ${row.country_name} — **${row.points}**`).join("\n")}` : ""
     ].filter(Boolean).join("\n"));
   for (const gameType of Object.keys(GREAT_GAME_TYPES) as GreatGameType[]) {
@@ -52,11 +52,14 @@ async function dashboardPayload(guildId: string, userId: string, gm: boolean) {
       inline: false
     });
   }
-  const gameButtons = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    ...(Object.keys(GREAT_GAME_TYPES) as GreatGameType[]).map((type) => new ButtonBuilder()
+  const visibleGameTypes = gm
+    ? Object.keys(GREAT_GAME_TYPES) as GreatGameType[]
+    : data.season?.status === "ACTIVE" && data.season.current_game && data.entries.some((entry) => entry.game_type === data.season!.current_game) ? [data.season.current_game] : [];
+  const gameButtons = visibleGameTypes.length ? new ActionRowBuilder<ButtonBuilder>().addComponents(
+    ...visibleGameTypes.map((type) => new ButtonBuilder()
       .setCustomId(`gg|view|${type}`).setLabel(GREAT_GAME_TYPES[type].label.slice(0, 30))
       .setEmoji(GREAT_GAME_TYPES[type].emoji).setStyle(ButtonStyle.Secondary))
-  );
+  ) : null;
   const controls = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId("gg|home").setLabel("Yenile").setEmoji("🔄").setStyle(ButtonStyle.Primary)
   );
@@ -67,13 +70,13 @@ async function dashboardPayload(guildId: string, userId: string, gm: boolean) {
       new ButtonBuilder().setCustomId("gg|cancel").setLabel("İptal ve İade").setStyle(ButtonStyle.Danger)
     );
   }
-  return { embeds: [embed], components: [gameButtons, controls], ephemeral: true as const };
+  return { embeds: [embed], components: gameButtons ? [gameButtons, controls] : [controls], ephemeral: true as const };
 }
 
 function gameRules(type: GreatGameType): string {
   if (type === "AUCTION") return "Kapalı teklifler 500 Altından başlar; artış en az 250, tek teklif en fazla 5.000 Altındır. Bir devlet en fazla iki ödül kazanabilir. Kaybeden teklif ödemez; kazanan ödemeleri genel ödül havuzuna gider.";
   if (type === "CHARIOT") return "Katılım 1.000 Altın. Üç etap oynanır; her etapta gizli sürüş taktiği seçilir. Katılım havuzu %65/%35 paylaşılır. İlk üç devlet 5/3/2 Büyük Oyunlar Puanı alır.";
-  if (type === "CARAVAN") return "2–4 devletlik takımlar kurulur. Her devlet 1.000–3.000 Altın yatırır, görev ve rota seçer. Üç aşama sonunda bütün yatırımlar takım ağırlıklarına göre geri dağıtılır.";
+  if (type === "CARAVAN") return "Yönetici oyunu başlattığında devletler 2–3 kişilik kervanlara ve görevlere otomatik ayrılır. Her devletten 1.000 Altın yatırım alınır. Üç aşama sonunda bütün yatırımlar takım ağırlıklarına göre geri dağıtılır.";
   if (type === "KINGS_BET") return "Katılım 1.000 Altın. Üç ikilemde İşbirliği veya İhanet ve rakibin kararı için tahmin gizlice seçilir. Havuz ilk üçe %50/%30/%20 dağıtılır.";
   return "Masalar tam üç devletten oluşur. Her devletin ana hedefi bağdaşmaz; anlaşma yalnız bir ana ve en fazla bir ikincil kazanan çıkarır. 500'er Altınlık 1.500 Altın havuz 1.000/500 veya 1.500/0 paylaşılır.";
 }
@@ -81,6 +84,9 @@ function gameRules(type: GreatGameType): string {
 async function gamePayload(guildId: string, userId: string, gm: boolean, type: GreatGameType) {
   const data = await greatGamesService.dashboard(guildId, userId);
   const mine = data.entries.find((entry) => entry.game_type === type);
+  if (!gm && (data.season?.status !== "ACTIVE" || data.season.current_game !== type || !mine)) {
+    throw new GameError("Oyuncular yalnızca yönetici tarafından başlatılmış etkin oyunu açabilir.");
+  }
   const game = GREAT_GAME_TYPES[type];
   const embed = new EmbedBuilder().setColor(0xb78b32).setTitle(`${game.emoji} ${game.label}`)
     .setDescription(`${gameRules(type)}\n\n**Katılımcı:** ${data.counts[type]}${mine ? `\n**Senin kaydın:** ${mine.status} • Skor ${mine.score}` : ""}`);
@@ -88,10 +94,7 @@ async function gamePayload(guildId: string, userId: string, gm: boolean, type: G
     new ButtonBuilder().setCustomId("gg|home").setLabel("Ana Menü").setStyle(ButtonStyle.Secondary)
   );
   const season = data.season;
-  if (season?.status === "OPEN" && !mine) row.addComponents(
-    new ButtonBuilder().setCustomId(`gg|register|${type}`).setLabel("Katıl").setStyle(ButtonStyle.Success)
-  );
-  if (season?.status === "OPEN" && type === "CHARIOT") row.addComponents(
+  if (season?.status === "ACTIVE" && season.current_game === "CHARIOT" && type === "CHARIOT") row.addComponents(
     new ButtonBuilder().setCustomId("gg|bet|CHARIOT").setLabel("Bahis Yap").setStyle(ButtonStyle.Primary)
   );
   if (season?.status === "ACTIVE" && season.current_game === type && mine && type !== "AUCTION") row.addComponents(
@@ -182,7 +185,9 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
   const country = await ownCountry(interaction.guildId, interaction.user.id);
   if (subcommand === "katil") {
     const result = await greatGamesWalletService.join(interaction.guildId, country.id, interaction.user.id);
-    await interaction.reply({ content: result.created ? `✅ ${country.name} etkinliğe katıldı. Oyun cüzdanına **${gold(5_000)}** yüklendi.` : `ℹ️ ${country.name} zaten etkinliğe katılmış. Güncel bakiye: **${gold(result.balance)}**.`, ephemeral: true });
+    await interaction.reply({ content: result.created
+      ? `✅ ${country.name}, beş Büyük Oyunun tamamına kaydedildi. Oyun cüzdanına **${gold(5_000)}** yüklendi.`
+      : `ℹ️ ${country.name} zaten etkinliğe katılmış. Beş oyun kaydı kontrol edilip eksikleri tamamlandı; ikinci başlangıç bakiyesi verilmedi. Güncel bakiye: **${gold(result.balance)}**.`, ephemeral: true });
     return true;
   }
   if (subcommand === "cuzdan") {
@@ -218,22 +223,42 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
     await interaction.editReply({ ...(await dashboardPayload(interaction.guildId, interaction.user.id, true)), content: `İptal tamamlandı; ${gold(refunded)} iade edildi.` }); return true;
   }
   if (action === "register") {
-    const type = gameId(rawType!);
-    if (type === "CARAVAN") { await interaction.showModal(caravanRegistrationModal()); return true; }
-    if (type === "CHARIOT") {
-      await interaction.showModal(new ModalBuilder().setCustomId("ggm|register|CHARIOT").setTitle("Savaş Arabaları Kaydı").addComponents(
-        new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("driver").setLabel("Sürücü adı").setStyle(TextInputStyle.Short).setMaxLength(40).setRequired(true))
-      )); return true;
-    }
-    const country = await ownCountry(interaction.guildId, interaction.user.id);
-    await greatGamesService.register({ guildId: interaction.guildId, countryId: country.id, userId: interaction.user.id, gameType: type });
-    await interaction.update(await gamePayload(interaction.guildId, interaction.user.id, isGameMaster(interaction), type)); return true;
+    throw new GameError("Oyunlara ayrı ayrı katılım kapalıdır. `/oyunlar katil` devleti bütün oyunlara kaydeder.");
   }
   if (action === "start") {
     if (!isGameMaster(interaction)) throw new GameError("Yalnızca oyun yöneticisi oyunu başlatabilir.");
     const type = gameId(rawType!);
-    const count = await greatGamesService.startGame(interaction.guildId, type);
-    await interaction.update({ ...(await gamePayload(interaction.guildId, interaction.user.id, true, type)), content: `${count} devletle oyun başlatıldı.` }); return true;
+    if (type === "KINGS_BET" || type === "DIPLOMACY") {
+      await interaction.update({
+        content: `**${GREAT_GAME_TYPES[type].label}** eşleşmeleri nasıl oluşturulsun?`, embeds: [],
+        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId(`gg|match-random|${type}`).setLabel("Rastgele Eşleştir").setEmoji("🎲").setStyle(ButtonStyle.Primary),
+          new ButtonBuilder().setCustomId(`gg|match-manual|${type}`).setLabel("Elle Eşleştir").setEmoji("📝").setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder().setCustomId(`gg|view|${type}`).setLabel("Geri").setStyle(ButtonStyle.Danger)
+        )]
+      });
+      return true;
+    }
+    const result = await greatGamesService.startGame(interaction.guildId, type);
+    await interaction.update({ ...(await gamePayload(interaction.guildId, interaction.user.id, true, type)), content: `${result.count} devletle oyun başlatıldı.` }); return true;
+  }
+  if (action === "match-random") {
+    if (!isGameMaster(interaction)) throw new GameError("Yalnızca oyun yöneticisi eşleştirme yapabilir.");
+    const type = gameId(rawType!);
+    if (type !== "KINGS_BET" && type !== "DIPLOMACY") throw new GameError("Bu oyun eşleştirme gerektirmiyor.");
+    const result = await greatGamesService.startGame(interaction.guildId, type, "RANDOM");
+    await interaction.update({ ...(await gamePayload(interaction.guildId, interaction.user.id, true, type)), content: `🎲 **Rastgele eşleşmeler**\n${result.rooms.map((room, index) => `${index + 1}. ${room}`).join("\n")}`.slice(0, 2_000) });
+    return true;
+  }
+  if (action === "match-manual") {
+    if (!isGameMaster(interaction)) throw new GameError("Yalnızca oyun yöneticisi eşleştirme yapabilir.");
+    const type = gameId(rawType!);
+    if (type !== "KINGS_BET" && type !== "DIPLOMACY") throw new GameError("Bu oyun eşleştirme gerektirmiyor.");
+    const grouping = type === "KINGS_BET" ? "Her 2 ülke bir eşleşme" : "Her 3 ülke bir masa";
+    await interaction.showModal(new ModalBuilder().setCustomId(`ggm|start-manual|${type}`).setTitle("Elle Eşleştirme").addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("countries").setLabel("Ülkeleri eşleşme sırasıyla yaz").setPlaceholder(`${grouping}; virgül veya yeni satır kullan`).setStyle(TextInputStyle.Paragraph).setMaxLength(4_000).setRequired(true))
+    ));
+    return true;
   }
   if (action === "bet") {
     await interaction.showModal(new ModalBuilder().setCustomId("ggm|chariot-bet|CHARIOT").setTitle("Savaş Arabaları Bahsi").addComponents(
@@ -273,6 +298,17 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
   if (!interaction.customId.startsWith("ggm|")) return false;
   if (!interaction.guildId) throw new GameError("Bu işlem yalnızca sunucuda kullanılabilir.");
   const [, action, rawType] = interaction.customId.split("|");
+  if (action === "start-manual") {
+    if (!isGameMaster(interaction)) throw new GameError("Yalnızca oyun yöneticisi eşleştirme yapabilir.");
+    const type = gameId(rawType!);
+    if (type !== "KINGS_BET" && type !== "DIPLOMACY") throw new GameError("Bu oyun eşleştirme gerektirmiyor.");
+    const countryNames = interaction.fields.getTextInputValue("countries").split(/[\n,;]+/).map((name) => name.trim()).filter(Boolean);
+    const result = await greatGamesService.startGame(interaction.guildId, type, "MANUAL", countryNames);
+    const content = `📝 **Elle oluşturulan eşleşmeler**\n${result.rooms.map((room, index) => `${index + 1}. ${room}`).join("\n")}`.slice(0, 2_000);
+    if (interaction.isFromMessage()) await interaction.update({ content, embeds: [], components: [] });
+    else await interaction.reply({ content, ephemeral: true });
+    return true;
+  }
   const country = await ownCountry(interaction.guildId, interaction.user.id);
   if (action === "chariot-bet") {
     const amount = Number(interaction.fields.getTextInputValue("amount").replaceAll(".", ""));
@@ -288,6 +324,9 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
     return true;
   }
   const type = gameId(rawType!);
+  if (action === "register") {
+    throw new GameError("Oyunlara ayrı ayrı katılım kapalıdır. `/oyunlar katil` devleti bütün oyunlara kaydeder.");
+  }
   if (action === "register" && type === "CHARIOT") {
     const driverName = interaction.fields.getTextInputValue("driver").trim();
     await greatGamesService.register({ guildId: interaction.guildId, countryId: country.id, userId: interaction.user.id, gameType: type, driverName });

@@ -91,6 +91,11 @@ export const greatGamesAuctionService = {
       if (!Number.isInteger(input.amount) || input.amount < 500 || input.amount > 5_000 || (input.amount - 500) % 250 !== 0) {
         throw new GameError("Teklif 500–5.000 Altın arasında ve 250'nin katlarıyla verilmelidir.");
       }
+      const participant = await client.query(
+        "SELECT 1 FROM great_games_entries WHERE season_id=$1 AND game_type='AUCTION' AND country_id=$2 AND status='ACTIVE'",
+        [active.id, input.countryId]
+      );
+      if (!participant.rowCount) throw new GameError("Bu devlet yayınlanan müzayedenin katılımcıları arasında değil.");
       const lot = (await client.query<{ id: string; title: string; phase: string; metadata: { finalists?: string[] } }>(
         "SELECT id,title,phase,metadata FROM great_games_auction_lots WHERE id=$1 AND season_id=$2 FOR UPDATE", [input.lotId, active.id]
       )).rows[0];
@@ -173,7 +178,7 @@ export const greatGamesAuctionService = {
         summary.push(`${lot.title}: **${winner.country_name}** — ${Number(winner.amount).toLocaleString("tr-TR")} Altın`);
       }
       await client.query("UPDATE great_games_seasons SET status='OPEN',current_game=NULL,current_round=0,prize_pool=prize_pool+$1,updated_at=NOW() WHERE id=$2", [prizePool, active.id]);
-      await client.query("UPDATE great_games_entries SET status='FINISHED' WHERE season_id=$1 AND game_type='AUCTION'", [active.id]);
+      await client.query("UPDATE great_games_entries SET status='FINISHED' WHERE season_id=$1 AND game_type='AUCTION' AND status='ACTIVE'", [active.id]);
       return { phase: "FINISHED", summary, refunded };
     });
   }

@@ -15,7 +15,7 @@ const SETTLEMENT_EVENT_CHOICES = Object.entries(SETTLEMENT_EVENT_TYPES).map(([va
 export const commandBuilders = [
   new SlashCommandBuilder()
     .setName("oyunlar").setDescription("15. Tur Büyük Oyunlarını ve oyun cüzdanını yönetir")
-    .addSubcommand((sub) => sub.setName("panel").setDescription("Büyük Oyunlar panelini açar"))
+    .addSubcommand((sub) => sub.setName("panel").setDescription("Yalnızca yönetici: Büyük Oyunlar yönetim panelini açar"))
     .addSubcommand((sub) => sub.setName("katil").setDescription("Etkinliğe katılır ve 5.000 Altınlık oyun cüzdanını açar"))
     .addSubcommand((sub) => sub.setName("cuzdan").setDescription("Oyun cüzdanı bakiyeni gösterir"))
     .addSubcommand((sub) => sub.setName("para-aktar").setDescription("Rastgele uygun bir yerleşkenden oyun cüzdanına Altın aktarır")

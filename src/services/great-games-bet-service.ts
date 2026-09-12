@@ -68,10 +68,10 @@ export const greatGamesBetService = {
       const active = (await client.query<Season>(
         "SELECT * FROM great_games_seasons WHERE guild_id=$1 AND game_turn=$2 FOR UPDATE", [input.guildId, GREAT_GAMES_TURN]
       )).rows[0];
-      if (!active || active.status !== "OPEN") throw new GameError("Bahisler yalnız yarış başlamadan önce verilebilir.");
+      if (!active || active.status !== "PUBLISHED" || active.current_game !== "CHARIOT") throw new GameError("Bahisler yalnız Savaş Arabaları formu yayınlandıktan sonra ve yarış başlamadan önce verilebilir.");
       const target = (await client.query<{ country_id: string; country_name: string }>(
         `SELECT e.country_id,c.name AS country_name FROM great_games_entries e JOIN countries c ON c.id=e.country_id
-         WHERE e.season_id=$1 AND e.game_type='CHARIOT' AND lower(c.name)=lower($2)`, [active.id, input.targetCountryName]
+         WHERE e.season_id=$1 AND e.game_type='CHARIOT' AND e.status='SELECTED' AND lower(c.name)=lower($2)`, [active.id, input.targetCountryName]
       )).rows[0];
       if (!target) throw new GameError("Bahis hedefi Savaş Arabaları katılımcıları arasında bulunamadı.");
       const existing = (await client.query<{ id: string }>(

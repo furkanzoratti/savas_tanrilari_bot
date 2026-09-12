@@ -22,4 +22,19 @@ describe("Büyük Oyunlar migration", () => {
     expect(migration?.sql).toContain("UNIQUE (wallet_id,source_key)");
     expect(migration?.sql).toContain("balance BIGINT NOT NULL DEFAULT 5000");
   });
+  it("mevcut cüzdan sahiplerini açık sezondaki bütün oyunlara kaydeder", () => {
+    const migration = migrations.find((item) => item.version === 61);
+    expect(migration?.name).toBe("great_games_auto_enrollment");
+    expect(migration?.sql).toContain("CROSS JOIN (VALUES ('AUCTION'),('CHARIOT'),('CARAVAN'),('KINGS_BET'),('DIPLOMACY'))");
+    expect(migration?.sql).toContain("s.status='OPEN'");
+    expect(migration?.sql).toContain("ON CONFLICT(season_id,game_type,country_id) DO NOTHING");
+    expect(migration?.sql).toContain("'autoEnrolled',TRUE");
+  });
+  it("katılımcı seçimi ile yayınlanan oyun aşamasını kalıcılaştırır", () => {
+    const migration = migrations.find((item) => item.version === 62);
+    expect(migration?.name).toBe("great_games_published_selection");
+    expect(migration?.sql).toContain("'OPEN','PUBLISHED','ACTIVE','FINISHED','CANCELLED'");
+    expect(migration?.sql).toContain("'REGISTERED','SELECTED','ACTIVE','FINISHED','CANCELLED'");
+    expect(migration?.sql).toContain("DROP CONSTRAINT IF EXISTS great_games_entries_status_check");
+  });
 });

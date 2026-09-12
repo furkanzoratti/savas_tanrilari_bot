@@ -11,7 +11,7 @@ import { adjustGreatGamesWallet } from "./great-games-wallet-service.js";
 import { settleChariotBets } from "./great-games-bet-service.js";
 
 export interface GreatGamesSeasonRow {
-  id: string; guild_id: string; game_turn: number; status: "OPEN" | "ACTIVE" | "FINISHED" | "CANCELLED";
+  id: string; guild_id: string; game_turn: number; status: "OPEN" | "PUBLISHED" | "ACTIVE" | "FINISHED" | "CANCELLED";
   current_game: GreatGameType | null; current_round: number; prize_pool: number;
 }
 
@@ -19,6 +19,60 @@ export interface GreatGamesEntryRow {
   id: string; season_id: string; game_type: GreatGameType; country_id: string; country_name: string;
   discord_user_id: string; stake: number; score: number; status: string; room_key: string | null;
   metadata: Record<string, unknown>;
+}
+
+export type GreatGamesMatchingMode = "ALPHABETICAL" | "RANDOM" | "MANUAL";
+
+const CARAVAN_AUTO_ROLES: CaravanRole[] = ["MERCHANT", "GUARD", "GUIDE", "FINANCIER"];
+
+export function automaticCaravanAssignments<T extends { id: string; metadata: Record<string, unknown> }>(participants: readonly T[]): T[] {
+  const arranged = [...participants];
+  let cursor = 0;
+  let teamIndex = 1;
+  while (cursor < arranged.length) {
+    const remaining = arranged.length - cursor;
+    const teamSize = remaining === 3 ? 3 : 2;
+    for (let seat = 0; seat < teamSize; seat += 1) {
+      const entry = arranged[cursor + seat]!;
+      entry.metadata = {
+        ...entry.metadata,
+        autoEnrolled: true,
+        teamName: `Kervan ${teamIndex}`,
+        role: CARAVAN_AUTO_ROLES[seat % CARAVAN_AUTO_ROLES.length],
+        route: "BALANCED",
+        shareWeight: 0,
+        financierUsed: false
+      };
+    }
+    cursor += teamSize;
+    teamIndex += 1;
+  }
+  return arranged;
+}
+
+export function orderGreatGamesParticipants<T extends { country_name: string }>(
+  participants: readonly T[], mode: GreatGamesMatchingMode, manualCountryNames: readonly string[] = [], random = Math.random
+): T[] {
+  const ordered = [...participants];
+  if (mode === "ALPHABETICAL") return ordered.sort((left, right) => left.country_name.localeCompare(right.country_name, "tr"));
+  if (mode === "RANDOM") {
+    for (let index = ordered.length - 1; index > 0; index -= 1) {
+      const target = Math.floor(random() * (index + 1));
+      [ordered[index], ordered[target]] = [ordered[target]!, ordered[index]!];
+    }
+    return ordered;
+  }
+  const normalize = (value: string) => value.trim().toLocaleLowerCase("tr-TR");
+  const requested = manualCountryNames.map(normalize).filter(Boolean);
+  if (requested.length !== ordered.length) throw new GameError(`Elle eşleştirmede kayıtlı ${ordered.length} devletin tamamı tam bir kez yazılmalıdır.`);
+  if (new Set(requested).size !== requested.length) throw new GameError("Elle eşleştirme listesinde aynı devlet birden fazla kez bulunamaz.");
+  const byName = new Map(ordered.map((entry) => [normalize(entry.country_name), entry]));
+  const result = requested.map((name) => byName.get(name));
+  if (result.some((entry) => !entry)) {
+    const invalid = requested.filter((name) => !byName.has(name));
+    throw new GameError(`Kayıtlı katılımcılar arasında bulunmayan devlet: ${invalid.join(", ")}`);
+  }
+  return result as T[];
 }
 
 export interface GreatGamesDashboard {
@@ -222,14 +276,14 @@ export const greatGamesService = {
       const season = await lockedSeason(client, input.guildId);
       if (season.status !== "ACTIVE" || season.current_game !== input.gameType) throw new GameError("Bu oyun şu anda hamle kabul etmiyor.");
       const entry = (await client.query<GreatGamesEntryRow>(
-        "SELECT e.*,'' AS country_name FROM great_games_entries e WHERE season_id=$1 AND game_type=$2 AND country_id=$3 FOR UPDATE",
+        "SELECT e.*,'' AS country_name FROM great_games_entries e WHERE season_id=$1 AND game_type=$2 AND country_id=$3 AND status='ACTIVE' FOR UPDATE",
         [season.id, input.gameType, input.countryId]
       )).rows[0];
       if (!entry) throw new GameError("Önce bu oyuna katılmalısın.");
       if (input.gameType === "CHARIOT" && input.payload.tactic === "SQUEEZE") {
         const targetCountryId = String(input.payload.targetCountryId ?? "");
         if (!targetCountryId || targetCountryId === input.countryId) throw new GameError("Sıkıştırma taktiğinde yarışan başka bir devlet hedeflenmelidir.");
-        const targetExists = await client.query("SELECT 1 FROM great_games_entries WHERE season_id=$1 AND game_type='CHARIOT' AND country_id=$2", [season.id, targetCountryId]);
+        const targetExists = await client.query("SELECT 1 FROM great_games_entries WHERE season_id=$1 AND game_type='CHARIOT' AND country_id=$2 AND status='ACTIVE'", [season.id, targetCountryId]);
         if (!targetExists.rowCount) throw new GameError("Sıkıştırma hedefi bu yarışa katılmıyor.");
         const used = await client.query("SELECT 1 FROM great_games_actions WHERE season_id=$1 AND game_type='CHARIOT' AND country_id=$2 AND resolved=TRUE AND payload->>'tactic'='SQUEEZE' LIMIT 1", [season.id, input.countryId]);
         if (used.rowCount) throw new GameError("Rakibi Sıkıştır taktiği yarış boyunca yalnız bir kez kullanılabilir.");
@@ -244,34 +298,57 @@ export const greatGamesService = {
     });
   },
 
-  async startGame(guildId: string, gameType: GreatGameType): Promise<number> {
+  async startGame(guildId: string, gameType: GreatGameType, matchingMode: GreatGamesMatchingMode = "ALPHABETICAL", manualCountryNames: readonly string[] = []): Promise<{ count: number; rooms: string[] }> {
     return withTransaction(async (client) => {
       const season = await lockedSeason(client, guildId);
       if (season.status !== "OPEN") throw new GameError("Başka bir Büyük Oyun sürerken yeni oyun başlatılamaz.");
       const list = await entries(client, season.id, gameType);
       if (list.some((entry) => entry.status === "FINISHED")) throw new GameError("Bu oyun daha önce tamamlandı.");
-      const minimum = gameType === "DIPLOMACY" ? 3 : 2;
+      const minimum = gameType === "DIPLOMACY" ? 3 : gameType === "CARAVAN" ? 4 : 2;
       if (list.length < minimum) throw new GameError(`Bu oyun için en az ${minimum} devlet gerekir.`);
       if (gameType === "KINGS_BET" && list.length % 2 !== 0) throw new GameError("Kralların Bahsi katılımcıları ikili eşleştirilebilmelidir.");
       if (gameType === "DIPLOMACY" && list.length % 3 !== 0) throw new GameError("Diplomasi Masası katılımcıları üçerli gruplara ayrılabilmelidir.");
+      const arranged = gameType === "KINGS_BET" || gameType === "DIPLOMACY"
+        ? orderGreatGamesParticipants(list, matchingMode, manualCountryNames)
+        : gameType === "CARAVAN" ? automaticCaravanAssignments(list) : list;
+      for (const entry of arranged) {
+        if (gameType === "CARAVAN") {
+          await client.query("UPDATE great_games_entries SET metadata=$1::jsonb WHERE id=$2", [JSON.stringify(entry.metadata), entry.id]);
+        }
+        const requiredStake = gameType === "CARAVAN"
+          ? (Number(entry.stake) > 0 ? Number(entry.stake) : 1_000)
+          : GREAT_GAME_TYPES[gameType].stake;
+        if (Number(entry.stake) === 0 && requiredStake > 0) {
+          await recordMoney(client, {
+            season, countryId: entry.country_id, gameType, amount: -requiredStake, kind: "STAKE",
+            sourceKey: `${gameType}:stake:${entry.country_id}`,
+            description: `${GREAT_GAME_TYPES[gameType].label} katılım/yatırım bedeli`
+          });
+          await client.query("UPDATE great_games_entries SET stake=$1 WHERE id=$2", [requiredStake, entry.id]);
+          entry.stake = requiredStake;
+        }
+      }
       const tableDevelopments = new Map<number, string>();
-      for (let index = 0; index < list.length; index += 1) {
+      for (let index = 0; index < arranged.length; index += 1) {
         const roomSize = gameType === "DIPLOMACY" ? 3 : gameType === "KINGS_BET" ? 2 : list.length;
-        await client.query("UPDATE great_games_entries SET status='ACTIVE',room_key=$1,updated_at=NOW() WHERE id=$2", [`${gameType}-${Math.floor(index / roomSize) + 1}`, list[index]!.id]);
+        await client.query("UPDATE great_games_entries SET status='ACTIVE',room_key=$1,updated_at=NOW() WHERE id=$2", [`${gameType}-${Math.floor(index / roomSize) + 1}`, arranged[index]!.id]);
         if (gameType === "DIPLOMACY") {
           const tableIndex = Math.floor(index / 3);
           const seat = index % 3;
           const scenario = DIPLOMACY_SCENARIOS[tableIndex % DIPLOMACY_SCENARIOS.length]!;
           const development = tableDevelopments.get(tableIndex) ?? DIPLOMACY_DEVELOPMENTS[rollDie(6) - 1]!;
           tableDevelopments.set(tableIndex, development);
-          await client.query("UPDATE great_games_entries SET metadata=metadata||$1::jsonb WHERE id=$2", [JSON.stringify({ scenario: scenario.title, crisis: scenario.description, primaryGoal: scenario.primary[seat], secondaryGoal: scenario.secondary[seat], development }), list[index]!.id]);
+          await client.query("UPDATE great_games_entries SET metadata=metadata||$1::jsonb WHERE id=$2", [JSON.stringify({ scenario: scenario.title, crisis: scenario.description, primaryGoal: scenario.primary[seat], secondaryGoal: scenario.secondary[seat], development }), arranged[index]!.id]);
         }
       }
       await client.query(
         "UPDATE great_games_seasons SET status='ACTIVE',current_game=$1,current_round=1,updated_at=NOW() WHERE id=$2",
         [gameType, season.id]
       );
-      return list.length;
+      const roomSize = gameType === "DIPLOMACY" ? 3 : gameType === "KINGS_BET" ? 2 : arranged.length;
+      const rooms: string[] = [];
+      for (let index = 0; index < arranged.length; index += roomSize) rooms.push(arranged.slice(index, index + roomSize).map((entry) => entry.country_name).join(" • "));
+      return { count: arranged.length, rooms };
     });
   },
 
@@ -280,7 +357,7 @@ export const greatGamesService = {
       const season = await lockedSeason(client, guildId);
       const gameType = season.current_game;
       if (season.status !== "ACTIVE" || !gameType) throw new GameError("Çözülecek etkin bir Büyük Oyun bulunmuyor.");
-      const list = await entries(client, season.id, gameType);
+      const list = (await entries(client, season.id, gameType)).filter((entry) => entry.status === "ACTIVE");
       const actions = (await client.query<{ country_id: string; action_type: string; payload: Record<string, unknown> }>(
         `SELECT country_id,action_type,payload FROM great_games_actions
          WHERE season_id=$1 AND game_type=$2 AND round=$3 AND resolved=FALSE`, [season.id, gameType, season.current_round]
@@ -376,7 +453,7 @@ export const greatGamesService = {
       }
       await client.query("UPDATE great_games_actions SET resolved=TRUE,updated_at=NOW() WHERE season_id=$1 AND game_type=$2 AND round=$3", [season.id, gameType, season.current_round]);
       if (finished) {
-        const ranked = await entries(client, season.id, gameType);
+        const ranked = (await entries(client, season.id, gameType)).filter((entry) => entry.status === "ACTIVE");
         const tieRolls = new Map<string, number>();
         if (gameType === "CHARIOT") {
           for (const entry of ranked) if (ranked.filter((other) => other.score === entry.score).length > 1) tieRolls.set(entry.country_id, rollDie(10));
@@ -419,7 +496,7 @@ export const greatGamesService = {
           }
         }
         if (gameType !== "DIPLOMACY" && gameType !== "CARAVAN") await addPlacementPoints(client, season.id, gameType, ranked);
-        await client.query("UPDATE great_games_entries SET status='FINISHED' WHERE season_id=$1 AND game_type=$2", [season.id, gameType]);
+        await client.query("UPDATE great_games_entries SET status='FINISHED' WHERE season_id=$1 AND game_type=$2 AND status='ACTIVE'", [season.id, gameType]);
         await client.query("UPDATE great_games_seasons SET status='OPEN',current_game=NULL,current_round=0,updated_at=NOW() WHERE id=$1", [season.id]);
       } else {
         await client.query("UPDATE great_games_seasons SET current_round=current_round+1,updated_at=NOW() WHERE id=$1", [season.id]);

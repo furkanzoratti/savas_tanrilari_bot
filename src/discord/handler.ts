@@ -54,7 +54,7 @@ import { characterService, processCharacterTurn } from "../services/character-se
 import { handleDiplomacyButton, handleDiplomacyCommand } from "./diplomacy-ui.js";
 import { handleWarDeclarationButton, handleWarDeclarationCommand, handleWarDeclarationModal } from "./war-declaration-ui.js";
 import { mercenaryCompanyAutocompleteAllowed, mercenarySubcommandRequiresGameMaster } from "./mercenary-access.js";
-import { handleGreatGamesButton, handleGreatGamesCommand, handleGreatGamesModal, handleGreatGamesSelect } from "./great-games-ui.js";
+import { handleGreatGamesButton, handleGreatGamesCommand, handleGreatGamesModal, handleGreatGamesSelect } from "./great-games-ui-v2.js";
 import { decodeUnitTypeFromCustomId, encodeUnitTypeForCustomId } from "./unit-custom-id.js";
 
 function settlementSelect(customId: string, settlements: Array<{ id: string; name: string; population: number }>, placeholder: string) {

@@ -1,6 +1,6 @@
 import type { DbClient } from "../db/pool.js";
 import { pool, withTransaction } from "../db/pool.js";
-import { GREAT_GAMES_TURN } from "../domain/great-games.js";
+import { GREAT_GAMES_TURN, GREAT_GAME_TYPES, type GreatGameType } from "../domain/great-games.js";
 import { GameError } from "./game-service.js";
 
 export type WalletMovementKind =
@@ -57,22 +57,39 @@ export const greatGamesWalletService = {
   async join(guildId: string, countryId: string, userId: string): Promise<{ created: boolean; balance: number }> {
     return withTransaction(async (client) => {
       const season = await lockedSeason(client, guildId);
-      if (!["OPEN", "ACTIVE"].includes(season.status)) throw new GameError("Büyük Oyunlara katılım kapalı.");
+      if (!["OPEN", "PUBLISHED", "ACTIVE"].includes(season.status)) throw new GameError("Büyük Oyunlara katılım kapalı.");
       const inserted = (await client.query<{ id: string; balance: number }>(
         `INSERT INTO great_games_wallets(season_id,country_id,balance,initial_grant,joined_by)
          VALUES($1,$2,5000,5000,$3) ON CONFLICT(season_id,country_id) DO NOTHING RETURNING id,balance`,
         [season.id, countryId, userId]
       )).rows[0];
-      if (!inserted) {
+      let balance: number;
+      if (inserted) {
+        await client.query(
+          `INSERT INTO great_games_wallet_movements(wallet_id,amount,balance_after,kind,source_key,description)
+           VALUES($1,5000,5000,'INITIAL_GRANT','initial-grant','15. Tur Büyük Oyunları başlangıç bakiyesi')`,
+          [inserted.id]
+        );
+        balance = 5_000;
+      } else {
         const wallet = await walletForUpdate(client, season.id, countryId);
-        return { created: false, balance: Number(wallet.balance) };
+        balance = Number(wallet.balance);
       }
-      await client.query(
-        `INSERT INTO great_games_wallet_movements(wallet_id,amount,balance_after,kind,source_key,description)
-         VALUES($1,5000,5000,'INITIAL_GRANT','initial-grant','15. Tur Büyük Oyunları başlangıç bakiyesi')`,
-        [inserted.id]
-      );
-      return { created: true, balance: 5_000 };
+
+      const countryName = (await client.query<{ name: string }>("SELECT name FROM countries WHERE id=$1", [countryId])).rows[0]?.name;
+      if (!countryName) throw new GameError("Etkinliğe kaydedilecek devlet bulunamadı.");
+      for (const gameType of Object.keys(GREAT_GAME_TYPES) as GreatGameType[]) {
+        const metadata = gameType === "CHARIOT"
+          ? { autoEnrolled: true, driverName: `${countryName} Sürücüsü`.slice(0, 40) }
+          : { autoEnrolled: true };
+        await client.query(
+          `INSERT INTO great_games_entries(season_id,game_type,country_id,discord_user_id,stake,score,metadata)
+           VALUES($1,$2,$3,$4,0,$5,$6::jsonb)
+           ON CONFLICT(season_id,game_type,country_id) DO NOTHING`,
+          [season.id, gameType, countryId, userId, gameType === "CARAVAN" ? 3 : 0, JSON.stringify(metadata)]
+        );
+      }
+      return { created: Boolean(inserted), balance };
     });
   },
 
