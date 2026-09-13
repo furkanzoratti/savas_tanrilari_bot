@@ -99,6 +99,13 @@ export interface GreatGamesDashboard {
   points: Array<{ country_id: string; country_name: string; points: number }>;
 }
 
+export interface GreatGamesPointStanding {
+  countryId: string;
+  countryName: string;
+  total: number;
+  byGame: Record<GreatGameType, number>;
+}
+
 const GAME_KEYS = Object.keys(GREAT_GAME_TYPES) as GreatGameType[];
 
 async function currentTurn(client: DbClient, guildId: string): Promise<number> {
@@ -237,6 +244,45 @@ export const greatGamesService = {
        JOIN countries c ON c.id=p.country_id WHERE p.season_id=$1 GROUP BY p.country_id,c.name ORDER BY points DESC,c.name`, [season.id]
     )).rows : [];
     return { season, currentTurn: turn, counts, entries: visibleEntries, points };
+  },
+
+  async pointStandings(guildId: string): Promise<GreatGamesPointStanding[]> {
+    const rows = (await pool.query<{
+      country_id: string;
+      country_name: string;
+      game_type: GreatGameType;
+      points: number;
+    }>(
+      `SELECT e.country_id,c.name AS country_name,e.game_type,
+              COALESCE(SUM(p.points),0)::integer AS points
+       FROM great_games_entries e
+       JOIN great_games_seasons s ON s.id=e.season_id
+       JOIN countries c ON c.id=e.country_id
+       LEFT JOIN great_games_points p
+         ON p.season_id=e.season_id
+        AND p.country_id=e.country_id
+        AND p.game_type=e.game_type
+       WHERE s.guild_id=$1 AND s.game_turn=$2
+       GROUP BY e.country_id,c.name,e.game_type`,
+      [guildId, GREAT_GAMES_TURN]
+    )).rows;
+
+    const standings = new Map<string, GreatGamesPointStanding>();
+    for (const row of rows) {
+      const standing = standings.get(row.country_id) ?? {
+        countryId: row.country_id,
+        countryName: row.country_name,
+        total: 0,
+        byGame: Object.fromEntries(GAME_KEYS.map((key) => [key, 0])) as Record<GreatGameType, number>
+      };
+      const points = Number(row.points);
+      standing.byGame[row.game_type] = points;
+      standing.total += points;
+      standings.set(row.country_id, standing);
+    }
+    return [...standings.values()].sort((left, right) =>
+      right.total - left.total || left.countryName.localeCompare(right.countryName, "tr")
+    );
   },
 
   async openSeason(guildId: string, actorId: string): Promise<GreatGamesSeasonRow> {

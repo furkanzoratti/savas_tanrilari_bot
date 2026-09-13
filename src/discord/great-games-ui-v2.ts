@@ -354,6 +354,24 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
     await interaction.reply({ embeds: [new EmbedBuilder().setColor(0xd6ad3c).setTitle("🏛️ Büyük Oyunlar • Katılımcı Ülkeler").setDescription(clip(lines.join("\n"), 3_900))], ephemeral: true });
     return true;
   }
+  if (subcommand === "puan-durumu") {
+    if (!isGameMaster(interaction)) throw new GameError("Bu komut yalnızca oyun yöneticileri tarafından kullanılabilir.");
+    const standings = await greatGamesService.pointStandings(interaction.guildId);
+    if (!standings.length) throw new GameError("Büyük Oyunlara katılmış devlet veya kaydedilmiş puan bulunmuyor.");
+    const lines = standings.map((standing, index) =>
+      `**${index + 1}. ${standing.countryName} — ${standing.total} Puan**\n` +
+      `↳ 🏺 Müzayede ${standing.byGame.AUCTION} • 🏇 Arabalar ${standing.byGame.CHARIOT} • 🐫 Kervan ${standing.byGame.CARAVAN} • 👑 Krallar ${standing.byGame.KINGS_BET} • 🤝 Diplomasi ${standing.byGame.DIPLOMACY}`
+    );
+    await interaction.reply({
+      embeds: [new EmbedBuilder()
+        .setColor(0xd6ad3c)
+        .setTitle("🏆 Büyük Oyunlar • Puan Durumu")
+        .setDescription(clip(lines.join("\n\n"), 3_900))
+        .setFooter({ text: "Puanlar oyunlar sonuçlandırıldığında kalıcı olarak kaydedilir." })],
+      ephemeral: true
+    });
+    return true;
+  }
   if (subcommand === "cuzdan-bonusu") {
     if (!isGameMaster(interaction)) throw new GameError("Bu komut yalnızca oyun yöneticileri tarafından kullanılabilir.");
     await interaction.deferReply({ ephemeral: true });
