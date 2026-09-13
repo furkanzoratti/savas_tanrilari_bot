@@ -18,6 +18,11 @@ import { greatGamesWalletService } from "../services/great-games-wallet-service.
 import { GameError, gameService } from "../services/game-service.js";
 import { isGameMaster } from "./auth.js";
 
+interface AdminPanelPayload {
+  embeds: EmbedBuilder[];
+  components: ActionRowBuilder<ButtonBuilder>[];
+}
+
 const CARAVAN_ROLE_LABELS: Record<string, string> = {
   MERCHANT: "Tüccar",
   GUARD: "Muhafız",
@@ -136,7 +141,7 @@ function auctionFields(lots: Awaited<ReturnType<typeof greatGamesAuctionService.
   });
 }
 
-async function adminDashboardPayload(guildId: string) {
+async function adminDashboardPayload(guildId: string): Promise<AdminPanelPayload> {
   const data = await greatGamesService.dashboard(guildId);
   const status = data.season
     ? `${data.season.status}${data.season.current_game ? ` • ${GREAT_GAME_TYPES[data.season.current_game].label}` : ""}`
@@ -158,10 +163,10 @@ async function adminDashboardPayload(guildId: string) {
   const controls = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId("gg2|admin-home").setLabel("Yenile").setEmoji("🔄").setStyle(ButtonStyle.Primary)
   );
-  return { embeds: [embed], components: [games, controls], ephemeral: true as const };
+  return { embeds: [embed], components: [games, controls] };
 }
 
-async function adminGamePayload(guildId: string, type: GreatGameType) {
+async function adminGamePayload(guildId: string, type: GreatGameType): Promise<AdminPanelPayload> {
   const data = await greatGamesService.dashboard(guildId);
   const entries = chosenEntries(data, type).filter((entry) => entry.status !== "FINISHED");
   const selectedNames = entries.length ? entries.map((entry, index) => `${index + 1}. ${entry.country_name}`).join("\n") : "Henüz katılımcı seçilmedi.";
@@ -183,7 +188,7 @@ async function adminGamePayload(guildId: string, type: GreatGameType) {
   if (data.season?.current_game === type && ["PUBLISHED", "ACTIVE"].includes(data.season.status)) row.addComponents(
     new ButtonBuilder().setCustomId(`gg2|recover|${type}`).setLabel("Formu Kurtar").setEmoji("🛠️").setStyle(ButtonStyle.Danger)
   );
-  return { embeds: [embed], components: [row], ephemeral: true as const };
+  return { embeds: [embed], components: [row] };
 }
 
 async function publicGamePayload(guildId: string, type: GreatGameType, content?: string) {
@@ -338,7 +343,7 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
   if (subcommand === "panel") {
     if (!isGameMaster(interaction)) throw new GameError("Büyük Oyunlar yönetim panelini yalnızca oyun yöneticisi açabilir.");
     await greatGamesService.openSeason(interaction.guildId, interaction.user.id);
-    await interaction.reply(await adminDashboardPayload(interaction.guildId));
+    await interaction.reply({ ...(await adminDashboardPayload(interaction.guildId)), ephemeral: true });
     return true;
   }
   if (subcommand === "katilimci-ulkeler") {
