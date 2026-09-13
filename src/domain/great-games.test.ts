@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AUCTION_BID_INCREMENT, AUCTION_OPENING_BID, DIPLOMACY_SCENARIOS, GREAT_GAMES_RACE_ROUNDS,
-  allocatePool, auctionNextMinimum, caravanMultiplier, isValidAuctionBidAmount,
+  allocatePool, auctionAvailableBid, auctionNextMinimum, caravanMultiplier, isValidAuctionBidAmount,
   parseCaravanRoute, parseChariotTactic, parseKingsDecision, pickNonRepeatingValue,
   raceTrackPosition, resolveCaravanStage, resolveChariotRound,
   resolveDiplomacyGoalVote, resolveDiplomacyVote, resolveKingsRound
@@ -22,6 +22,9 @@ describe("15. Tur Büyük Oyunları", () => {
     expect(isValidAuctionBidAmount(250)).toBe(false);
     expect(auctionNextMinimum(0)).toBe(500);
     expect(auctionNextMinimum(10_000)).toBe(10_250);
+    expect(auctionAvailableBid(15_000, 0)).toBe(15_000);
+    expect(auctionAvailableBid(15_000, 6_500)).toBe(8_500);
+    expect(auctionAvailableBid(5_000, 7_000)).toBe(0);
   });
 
   it("Savaş Arabaları taktiklerini kaza, sıkıştırma ve temkin bonusuyla çözer", () => {

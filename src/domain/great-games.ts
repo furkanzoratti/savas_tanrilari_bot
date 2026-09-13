@@ -16,6 +16,12 @@ export function auctionNextMinimum(currentBid: number): number {
   return currentBid > 0 ? currentBid + AUCTION_BID_INCREMENT : AUCTION_OPENING_BID;
 }
 
+export function auctionAvailableBid(walletBalance: number, leadingBidsOnOtherLots: number): number {
+  if (!Number.isSafeInteger(walletBalance) || walletBalance < 0) throw new Error("Oyun cüzdanı bakiyesi geçersiz.");
+  if (!Number.isSafeInteger(leadingBidsOnOtherLots) || leadingBidsOnOtherLots < 0) throw new Error("Müzayede yükümlülüğü geçersiz.");
+  return Math.max(0, walletBalance - leadingBidsOnOtherLots);
+}
+
 export const GREAT_GAME_TYPES = {
   AUCTION: { label: "Devletler Müzayedesi", emoji: "🏺", stake: 0 },
   CHARIOT: { label: "Savaş Arabaları Turnuvası", emoji: "🏇", stake: 1_000 },

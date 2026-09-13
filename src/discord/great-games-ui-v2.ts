@@ -44,7 +44,7 @@ async function ownCountry(guildId: string | null, userId: string) {
 }
 
 function gameRules(type: GreatGameType): string {
-  if (type === "AUCTION") return "Tek turlu açık artırmadır. Bütün Büyük Oyun katılımcıları cüzdan bakiyeleri kadar teklif verebilir. Açılış 500 Altındır ve her yeni teklif bedeli tam 250 Altın artırır; üst teklif ve kazanılabilecek ödül sınırı yoktur.";
+  if (type === "AUCTION") return "Tek turlu açık artırmadır. Teklif sırasında cüzdandan para düşmez; yalnız kazanılan kalemlerin bedeli oyun sonunda kesilir. Aynı anda lider olunan tekliflerin toplamı cüzdan bakiyesini aşamaz. Açılış 500 Altındır ve her yeni teklif tam 250 Altın artar.";
   if (type === "CHARIOT") return `Katılım 1.000 Altın. Form yayınlandıktan sonra bahisler açılır. Yarış ${GREAT_GAMES_RACE_ROUNDS} etap sürer; her etapta gizli taktik verilir ve 50 kademeli pistteki atlar sonuçlarla birlikte ilerler. Katılım havuzu %65/%35 paylaşılır.`;
   if (type === "CARAVAN") return `Seçilen devletler 2–3 kişilik kervanlara ayrılır. ${GREAT_GAMES_RACE_ROUNDS} aşamanın her birinde, her kervandan yalnız bir takım üyesi ortak rotayı gizlice seçer. Her devletten oyun başlarken 1.000 Altın alınır; kervanların 50 kademeli pistteki sırası canlı değişir.`;
   if (type === "KINGS_BET") return "Katılım 1.000 Altın. Üç ikilemde İşbirliği veya İhanet ve rakibin kararı için tahmin gizlice seçilir.";
@@ -566,7 +566,7 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
   if (action === "bid") {
     const amount = Number(interaction.fields.getTextInputValue("amount").replaceAll(".", ""));
     const result = await greatGamesAuctionService.bid({ guildId: interaction.guildId, countryId: country.id, userId: interaction.user.id, lotId: rawType!, amount });
-    await interaction.reply({ content: `✅ Açık artırma teklifin **${gold(result.reserved)}** olarak kaydedildi. Güncel durumu görmek için müzayede formunu yenileyebilirsin.`, ephemeral: true }); return true;
+    await interaction.reply({ content: `✅ Açık artırma teklifin **${gold(result.amount)}** olarak kaydedildi; cüzdandan para kesilmedi. Diğer lider tekliflerin hesaba katıldığında kalan teklif kapasiten: **${gold(result.availableAfter)}**.`, ephemeral: true }); return true;
   }
   if (action !== "action") return false;
   const type = gameId(rawType!);

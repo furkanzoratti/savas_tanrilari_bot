@@ -4,7 +4,7 @@ import { GREAT_GAMES_TURN, GREAT_GAME_TYPES, type GreatGameType } from "../domai
 import { GameError } from "./game-service.js";
 
 export type WalletMovementKind =
-  | "INITIAL_GRANT" | "TREASURY_TRANSFER" | "GAME_STAKE" | "BID_RESERVE"
+  | "INITIAL_GRANT" | "TREASURY_TRANSFER" | "GAME_STAKE" | "BID_RESERVE" | "AUCTION_PAYMENT"
   | "REFUND" | "PAYOUT" | "FINAL_SETTLEMENT" | "ADMIN_GRANT";
 
 export interface GreatGamesWalletRow {

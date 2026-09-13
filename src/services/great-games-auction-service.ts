@@ -1,6 +1,6 @@
 import type { DbClient } from "../db/pool.js";
 import { pool, withTransaction } from "../db/pool.js";
-import { AUCTION_OPENING_BID, auctionNextMinimum, GREAT_GAMES_TURN, isValidAuctionBidAmount } from "../domain/great-games.js";
+import { AUCTION_OPENING_BID, auctionAvailableBid, auctionNextMinimum, GREAT_GAMES_TURN, isValidAuctionBidAmount } from "../domain/great-games.js";
 import { GameError } from "./game-service.js";
 import { adjustGreatGamesWallet } from "./great-games-wallet-service.js";
 
@@ -20,32 +20,9 @@ async function season(client: DbClient, guildId: string): Promise<Season> {
   return row;
 }
 
-async function moveTreasury(client: DbClient, countryId: string, amount: number, description: string): Promise<void> {
-  const settlements = (await client.query<{ id: string; local_treasury: number }>(
-    "SELECT id,local_treasury FROM settlements WHERE country_id=$1 ORDER BY local_treasury DESC,name,id FOR UPDATE", [countryId]
-  )).rows;
-  if (!settlements.length) throw new GameError("Devletin yerleşkesi bulunmuyor.");
-  if (amount < 0) {
-    let remaining = -amount;
-    if (settlements.reduce((sum, item) => sum + Math.max(0, Number(item.local_treasury)), 0) < remaining) throw new GameError("Teklif için devlet hazinesi yetersiz.");
-    for (const item of settlements) {
-      const deduction = Math.min(remaining, Math.max(0, Number(item.local_treasury)));
-      if (deduction) await client.query("UPDATE settlements SET local_treasury=local_treasury-$1 WHERE id=$2", [deduction, item.id]);
-      remaining -= deduction;
-      if (!remaining) break;
-    }
-  } else if (amount > 0) {
-    await client.query("UPDATE settlements SET local_treasury=local_treasury+$1 WHERE id=$2", [amount, settlements[0]!.id]);
-  }
-  await client.query("UPDATE countries SET treasury=(SELECT COALESCE(SUM(local_treasury),0)::bigint FROM settlements WHERE country_id=$1) WHERE id=$1", [countryId]);
-  await client.query(
-    "INSERT INTO transactions(country_id,turn,kind,amount,description) VALUES($1,$2,$3,$4,$5)",
-    [countryId, GREAT_GAMES_TURN, amount < 0 ? "GREAT_GAMES_BID_RESERVE" : "GREAT_GAMES_REFUND", amount, description]
-  );
-}
 
 async function moneyOnce(client: DbClient, data: {
-  seasonId: string; countryId: string; amount: number; kind: "BID_RESERVE" | "REFUND"; sourceKey: string; description: string;
+  seasonId: string; countryId: string; amount: number; kind: "BID_RESERVE" | "AUCTION_PAYMENT" | "REFUND"; sourceKey: string; description: string;
 }): Promise<boolean> {
   const inserted = await client.query(
     `INSERT INTO great_games_money(season_id,country_id,game_type,amount,kind,source_key,description)
@@ -107,7 +84,7 @@ export const greatGamesAuctionService = {
     )).rows;
   },
 
-  async bid(input: { guildId: string; countryId: string; userId: string; lotId: string; amount: number }): Promise<{ phase: string; reserved: number }> {
+  async bid(input: { guildId: string; countryId: string; userId: string; lotId: string; amount: number }): Promise<{ phase: string; amount: number; availableAfter: number }> {
     return withTransaction(async (client) => {
       const active = await season(client, input.guildId);
       if (active.status !== "ACTIVE" || active.current_game !== "AUCTION") throw new GameError("Müzayede şu anda teklif kabul etmiyor.");
@@ -133,21 +110,39 @@ export const greatGamesAuctionService = {
       if (input.amount !== Number(existing?.amount ?? 0) && input.amount !== minimum) {
         throw new GameError(`Sıradaki teklif tam olarak ${minimum.toLocaleString("tr-TR")} Altın olmalıdır.`);
       }
-      const previousReserve = Number(existing?.reserved_amount ?? 0);
-      const difference = input.amount - previousReserve;
-      if (difference < 0) throw new GameError("Teklif düşürülemez.");
-      if (difference > 0) await moneyOnce(client, {
-        seasonId: active.id, countryId: input.countryId, amount: -difference, kind: "BID_RESERVE",
-        sourceKey: `${Number(active.current_run ?? 0) > 0 ? `auction:run:${active.current_run}:reserve` : "auction-reserve"}:${lot.id}:${input.countryId}:${input.amount}`,
-        description: `${lot.title} için açık müzayede teklif rezervi`
-      });
+      const wallet = (await client.query<{ balance: number }>(
+        "SELECT balance FROM great_games_wallets WHERE season_id=$1 AND country_id=$2 AND closed_at IS NULL FOR UPDATE",
+        [active.id, input.countryId]
+      )).rows[0];
+      if (!wallet) throw new GameError("Bu devletin açık oyun cüzdanı bulunmuyor.");
+      const committedOnOtherLots = Number((await client.query<{ amount: number }>(
+        `SELECT COALESCE(SUM(leader.amount),0)::bigint AS amount
+           FROM great_games_auction_lots other_lot
+           JOIN LATERAL (
+             SELECT b.country_id,b.amount
+             FROM great_games_auction_bids b
+             WHERE b.lot_id=other_lot.id
+             ORDER BY b.amount DESC,b.updated_at
+             LIMIT 1
+           ) leader ON TRUE
+          WHERE other_lot.season_id=$1 AND other_lot.id<>$2 AND other_lot.phase='FINAL'
+            AND leader.country_id=$3`,
+        [active.id, lot.id, input.countryId]
+      )).rows[0]?.amount ?? 0);
+      const available = auctionAvailableBid(Number(wallet.balance), committedOnOtherLots);
+      if (input.amount > available) {
+        throw new GameError(
+          `Bu teklif diğer kalemlerde lider olduğun tutarlarla birlikte cüzdanını aşıyor. ` +
+          `Bu kalem için kullanılabilir üst sınır: ${available.toLocaleString("tr-TR")} Altın.`
+        );
+      }
       await client.query(
         `INSERT INTO great_games_auction_bids(lot_id,country_id,discord_user_id,amount,phase,reserved_amount)
-         VALUES($1,$2,$3,$4,$5,$4) ON CONFLICT(lot_id,country_id)
-         DO UPDATE SET amount=EXCLUDED.amount,phase=EXCLUDED.phase,reserved_amount=EXCLUDED.reserved_amount,updated_at=NOW()`,
+         VALUES($1,$2,$3,$4,$5,0) ON CONFLICT(lot_id,country_id)
+         DO UPDATE SET amount=EXCLUDED.amount,phase=EXCLUDED.phase,reserved_amount=0,updated_at=NOW()`,
         [lot.id, input.countryId, input.userId, input.amount, "FINAL"]
       );
-      return { phase: lot.phase, reserved: input.amount };
+      return { phase: lot.phase, amount: input.amount, availableAfter: available - input.amount };
     });
   },
 
@@ -183,7 +178,19 @@ export const greatGamesAuctionService = {
           summary.push(`${lot.title}: teklif verilmedi`);
           continue;
         }
-        prizePool += Number(winner.reserved_amount);
+        const legacyReserve = Number(winner.reserved_amount);
+        const paymentDue = Number(winner.amount) - legacyReserve;
+        if (paymentDue > 0) {
+          await moneyOnce(client, {
+            seasonId: active.id,
+            countryId: winner.country_id,
+            amount: -paymentDue,
+            kind: "AUCTION_PAYMENT",
+            sourceKey: `auction:run:${Math.max(1, Number(active.current_run ?? 0))}:payment:${lot.id}:${winner.country_id}:${winner.amount}`,
+            description: `${lot.title} müzayede kazanan ödemesi`
+          });
+        }
+        prizePool += Number(winner.amount);
         await client.query("UPDATE great_games_auction_bids SET reserved_amount=0 WHERE id=$1", [winner.id]);
         await client.query(
           "UPDATE great_games_auction_lots SET phase='FINISHED',winning_country_id=$1,winning_bid=$2 WHERE id=$3",

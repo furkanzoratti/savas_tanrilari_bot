@@ -2149,5 +2149,61 @@ export const migrations = [
       ALTER TABLE great_games_auction_lots
       ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
     `
+  },
+  {
+    version: 67,
+    name: "great_games_nonreserved_auction_bids",
+    sql: `
+      ALTER TABLE great_games_money
+        DROP CONSTRAINT IF EXISTS great_games_money_kind_check;
+      ALTER TABLE great_games_money
+        ADD CONSTRAINT great_games_money_kind_check
+        CHECK (kind IN ('STAKE','BID_RESERVE','AUCTION_PAYMENT','REFUND','PAYOUT'));
+
+      ALTER TABLE great_games_wallet_movements
+        DROP CONSTRAINT IF EXISTS great_games_wallet_movements_kind_check;
+      ALTER TABLE great_games_wallet_movements
+        ADD CONSTRAINT great_games_wallet_movements_kind_check
+        CHECK (kind IN (
+          'INITIAL_GRANT','TREASURY_TRANSFER','GAME_STAKE','BID_RESERVE','AUCTION_PAYMENT',
+          'REFUND','PAYOUT','FINAL_SETTLEMENT','ADMIN_GRANT'
+        ));
+
+      CREATE TEMP TABLE great_games_auction_reserve_refunds_v67 ON COMMIT DROP AS
+      SELECT w.id AS wallet_id,w.season_id,w.country_id,SUM(b.reserved_amount)::bigint AS amount
+      FROM great_games_wallets w
+      JOIN great_games_seasons s ON s.id=w.season_id
+      JOIN great_games_auction_lots l ON l.season_id=s.id
+      JOIN great_games_auction_bids b ON b.lot_id=l.id AND b.country_id=w.country_id
+      WHERE s.status='ACTIVE' AND s.current_game='AUCTION'
+        AND w.closed_at IS NULL AND b.reserved_amount>0
+      GROUP BY w.id,w.season_id,w.country_id;
+
+      UPDATE great_games_wallets w
+      SET balance=w.balance+r.amount
+      FROM great_games_auction_reserve_refunds_v67 r
+      WHERE w.id=r.wallet_id;
+
+      INSERT INTO great_games_money(season_id,country_id,game_type,amount,kind,source_key,description)
+      SELECT r.season_id,r.country_id,'AUCTION',r.amount,'REFUND',
+             'auction-nonreserved-refund:' || r.country_id,
+             'Rezervsiz müzayedeye geçişte eski teklif kesintilerinin toplu iadesi'
+      FROM great_games_auction_reserve_refunds_v67 r
+      ON CONFLICT(season_id,source_key) DO NOTHING;
+
+      INSERT INTO great_games_wallet_movements(wallet_id,amount,balance_after,kind,source_key,description)
+      SELECT r.wallet_id,r.amount,w.balance,'REFUND',
+             'auction-nonreserved-refund:' || r.country_id,
+             'Rezervsiz müzayedeye geçişte eski teklif kesintilerinin toplu iadesi'
+      FROM great_games_auction_reserve_refunds_v67 r
+      JOIN great_games_wallets w ON w.id=r.wallet_id
+      ON CONFLICT(wallet_id,source_key) DO NOTHING;
+
+      UPDATE great_games_auction_bids b
+      SET reserved_amount=0,updated_at=NOW()
+      FROM great_games_auction_lots l,great_games_auction_reserve_refunds_v67 r
+      WHERE b.lot_id=l.id AND l.season_id=r.season_id
+        AND b.country_id=r.country_id AND b.reserved_amount>0;
+    `
   }
 ] as const;

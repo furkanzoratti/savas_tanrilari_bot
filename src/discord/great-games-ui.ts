@@ -320,7 +320,7 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
   if (action === "bid") {
     const amount = Number(interaction.fields.getTextInputValue("amount").replaceAll(".", ""));
     const result = await greatGamesAuctionService.bid({ guildId: interaction.guildId, countryId: country.id, userId: interaction.user.id, lotId: rawType!, amount });
-    await interaction.reply({ content: `${result.phase === "SEALED" ? "Kapalı" : "Açık final"} teklifin ${gold(result.reserved)} olarak kaydedildi.`, ephemeral: true });
+    await interaction.reply({ content: `${result.phase === "SEALED" ? "Kapalı" : "Açık final"} teklifin ${gold(result.amount)} olarak kaydedildi; cüzdandan para kesilmedi. Kalan teklif kapasiten: ${gold(result.availableAfter)}.`, ephemeral: true });
     return true;
   }
   const type = gameId(rawType!);

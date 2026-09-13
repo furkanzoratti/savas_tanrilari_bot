@@ -56,6 +56,15 @@ describe("Büyük Oyunlar migration", () => {
     expect(migration?.sql).toContain("ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()");
   });
 
+  it("mevcut teklif rezervlerini iade eder ve kazanan ödemesi türünü açar", () => {
+    const migration = migrations.find((item) => item.version === 67);
+    expect(migration?.name).toBe("great_games_nonreserved_auction_bids");
+    expect(migration?.sql).toContain("SUM(b.reserved_amount)::bigint");
+    expect(migration?.sql).toContain("SET balance=w.balance+r.amount");
+    expect(migration?.sql).toContain("SET reserved_amount=0");
+    expect(migration?.sql).toContain("'AUCTION_PAYMENT'");
+  });
+
   it("iptal edilmiş Büyük Oyunları ve aday kayıtlarını yeniden açar", () => {
     const migration = migrations.find((item) => item.version === 63);
     expect(migration?.name).toBe("great_games_always_open");
