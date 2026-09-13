@@ -49,6 +49,13 @@ describe("Büyük Oyunlar migration", () => {
     expect(migration?.sql).toContain("'ADMIN_GRANT'");
   });
 
+  it("müzayede tekrar açılırken kalemlerin güncelleme zamanını saklar", () => {
+    const migration = migrations.find((item) => item.version === 66);
+    expect(migration?.name).toBe("great_games_auction_lot_timestamps");
+    expect(migration?.sql).toContain("ALTER TABLE great_games_auction_lots");
+    expect(migration?.sql).toContain("ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()");
+  });
+
   it("iptal edilmiş Büyük Oyunları ve aday kayıtlarını yeniden açar", () => {
     const migration = migrations.find((item) => item.version === 63);
     expect(migration?.name).toBe("great_games_always_open");

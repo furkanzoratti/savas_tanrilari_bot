@@ -2141,5 +2141,13 @@ export const migrations = [
 
 
     `
+  },
+  {
+    version: 66,
+    name: "great_games_auction_lot_timestamps",
+    sql: `
+      ALTER TABLE great_games_auction_lots
+      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    `
   }
 ] as const;
