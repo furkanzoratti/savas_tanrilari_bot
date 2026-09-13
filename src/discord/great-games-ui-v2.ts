@@ -354,11 +354,11 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
   if (subcommand === "cuzdan-bonusu") {
     if (!isGameMaster(interaction)) throw new GameError("Bu komut yalnızca oyun yöneticileri tarafından kullanılabilir.");
     await interaction.deferReply({ ephemeral: true });
-    const result = await greatGamesWalletService.grantAuctionBonus(interaction.guildId);
+    const result = await greatGamesWalletService.grantAuctionBonus(interaction.guildId, `discord:${interaction.id}`);
     await interaction.editReply(
       `💰 **Müzayede cüzdan bonusu tamamlandı.**\n` +
-      `Yeni ödeme: **${result.credited} devlet • ${gold(result.total)}**\n` +
-      `Daha önce ödenmiş: **${result.alreadyCredited} devlet**`
+      `Ödeme yapılan açık cüzdan: **${result.credited}**\n` +
+      `Toplam eklenen bakiye: **${gold(result.total)}**`
     );
     return true;
   }

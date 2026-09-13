@@ -2111,7 +2111,7 @@ export const migrations = [
   },
   {
     version: 65,
-    name: "great_games_open_auction_and_wallet_bonus",
+    name: "great_games_open_auction_and_admin_grant",
     sql: `
       ALTER TABLE great_games_auction_bids
         DROP CONSTRAINT IF EXISTS great_games_auction_bids_amount_check;
@@ -2139,28 +2139,7 @@ export const migrations = [
           'REFUND','PAYOUT','FINAL_SETTLEMENT','ADMIN_GRANT'
         ));
 
-      WITH eligible AS (
-        SELECT w.id
-        FROM great_games_wallets w
-        JOIN great_games_seasons s ON s.id=w.season_id
-        WHERE s.game_turn=15 AND w.closed_at IS NULL
-          AND NOT EXISTS (
-            SELECT 1 FROM great_games_wallet_movements m
-            WHERE m.wallet_id=w.id AND m.source_key='auction-open-wallet-bonus-5000'
-          )
-      ), updated AS (
-        UPDATE great_games_wallets w
-        SET balance=w.balance+5000
-        FROM eligible e
-        WHERE w.id=e.id
-        RETURNING w.id,w.balance
-      )
-      INSERT INTO great_games_wallet_movements(
-        wallet_id,amount,balance_after,kind,source_key,description
-      )
-      SELECT id,5000,balance,'ADMIN_GRANT','auction-open-wallet-bonus-5000',
-             'Açık müzayede için tek seferlik 5.000 Altın oyun bakiyesi'
-      FROM updated;
+
     `
   }
 ] as const;

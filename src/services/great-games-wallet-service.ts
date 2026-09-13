@@ -112,7 +112,7 @@ export const greatGamesWalletService = {
     )).rows;
   },
 
-  async grantAuctionBonus(guildId: string): Promise<{ credited: number; alreadyCredited: number; total: number }> {
+  async grantAuctionBonus(guildId: string, operationKey: string): Promise<{ credited: number; total: number }> {
     return withTransaction(async (client) => {
       const season = await lockedSeason(client, guildId);
       const wallets = (await client.query<{ country_id: string }>(
@@ -127,12 +127,12 @@ export const greatGamesWalletService = {
           countryId: wallet.country_id,
           amount: 5_000,
           kind: "ADMIN_GRANT",
-          sourceKey: "auction-open-wallet-bonus-5000",
-          description: "Açık müzayede için tek seferlik 5.000 Altın oyun bakiyesi"
+          sourceKey: `auction-wallet-bonus:${operationKey}`,
+          description: "Yönetici tarafından bütün oyun cüzdanlarına verilen 5.000 Altın bonus"
         });
         if (result.changed) credited += 1;
       }
-      return { credited, alreadyCredited: wallets.length - credited, total: credited * 5_000 };
+      return { credited, total: credited * 5_000 };
     });
   },
 
