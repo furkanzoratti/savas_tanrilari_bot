@@ -42,6 +42,15 @@ describe("Büyük Oyunlar migration", () => {
     expect(migration?.name).toBe("great_games_repeat_runs");
     expect(migration?.sql).toContain("ADD COLUMN IF NOT EXISTS current_run INTEGER NOT NULL DEFAULT 0");
   });
+  it("açık müzayede üst sınırını kaldırır ve mevcut cüzdanlara tek seferlik bakiye ekler", () => {
+    const migration = migrations.find((item) => item.version === 65);
+    expect(migration?.name).toBe("great_games_open_auction_and_wallet_bonus");
+    expect(migration?.sql).toContain("CHECK (amount >= 500 AND MOD(amount - 500, 250) = 0)");
+    expect(migration?.sql).toContain("auction-open-wallet-bonus-5000");
+    expect(migration?.sql).toContain("SET balance=w.balance+5000");
+    expect(migration?.sql).toContain("'ADMIN_GRANT'");
+  });
+
   it("iptal edilmiş Büyük Oyunları ve aday kayıtlarını yeniden açar", () => {
     const migration = migrations.find((item) => item.version === 63);
     expect(migration?.name).toBe("great_games_always_open");

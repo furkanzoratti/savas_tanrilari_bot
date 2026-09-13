@@ -1,8 +1,9 @@
 import type { DbClient } from "../db/pool.js";
 import { pool, withTransaction } from "../db/pool.js";
 import {
-  AUCTION_REWARDS, CARAVAN_ROUTES, DIPLOMACY_DEVELOPMENTS, DIPLOMACY_SCENARIOS, GREAT_GAMES_TURN, GREAT_GAME_TYPES,
-  allocatePool, caravanMultiplier, resolveCaravanStage, resolveChariotRound,
+  AUCTION_REWARDS, CARAVAN_CHALLENGE_LABELS, CARAVAN_ROUTES, CHARIOT_TACTICS,
+  DIPLOMACY_DEVELOPMENTS, DIPLOMACY_SCENARIOS, GREAT_GAMES_RACE_ROUNDS, GREAT_GAMES_TURN, GREAT_GAME_TYPES,
+  KINGS_DECISION_LABELS, allocatePool, caravanMultiplier, resolveCaravanStage, resolveChariotRound,
   resolveDiplomacyVote, resolveKingsRound, rollDie,
   type CaravanRole, type CaravanRoute, type ChariotTactic, type GreatGameType, type KingsDecision
 } from "../domain/great-games.js";
@@ -444,9 +445,10 @@ export const greatGamesService = {
         })));
         for (const result of results) {
           await client.query("UPDATE great_games_entries SET score=score+$1 WHERE season_id=$2 AND game_type=$3 AND country_id=$4", [result.score, season.id, gameType, result.countryId]);
-          summary.push(`${list.find((entry) => entry.country_id === result.countryId)?.country_name}: ${result.crashed ? "Kaza • 0" : `${result.naturalRoll}${result.penaltyRoll ? ` − ${result.penaltyRoll}` : ""} → ${result.score}`}`);
+          const tactic = CHARIOT_TACTICS[result.tactic].label;
+          summary.push(`${list.find((entry) => entry.country_id === result.countryId)?.country_name}: ${tactic} • ${result.crashed ? `Kaza • Etap puanı 0` : `Zar ${result.naturalRoll}${result.penaltyRoll ? ` − ${result.penaltyRoll} sıkıştırma` : ""} • Etap puanı ${result.score}`}`);
         }
-        finished = season.current_round >= 3;
+        finished = season.current_round >= GREAT_GAMES_RACE_ROUNDS;
       } else if (gameType === "CARAVAN") {
         const teams = new Map<string, GreatGamesEntryRow[]>();
         for (const entry of list) {
@@ -467,21 +469,21 @@ export const greatGamesService = {
             "UPDATE great_games_entries SET score=score+$1,metadata=jsonb_set(metadata,'{financierUsed}',$2::jsonb) WHERE id=$3",
             [result.scoreDelta, JSON.stringify(result.financierUsed), member.id]
           );
-          summary.push(`${teamName}: ${result.challenge} ${result.total}/${CARAVAN_ROUTES[route].difficulty} • ${result.scoreDelta >= 0 ? "+" : ""}${result.scoreDelta}`);
+          const routeRule = CARAVAN_ROUTES[route];
+          summary.push(`${teamName}: ${CARAVAN_CHALLENGE_LABELS[result.challenge]} • ${routeRule.label} • Zar ${result.total}/${routeRule.difficulty} • ${result.success ? "Başarılı" : "Başarısız"} • ${result.scoreDelta >= 0 ? "+" : ""}${result.scoreDelta} puan`);
         }
-        finished = season.current_round >= 3;
+        finished = season.current_round >= GREAT_GAMES_RACE_ROUNDS;
       } else if (gameType === "KINGS_BET") {
         for (const room of [...new Set(list.map((entry) => entry.room_key))]) {
           const pair = list.filter((entry) => entry.room_key === room);
           const pairActions = pair.map((entry) => actions.find((action) => action.country_id === entry.country_id));
           if (pair.length !== 2 || pairActions.some((action) => !action)) throw new GameError(`Bütün Kralların Bahsi seçimleri tamamlanmadı (${room}).`);
-          const result = resolveKingsRound(
-            pairActions[0]!.payload as { decision: KingsDecision; prediction: KingsDecision },
-            pairActions[1]!.payload as { decision: KingsDecision; prediction: KingsDecision }
-          );
+          const leftAction = pairActions[0]!.payload as { decision: KingsDecision; prediction: KingsDecision };
+          const rightAction = pairActions[1]!.payload as { decision: KingsDecision; prediction: KingsDecision };
+          const result = resolveKingsRound(leftAction, rightAction);
           await client.query("UPDATE great_games_entries SET score=score+$1 WHERE id=$2", [result.left, pair[0]!.id]);
           await client.query("UPDATE great_games_entries SET score=score+$1 WHERE id=$2", [result.right, pair[1]!.id]);
-          summary.push(`${pair[0]!.country_name} ${result.left} — ${result.right} ${pair[1]!.country_name}`);
+          summary.push(`${pair[0]!.country_name}: ${KINGS_DECISION_LABELS[leftAction.decision]} • ${result.left >= 0 ? "+" : ""}${result.left} puan — ${pair[1]!.country_name}: ${KINGS_DECISION_LABELS[rightAction.decision]} • ${result.right >= 0 ? "+" : ""}${result.right} puan`);
         }
         if (season.current_round < 3) finished = false;
         else {

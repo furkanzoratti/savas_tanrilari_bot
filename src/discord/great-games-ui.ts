@@ -74,7 +74,7 @@ async function dashboardPayload(guildId: string, userId: string, gm: boolean) {
 }
 
 function gameRules(type: GreatGameType): string {
-  if (type === "AUCTION") return "Kapalı teklifler 500 Altından başlar; artış en az 250, tek teklif en fazla 5.000 Altındır. Bir devlet en fazla iki ödül kazanabilir. Kaybeden teklif ödemez; kazanan ödemeleri genel ödül havuzuna gider.";
+  if (type === "AUCTION") return "Tek turlu açık artırmadır. Açılış 500 Altındır; her yeni teklif tam 250 Altın artırır. Üst teklif ve kazanılabilecek ödül sınırı yoktur. Kaybeden teklif ödemez; kazanan ödemeleri genel ödül havuzuna gider.";
   if (type === "CHARIOT") return "Katılım 1.000 Altın. Üç etap oynanır; her etapta gizli sürüş taktiği seçilir. Katılım havuzu %65/%35 paylaşılır. İlk üç devlet 5/3/2 Büyük Oyunlar Puanı alır.";
   if (type === "CARAVAN") return "Yönetici oyunu başlattığında devletler 2–3 kişilik kervanlara ve görevlere otomatik ayrılır. Her devletten 1.000 Altın yatırım alınır. Üç aşama sonunda bütün yatırımlar takım ağırlıklarına göre geri dağıtılır.";
   if (type === "KINGS_BET") return "Katılım 1.000 Altın. Üç ikilemde İşbirliği veya İhanet ve rakibin kararı için tahmin gizlice seçilir. Havuz ilk üçe %50/%30/%20 dağıtılır.";
@@ -109,7 +109,7 @@ async function gamePayload(guildId: string, userId: string, gm: boolean, type: G
     const available = lots.filter((lot) => lot.phase === "SEALED" || lot.phase === "FINAL");
     if (available.length) components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
       new StringSelectMenuBuilder().setCustomId("ggs|auction-lot").setPlaceholder("Teklif verilecek ödülü seç")
-        .addOptions(available.slice(0, 25).map((lot) => ({ label: lot.title.slice(0, 100), value: lot.id, description: `${lot.phase === "SEALED" ? "Kapalı teklif" : "Açık final"}${lot.own_bid ? ` • Teklifin ${gold(Number(lot.own_bid))}` : ""}`.slice(0, 100) })))
+        .addOptions(available.slice(0, 25).map((lot) => ({ label: lot.title.slice(0, 100), value: lot.id, description: `${"Açık artırma"}${lot.own_bid ? ` • Teklifin ${gold(Number(lot.own_bid))}` : ""}`.slice(0, 100) })))
     ));
   }
   return { embeds: [embed], components, ephemeral: true as const };
@@ -288,7 +288,7 @@ export async function handleGreatGamesSelect(interaction: StringSelectMenuIntera
   const lotId = interaction.values[0];
   if (!lotId) throw new GameError("Müzayede kalemi seçilmedi.");
   const modal = new ModalBuilder().setCustomId(`ggm|bid|${lotId}`).setTitle("Müzayede Teklifi").addComponents(
-    new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("amount").setLabel("Teklif (500–5.000; 250 katları)").setStyle(TextInputStyle.Short).setRequired(true))
+    new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("amount").setLabel("Teklif (sıradaki 250 Altınlık bedel)").setStyle(TextInputStyle.Short).setRequired(true))
   );
   await interaction.showModal(modal);
   return true;

@@ -1,14 +1,15 @@
 import type { DbClient } from "../db/pool.js";
 import { pool, withTransaction } from "../db/pool.js";
 import {
-  DIPLOMACY_DEVELOPMENTS, DIPLOMACY_SCENARIOS, GREAT_GAMES_TURN, GREAT_GAME_TYPES, rollDie,
+  DIPLOMACY_DEVELOPMENTS, DIPLOMACY_SCENARIOS, GREAT_GAMES_TURN, GREAT_GAME_TYPES,
+  pickNonRepeatingValue,
   type GreatGameType
 } from "../domain/great-games.js";
 import { GameError } from "./game-service.js";
 import { automaticCaravanAssignments, greatGamesEntrySourceKey, type GreatGamesEntryRow, type GreatGamesSeasonRow } from "./great-games-service.js";
 import { adjustGreatGamesWallet } from "./great-games-wallet-service.js";
 
-export type GreatGamesSelectionMode = "RANDOM" | "MANUAL";
+export type GreatGamesSelectionMode = "RANDOM" | "MANUAL" | "ALL";
 
 interface SelectionResult {
   count: number;
@@ -136,11 +137,40 @@ export const greatGamesFlowService = {
         : Number(season.current_run ?? 0) + 1;
 
       if (!continuingSelection) {
+        if (input.gameType === "DIPLOMACY") {
+          for (const entry of allEntries) {
+            const storedScenarioHistory = Array.isArray(entry.metadata.diplomacyScenarioHistory)
+              ? entry.metadata.diplomacyScenarioHistory.filter((value): value is string => typeof value === "string")
+              : [];
+            const storedDevelopmentHistory = Array.isArray(entry.metadata.diplomacyDevelopmentHistory)
+              ? entry.metadata.diplomacyDevelopmentHistory.filter((value): value is string => typeof value === "string")
+              : [];
+            const previousScenarioKey = typeof entry.metadata.scenarioKey === "string"
+              ? entry.metadata.scenarioKey
+              : DIPLOMACY_SCENARIOS.find((scenario) => scenario.title === entry.metadata.scenario)?.key;
+            const previousDevelopment = typeof entry.metadata.development === "string" ? entry.metadata.development : undefined;
+            const scenarioHistory = previousScenarioKey && storedScenarioHistory.at(-1) !== previousScenarioKey
+              ? [...storedScenarioHistory, previousScenarioKey].slice(-3)
+              : storedScenarioHistory.slice(-3);
+            const developmentHistory = previousDevelopment && storedDevelopmentHistory.at(-1) !== previousDevelopment
+              ? [...storedDevelopmentHistory, previousDevelopment].slice(-2)
+              : storedDevelopmentHistory.slice(-2);
+            if (scenarioHistory.length !== storedScenarioHistory.length
+              || developmentHistory.length !== storedDevelopmentHistory.length
+              || scenarioHistory.some((value, index) => value !== storedScenarioHistory[index])
+              || developmentHistory.some((value, index) => value !== storedDevelopmentHistory[index])) {
+              await client.query(
+                "UPDATE great_games_entries SET metadata=$1,updated_at=NOW() WHERE id=$2",
+                [{ ...entry.metadata, diplomacyScenarioHistory: scenarioHistory, diplomacyDevelopmentHistory: developmentHistory }, entry.id]
+              );
+            }
+          }
+        }
         await client.query(
           `UPDATE great_games_entries
              SET status='REGISTERED',room_key=NULL,stake=0,
                  score=CASE WHEN game_type='CARAVAN' THEN 3 ELSE 0 END,
-                 metadata=metadata-'selectionOrder'-'runNumber'-'scenario'-'crisis'-'primaryGoal'-'secondaryGoal'-'development'
+                 metadata=metadata-'selectionOrder'-'runNumber'-'scenarioKey'-'scenario'-'crisis'-'primaryGoal'-'secondaryGoal'-'development'
                                   -'teamName'-'role'-'route'-'shareWeight'-'financierUsed',
                  updated_at=NOW()
            WHERE season_id=$1 AND game_type=$2`,
@@ -168,7 +198,9 @@ export const greatGamesFlowService = {
       if (!candidates.length) throw new GameError("Bu oyuna aday kayıtlı devlet bulunmuyor.");
 
       let selected: GreatGamesEntryRow[];
-      if (input.mode === "RANDOM") {
+      if (input.mode === "ALL") {
+        selected = [...candidates];
+      } else if (input.mode === "RANDOM") {
         const count = input.count ?? 0;
         if (!Number.isInteger(count) || count < 1 || count > candidates.length) {
           throw new GameError(`Rastgele seçim sayısı 1–${candidates.length} arasında olmalıdır.`);
@@ -226,24 +258,65 @@ export const greatGamesFlowService = {
         .filter((entry) => entry.status === "SELECTED")
         .sort((left, right) => Number(left.metadata.selectionOrder ?? 0) - Number(right.metadata.selectionOrder ?? 0));
       validateSelection(gameType, selected.length);
+      if (gameType === "AUCTION") {
+        await client.query(
+          "UPDATE great_games_auction_lots SET phase='FINAL',metadata=metadata-'finalists',updated_at=NOW() WHERE season_id=$1",
+          [season.id]
+        );
+      }
 
       const tableDevelopments = new Map<number, string>();
+      const tableScenarios = new Map<number, (typeof DIPLOMACY_SCENARIOS)[number]>();
+      const usedScenarioKeys: string[] = [];
+      const usedDevelopments: string[] = [];
       for (let index = 0; index < selected.length; index += 1) {
         const entry = selected[index]!;
         await chargeStake(client, season, entry);
         if (gameType === "DIPLOMACY") {
           const tableIndex = Math.floor(index / 3);
           const seat = index % 3;
-          const scenario = DIPLOMACY_SCENARIOS[tableIndex % DIPLOMACY_SCENARIOS.length]!;
-          const development = tableDevelopments.get(tableIndex) ?? DIPLOMACY_DEVELOPMENTS[rollDie(6) - 1]!;
-          tableDevelopments.set(tableIndex, development);
+          const tableMembers = selected.slice(tableIndex * 3, tableIndex * 3 + 3);
+          let scenario = tableScenarios.get(tableIndex);
+          let development = tableDevelopments.get(tableIndex);
+          if (!scenario) {
+            const recentScenarioKeys = tableMembers.flatMap((member) =>
+              Array.isArray(member.metadata.diplomacyScenarioHistory)
+                ? (member.metadata.diplomacyScenarioHistory as string[]).slice(-3)
+                : []
+            );
+            const scenarioKey = pickNonRepeatingValue(
+              DIPLOMACY_SCENARIOS.map((item) => item.key), recentScenarioKeys, usedScenarioKeys
+            );
+            scenario = DIPLOMACY_SCENARIOS.find((item) => item.key === scenarioKey)!;
+            tableScenarios.set(tableIndex, scenario);
+            usedScenarioKeys.push(scenario.key);
+          }
+          if (!development) {
+            const recentDevelopments = tableMembers.flatMap((member) =>
+              Array.isArray(member.metadata.diplomacyDevelopmentHistory)
+                ? (member.metadata.diplomacyDevelopmentHistory as string[]).slice(-2)
+                : []
+            );
+            development = pickNonRepeatingValue(DIPLOMACY_DEVELOPMENTS, recentDevelopments, usedDevelopments);
+            tableDevelopments.set(tableIndex, development);
+            usedDevelopments.push(development);
+          }
+          const scenarioHistory = Array.isArray(entry.metadata.diplomacyScenarioHistory)
+            ? (entry.metadata.diplomacyScenarioHistory as string[])
+            : [];
+          const developmentHistory = Array.isArray(entry.metadata.diplomacyDevelopmentHistory)
+            ? (entry.metadata.diplomacyDevelopmentHistory as string[])
+            : [];
           entry.metadata = {
             ...entry.metadata,
+            scenarioKey: scenario.key,
             scenario: scenario.title,
             crisis: scenario.description,
             primaryGoal: scenario.primary[seat],
             secondaryGoal: scenario.secondary[seat],
-            development
+            development,
+            diplomacyScenarioHistory: [...scenarioHistory, scenario.key].slice(-3),
+            diplomacyDevelopmentHistory: [...developmentHistory, development].slice(-2)
           };
         }
         await client.query(

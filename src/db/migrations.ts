@@ -1938,7 +1938,7 @@ export const migrations = [
         lot_id UUID NOT NULL REFERENCES great_games_auction_lots(id) ON DELETE CASCADE,
         country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
         discord_user_id TEXT NOT NULL,
-        amount BIGINT NOT NULL CHECK (amount BETWEEN 500 AND 5000),
+        amount BIGINT NOT NULL CHECK (amount >= 500 AND MOD(amount - 500, 250) = 0),
         phase TEXT NOT NULL DEFAULT 'SEALED' CHECK (phase IN ('SEALED','FINAL')),
         reserved_amount BIGINT NOT NULL DEFAULT 0 CHECK (reserved_amount >= 0),
         tie_roll INTEGER,
@@ -2107,6 +2107,60 @@ export const migrations = [
     sql: `
       ALTER TABLE great_games_seasons
       ADD COLUMN IF NOT EXISTS current_run INTEGER NOT NULL DEFAULT 0;
+    `
+  },
+  {
+    version: 65,
+    name: "great_games_open_auction_and_wallet_bonus",
+    sql: `
+      ALTER TABLE great_games_auction_bids
+        DROP CONSTRAINT IF EXISTS great_games_auction_bids_amount_check;
+      ALTER TABLE great_games_auction_bids
+        ADD CONSTRAINT great_games_auction_bids_amount_check
+        CHECK (amount >= 500 AND MOD(amount - 500, 250) = 0);
+
+      UPDATE great_games_auction_lots l
+      SET phase='FINAL',metadata=l.metadata-'finalists'
+      FROM great_games_seasons s
+      WHERE l.season_id=s.id AND s.status='ACTIVE' AND s.current_game='AUCTION'
+        AND l.phase IN ('SEALED','FINAL');
+      UPDATE great_games_auction_bids b
+      SET phase='FINAL'
+      FROM great_games_auction_lots l,great_games_seasons s
+      WHERE b.lot_id=l.id AND l.season_id=s.id
+        AND s.status='ACTIVE' AND s.current_game='AUCTION';
+
+      ALTER TABLE great_games_wallet_movements
+        DROP CONSTRAINT IF EXISTS great_games_wallet_movements_kind_check;
+      ALTER TABLE great_games_wallet_movements
+        ADD CONSTRAINT great_games_wallet_movements_kind_check
+        CHECK (kind IN (
+          'INITIAL_GRANT','TREASURY_TRANSFER','GAME_STAKE','BID_RESERVE',
+          'REFUND','PAYOUT','FINAL_SETTLEMENT','ADMIN_GRANT'
+        ));
+
+      WITH eligible AS (
+        SELECT w.id
+        FROM great_games_wallets w
+        JOIN great_games_seasons s ON s.id=w.season_id
+        WHERE s.game_turn=15 AND w.closed_at IS NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM great_games_wallet_movements m
+            WHERE m.wallet_id=w.id AND m.source_key='auction-open-wallet-bonus-5000'
+          )
+      ), updated AS (
+        UPDATE great_games_wallets w
+        SET balance=w.balance+5000
+        FROM eligible e
+        WHERE w.id=e.id
+        RETURNING w.id,w.balance
+      )
+      INSERT INTO great_games_wallet_movements(
+        wallet_id,amount,balance_after,kind,source_key,description
+      )
+      SELECT id,5000,balance,'ADMIN_GRANT','auction-open-wallet-bonus-5000',
+             'Açık müzayede için tek seferlik 5.000 Altın oyun bakiyesi'
+      FROM updated;
     `
   }
 ] as const;

@@ -1,4 +1,20 @@
 export const GREAT_GAMES_TURN = 15;
+export const GREAT_GAMES_RACE_ROUNDS = 6;
+export const RACE_TRACK_STEPS = 50;
+export const CHARIOT_TRACK_TARGET = 100;
+export const CARAVAN_TRACK_TARGET = 20;
+export const AUCTION_OPENING_BID = 500;
+export const AUCTION_BID_INCREMENT = 250;
+
+export function isValidAuctionBidAmount(amount: number): boolean {
+  return Number.isSafeInteger(amount)
+    && amount >= AUCTION_OPENING_BID
+    && (amount - AUCTION_OPENING_BID) % AUCTION_BID_INCREMENT === 0;
+}
+
+export function auctionNextMinimum(currentBid: number): number {
+  return currentBid > 0 ? currentBid + AUCTION_BID_INCREMENT : AUCTION_OPENING_BID;
+}
 
 export const GREAT_GAME_TYPES = {
   AUCTION: { label: "Devletler Müzayedesi", emoji: "🏺", stake: 0 },
@@ -12,9 +28,13 @@ export type GreatGameType = keyof typeof GREAT_GAME_TYPES;
 export type ChariotTactic = "AGGRESSIVE" | "BALANCED" | "CAUTIOUS" | "SQUEEZE";
 export type KingsDecision = "COOPERATE" | "BETRAY";
 
+function normalizeGameChoice(value: string): string {
+  return value.trim().toLocaleUpperCase("tr-TR").normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9]/g, "");
+}
+
 export function parseKingsDecision(value: string): KingsDecision | null {
-  const normalized = value.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-    .toUpperCase().replace(/[\s_-]+/g, "");
+  const normalized = normalizeGameChoice(value);
   if (normalized === "ISBIRLIGI" || normalized === "COOPERATE") return "COOPERATE";
   if (normalized === "IHANET" || normalized === "BETRAY" || normalized === "BETRAYAL") return "BETRAY";
   return null;
@@ -22,6 +42,39 @@ export function parseKingsDecision(value: string): KingsDecision | null {
 export type CaravanRoute = "SAFE" | "BALANCED" | "DANGEROUS";
 export type CaravanChallenge = "TRADE" | "SECURITY" | "TRAVEL";
 export type CaravanRole = "MERCHANT" | "GUARD" | "GUIDE" | "FINANCIER";
+
+export function parseChariotTactic(value: string): ChariotTactic | null {
+  const normalized = normalizeGameChoice(value);
+  if (["SALDIRGAN", "SALDIRGANSURUS", "AGGRESSIVE"].includes(normalized)) return "AGGRESSIVE";
+  if (["DENGELI", "DENGELISURUS", "BALANCED"].includes(normalized)) return "BALANCED";
+  if (["TEMKINLI", "TEMKINLISURUS", "CAUTIOUS"].includes(normalized)) return "CAUTIOUS";
+  if (["SIKISTIR", "RAKIBISIKISTIR", "SQUEEZE"].includes(normalized)) return "SQUEEZE";
+  return null;
+}
+
+export function parseCaravanRoute(value: string): CaravanRoute | null {
+  const normalized = normalizeGameChoice(value);
+  if (["GUVENLI", "GUVENLIYOL", "SAFE"].includes(normalized)) return "SAFE";
+  if (["DENGELI", "DENGELIYOL", "BALANCED"].includes(normalized)) return "BALANCED";
+  if (["TEHLIKELI", "TEHLIKELIYOL", "DANGEROUS"].includes(normalized)) return "DANGEROUS";
+  return null;
+}
+
+export const KINGS_DECISION_LABELS: Record<KingsDecision, string> = {
+  COOPERATE: "İşbirliği",
+  BETRAY: "İhanet"
+};
+
+export const CARAVAN_CHALLENGE_LABELS: Record<CaravanChallenge, string> = {
+  TRADE: "Ticaret Sınaması",
+  SECURITY: "Güvenlik Sınaması",
+  TRAVEL: "Yolculuk Sınaması"
+};
+
+export function raceTrackPosition(score: number, target: number): number {
+  if (!Number.isFinite(score) || !Number.isFinite(target) || target <= 0) return 0;
+  return Math.max(0, Math.min(RACE_TRACK_STEPS, Math.floor(score / target * RACE_TRACK_STEPS)));
+}
 
 export const CHARIOT_TACTICS: Record<ChariotTactic, { label: string; bonus: number; crashMaximum: number }> = {
   AGGRESSIVE: { label: "Saldırgan Sürüş", bonus: 4, crashMaximum: 4 },
@@ -205,37 +258,89 @@ export function allocatePool(total: number, weights: readonly number[]): number[
 }
 
 export const DIPLOMACY_DEVELOPMENTS = [
-  "Ana sonuçlardan biri görüşme dışı kaldı.",
-  "İkincil tavizin altın bedeli arttı.",
-  "Taraflar sonuçlanmadan önce bir yeniden oylama hakkı kazandı.",
-  "Mevcut ikincil tavizlerden biri kaldırıldı.",
-  "Yalnız bir devlete verilebilen yeni bir taviz açıldı.",
-  "Oylama süresi kısaldı."
+  "Saray arşivinden çıkan eski bir ferman iddialardan birini güçlendirdi; taraflar belgeyi kimin yorumlayacağını belirlemelidir.",
+  "Meydanda toplanan halk görüşmelerin uzamasına öfkeli; anlaşma sağlanamazsa masanın itibarı sarsılacak.",
+  "Tarafsız arabulucu yalnızca tek bir ikincil tavizin metne girmesine izin veriyor.",
+  "Bir ticaret loncası anlaşmayı finanse etmeyi teklif etti; karşılığında kazanan taraftan ayrıcalık istiyor.",
+  "Sınırdaki askerî hareketlilik müzakere süresini daralttı; elçiler kararlarını geciktiremeyecek.",
+  "Dini önderler kan dökülmemesi şartıyla anlaşmayı destekleyeceklerini ilan etti.",
+  "Gizli bir mektup taraflardan birinin niyetini tartışmalı hâle getirdi; güven sorunu masanın merkezine oturdu.",
+  "Komşu şehirler alınacak kararın kendilerine de uygulanmasından korkuyor ve ek güvence talep ediyor.",
+  "Kıtlık haberi ulaştı; ikincil tavizlerden biri tahıl veya hazine yardımı biçiminde yorumlanmalıdır.",
+  "Müzakere salonundaki suikast söylentisi yüzünden heyetler yalnızca yazılı ve garantili taahhütleri kabul ediyor."
 ] as const;
 
 export const DIPLOMACY_SCENARIOS = [
   {
     key: "PORT_CRISIS",
     title: "Tartışmalı Liman",
-    description: "Üç devlet aynı limanın geleceği konusunda anlaşmak zorundadır.",
-    primary: ["Liman devletin tam kontrolüne geçsin", "Liman tarafsız ve askerî kullanıma kapalı kalsın", "Liman devletin korumasına alınsın"],
-    secondary: ["İki turluk ticaret hakkı", "1.000 Altın tazminat", "Anlaşmanın tek garantörü olma"]
+    description: "Fırtınada zarar gören stratejik limanın eski yönetimi çöktü. Üç devlet limanın askerî, ticari ve siyasi geleceğini belirlemek zorunda.",
+    primary: ["Limanın tam egemenliğini ve gümrük gelirini almak", "Limanı tarafsızlaştırıp bütün savaş gemilerine kapatmak", "Limanı himaye altına alıp güvenliğini üstlenmek"],
+    secondary: ["İki turluk ayrıcalıklı ticaret hakkı", "1.000 Altın yeniden inşa tazminatı", "Anlaşmanın tek diplomatik garantörü olmak"]
   },
   {
     key: "BORDER_CITY",
     title: "Sınır Şehri Krizi",
-    description: "Tartışmalı sınır şehrinin siyasî statüsü belirlenmelidir.",
-    primary: ["Şehir devlete bağlansın", "Şehir bağımsız tampon bölge olsun", "Şehir devletin himayesine girsin"],
-    secondary: ["Şehirde ticaret mahallesi", "İki turluk askerî geçiş", "Sınır vergisinden pay"]
+    description: "İki ticaret yolunu ve bir dağ geçidini denetleyen sınır şehri hükümdarsız kaldı. Halk, komşu devletlerin kararını bekliyor.",
+    primary: ["Şehri doğrudan kendi devletine bağlamak", "Şehri silahsızlandırılmış bağımsız tampon bölge yapmak", "Şehri kendi himayesine alıp yerel yönetimi korumak"],
+    secondary: ["Şehirde ayrıcalıklı ticaret mahallesi", "İki turluk askerî geçiş hakkı", "Sınır vergilerinden pay almak"]
   },
   {
     key: "ROYAL_SUCCESSION",
     title: "Veraset Bunalımı",
-    description: "Varissiz hükümdarın ardından yeni düzen üç devlet tarafından belirlenmelidir.",
-    primary: ["Devletin desteklediği aday tahta çıksın", "Ortak naiplik konseyi kurulsun", "Taht kaldırılarak şehir meclisi kurulsun"],
-    secondary: ["Hanedan evliliği hakkı", "Hazineden tazminat", "Kalıcı diplomatik temsilcilik"]
+    description: "Varissiz hükümdarın ölümü sarayı üç hizbe böldü. Yanlış karar bir iç savaşı, doğru uzlaşma yeni bir siyasi düzeni doğurabilir.",
+    primary: ["Kendi desteklediği hanedan adayını tahta çıkarmak", "Üç devletin denetlediği geçici naiplik konseyi kurmak", "Tahtı kaldırıp bağımsız şehir meclisi kurmak"],
+    secondary: ["Hanedan evliliği ve miras hakkı", "Kraliyet hazinesinden tazminat", "Kalıcı diplomatik temsilcilik açmak"]
+  },
+  {
+    key: "GRAIN_EMBARGO",
+    title: "Tahıl Ablukası",
+    description: "Kuraklık bölge ambarlarını boşalttı. Tahıl taşıyan filolar sınırda bekletilirken üç devlet kıtlığın bedelini kimin ödeyeceğine karar vermeli.",
+    primary: ["Tahıl sevkiyatının önce kendi şehirlerine yönelmesini sağlamak", "Tahılı nüfusa göre tarafsız biçimde paylaştırmak", "Ablukayı kaldırma karşılığında bölgesel dağıtımı yönetmek"],
+    secondary: ["Bir turluk gümrük muafiyeti", "Acil yardım için 1.000 Altın katkı", "Tahıl yollarının denetim hakkı"]
+  },
+  {
+    key: "SACRED_SITE",
+    title: "Kutsal Şehir Anlaşmazlığı",
+    description: "Üç halkın da kutsal saydığı şehirde rahipler ve muhafızlar karşı karşıya geldi. Şehrin statüsü belirlenmezse mezhep çatışması başlayabilir.",
+    primary: ["Kutsal şehrin koruyuculuğunu üstlenmek", "Şehri bütün inançlara açık tarafsız bölge ilan etmek", "Yerel ruhban meclisine siyasi özerklik vermek"],
+    secondary: ["Hac yollarında vergi muafiyeti", "Tapınakların güvenlik sorumluluğu", "Dini törenlerde öncelik hakkı"]
+  },
+  {
+    key: "ROYAL_HOSTAGE",
+    title: "Kraliyet Rehinesi",
+    description: "Bir taht varisi sınır çatışmasında esir düştü. İadesi, yargılanması veya siyasi güvence olarak tutulması savaş ile barış arasındaki çizgiyi belirleyecek.",
+    primary: ["Varisin koşulsuz iadesini sağlamak", "Varisi tarafsız mahkemede yargılatmak", "Barış antlaşması tamamlanana kadar varisi güvence altında tutmak"],
+    secondary: ["Fidye gelirinden pay", "İki turluk saldırmazlık güvencesi", "Esir değişiminin denetimini üstlenmek"]
+  },
+  {
+    key: "PIRATE_LEAGUE",
+    title: "Korsan Birliği Tehdidi",
+    description: "Birleşen korsan filoları kıyı ticaretini felç etti. Üç devlet ortak harekâtın komutasını, masrafını ve ele geçirilen ganimeti paylaşmalı.",
+    primary: ["Ortak filonun başkomutanlığını almak", "Kıyıları bölgesel sorumluluk alanlarına ayırmak", "Korsanlarla kontrollü af ve ticaret anlaşması yapmak"],
+    secondary: ["Ele geçirilen gemilerden pay", "Sefer masrafları için 1.000 Altın katkı", "Kurtarılan limanlarda ticaret önceliği"]
+  },
+  {
+    key: "CARAVAN_TOLL",
+    title: "Büyük Kervan Yolu",
+    description: "Yeni açılan kıtalar arası kervan yolu büyük gelir vaat ediyor. Geçiş vergisi, yol güvenliği ve pazar ayrıcalıkları konusunda üç devlet yarışıyor.",
+    primary: ["Ana geçiş kapısını ve vergileri denetlemek", "Yolu vergisiz uluslararası ticaret koridoru yapmak", "Yol güvenliğini üstlenip koruma payı toplamak"],
+    secondary: ["Başkentte kalıcı pazar yeri", "Kervanlara askerî refakat hakkı", "Gümrük gelirinden iki turluk pay"]
   }
 ] as const;
+
+export function pickNonRepeatingValue<T>(
+  values: readonly T[], recent: readonly T[], used: readonly T[] = [], random = Math.random
+): T {
+  if (!values.length) throw new Error("Seçilecek diplomasi içeriği bulunmuyor.");
+  const recentSet = new Set(recent);
+  const usedSet = new Set(used);
+  let pool = values.filter((value) => !recentSet.has(value) && !usedSet.has(value));
+  if (!pool.length) pool = values.filter((value) => !recentSet.has(value));
+  if (!pool.length && recent.length) pool = values.filter((value) => value !== recent.at(-1));
+  if (!pool.length) pool = [...values];
+  return pool[Math.floor(random() * pool.length)]!;
+}
 
 export function resolveDiplomacyVote(
   countryIds: readonly string[],

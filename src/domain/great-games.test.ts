@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  allocatePool, caravanMultiplier, resolveCaravanStage, resolveChariotRound,
-  parseKingsDecision, resolveDiplomacyVote, resolveKingsRound
+  AUCTION_BID_INCREMENT, AUCTION_OPENING_BID, DIPLOMACY_SCENARIOS, GREAT_GAMES_RACE_ROUNDS,
+  allocatePool, auctionNextMinimum, caravanMultiplier, isValidAuctionBidAmount,
+  parseCaravanRoute, parseChariotTactic, parseKingsDecision, pickNonRepeatingValue,
+  raceTrackPosition, resolveCaravanStage, resolveChariotRound,
+  resolveDiplomacyVote, resolveKingsRound
 } from "./great-games.js";
 
 function sequence(values: number[]): () => number {
@@ -10,6 +13,17 @@ function sequence(values: number[]): () => number {
 }
 
 describe("15. Tur Büyük Oyunları", () => {
+  it("müzayedede 500 Altından başlayan sınırsız 250'lik teklifleri doğrular", () => {
+    expect(AUCTION_OPENING_BID).toBe(500);
+    expect(AUCTION_BID_INCREMENT).toBe(250);
+    expect(isValidAuctionBidAmount(500)).toBe(true);
+    expect(isValidAuctionBidAmount(10_000)).toBe(true);
+    expect(isValidAuctionBidAmount(625)).toBe(false);
+    expect(isValidAuctionBidAmount(250)).toBe(false);
+    expect(auctionNextMinimum(0)).toBe(500);
+    expect(auctionNextMinimum(10_000)).toBe(10_250);
+  });
+
   it("Savaş Arabaları taktiklerini kaza, sıkıştırma ve temkin bonusuyla çözer", () => {
     const result = resolveChariotRound([
       { countryId: "a", tactic: "AGGRESSIVE" },
@@ -48,6 +62,14 @@ describe("15. Tur Büyük Oyunları", () => {
     expect(allocatePool(10, [1, 1, 1]).reduce((sum, value) => sum + value, 0)).toBe(10);
   });
 
+  it("Diplomasi kriz havuzunu genişletir ve yakın geçmişteki krizi tekrarlamaz", () => {
+    expect(DIPLOMACY_SCENARIOS).toHaveLength(8);
+    expect(new Set(DIPLOMACY_SCENARIOS.map((scenario) => scenario.key)).size).toBe(8);
+    expect(pickNonRepeatingValue(["A", "B", "C", "D"], ["A", "B"], ["C"], () => 0)).toBe("D");
+    expect(pickNonRepeatingValue(["A", "B"], ["A", "B"], [], () => 0)).toBe("A");
+    expect(pickNonRepeatingValue(["A", "B"], ["A"], ["B"], () => 0)).toBe("B");
+  });
+
   it("Diplomasi Masasında yalnız bir ana ve en fazla bir ikincil kazanan çıkarır", () => {
     expect(resolveDiplomacyVote(
       ["a", "b", "c"],
@@ -66,6 +88,24 @@ describe("15. Tur Büyük Oyunları", () => {
     expect(result.primaryWinnerId).toBe("b");
     expect(result.influenceRolls).toEqual({ a: 5, b: 17, c: 9 });
     expect(result.secondaryWinnerId).toBeNull();
+  });
+
+  it("yarışları altı aşama ve 50 kademeli pistle çalıştırır", () => {
+    expect(GREAT_GAMES_RACE_ROUNDS).toBe(6);
+    expect(raceTrackPosition(0, 100)).toBe(0);
+    expect(raceTrackPosition(2, 100)).toBe(1);
+    expect(raceTrackPosition(100, 100)).toBe(50);
+    expect(raceTrackPosition(140, 100)).toBe(50);
+  });
+
+  it("araba taktikleriyle kervan rotalarını Türkçe ve eski İngilizce değerlerle okuyabilir", () => {
+    expect(parseChariotTactic("Saldırgan")).toBe("AGGRESSIVE");
+    expect(parseChariotTactic("Rakibi Sıkıştır")).toBe("SQUEEZE");
+    expect(parseChariotTactic("balanced")).toBe("BALANCED");
+    expect(parseCaravanRoute("Güvenli")).toBe("SAFE");
+    expect(parseCaravanRoute("Tehlikeli Yol")).toBe("DANGEROUS");
+    expect(parseCaravanRoute("balanced")).toBe("BALANCED");
+    expect(parseCaravanRoute("bilinmeyen")).toBeNull();
   });
 
   it("Kralların Bahsi kararlarını Türkçe ve eski İngilizce değerlerle okuyabilir", () => {

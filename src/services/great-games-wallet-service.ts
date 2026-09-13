@@ -5,7 +5,7 @@ import { GameError } from "./game-service.js";
 
 export type WalletMovementKind =
   | "INITIAL_GRANT" | "TREASURY_TRANSFER" | "GAME_STAKE" | "BID_RESERVE"
-  | "REFUND" | "PAYOUT" | "FINAL_SETTLEMENT";
+  | "REFUND" | "PAYOUT" | "FINAL_SETTLEMENT" | "ADMIN_GRANT";
 
 export interface GreatGamesWalletRow {
   id: string; season_id: string; country_id: string; country_name: string;
@@ -110,6 +110,30 @@ export const greatGamesWalletService = {
        ORDER BY w.closed_at NULLS FIRST,w.balance DESC,c.name`,
       [guildId, GREAT_GAMES_TURN]
     )).rows;
+  },
+
+  async grantAuctionBonus(guildId: string): Promise<{ credited: number; alreadyCredited: number; total: number }> {
+    return withTransaction(async (client) => {
+      const season = await lockedSeason(client, guildId);
+      const wallets = (await client.query<{ country_id: string }>(
+        "SELECT country_id FROM great_games_wallets WHERE season_id=$1 AND closed_at IS NULL ORDER BY country_id FOR UPDATE",
+        [season.id]
+      )).rows;
+      if (!wallets.length) throw new GameError("Bonus verilecek açık oyun cüzdanı bulunmuyor.");
+      let credited = 0;
+      for (const wallet of wallets) {
+        const result = await adjustGreatGamesWallet(client, {
+          seasonId: season.id,
+          countryId: wallet.country_id,
+          amount: 5_000,
+          kind: "ADMIN_GRANT",
+          sourceKey: "auction-open-wallet-bonus-5000",
+          description: "Açık müzayede için tek seferlik 5.000 Altın oyun bakiyesi"
+        });
+        if (result.changed) credited += 1;
+      }
+      return { credited, alreadyCredited: wallets.length - credited, total: credited * 5_000 };
+    });
   },
 
   async transferFromRandomSettlement(input: {
