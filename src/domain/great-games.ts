@@ -342,6 +342,83 @@ export function pickNonRepeatingValue<T>(
   return pool[Math.floor(random() * pool.length)]!;
 }
 
+export function diplomacyGoalKey(ownerCountryId: string, tier: "PRIMARY" | "SECONDARY"): string {
+  return `${tier === "PRIMARY" ? "P" : "S"}:${ownerCountryId}`;
+}
+
+export interface DiplomacyGoalOption {
+  key: string;
+  ownerCountryId: string;
+  tier: "PRIMARY" | "SECONDARY";
+  text: string;
+}
+
+export function resolveDiplomacyGoalVote(
+  countryIds: readonly string[],
+  goals: readonly DiplomacyGoalOption[],
+  primaryVotes: Readonly<Record<string, string>>,
+  secondaryVotes: Readonly<Record<string, string>>,
+  random = Math.random
+): {
+  primaryGoalKey: string;
+  secondaryGoalKey: string | null;
+  primaryWinnerId: string;
+  secondaryWinnerId: string | null;
+  influenceRolls: Record<string, number>;
+} {
+  if (countryIds.length !== 3) throw new Error("Diplomasi Masası tam olarak üç devlet gerektirir.");
+  const goalByKey = new Map(goals.map((goal) => [goal.key, goal]));
+  if (goalByKey.size !== goals.length) throw new Error("Diplomasi hedef anahtarları benzersiz olmalıdır.");
+  for (const goal of goals) {
+    if (!countryIds.includes(goal.ownerCountryId)) throw new Error("Diplomasi hedefinin sahibi masada bulunmuyor.");
+  }
+
+  const validateVote = (voterId: string, goalKey: string | undefined): DiplomacyGoalOption => {
+    const goal = goalKey ? goalByKey.get(goalKey) : undefined;
+    if (!goal) throw new Error("Bütün devletler geçerli hedeflere oy vermelidir.");
+    if (goal.ownerCountryId === voterId) throw new Error("Bir devlet kendi diplomasi hedefine oy veremez.");
+    return goal;
+  };
+
+  const primaryCounts = new Map<string, number>();
+  for (const voterId of countryIds) {
+    const goal = validateVote(voterId, primaryVotes[voterId]);
+    primaryCounts.set(goal.key, (primaryCounts.get(goal.key) ?? 0) + 1);
+  }
+  const highestPrimaryCount = Math.max(...primaryCounts.values());
+  const primaryCandidates = [...primaryCounts.keys()].filter((key) => primaryCounts.get(key) === highestPrimaryCount);
+  const influenceRolls: Record<string, number> = {};
+  let primaryGoalKey: string;
+  if (primaryCandidates.length === 1) {
+    primaryGoalKey = primaryCandidates[0]!;
+  } else {
+    primaryGoalKey = primaryCandidates.map((key) => {
+      const roll = rollDie(20, random);
+      influenceRolls[key] = roll;
+      return { key, roll };
+    }).sort((left, right) => right.roll - left.roll || left.key.localeCompare(right.key))[0]!.key;
+  }
+  const primaryGoal = goalByKey.get(primaryGoalKey)!;
+
+  const secondaryCounts = new Map<string, number>();
+  for (const voterId of countryIds) {
+    const primaryVote = validateVote(voterId, primaryVotes[voterId]);
+    const secondaryVote = validateVote(voterId, secondaryVotes[voterId]);
+    if (primaryVote.key === secondaryVote.key) throw new Error("Ana ve ikincil sonuç için aynı hedef seçilemez.");
+    if (secondaryVote.ownerCountryId === primaryGoal.ownerCountryId) continue;
+    secondaryCounts.set(secondaryVote.key, (secondaryCounts.get(secondaryVote.key) ?? 0) + 1);
+  }
+  const secondaryGoalKey = [...secondaryCounts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0]?.[0] ?? null;
+  return {
+    primaryGoalKey,
+    secondaryGoalKey,
+    primaryWinnerId: primaryGoal.ownerCountryId,
+    secondaryWinnerId: secondaryGoalKey ? goalByKey.get(secondaryGoalKey)!.ownerCountryId : null,
+    influenceRolls
+  };
+}
+
 export function resolveDiplomacyVote(
   countryIds: readonly string[],
   primaryVotes: Readonly<Record<string, string>>,

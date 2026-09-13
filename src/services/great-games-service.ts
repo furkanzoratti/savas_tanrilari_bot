@@ -3,8 +3,8 @@ import { pool, withTransaction } from "../db/pool.js";
 import {
   AUCTION_REWARDS, CARAVAN_CHALLENGE_LABELS, CARAVAN_ROUTES, CHARIOT_TACTICS,
   DIPLOMACY_DEVELOPMENTS, DIPLOMACY_SCENARIOS, GREAT_GAMES_RACE_ROUNDS, GREAT_GAMES_TURN, GREAT_GAME_TYPES,
-  KINGS_DECISION_LABELS, allocatePool, caravanMultiplier, resolveCaravanStage, resolveChariotRound,
-  resolveDiplomacyVote, resolveKingsRound, rollDie,
+  KINGS_DECISION_LABELS, allocatePool, caravanMultiplier, diplomacyGoalKey, resolveCaravanStage, resolveChariotRound,
+  resolveDiplomacyGoalVote, resolveKingsRound, rollDie,
   type CaravanRole, type CaravanRoute, type ChariotTactic, type GreatGameType, type KingsDecision
 } from "../domain/great-games.js";
 import { GameError } from "./game-service.js";
@@ -512,16 +512,40 @@ export const greatGamesService = {
           const table = list.filter((entry) => entry.room_key === room);
           const tableActions = table.map((entry) => actions.find((action) => action.country_id === entry.country_id));
           if (tableActions.some((action) => !action)) throw new GameError(`Diplomasi Masası oyları tamamlanmadı (${room}).`);
-          const primary = Object.fromEntries(tableActions.map((action) => [action!.country_id, String(action!.payload.primary)]));
-          const secondary = Object.fromEntries(tableActions.map((action) => [action!.country_id, action!.payload.secondary ? String(action!.payload.secondary) : null]));
-          const result = resolveDiplomacyVote(table.map((entry) => entry.country_id), primary, secondary);
+          const goals = table.flatMap((entry) => ([
+            { key: diplomacyGoalKey(entry.country_id, "PRIMARY"), ownerCountryId: entry.country_id, tier: "PRIMARY" as const, text: String(entry.metadata.primaryGoal) },
+            { key: diplomacyGoalKey(entry.country_id, "SECONDARY"), ownerCountryId: entry.country_id, tier: "SECONDARY" as const, text: String(entry.metadata.secondaryGoal) }
+          ]));
+          const goalByKey = new Map(goals.map((goal) => [goal.key, goal]));
+          const tableCountryIds = new Set(table.map((entry) => entry.country_id));
+          const normalizeStoredVote = (action: NonNullable<(typeof tableActions)[number]>, tier: "PRIMARY" | "SECONDARY"): string => {
+            const raw = action.payload[tier === "PRIMARY" ? "primary" : "secondary"];
+            const value = typeof raw === "string" ? raw : "";
+            const selectedGoal = goalByKey.get(value);
+            if (selectedGoal && selectedGoal.ownerCountryId !== action.country_id) return value;
+            if (tableCountryIds.has(value) && value !== action.country_id) return diplomacyGoalKey(value, tier);
+            const voterName = table.find((entry) => entry.country_id === action.country_id)?.country_name ?? "Bir devlet";
+            throw new GameError(`${voterName} eski veya geçersiz bir Diplomasi Masası oyu kullanıyor; hedef seçeneklerinden yeniden oy vermelidir.`);
+          };
+          const primary = Object.fromEntries(tableActions.map((action) => [action!.country_id, normalizeStoredVote(action!, "PRIMARY")]));
+          const secondary = Object.fromEntries(tableActions.map((action) => [action!.country_id, normalizeStoredVote(action!, "SECONDARY")]));
+          const result = resolveDiplomacyGoalVote(table.map((entry) => entry.country_id), goals, primary, secondary);
+          const primaryGoal = goalByKey.get(result.primaryGoalKey)!;
+          const secondaryGoal = result.secondaryGoalKey ? goalByKey.get(result.secondaryGoalKey)! : null;
           await client.query("UPDATE great_games_entries SET score=score+5 WHERE season_id=$1 AND game_type=$2 AND country_id=$3", [season.id, gameType, result.primaryWinnerId]);
           if (result.secondaryWinnerId) await client.query("UPDATE great_games_entries SET score=score+2 WHERE season_id=$1 AND game_type=$2 AND country_id=$3", [season.id, gameType, result.secondaryWinnerId]);
           const runNumber = greatGamesEntryRunNumber(table[0]!);
           const runKey = runNumber > 0 ? `:run:${runNumber}` : "";
-          await client.query(`INSERT INTO great_games_points(season_id,country_id,game_type,points,reason,dedupe_key) VALUES($1,$2,$3,5,$4,$5) ON CONFLICT(season_id,dedupe_key) DO NOTHING`, [season.id, result.primaryWinnerId, gameType, `${room} ana hedef`, `DIPLOMACY${runKey}:${room}:primary`]);
-          if (result.secondaryWinnerId) await client.query(`INSERT INTO great_games_points(season_id,country_id,game_type,points,reason,dedupe_key) VALUES($1,$2,$3,2,$4,$5) ON CONFLICT(season_id,dedupe_key) DO NOTHING`, [season.id, result.secondaryWinnerId, gameType, `${room} ikincil hedef`, `DIPLOMACY${runKey}:${room}:secondary`]);
-          summary.push(`${room}: Ana kazanan ${table.find((entry) => entry.country_id === result.primaryWinnerId)?.country_name}; ikincil ${table.find((entry) => entry.country_id === result.secondaryWinnerId)?.country_name ?? "yok"}`);
+          await client.query(`INSERT INTO great_games_points(season_id,country_id,game_type,points,reason,dedupe_key) VALUES($1,$2,$3,5,$4,$5) ON CONFLICT(season_id,dedupe_key) DO NOTHING`, [season.id, result.primaryWinnerId, gameType, `${room}: ${primaryGoal.text}`, `DIPLOMACY${runKey}:${room}:primary`]);
+          if (result.secondaryWinnerId && secondaryGoal) await client.query(`INSERT INTO great_games_points(season_id,country_id,game_type,points,reason,dedupe_key) VALUES($1,$2,$3,2,$4,$5) ON CONFLICT(season_id,dedupe_key) DO NOTHING`, [season.id, result.secondaryWinnerId, gameType, `${room}: ${secondaryGoal.text}`, `DIPLOMACY${runKey}:${room}:secondary`]);
+          const primaryCountry = table.find((entry) => entry.country_id === result.primaryWinnerId)?.country_name;
+          const secondaryCountry = table.find((entry) => entry.country_id === result.secondaryWinnerId)?.country_name;
+          const influence = Object.entries(result.influenceRolls).map(([key, roll]) => `${goalByKey.get(key)?.text ?? key}: ${roll}`).join(" • ");
+          summary.push(
+            `${room}: Ana sonuç “${primaryGoal.text}” — **${primaryCountry}**; ` +
+            `ikincil ${secondaryGoal ? `“${secondaryGoal.text}” — **${secondaryCountry}**` : "yok"}` +
+            `${influence ? `; nüfuz zarları ${influence}` : ""}`
+          );
         }
         finished = true;
       } else {

@@ -4,7 +4,7 @@ import {
   allocatePool, auctionNextMinimum, caravanMultiplier, isValidAuctionBidAmount,
   parseCaravanRoute, parseChariotTactic, parseKingsDecision, pickNonRepeatingValue,
   raceTrackPosition, resolveCaravanStage, resolveChariotRound,
-  resolveDiplomacyVote, resolveKingsRound
+  resolveDiplomacyGoalVote, resolveDiplomacyVote, resolveKingsRound
 } from "./great-games.js";
 
 function sequence(values: number[]): () => number {
@@ -68,6 +68,30 @@ describe("15. Tur Büyük Oyunları", () => {
     expect(pickNonRepeatingValue(["A", "B", "C", "D"], ["A", "B"], ["C"], () => 0)).toBe("D");
     expect(pickNonRepeatingValue(["A", "B"], ["A", "B"], [], () => 0)).toBe("A");
     expect(pickNonRepeatingValue(["A", "B"], ["A"], ["B"], () => 0)).toBe("B");
+  });
+
+  it("Diplomasi Masasında yalnız diğer devletlerin hedeflerine oy verilmesini sağlar", () => {
+    const goals = [
+      { key: "a:p", ownerCountryId: "a", tier: "PRIMARY" as const, text: "A ana" },
+      { key: "a:s", ownerCountryId: "a", tier: "SECONDARY" as const, text: "A ikincil" },
+      { key: "b:p", ownerCountryId: "b", tier: "PRIMARY" as const, text: "B ana" },
+      { key: "b:s", ownerCountryId: "b", tier: "SECONDARY" as const, text: "B ikincil" },
+      { key: "c:p", ownerCountryId: "c", tier: "PRIMARY" as const, text: "C ana" },
+      { key: "c:s", ownerCountryId: "c", tier: "SECONDARY" as const, text: "C ikincil" }
+    ];
+    expect(resolveDiplomacyGoalVote(
+      ["a", "b", "c"], goals,
+      { a: "b:p", b: "a:p", c: "a:p" },
+      { a: "c:s", b: "c:s", c: "b:s" }
+    )).toEqual({
+      primaryGoalKey: "a:p", secondaryGoalKey: "c:s",
+      primaryWinnerId: "a", secondaryWinnerId: "c", influenceRolls: {}
+    });
+    expect(() => resolveDiplomacyGoalVote(
+      ["a", "b", "c"], goals,
+      { a: "a:p", b: "a:p", c: "b:p" },
+      { a: "b:s", b: "c:s", c: "a:s" }
+    )).toThrow("kendi diplomasi hedefine");
   });
 
   it("Diplomasi Masasında yalnız bir ana ve en fazla bir ikincil kazanan çıkarır", () => {

@@ -5,7 +5,7 @@ import {
 } from "discord.js";
 import {
   AUCTION_OPENING_BID, CARAVAN_ROUTES, CARAVAN_TRACK_TARGET, CHARIOT_TACTICS, CHARIOT_TRACK_TARGET,
-  GREAT_GAMES_RACE_ROUNDS, GREAT_GAME_TYPES, RACE_TRACK_STEPS, auctionNextMinimum,
+  GREAT_GAMES_RACE_ROUNDS, GREAT_GAME_TYPES, RACE_TRACK_STEPS, auctionNextMinimum, diplomacyGoalKey,
   parseCaravanRoute, parseChariotTactic, parseKingsDecision, raceTrackPosition,
   type CaravanRoute, type ChariotTactic, type GreatGameType, type KingsDecision
 } from "../domain/great-games.js";
@@ -289,30 +289,28 @@ function diplomacyActionModal(data: GreatGamesDashboard, countryId: string): Mod
     entry.game_type === "DIPLOMACY" && entry.room_key === ownEntry.room_key && entry.status === "ACTIVE"
   );
   if (table.length !== 3) throw new GameError("Diplomasi Masası üç devlet olarak hazırlanamadı.");
-  const countryOptions = table.map((entry) => ({
-    label: entry.country_name.slice(0, 100),
-    value: entry.country_id,
-    description: entry.country_id === countryId ? "Kendi devletin" : "Masadaki diğer devlet"
-  }));
+  const goalOptions = table.filter((entry) => entry.country_id !== countryId).flatMap((entry) => ([
+    { label: String(entry.metadata.primaryGoal).slice(0, 100), value: diplomacyGoalKey(entry.country_id, "PRIMARY") },
+    { label: String(entry.metadata.secondaryGoal).slice(0, 100), value: diplomacyGoalKey(entry.country_id, "SECONDARY") }
+  ])).sort((left, right) => left.label.localeCompare(right.label, "tr"));
+  if (goalOptions.length !== 4) throw new GameError("Diğer iki devletin dört diplomasi hedefi hazırlanamadı.");
   const context = [
     `## ${String(ownEntry.metadata.scenario ?? "Diplomatik Kriz")}`,
     String(ownEntry.metadata.crisis ?? "Kriz açıklaması bulunmuyor."),
     `**Senin ana hedefin:** ${String(ownEntry.metadata.primaryGoal ?? "Belirlenmedi")}`,
     `**Senin ikincil hedefin:** ${String(ownEntry.metadata.secondaryGoal ?? "Belirlenmedi")}`,
-    `**Masa gelişmesi:** ${String(ownEntry.metadata.development ?? "Gelişme bulunmuyor.")}`
+    `**Masa gelişmesi:** ${String(ownEntry.metadata.development ?? "Gelişme bulunmuyor.")}`,
+    "Aşağıdaki dört sonuç yalnızca diğer iki devletin hedefleridir; kendi hedeflerine oy veremezsin."
   ].join("\n");
   return new ModalBuilder()
     .setCustomId("ggm2|action|DIPLOMACY")
     .setTitle(`Diplomasi • ${String(ownEntry.metadata.scenario ?? "Masa")}`.slice(0, 45))
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(context.slice(0, 4_000)))
     .addLabelComponents(
-      new LabelBuilder().setLabel("Ana kazanan").setDescription("Anlaşmanın ana sonucunu alacak devleti seç.")
-        .setStringSelectMenuComponent(new StringSelectMenuBuilder().setCustomId("primary").setPlaceholder("Ana kazanan devleti seç").setRequired(true).addOptions(countryOptions)),
-      new LabelBuilder().setLabel("İkincil kazanan").setDescription("İkincil tavizi alacak devleti veya 'yok' seçeneğini seç.")
-        .setStringSelectMenuComponent(new StringSelectMenuBuilder().setCustomId("secondary").setPlaceholder("İkincil kazananı seç").setRequired(true).addOptions(
-          { label: "İkincil kazanan yok", value: "NONE", description: "Anlaşma yalnızca bir ana kazanan çıkarsın" },
-          ...countryOptions
-        ))
+      new LabelBuilder().setLabel("Ana sonuç").setDescription("Anlaşmanın temel hükmü olacak hedefi seç.")
+        .setStringSelectMenuComponent(new StringSelectMenuBuilder().setCustomId("primary").setPlaceholder("Dört hedeften ana sonucu seç").setRequired(true).addOptions(goalOptions)),
+      new LabelBuilder().setLabel("İkincil sonuç").setDescription("Anlaşmaya eklenecek farklı bir hedefi seç.")
+        .setStringSelectMenuComponent(new StringSelectMenuBuilder().setCustomId("secondary").setPlaceholder("Dört hedeften ikincil sonucu seç").setRequired(true).addOptions(goalOptions))
     );
 }
 
@@ -586,20 +584,23 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
     if (!decision || !prediction) throw new GameError("Karar ve tahmin `İşbirliği` veya `İhanet` olmalıdır.");
     payload = { decision, prediction };
   } else if (type === "DIPLOMACY") {
-    const primaryId = interaction.fields.getStringSelectValues("primary")[0];
-    const secondaryValue = interaction.fields.getStringSelectValues("secondary")[0];
-    if (!primaryId || !secondaryValue) throw new GameError("Ana ve ikincil diplomasi seçimleri tamamlanmalıdır.");
+    const primaryGoalKey = interaction.fields.getStringSelectValues("primary")[0];
+    const secondaryGoalKey = interaction.fields.getStringSelectValues("secondary")[0];
+    if (!primaryGoalKey || !secondaryGoalKey) throw new GameError("Ana ve ikincil diplomasi hedefleri seçilmelidir.");
     const data = await greatGamesService.dashboard(interaction.guildId);
     const ownEntry = data.entries.find((entry) => entry.game_type === "DIPLOMACY" && entry.country_id === country.id && entry.status === "ACTIVE");
-    const tableCountryIds = new Set(data.entries.filter((entry) =>
-      entry.game_type === "DIPLOMACY" && entry.room_key === ownEntry?.room_key && entry.status === "ACTIVE"
-    ).map((entry) => entry.country_id));
-    const secondaryId = secondaryValue === "NONE" ? null : secondaryValue;
-    if (!ownEntry || !tableCountryIds.has(primaryId) || (secondaryId && !tableCountryIds.has(secondaryId))) {
-      throw new GameError("Diplomasi seçimi yalnızca kendi masandaki devletler arasından yapılabilir.");
+    const allowedGoalKeys = new Set(data.entries.filter((entry) =>
+      entry.game_type === "DIPLOMACY" && entry.room_key === ownEntry?.room_key
+        && entry.status === "ACTIVE" && entry.country_id !== country.id
+    ).flatMap((entry) => [
+      diplomacyGoalKey(entry.country_id, "PRIMARY"),
+      diplomacyGoalKey(entry.country_id, "SECONDARY")
+    ]));
+    if (!ownEntry || allowedGoalKeys.size !== 4 || !allowedGoalKeys.has(primaryGoalKey) || !allowedGoalKeys.has(secondaryGoalKey)) {
+      throw new GameError("Yalnızca diğer iki devletin ana ve ikincil hedefleri seçilebilir.");
     }
-    if (secondaryId === primaryId) throw new GameError("Ana ve ikincil kazanan aynı devlet olamaz.");
-    payload = { primary: primaryId, secondary: secondaryId };
+    if (secondaryGoalKey === primaryGoalKey) throw new GameError("Ana ve ikincil sonuç için aynı hedef seçilemez.");
+    payload = { primary: primaryGoalKey, secondary: secondaryGoalKey };
   } else throw new GameError("Bu oyun için oyuncu hamlesi bulunmuyor.");
   await greatGamesService.submitAction({ guildId: interaction.guildId, countryId: country.id, gameType: type, actionType: "ROUND", payload });
   const confirmation = type === "KINGS_BET"
@@ -609,7 +610,7 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
     : type === "CARAVAN"
       ? `✅ Kervanının ortak rota seçimi gizlice kaydedildi.\n**Rota:** ${CARAVAN_ROUTES[payload.route as CaravanRoute].label}`
     : type === "DIPLOMACY"
-      ? `✅ Diplomasi Masası oyun gizlice kaydedildi. Ana ve ikincil tercihin yalnızca sonuç çözülünce açıklanacak.`
+      ? `✅ Diplomasi Masası oyun gizlice kaydedildi. Seçtiğin ana ve ikincil hedef yalnızca sonuç çözülünce açıklanacak.`
     : "✅ Büyük Oyun hamlen gizlice kaydedildi.";
   if (interaction.isFromMessage()) {
     await interaction.update(await publicGamePayload(interaction.guildId, type));
