@@ -356,7 +356,9 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
   }
   if (subcommand === "puan-durumu") {
     if (!isGameMaster(interaction)) throw new GameError("Bu komut yalnızca oyun yöneticileri tarafından kullanılabilir.");
-    const standings = await greatGamesService.pointStandings(interaction.guildId);
+    const [standings, dashboard] = await Promise.all([
+      greatGamesService.pointStandings(interaction.guildId), greatGamesService.dashboard(interaction.guildId)
+    ]);
     if (!standings.length) throw new GameError("Büyük Oyunlara katılmış devlet veya kaydedilmiş puan bulunmuyor.");
     const lines = standings.map((standing, index) =>
       `**${index + 1}. ${standing.countryName} — ${standing.total} Puan**\n` +
@@ -366,8 +368,8 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
       embeds: [new EmbedBuilder()
         .setColor(0xd6ad3c)
         .setTitle("🏆 Büyük Oyunlar • Puan Durumu")
-        .setDescription(clip(lines.join("\n\n"), 3_900))
-        .setFooter({ text: "Puanlar oyunlar sonuçlandırıldığında kalıcı olarak kaydedilir." })],
+        .setDescription(clip(`💰 **Müzayede Ödül Havuzu:** ${gold(Number(dashboard.season?.prize_pool ?? 0))}\nKapanışta genel sıralamanın ilk üçüne %50 / %30 / %20 dağıtılır.\n\n${lines.join("\n\n")}`, 3_900))
+        .setFooter({ text: "Puanlar oyunlar sonuçlandırıldığında kalıcı olarak kaydedilir; ödül dağıtımı yalnızca yönetici kapanışında yapılır." })],
       ephemeral: true
     });
     return true;
@@ -403,7 +405,12 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
     if (!isGameMaster(interaction)) throw new GameError("Bu komut yalnızca oyun yöneticileri tarafından kullanılabilir.");
     await interaction.deferReply({ ephemeral: true });
     const result = await greatGamesWalletService.closeAll(interaction.guildId);
-    await interaction.editReply(`🏛️ Cüzdanlar kapatıldı. **${gold(result.total)}** rastgele yerleşkelere aktarıldı.`);
+    const awards = result.prizeAwards.length
+      ? `\n\n🏆 **Müzayede ödül havuzu dağıtımı**\n${result.prizeAwards.map((award) =>
+        `${award.rank}. **${award.countryName}** — ${award.points} puan • +${gold(award.amount)}`
+      ).join("\n")}`
+      : "";
+    await interaction.editReply(clip(`🏛️ Büyük Oyunlar kapatıldı. Ödül havuzu önce dereceye giren cüzdanlara dağıtıldı; ardından bütün cüzdanlardan toplam **${gold(result.total)}** ülke yerleşkelerine aktarıldı.${awards}`, 1_990));
     return true;
   }
   const country = await ownCountry(interaction.guildId, interaction.user.id);

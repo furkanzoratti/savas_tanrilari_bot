@@ -104,6 +104,8 @@ export interface GreatGamesPointStanding {
   countryName: string;
   total: number;
   byGame: Record<GreatGameType, number>;
+  firstPlaces: number;
+  secondPlaces: number;
 }
 
 const GAME_KEYS = Object.keys(GREAT_GAME_TYPES) as GreatGameType[];
@@ -252,9 +254,13 @@ export const greatGamesService = {
       country_name: string;
       game_type: GreatGameType;
       points: number;
+      first_places: number;
+      second_places: number;
     }>(
       `SELECT e.country_id,c.name AS country_name,e.game_type,
-              COALESCE(SUM(p.points),0)::integer AS points
+              COALESCE(SUM(p.points),0)::integer AS points,
+              COUNT(p.id) FILTER (WHERE p.points=5)::integer AS first_places,
+              COUNT(p.id) FILTER (WHERE p.points=3)::integer AS second_places
        FROM great_games_entries e
        JOIN great_games_seasons s ON s.id=e.season_id
        JOIN countries c ON c.id=e.country_id
@@ -273,15 +279,20 @@ export const greatGamesService = {
         countryId: row.country_id,
         countryName: row.country_name,
         total: 0,
-        byGame: Object.fromEntries(GAME_KEYS.map((key) => [key, 0])) as Record<GreatGameType, number>
+        byGame: Object.fromEntries(GAME_KEYS.map((key) => [key, 0])) as Record<GreatGameType, number>,
+        firstPlaces: 0,
+        secondPlaces: 0
       };
       const points = Number(row.points);
       standing.byGame[row.game_type] = points;
       standing.total += points;
+      standing.firstPlaces += Number(row.first_places);
+      standing.secondPlaces += Number(row.second_places);
       standings.set(row.country_id, standing);
     }
     return [...standings.values()].sort((left, right) =>
-      right.total - left.total || left.countryName.localeCompare(right.countryName, "tr")
+      right.total - left.total || right.firstPlaces - left.firstPlaces ||
+      right.secondPlaces - left.secondPlaces || left.countryName.localeCompare(right.countryName, "tr")
     );
   },
 

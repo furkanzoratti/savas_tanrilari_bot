@@ -25,7 +25,7 @@ export const commandBuilders = [
     .addSubcommand((sub) => sub.setName("cuzdan-bonusu").setDescription("Yalnızca yönetici: her kullanımda tüm açık oyun cüzdanlarına 5.000 Altın ekler"))
     .addSubcommand((sub) => sub.setName("kurtar").setDescription("Yalnızca yönetici: aktif oyunun çalışır formunu yeniden yayımlar"))
     .addSubcommand((sub) => sub.setName("cuzdan-onar").setDescription("Yalnızca yönetici: biten Kervan oyununun eksik cüzdan ödemelerini tamamlar"))
-    .addSubcommand((sub) => sub.setName("yonetici-bitir").setDescription("Yalnızca yönetici: bütün cüzdanları rastgele yerleşkelere aktarır")),
+    .addSubcommand((sub) => sub.setName("yonetici-bitir").setDescription("Yalnızca yönetici: ödül havuzunu dağıtır, cüzdanları ülkelere aktarır ve oyunları kapatır")),
   new SlashCommandBuilder()
     .setName("hazine-hareketleri").setDescription("Yalnızca yönetici: bir ülkenin tur içindeki bütün mali hareketlerini gösterir")
     .addStringOption((o) => o.setName("ulke").setDescription("Mali dökümü görüntülenecek ülke").setRequired(true))

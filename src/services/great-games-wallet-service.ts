@@ -1,6 +1,6 @@
 import type { DbClient } from "../db/pool.js";
 import { pool, withTransaction } from "../db/pool.js";
-import { GREAT_GAMES_TURN, GREAT_GAME_TYPES, type GreatGameType } from "../domain/great-games.js";
+import { allocatePool, GREAT_GAMES_TURN, GREAT_GAME_TYPES, type GreatGameType } from "../domain/great-games.js";
 import { GameError } from "./game-service.js";
 
 export type WalletMovementKind =
@@ -175,11 +175,57 @@ export const greatGamesWalletService = {
 
   async closeAll(guildId: string): Promise<{
     total: number; countries: Array<{ countryName: string; settlementName: string; amount: number }>;
+    prizePoolDistributed: number;
+    prizeAwards: Array<{ rank: number; countryName: string; points: number; amount: number }>;
     remainingPrizePool: number;
   }> {
     return withTransaction(async (client) => {
       const season = await lockedSeason(client, guildId);
       if (season.status === "ACTIVE" || season.current_game) throw new GameError("Etkin bir oyun sürerken cüzdanlar kapatılamaz.");
+      const prizePool = Number(season.prize_pool);
+      const prizeAwards: Array<{ rank: number; countryName: string; points: number; amount: number }> = [];
+      if (prizePool > 0) {
+        const podium = (await client.query<{
+          country_id: string; country_name: string; points: number; first_places: number; second_places: number;
+        }>(
+          `SELECT w.country_id,c.name AS country_name,
+                  COALESCE(SUM(p.points),0)::integer AS points,
+                  COUNT(p.id) FILTER (WHERE p.points=5)::integer AS first_places,
+                  COUNT(p.id) FILTER (WHERE p.points=3)::integer AS second_places
+           FROM great_games_wallets w
+           JOIN countries c ON c.id=w.country_id
+           LEFT JOIN great_games_points p ON p.season_id=w.season_id AND p.country_id=w.country_id
+           WHERE w.season_id=$1 AND w.closed_at IS NULL
+           GROUP BY w.country_id,c.name
+           ORDER BY points DESC,first_places DESC,second_places DESC,c.name
+           LIMIT 3`,
+          [season.id]
+        )).rows;
+        if (podium.length < 3) throw new GameError("Müzayede ödül havuzunu dağıtmak için en az üç açık oyun cüzdanı gereklidir.");
+        const payouts = allocatePool(prizePool, [50, 30, 20]);
+        for (let index = 0; index < podium.length; index += 1) {
+          const winner = podium[index]!;
+          const amount = payouts[index] ?? 0;
+          const sourceKey = `overall-prize-payout:${index + 1}`;
+          const adjusted = await adjustGreatGamesWallet(client, {
+            seasonId: season.id,
+            countryId: winner.country_id,
+            amount,
+            kind: "PAYOUT",
+            sourceKey,
+            description: `Büyük Oyunlar genel puan sıralaması ${index + 1}. sıra müzayede havuzu ödülü`
+          });
+          if (!adjusted.changed) throw new GameError("Genel sıralama ödülü daha önce dağıtılmış; cüzdan kapanışı güvenlik amacıyla durduruldu.");
+          await client.query(
+            `INSERT INTO great_games_money(season_id,country_id,game_type,amount,kind,source_key,description)
+             VALUES($1,$2,'OVERALL',$3,'PAYOUT',$4,$5)`,
+            [season.id, winner.country_id, amount, sourceKey, `Genel puan sıralaması ${index + 1}. sıra ödülü`]
+          );
+          prizeAwards.push({ rank: index + 1, countryName: winner.country_name, points: Number(winner.points), amount });
+        }
+        await client.query("UPDATE great_games_seasons SET prize_pool=0,updated_at=NOW() WHERE id=$1", [season.id]);
+      }
+
       const wallets = (await client.query<GreatGamesWalletRow>(
         `SELECT w.*,c.name AS country_name FROM great_games_wallets w JOIN countries c ON c.id=w.country_id
          WHERE w.season_id=$1 AND w.closed_at IS NULL ORDER BY c.name FOR UPDATE`, [season.id]
@@ -214,8 +260,8 @@ export const greatGamesWalletService = {
         total += amount;
         countries.push({ countryName: wallet.country_name, settlementName: selected.name, amount });
       }
-      if (Number(season.prize_pool) === 0) await client.query("UPDATE great_games_seasons SET status='FINISHED',updated_at=NOW() WHERE id=$1", [season.id]);
-      return { total, countries, remainingPrizePool: Number(season.prize_pool) };
+      await client.query("UPDATE great_games_seasons SET status='FINISHED',prize_pool=0,updated_at=NOW() WHERE id=$1", [season.id]);
+      return { total, countries, prizePoolDistributed: prizePool, prizeAwards, remainingPrizePool: 0 };
     });
   }
 };
