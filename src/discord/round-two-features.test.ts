@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { commandBuilders } from "./commands.js";
-import { BRAND_BANNER_PATH, BRAND_BANNER_URL, TEMPLE_BANNER_PATH } from "./assets.js";
+import { TEMPLE_BANNER_PATH, TURN_BANNER_PATH, TURN_BANNER_URL } from "./assets.js";
 import { turnAnnouncement } from "./turn-announcements.js";
 
 describe("ikinci komut ve görsel paketi", () => {
@@ -21,11 +21,11 @@ describe("ikinci komut ve görsel paketi", () => {
     expect(admin?.options?.some((option) => option.name === "komut-gecmisi")).toBe(true);
   });
 
-  it("tur duyurusunu marka görseline bağlar ve iki görseli projede tutar", () => {
+  it("tur duyurusunu nötr AMRP tur görseline bağlar", () => {
     const embed = turnAnnouncement({ kind: "OPEN", turn: 7 }).toJSON();
     expect(embed.title).toContain("TUR 7");
-    expect(embed.image?.url).toBe(BRAND_BANNER_URL);
-    expect(existsSync(BRAND_BANNER_PATH)).toBe(true);
+    expect(embed.image?.url).toBe(TURN_BANNER_URL);
+    expect(existsSync(TURN_BANNER_PATH)).toBe(true);
     expect(existsSync(TEMPLE_BANNER_PATH)).toBe(true);
   });
 });

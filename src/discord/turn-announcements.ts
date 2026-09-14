@@ -1,5 +1,5 @@
 import { EmbedBuilder } from "discord.js";
-import { BRAND_BANNER_URL } from "./assets.js";
+import { TURN_BANNER_URL } from "./assets.js";
 
 export type TurnAnnouncement = "ADVANCE" | "OPEN" | "PAUSE" | "CLOSE";
 
@@ -43,7 +43,7 @@ export function turnAnnouncement(input: TurnAnnouncementInput): EmbedBuilder {
       CLOSE: { color: 0x8b1e1e, title: `🔴 TUR ${input.turn} KAPATILDI`, description: "Bu turun bütün hareketleri sona ermiştir. Yeni hamle gönderilemez; bir sonraki tur duyurusu beklenmelidir." }
     } as const;
     const selected = details[input.kind];
-    return new EmbedBuilder().setColor(selected.color).setTitle(selected.title).setDescription(selected.description).setImage(BRAND_BANNER_URL).setFooter({ text: "Savaş Tanrıları Role Play • Resmî Tur Duyurusu" }).setTimestamp();
+    return new EmbedBuilder().setColor(selected.color).setTitle(selected.title).setDescription(selected.description).setImage(TURN_BANNER_URL).setFooter({ text: "Antik Medeniyetler Role Play • Resmî Tur Duyurusu" }).setTimestamp();
   }
 
   const embed = new EmbedBuilder()
@@ -55,8 +55,8 @@ export function turnAnnouncement(input: TurnAnnouncementInput): EmbedBuilder {
       `🏗️ Tamamlanan bina: **${input.completedBuildings ?? 0}** • ⚔️ Katılan asker: **${(input.recruitmentArrivals ?? 0).toLocaleString("tr-TR")}**`,
       `🛡️ Tamamlanan garnizon: **${input.garrisonUpgrades ?? 0}** • 🚢 Tamamlanan gemi: **${input.completedShips ?? 0}** • 🛠️ Kuşatma aleti: **${input.completedSiegeAssets ?? 0}**`
     ].join("\n"))
-    .setImage(BRAND_BANNER_URL)
-    .setFooter({ text: "Savaş Tanrıları Role Play • Resmî Tur Duyurusu" })
+    .setImage(TURN_BANNER_URL)
+    .setFooter({ text: "Antik Medeniyetler Role Play • Resmî Tur Duyurusu" })
     .setTimestamp();
 
   if (input.completedBuildingDetails?.length) embed.addFields({

@@ -38,7 +38,7 @@ import { assertCountryAccess, isGameMaster, requireGameMaster, resolveCountry } 
 import { buildingChoices, shipChoices, unitChoices } from "./commands.js";
 import { batchDocumentEmbeds, renderDocument } from "./document.js";
 import { publishGreatPowerRanking } from "./great-power-ui.js";
-import { BRAND_BANNER_PATH, BRAND_BANNER_NAME, TEMPLE_BANNER_PATH, TEMPLE_BANNER_NAME } from "./assets.js";
+import { BRAND_BANNER_PATH, BRAND_BANNER_NAME, TEMPLE_BANNER_PATH, TEMPLE_BANNER_NAME, TURN_BANNER_PATH, TURN_BANNER_NAME } from "./assets.js";
 import { turnAnnouncement } from "./turn-announcements.js";
 import { handleBattleButton, handleBattleCommand, refreshActiveBattleCards } from "./battle-ui.js";
 import { handleArmyCommand } from "./army-ui.js";
@@ -391,7 +391,7 @@ async function handleTurn(interaction: ChatInputCommandInteraction): Promise<voi
     const guild = await gameService.guildState(interaction.guildId);
     embed = turnAnnouncement({ kind: sub === "ac" ? "OPEN" : sub === "durdur" ? "PAUSE" : "CLOSE", turn: guild.current_turn });
   }
-  await interaction.editReply({ embeds: [embed], files: [new AttachmentBuilder(BRAND_BANNER_PATH, { name: BRAND_BANNER_NAME })] });
+  await interaction.editReply({ embeds: [embed], files: [new AttachmentBuilder(TURN_BANNER_PATH, { name: TURN_BANNER_NAME })] });
   if (characterAutomationWarnings.length) {
     await interaction.followUp({
       content:"⚠️ **Yalnızca yöneticiye görünen karakter otomasyonu uyarısı:**\n"+characterAutomationWarnings.join("\n⚠️ "),
@@ -665,7 +665,7 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
       mercenaryUnpaidDetails: result.mercenaryUnpaidDetails,
       mercenaryEndedDetails: result.mercenaryEndedDetails,
       assimilatedSettlementDetails: result.assimilatedSettlementDetails
-    })], files: [new AttachmentBuilder(BRAND_BANNER_PATH, { name: BRAND_BANNER_NAME })] });
+    })], files: [new AttachmentBuilder(TURN_BANNER_PATH, { name: TURN_BANNER_NAME })] });
     if (characterAutomation.warnings.length) {
       await interaction.followUp({content:"⚠️ **Karakter otomasyonu:** "+characterAutomation.warnings.join("\n⚠️ "),ephemeral:true});
     }
