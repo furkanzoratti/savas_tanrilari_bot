@@ -1734,8 +1734,27 @@ async function reportError(interaction: Interaction, error: unknown): Promise<vo
     return;
   }
   if (!(error instanceof GameError)) {
+    const databaseError = error as Partial<{
+      code: string; detail: string; hint: string; where: string;
+      schema: string; table: string; column: string; constraint: string;
+      file: string; line: string; routine: string;
+    }>;
     logger.error({
-      error,
+      err: error,
+      errorName: error instanceof Error ? error.name : undefined,
+      errorMessage: error instanceof Error ? error.message : String(error),
+      errorStack: error instanceof Error ? error.stack : undefined,
+      errorCode: databaseError?.code,
+      errorDetail: databaseError?.detail,
+      errorHint: databaseError?.hint,
+      errorWhere: databaseError?.where,
+      errorSchema: databaseError?.schema,
+      errorTable: databaseError?.table,
+      errorColumn: databaseError?.column,
+      errorConstraint: databaseError?.constraint,
+      errorFile: databaseError?.file,
+      errorLine: databaseError?.line,
+      errorRoutine: databaseError?.routine,
       reference,
       interactionId: interaction.id,
       interactionType: interaction.type,
