@@ -20,7 +20,7 @@ describe("kuşatma ordusu başlangıç konumu", () => {
       if (sql.includes("SELECT battle.terrain,siege_hex.coordinate")) return { rows: [battle], rowCount: 1 };
       if (sql.includes("SELECT 1 FROM army_map_positions WHERE army_id")) return { rows: [], rowCount: alreadyPositioned ? 1 : 0 };
       if (sql.includes("FROM movement_orders") || sql.includes("FROM movement_encounters") || sql.includes("FROM army_muster_orders")) return { rows: [], rowCount: 0 };
-      if (sql.includes("FROM map_hexes WHERE guild_id")) return { rows: [{ id: "city-hex", coordinate: "J22", q: 1, r: 2, domain: "LAND", terrain: "PLAINS", region_key: null, owner_country_id: "defender", passable: true }], rowCount: 1 };
+      if (sql.includes("FROM map_hexes hex WHERE hex.guild_id")) return { rows: [{ id: "city-hex", coordinate: "J22", q: 1, r: 2, domain: "LAND", terrain: "PLAINS", region_key: null, owner_country_id: "defender", passable: true, coastal_port: false }], rowCount: 1 };
       if (sql.includes("SELECT hex.coordinate FROM army_map_positions")) return { rows: [], rowCount: 0 };
       if (sql.includes("INSERT INTO army_map_positions")) { writes.push("position"); return { rows: [], rowCount: 1 }; }
       if (sql.includes("INSERT INTO audit_logs")) return { rows: [], rowCount: 1 };
@@ -49,5 +49,41 @@ describe("kuşatma ordusu başlangıç konumu", () => {
   it("normal savaştaki orduya kuşatma istisnası uygulamaz", async () => {
     setup({ terrain: "LAND", siege_coordinate: null });
     await expect(movementService.positionFormation(input)).rejects.toThrow("kuşatma kentinin");
+  });
+});
+
+describe("KIYI yerleşkesinde filo konumu", () => {
+  function setup(coastalPort: boolean) {
+    const writes: string[] = [];
+    fixture.client = { query: async (sql: string) => {
+      if (sql.includes("pg_advisory_xact_lock")) return { rows: [], rowCount: 1 };
+      if (sql.includes("FROM guild_movement_settings")) return { rows: [{ guild_id: "guild", enabled: false, visibility_mode: "INTELLIGENCE", map_revision: 1, rules: {} }], rowCount: 1 };
+      if (sql.includes("SELECT id,name,guild_id,country_id FROM fleets")) return { rows: [{ id: "fleet", name: "Kıyı Filosu", guild_id: "guild", country_id: "country" }], rowCount: 1 };
+      if (sql.includes("SELECT battle.terrain,siege_hex.coordinate")) return { rows: [], rowCount: 0 };
+      if (sql.includes("FROM movement_orders") || sql.includes("FROM movement_encounters")) return { rows: [], rowCount: 0 };
+      if (sql.includes("FROM map_hexes hex WHERE hex.guild_id")) return { rows: [{ id: "coast-hex", coordinate: "J22", q: 1, r: 2,
+        domain: "LAND", terrain: "OPEN_PLAIN", region_key: null, owner_country_id: "country", passable: true,
+        coastal_port: coastalPort }], rowCount: 1 };
+      if (sql.includes("SELECT hex.coordinate FROM fleet_map_positions")) return { rows: [], rowCount: 0 };
+      if (sql.includes("INSERT INTO fleet_map_positions")) { writes.push("position"); return { rows: [], rowCount: 1 }; }
+      if (sql.includes("INSERT INTO audit_logs")) return { rows: [], rowCount: 1 };
+      throw new Error(`Unexpected query: ${sql}`);
+    } } as unknown as DbClient;
+    return writes;
+  }
+
+  const input = { guildId: "guild", countryId: "country", actorId: "gm", formationKind: "FLEET" as const,
+    formationId: "fleet", coordinate: "J22", arrivedTurn: 20 };
+
+  it("denize komşu KIYI kenti kara hexine bütün filoyu tek konumla yerleştirir", async () => {
+    const writes = setup(true);
+    await expect(movementService.positionFormation(input)).resolves.toMatchObject({ coordinate: "J22" });
+    expect(writes).toEqual(["position"]);
+  });
+
+  it("KIYI erişimi olmayan kara hexine filo yerleştirmez", async () => {
+    const writes = setup(false);
+    await expect(movementService.positionFormation(input)).rejects.toThrow("KIYI yerleşkesi");
+    expect(writes).toEqual([]);
   });
 });

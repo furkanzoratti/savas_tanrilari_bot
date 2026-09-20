@@ -1,5 +1,6 @@
 import type { DbClient } from "../db/pool.js";
 import { pool } from "../db/pool.js";
+import { coastalPortSql } from "./coastal-navigation-sql.js";
 
 export interface MovementReadiness {
   ready: boolean;
@@ -56,7 +57,8 @@ export async function inspectMovementReadiness(client: DbClient, guildId: string
       +(SELECT COUNT(*) FROM fleet_map_positions position JOIN fleets fleet ON fleet.id=position.fleet_id
         JOIN countries owner ON owner.id=fleet.country_id
         JOIN map_hexes hex ON hex.id=position.hex_id
-        WHERE fleet.guild_id=$1 AND owner.status='ACTIVE' AND (hex.guild_id<>$1 OR hex.domain<>'SEA' OR NOT hex.passable))) AS invalid_positions,
+        WHERE fleet.guild_id=$1 AND owner.status='ACTIVE' AND
+          (hex.guild_id<>$1 OR NOT hex.passable OR (hex.domain<>'SEA' AND NOT ${coastalPortSql("hex")})))) AS invalid_positions,
     (SELECT COUNT(*) FROM movement_orders WHERE guild_id=$1 AND status IN ('SUBMITTED','IN_PROGRESS','BLOCKED')) AS active_orders,
     (SELECT COUNT(*) FROM army_muster_orders WHERE guild_id=$1 AND status IN ('SUBMITTED','IN_PROGRESS','BLOCKED','WAITING_ARMY')) AS active_musters,
     (SELECT COUNT(*) FROM movement_encounters WHERE guild_id=$1 AND status IN ('PENDING','BATTLE_PENDING','BATTLE_LINKED','SPECIAL')) AS unresolved_encounters,

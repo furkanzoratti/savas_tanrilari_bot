@@ -5,6 +5,8 @@ import { GameError } from "./game-service.js";
 import { resolveMovementRecon } from "./movement-recon-service.js";
 import { fleetCargoSnapshot } from "./movement-transport-service.js";
 import { resolveArmyMusterStage, type MusterStageSummary } from "./army-muster-service.js";
+import { fleetAccessibleStep } from "../domain/coastal-navigation.js";
+import { coastalPortSql } from "./coastal-navigation-sql.js";
 
 export interface MovementStageSummary {
   enabled: boolean;
@@ -41,6 +43,9 @@ interface OrderRow {
 
 interface StepRow extends ResolutionStep {
   domain: string;
+  coastal_port: boolean;
+  from_domain: string;
+  from_coastal_port: boolean;
   passable: boolean;
   owner_country_id: string | null;
 }
@@ -73,17 +78,22 @@ function blockAt(plan: PlannedOrder, stepIndex: number, reason: string): void {
 async function loadSteps(client: DbClient, orderId: string): Promise<StepRow[]> {
   const rows = (await client.query<{
     step_index: number; from_hex_id: string; to_hex_id: string; movement_cost: number;
-    domain: string; passable: boolean; owner_country_id: string | null;
+    domain: string; coastal_port: boolean; from_domain: string; from_coastal_port: boolean;
+    passable: boolean; owner_country_id: string | null;
   }>(
     `SELECT step.step_index,step.from_hex_id,step.to_hex_id,step.movement_cost,
-            target.domain,target.passable,target.owner_country_id
+            target.domain,target.passable,target.owner_country_id,
+            source.domain AS from_domain,${coastalPortSql("source")} AS from_coastal_port,
+            ${coastalPortSql("target")} AS coastal_port
        FROM movement_order_steps step JOIN map_hexes target ON target.id=step.to_hex_id
+       JOIN map_hexes source ON source.id=step.from_hex_id
       WHERE step.order_id=$1 ORDER BY step.step_index`,
     [orderId]
   )).rows;
   return rows.map((row) => ({
     stepIndex: Number(row.step_index), fromHexId: row.from_hex_id, toHexId: row.to_hex_id,
-    cost: Number(row.movement_cost), domain: row.domain, passable: row.passable,
+    cost: Number(row.movement_cost), domain: row.domain, coastal_port: row.coastal_port,
+    from_domain: row.from_domain, from_coastal_port: row.from_coastal_port, passable: row.passable,
     owner_country_id: row.owner_country_id
   }));
 }
@@ -204,8 +214,12 @@ export async function resolveMovementStage(
         let from = position.hex_id;
         for (const step of [...plan.traversed]) {
           let reason: string | null = null;
-          if (step.fromHexId !== from || !step.passable || step.domain !== (order.formation_kind === "ARMY" ? "LAND" : "SEA")) {
+          if (step.fromHexId !== from || !step.passable || (order.formation_kind === "ARMY"
+            ? step.domain !== "LAND"
+            : !fleetAccessibleStep(step.from_domain,step.from_coastal_port,step.domain,step.coastal_port))) {
             reason = "Rota veya geçilebilir Hex türü değişti; yönetici incelemesi gerekiyor.";
+          } else if (order.formation_kind === "FLEET" && step.coastal_port && step.owner_country_id !== order.country_id) {
+            reason = "Yabancı kıyı yerleşkesine giriş yönetici kararı gerektiriyor.";
           } else if ((occupancy.get(key(order.formation_kind, step.toHexId)) ?? [])
             .some((item) => item.country_id !== order.country_id)) {
             reason = "Hedef Hex'te karşı tarafın birliği var; karşılaşma yönetici kararı gerektiriyor.";

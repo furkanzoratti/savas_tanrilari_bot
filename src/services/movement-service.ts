@@ -21,6 +21,8 @@ import {
   type MovementOrderStatus
 } from "../domain/movement.js";
 import { GameError } from "./game-service.js";
+import { fleetAccessibleHex, fleetAccessibleStep } from "../domain/coastal-navigation.js";
+import { coastalPortSql } from "./coastal-navigation-sql.js";
 import { fleetCargoSnapshot } from "./movement-transport-service.js";
 import { inspectMovementReadiness } from "./movement-readiness-service.js";
 
@@ -128,6 +130,7 @@ interface HexRow {
   region_key: string | null;
   owner_country_id: string | null;
   passable: boolean;
+  coastal_port: boolean;
 }
 
 function normalizedCoordinate(value: string): string {
@@ -226,8 +229,9 @@ async function routeHexes(client: DbClient, guildId: string, route: readonly str
   try { normalized = route.map(normalizedCoordinate); }
   catch { throw new GameError("Manuel rotada geçersiz Hex koordinatı var; A12 veya AA12 biçimini kullanın."); }
   const rows = (await client.query<HexRow>(
-    `SELECT id,coordinate,q,r,domain,terrain,region_key,owner_country_id,passable
-       FROM map_hexes WHERE guild_id=$1 AND coordinate=ANY($2::text[])`,
+    `SELECT hex.id,hex.coordinate,hex.q,hex.r,hex.domain,hex.terrain,hex.region_key,hex.owner_country_id,hex.passable,
+            ${coastalPortSql("hex")} AS coastal_port
+       FROM map_hexes hex WHERE hex.guild_id=$1 AND hex.coordinate=ANY($2::text[])`,
     [guildId, normalized]
   )).rows;
   const byCoordinate = new Map(rows.map((row) => [row.coordinate.toUpperCase(), row]));
@@ -252,7 +256,7 @@ async function edgeOverrides(client: DbClient, route: readonly HexRow[]): Promis
   return result;
 }
 
-function validateRoute(kind: FormationKind, route: readonly HexRow[], overrides: ReadonlyMap<string, { army_allowed: boolean; fleet_allowed: boolean; movement_cost: number }>): number[] {
+function validateRoute(kind: FormationKind, countryId: string, route: readonly HexRow[], overrides: ReadonlyMap<string, { army_allowed: boolean; fleet_allowed: boolean; movement_cost: number }>): number[] {
   const costs: number[] = [];
   for (let index = 1; index < route.length; index += 1) {
     const from = route[index - 1]!;
@@ -262,11 +266,14 @@ function validateRoute(kind: FormationKind, route: readonly HexRow[], overrides:
     const adjacent = hexDistance(parseHexCoordinate(from.coordinate), parseHexCoordinate(to.coordinate)) === 1;
     if (!adjacent && !override) throw new GameError(`${from.coordinate} ile ${to.coordinate} birbirine bağlı değil.`);
     if (kind === "ARMY" && (to.domain !== "LAND" || (override && !override.army_allowed))) throw new GameError(`Kara ordusu ${to.coordinate} koordinatına geçemez.`);
-    if (kind === "FLEET" && (to.domain !== "SEA" || (override && !override.fleet_allowed))) throw new GameError(`Filo ${to.coordinate} koordinatına geçemez.`);
+    if (kind === "FLEET" && (!fleetAccessibleStep(from.domain,from.coastal_port,to.domain,to.coastal_port)
+      || (override && !override.fleet_allowed))) throw new GameError(`Filo ${to.coordinate} koordinatına geçemez.`);
+    if (kind === "FLEET" && to.coastal_port && to.owner_country_id !== countryId)
+      throw new GameError("Filo başka bir devletin kıyı yerleşkesine normal hareket emriyle giremez; denizde bekleyip yönetici kararı alınmalıdır.");
     const terrainKey = to.terrain as keyof typeof DEFAULT_MOVEMENT_RULES.terrainCosts;
     const normalCost = DEFAULT_MOVEMENT_RULES.terrainCosts[terrainKey];
-    if (normalCost == null) throw new GameError(`${to.coordinate} arazisi bu rota için geçilemez.`);
-    const cost = override?.movement_cost ?? normalCost;
+    if (normalCost == null && !(kind === "FLEET" && to.coastal_port)) throw new GameError(`${to.coordinate} arazisi bu rota için geçilemez.`);
+    const cost = override?.movement_cost ?? (kind === "FLEET" && to.coastal_port ? 1 : normalCost);
     if (cost === null || cost <= 0) throw new GameError(`${to.coordinate} bu birlik türü için geçilemez.`);
     costs.push(cost);
   }
@@ -563,12 +570,15 @@ export const movementService = {
         [input.formationId]
       )).rowCount) throw new GameError("Bu orduya yolda asker geliyor; konumunu düzeltmeden önce toplanma emirlerini çözün.");
       const hex = (await client.query<HexRow>(
-        "SELECT id,coordinate,q,r,domain,terrain,region_key,owner_country_id,passable FROM map_hexes WHERE guild_id=$1 AND coordinate=$2",
+        `SELECT hex.id,hex.coordinate,hex.q,hex.r,hex.domain,hex.terrain,hex.region_key,hex.owner_country_id,hex.passable,
+                ${coastalPortSql("hex")} AS coastal_port
+           FROM map_hexes hex WHERE hex.guild_id=$1 AND hex.coordinate=$2`,
         [input.guildId, coordinate]
       )).rows[0];
       if (!hex || !hex.passable || hex.domain === "VOID") throw new GameError("Geçerli ve geçilebilir bir harita koordinatı seçilmelidir.");
       if (input.formationKind === "ARMY" && hex.domain !== "LAND") throw new GameError("Kara ordusu deniz Hex'ine yerleştirilemez.");
-      if (input.formationKind === "FLEET" && hex.domain !== "SEA") throw new GameError("Filo kara Hex'ine yerleştirilemez.");
+      if (input.formationKind === "FLEET" && !fleetAccessibleHex(hex.domain,hex.coastal_port))
+        throw new GameError("Filo yalnız deniz Hex'ine veya denize komşu KIYI yerleşkesi Hex'ine yerleştirilebilir.");
       const table = input.formationKind === "ARMY" ? "army_map_positions" : "fleet_map_positions";
       const idColumn = input.formationKind === "ARMY" ? "army_id" : "fleet_id";
       const before=(await client.query<{coordinate:string}>(
@@ -670,7 +680,10 @@ export const movementService = {
       const position = await formationPosition(client, input.formationKind, unit.id);
       const hexes = (await client.query<{
         coordinate: string; domain: MapDomain; terrain: string; passable: boolean;
-      }>("SELECT coordinate,domain,terrain,passable FROM map_hexes WHERE guild_id=$1", [input.guildId])).rows;
+        coastal_port: boolean; owner_country_id: string | null;
+      }>(`SELECT hex.coordinate,hex.domain,hex.terrain,hex.passable,
+                 hex.owner_country_id,${coastalPortSql("hex")} AS coastal_port
+            FROM map_hexes hex WHERE hex.guild_id=$1`, [input.guildId])).rows;
       const edges = (await client.query<{
         from_coordinate: string; to_coordinate: string; movement_cost: number;
         army_allowed: boolean; fleet_allowed: boolean; bidirectional: boolean;
@@ -685,7 +698,9 @@ export const movementService = {
         armyAllowed: edge.army_allowed, fleetAllowed: edge.fleet_allowed, bidirectional: edge.bidirectional
       }));
       const result = planHexRoute({
-        hexes, edges: routingEdges, start: position.coordinate, destination,
+        hexes: hexes.map((hex) => ({ ...hex,
+          coastal_port: hex.coastal_port && (hex.owner_country_id === input.countryId || hex.coordinate === position.coordinate)
+        })), edges: routingEdges, start: position.coordinate, destination,
         formationKind: input.formationKind, terrainCosts: DEFAULT_MOVEMENT_RULES.terrainCosts
       });
       if (!result) throw new GameError("Hedefe bu birlik için geçilebilir bir rota bulunamadı.");
@@ -706,7 +721,7 @@ export const movementService = {
       if (route[0]!.id !== position.hex_id) {
         throw new GameError(`Manuel rota birliğin bulunduğu ${position.coordinate} Hex'inden başlamalıdır.`);
       }
-      const costs = validateRoute(input.formationKind, route, await edgeOverrides(client, route));
+      const costs = validateRoute(input.formationKind, input.countryId, route, await edgeOverrides(client, route));
       return {
         coordinates: route.map((hex) => hex.coordinate), costs,
         totalCost: costs.reduce((sum, cost) => sum + cost, 0)
@@ -780,7 +795,7 @@ export const movementService = {
       const route = await routeHexes(client, input.guildId, input.route);
       if (route[0]!.id !== position.hex_id) throw new GameError(`Rota birliğin mevcut ${position.coordinate} koordinatından başlamalıdır.`);
       const overrides = await edgeOverrides(client, route);
-      const costs = validateRoute(input.formationKind, route, overrides);
+      const costs = validateRoute(input.formationKind, input.countryId, route, overrides);
       const friendlyTerritoryRoute = route.every((hex) => hex.owner_country_id === input.countryId);
       const strategicEligible = input.mode === "STRATEGIC_REDEPLOYMENT" && friendlyTerritoryRoute;
       if (input.mode === "STRATEGIC_REDEPLOYMENT" && !strategicEligible) {
@@ -879,7 +894,7 @@ export const movementService = {
         throw new GameError("Birliğin güncel Hex'i veya kalan rota kayıtları uyuşmuyor; konumu yöneticiyle düzeltin.");
       const remaining=[position.coordinate,...steps.map((step)=>step.to_coordinate)];
       const route=await routeHexes(client,input.guildId,remaining);
-      const costs=validateRoute(order.formation_kind,route,await edgeOverrides(client,route));
+      const costs=validateRoute(order.formation_kind,order.country_id,route,await edgeOverrides(client,route));
       const friendly=route.every((hex)=>hex.owner_country_id===order.country_id);
       const snapshot=order.formation_kind==="ARMY"
         ? await armyMovementSnapshot(client,formationId,"NORMAL",false,friendly)

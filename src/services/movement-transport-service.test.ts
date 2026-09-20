@@ -23,7 +23,7 @@ describe("fleet cargo snapshot", () => {
 });
 
 describe("ordu filo bağlantısı", () => {
-  it("orduyu gemiye alırken kara konumunu kaldırır ve filo yüküne dahil eder", async () => {
+  async function embark(sharedCoast: boolean) {
     const writes: string[] = [];
     transaction.client = { query: async (sql: string) => {
       if (sql.includes("pg_advisory_xact_lock")) return { rows: [], rowCount: 1 };
@@ -32,8 +32,9 @@ describe("ordu filo bağlantısı", () => {
       if (sql.includes("SELECT unit.id,unit.name,unit.country_id")) {
         const fleet = sql.includes("FROM fleets unit");
         return { rows: [{ id: fleet ? "fleet-1" : "army-1", name: fleet ? "Filo" : "Ordu",
-          country_id: "country-1", hex_id: fleet ? "sea-1" : "land-1",
-          coordinate: fleet ? "AA10" : "AB10", domain: fleet ? "SEA" : "LAND",
+          country_id: "country-1", hex_id: fleet && !sharedCoast ? "sea-1" : "land-1",
+          coordinate: fleet && !sharedCoast ? "AA10" : "AB10", domain: fleet && !sharedCoast ? "SEA" : "LAND",
+          coastal_port: fleet && sharedCoast,
           owner_country_id: fleet ? null : "country-1" }], rowCount: 1 };
       }
       if (sql.includes("FROM movement_orders") || sql.includes("FROM movement_encounters") ||
@@ -50,23 +51,33 @@ describe("ordu filo bağlantısı", () => {
     } } as unknown as DbClient;
     await movementTransportService.embark({ guildId: "guild", countryId: "country-1", actorId: "player",
       armyId: "army-1", fleetId: "fleet-1" });
-    expect(writes).toEqual(["embark", "remove_land_position"]);
+    return writes;
+  }
+
+  it("orduyu deniz hexindeki filoya alırken kara konumunu kaldırır", async () => {
+    expect(await embark(false)).toEqual(["embark", "remove_land_position"]);
+  });
+
+  it("ordu ve filo aynı KIYI kenti hexindeyken gemiye alır", async () => {
+    expect(await embark(true)).toEqual(["embark", "remove_land_position"]);
   });
 });
 
 describe("yönetici kıyı çıkarması",()=>{
-  function fixture(enemy=false){
+  function fixture(enemy=false,sharedCoast=false){
     const writes:string[]=[];
     transaction.client={query:async(sql:string)=>{
       if(sql.includes("pg_advisory_xact_lock"))return {rows:[],rowCount:1};
       if(sql.includes("SELECT current_turn,turn_phase FROM guilds"))return {rows:[{current_turn:9,turn_phase:"OPEN"}],rowCount:1};
       if(sql.includes("SELECT cargo.fleet_id,cargo.embarked_turn"))return {rows:[{fleet_id:"fleet-1",embarked_turn:8}],rowCount:1};
       if(sql.includes("SELECT unit.id,unit.name,unit.country_id"))return {rows:[{
-        id:"fleet-1",name:"Filo",country_id:"country-1",hex_id:"sea-1",coordinate:"AA10",domain:"SEA",owner_country_id:null
+        id:"fleet-1",name:"Filo",country_id:"country-1",hex_id:sharedCoast?"land-1":"sea-1",
+        coordinate:sharedCoast?"AB10":"AA10",domain:sharedCoast?"LAND":"SEA",
+        coastal_port:sharedCoast,owner_country_id:sharedCoast?"country-1":null
       }],rowCount:1};
       if(sql.includes("FROM movement_orders")||sql.includes("FROM movement_encounters"))return {rows:[],rowCount:0};
       if(sql.includes("SELECT id,coordinate,domain,passable,owner_country_id FROM map_hexes"))return {rows:[{
-        id:"land-1",coordinate:"AB10",domain:"LAND",passable:true,owner_country_id:"country-2"
+        id:"land-1",coordinate:"AB10",domain:"LAND",passable:true,owner_country_id:sharedCoast?"country-1":"country-2"
       }],rowCount:1};
       if(sql.includes("FROM army_map_positions position JOIN armies army"))return {rows:[],rowCount:enemy?1:0};
       if(sql.includes("DELETE FROM fleet_cargo_armies")){writes.push("unload");return {rows:[],rowCount:1};}
@@ -90,5 +101,12 @@ describe("yönetici kıyı çıkarması",()=>{
     await expect(movementTransportService.disembark({guildId:"guild",countryId:"country-1",actorId:"gm",
       armyId:"army-1",coordinate:"AB10",adminReason:"GM çıkarma kararı"})).rejects.toThrow("düşman ordusu");
     expect(writes).toEqual([]);
+  });
+
+  it("KIYI yerleşkesi hexindeki filo orduyu aynı hexe indirebilir",async()=>{
+    const writes=fixture(false,true);
+    await movementTransportService.disembark({guildId:"guild",countryId:"country-1",actorId:"player",
+      armyId:"army-1",coordinate:"AB10"});
+    expect(writes).toEqual(["unload","land"]);
   });
 });

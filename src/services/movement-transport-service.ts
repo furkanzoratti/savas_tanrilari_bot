@@ -5,15 +5,17 @@ import { formableModifiers, isFormableCountryKey } from "../domain/formable-coun
 import { hexDistance, parseHexCoordinate, type MobileSiegeLoad } from "../domain/movement.js";
 import { navalCargoCapacity, type NavalCargoManifest } from "../domain/naval-cargo.js";
 import { GameError } from "./game-service.js";
+import { coastalPortSql } from "./coastal-navigation-sql.js";
 
-interface LocatedFormation { id: string; name: string; country_id: string; hex_id: string; coordinate: string; domain: string; owner_country_id: string | null; }
+interface LocatedFormation { id: string; name: string; country_id: string; hex_id: string; coordinate: string; domain: string; coastal_port: boolean; owner_country_id: string | null; }
 
 async function located(client: DbClient, guildId: string, countryId: string, kind: "ARMY" | "FLEET", id: string): Promise<LocatedFormation> {
   const table = kind === "ARMY" ? "armies" : "fleets";
   const positions = kind === "ARMY" ? "army_map_positions" : "fleet_map_positions";
   const column = kind === "ARMY" ? "army_id" : "fleet_id";
   const row = (await client.query<LocatedFormation>(
-    `SELECT unit.id,unit.name,unit.country_id,hex.id AS hex_id,hex.coordinate,hex.domain,hex.owner_country_id
+    `SELECT unit.id,unit.name,unit.country_id,hex.id AS hex_id,hex.coordinate,hex.domain,hex.owner_country_id,
+            ${coastalPortSql("hex")} AS coastal_port
        FROM ${table} unit JOIN ${positions} position ON position.${column}=unit.id
        JOIN map_hexes hex ON hex.id=position.hex_id
       WHERE unit.id=$1 AND unit.country_id=$2 AND unit.guild_id=$3 FOR UPDATE OF unit,position`,
@@ -98,8 +100,10 @@ export const movementTransportService = {
       if (!enabled) throw new GameError("Deniz taşıması koordinatlı hareket açılana kadar kullanılamaz.");
       const fleet = await located(client, input.guildId, input.countryId, "FLEET", input.fleetId);
       const army = await located(client, input.guildId, input.countryId, "ARMY", input.armyId);
-      if (army.domain !== "LAND" || fleet.domain !== "SEA" || hexDistance(parseHexCoordinate(army.coordinate),parseHexCoordinate(fleet.coordinate)) !== 1) {
-        throw new GameError("Ordu, filonun bulunduğu deniz Hex'ine bitişik bir kara Hex'inde olmalıdır.");
+      const adjacentSea = fleet.domain === "SEA" && hexDistance(parseHexCoordinate(army.coordinate),parseHexCoordinate(fleet.coordinate)) === 1;
+      const sharedCoast = fleet.coastal_port && army.hex_id === fleet.hex_id;
+      if (army.domain !== "LAND" || !(adjacentSea || sharedCoast)) {
+        throw new GameError("Ordu, filonun deniz Hex'ine bitişik kıyıda veya filo ile aynı KIYI yerleşkesi Hex'inde olmalıdır.");
       }
       if (army.owner_country_id !== input.countryId) throw new GameError("Gemiye binme kendi kontrolünüzdeki kıyıdan yapılmalıdır.");
       if (await activeOrder(client,"ARMY",army.id) || await activeOrder(client,"FLEET",fleet.id)) throw new GameError("Etkin hareket emri bulunan birliklerde yükleme yapılamaz.");
@@ -149,8 +153,11 @@ export const movementTransportService = {
         "SELECT id,coordinate,domain,passable,owner_country_id FROM map_hexes WHERE guild_id=$1 AND coordinate=upper($2)",
         [input.guildId,input.coordinate]
       )).rows[0];
-      if (!destination || !destination.passable || destination.domain !== "LAND" || hexDistance(parseHexCoordinate(fleet.coordinate),parseHexCoordinate(destination.coordinate)) !== 1) {
-        throw new GameError("Karaya çıkış noktası filonun deniz Hex'ine bitişik, geçilebilir kara Hex'i olmalıdır.");
+      const adjacentSea = fleet.domain === "SEA" && destination
+        && hexDistance(parseHexCoordinate(fleet.coordinate),parseHexCoordinate(destination.coordinate)) === 1;
+      const sharedCoast = fleet.coastal_port && destination?.id === fleet.hex_id;
+      if (!destination || !destination.passable || destination.domain !== "LAND" || !(adjacentSea || sharedCoast)) {
+        throw new GameError("Karaya çıkış noktası filonun deniz Hex'ine bitişik kara veya aynı KIYI yerleşkesi Hex'i olmalıdır.");
       }
       const reason=input.adminReason?.trim();
       if (destination.owner_country_id !== input.countryId && (!reason || reason.length<5))

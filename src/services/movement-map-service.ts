@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { DbClient } from "../db/pool.js";
 import { pool, withTransaction } from "../db/pool.js";
-import { hexCodeAxial } from "../domain/movement.js";
+import { hexCodeAxial, hexDistance, parseHexCoordinate } from "../domain/movement.js";
+import { fleetAccessibleHex } from "../domain/coastal-navigation.js";
 import { prepareR56Map, type BotSettlement, type R56Map } from "../domain/hex-map-data.js";
 import { GameError } from "./game-service.js";
 import { syncObserverPosts } from "./movement-observer-service.js";
@@ -38,8 +39,8 @@ function loadR56Source(): { map: R56Map; aliases: Record<string, string> } {
 
 async function preparedForGuild(client: DbClient, guildId: string) {
   const { map, aliases } = loadR56Source();
-  const settlements = (await client.query<{ id: string; name: string; country_id: string }>(
-    "SELECT s.id,s.name,s.country_id FROM settlements s JOIN countries c ON c.id=s.country_id WHERE c.guild_id=$1",
+  const settlements = (await client.query<{ id: string; name: string; country_id: string; is_coastal: boolean }>(
+    "SELECT s.id,s.name,s.country_id,s.is_coastal FROM settlements s JOIN countries c ON c.id=s.country_id WHERE c.guild_id=$1",
     [guildId]
   )).rows;
   const records: BotSettlement[] = settlements.map((row) => ({ id: row.id, name: row.name, countryId: row.country_id }));
@@ -59,7 +60,13 @@ async function preparedForGuild(client: DbClient, guildId: string) {
     settlements: prepared.settlementPositions.length,
     ambiguousRegions: prepared.ambiguousRegions
   };
-  return { prepared, preview };
+  const coastalSettlements = new Set(settlements.filter((settlement) => settlement.is_coastal).map((settlement) => settlement.id));
+  const seaHexes = prepared.hexes.filter((hex) => hex.domain === "SEA" && hex.passable);
+  const coastalPortCoordinates = new Set(prepared.settlementPositions
+    .filter((position) => coastalSettlements.has(position.settlementId)
+      && seaHexes.some((sea) => hexDistance(parseHexCoordinate(position.coordinate),parseHexCoordinate(sea.coordinate)) === 1))
+    .map((position) => position.coordinate));
+  return { prepared, preview, coastalPortCoordinates };
 }
 
 export const movementMapService = {
@@ -123,7 +130,7 @@ export const movementMapService = {
         [input.guildId]
       );
       if (active.rowCount) throw new GameError("Etkin hareket emirleri bitmeden harita yeniden aktarılamaz.");
-      const { prepared, preview } = await preparedForGuild(client, input.guildId);
+      const { prepared, preview, coastalPortCoordinates } = await preparedForGuild(client, input.guildId);
       const byCoordinate = new Map(prepared.hexes.map((hex) => [hex.coordinate, hex]));
       const positioned = (await client.query<{ coordinate: string; formation_kind: "ARMY" | "FLEET" }>(
         `SELECT hex.coordinate,'ARMY' AS formation_kind
@@ -135,7 +142,9 @@ export const movementMapService = {
       )).rows;
       for (const position of positioned) {
         const target = byCoordinate.get(position.coordinate);
-        if (!target || !target.passable || target.domain !== (position.formation_kind === "ARMY" ? "LAND" : "SEA")) {
+        if (!target || !target.passable || (position.formation_kind === "ARMY"
+          ? target.domain !== "LAND"
+          : !fleetAccessibleHex(target.domain,coastalPortCoordinates.has(position.coordinate)))) {
           throw new GameError(`${position.coordinate} koordinatında birlik varken Hex türü değiştirilemez.`);
         }
       }

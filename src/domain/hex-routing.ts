@@ -1,10 +1,12 @@
 import { adjacentHexes, formatHexCoordinate, parseHexCoordinate, type FormationKind, type MapDomain } from "./movement.js";
+import { fleetAccessibleHex, fleetAccessibleStep } from "./coastal-navigation.js";
 
 export interface RoutingHex {
   coordinate: string;
   domain: MapDomain;
   terrain: string;
   passable: boolean;
+  coastal_port?: boolean;
 }
 
 export interface RoutingEdge {
@@ -33,10 +35,12 @@ export function planHexRoute(input: {
   const start = formatHexCoordinate(parseHexCoordinate(input.start));
   const destination = formatHexCoordinate(parseHexCoordinate(input.destination));
   const hexes = new Map(input.hexes.map((hex) => [formatHexCoordinate(parseHexCoordinate(hex.coordinate)), hex]));
-  const domain = input.formationKind === "ARMY" ? "LAND" : "SEA";
   const usable = (coordinate: string): boolean => {
     const hex = hexes.get(coordinate);
-    return Boolean(hex?.passable && hex.domain === domain && input.terrainCosts[hex.terrain] != null);
+    if (!hex?.passable) return false;
+    if (input.formationKind === "ARMY") return hex.domain === "LAND" && input.terrainCosts[hex.terrain] != null;
+    return fleetAccessibleHex(hex.domain, Boolean(hex.coastal_port))
+      && (hex.coastal_port || input.terrainCosts[hex.terrain] != null);
   };
   if (!usable(start) || !usable(destination)) return null;
   if (start === destination) return { coordinates: [start], costs: [], totalCost: 0 };
@@ -68,9 +72,15 @@ export function planHexRoute(input: {
     const linked = [...overrides.keys()].filter((key) => key.startsWith(`${current}:`)).map((key) => key.slice(current!.length + 1));
     for (const next of new Set([...natural, ...linked])) {
       if (visited.has(next) || !usable(next)) continue;
+      if (input.formationKind === "FLEET") {
+        const source = hexes.get(current)!;
+        const target = hexes.get(next)!;
+        if (!fleetAccessibleStep(source.domain, Boolean(source.coastal_port), target.domain, Boolean(target.coastal_port))) continue;
+      }
       const override = overrides.get(`${current}:${next}`);
       if (override && !(input.formationKind === "ARMY" ? override.armyAllowed : override.fleetAllowed)) continue;
-      const cost = override ? override.cost : input.terrainCosts[hexes.get(next)!.terrain];
+      const cost = override ? override.cost : input.formationKind === "FLEET" && hexes.get(next)!.coastal_port
+        ? 1 : input.terrainCosts[hexes.get(next)!.terrain];
       if (cost == null || !Number.isFinite(cost) || cost <= 0) continue;
       const candidate = distances.get(current)! + cost;
       if (candidate >= (distances.get(next) ?? Infinity)) continue;

@@ -20,6 +20,18 @@ describe("Hex rota planlayıcısı", () => {
     expect(planHexRoute({ hexes, start: "B10", destination: "A10", formationKind: "FLEET", terrainCosts: costs })).toBeNull();
   });
 
+  it("filoyu denizden KIYI kentinin kara hexine alır ve tekrar denize çıkarır", () => {
+    const hexes = [{ ...land("A10"), coastal_port: true }, sea("B10")];
+    expect(planHexRoute({ hexes, start: "B10", destination: "A10", formationKind: "FLEET", terrainCosts: costs }))
+      .toEqual({ coordinates: ["B10", "A10"], costs: [1], totalCost: 1 });
+    expect(planHexRoute({ hexes, start: "A10", destination: "B10", formationKind: "FLEET", terrainCosts: costs })?.totalCost).toBe(1);
+  });
+
+  it("filoya iki kıyı kara hexi arasında doğrudan kara geçişi açmaz", () => {
+    const hexes = [{ ...land("A10"), coastal_port: true }, { ...land("B10"), coastal_port: true }];
+    expect(planHexRoute({ hexes, start: "A10", destination: "B10", formationKind: "FLEET", terrainCosts: costs })).toBeNull();
+  });
+
   it("tek yönlü bağlantı ve birlik türü iznini uygular", () => {
     const input = {
       hexes: [land("A10"), land("C10")],
