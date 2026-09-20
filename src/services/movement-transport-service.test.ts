@@ -23,7 +23,7 @@ describe("fleet cargo snapshot", () => {
 });
 
 describe("ordu filo bağlantısı", () => {
-  async function embark(sharedCoast: boolean) {
+  async function embark(sharedCoast: boolean, pendingMuster = false, soldiers = 500) {
     const writes: string[] = [];
     transaction.client = { query: async (sql: string) => {
       if (sql.includes("pg_advisory_xact_lock")) return { rows: [], rowCount: 1 };
@@ -39,11 +39,12 @@ describe("ordu filo bağlantısı", () => {
       }
       if (sql.includes("FROM movement_orders") || sql.includes("FROM movement_encounters") ||
           sql.includes("FROM battle_army_assignments") || sql.includes("SELECT 1 FROM fleet_cargo_armies")) return { rows: [], rowCount: 0 };
+      if (sql.includes("FROM army_muster_orders")) return { rows: [], rowCount: pendingMuster ? 1 : 0 };
       if (sql.includes("INSERT INTO fleet_cargo_armies")) { writes.push("embark"); return { rows: [], rowCount: 1 }; }
       if (sql.includes("FROM fleet_ships")) return { rows: [{ ship_type: "trireme", quantity: 2 }], rowCount: 1 };
       if (sql.includes("FROM fleets fleet JOIN countries")) return { rows: [{ active_formable_key: null }], rowCount: 1 };
       if (sql.includes("SELECT army_id FROM fleet_cargo_armies")) return { rows: [{ army_id: "army-1" }], rowCount: 1 };
-      if (sql.includes("FROM army_units")) return { rows: [{ soldiers: 500 }], rowCount: 1 };
+      if (sql.includes("FROM army_units")) return { rows: [{ soldiers }], rowCount: 1 };
       if (sql.includes("FROM army_siege_assets")) return { rows: [], rowCount: 0 };
       if (sql.includes("DELETE FROM army_map_positions")) { writes.push("remove_land_position"); return { rows: [], rowCount: 1 }; }
       if (sql.includes("INSERT INTO audit_logs")) return { rows: [], rowCount: 1 };
@@ -61,15 +62,23 @@ describe("ordu filo bağlantısı", () => {
   it("ordu ve filo aynı KIYI kenti hexindeyken gemiye alır", async () => {
     expect(await embark(true)).toEqual(["embark", "remove_land_position"]);
   });
+
+  it("toplanma emri sürerken orduyu gemiye yüklemez", async () => {
+    await expect(embark(false, true)).rejects.toThrow("toplanma emri bitmeden");
+  });
+
+  it("kapasite aşılırsa gemiye yüklemeyi reddeder", async () => {
+    await expect(embark(false, false, 1_001)).rejects.toThrow("kapasitesi aşılıyor");
+  });
 });
 
 describe("yönetici kıyı çıkarması",()=>{
-  function fixture(enemy=false,sharedCoast=false){
+  function fixture(enemy=false,sharedCoast=false,sameTurn=false){
     const writes:string[]=[];
     transaction.client={query:async(sql:string)=>{
       if(sql.includes("pg_advisory_xact_lock"))return {rows:[],rowCount:1};
       if(sql.includes("SELECT current_turn,turn_phase FROM guilds"))return {rows:[{current_turn:9,turn_phase:"OPEN"}],rowCount:1};
-      if(sql.includes("SELECT cargo.fleet_id,cargo.embarked_turn"))return {rows:[{fleet_id:"fleet-1",embarked_turn:8}],rowCount:1};
+      if(sql.includes("SELECT cargo.fleet_id,cargo.embarked_turn"))return {rows:[{fleet_id:"fleet-1",embarked_turn:sameTurn?9:8}],rowCount:1};
       if(sql.includes("SELECT unit.id,unit.name,unit.country_id"))return {rows:[{
         id:"fleet-1",name:"Filo",country_id:"country-1",hex_id:sharedCoast?"land-1":"sea-1",
         coordinate:sharedCoast?"AB10":"AA10",domain:sharedCoast?"LAND":"SEA",
@@ -108,5 +117,12 @@ describe("yönetici kıyı çıkarması",()=>{
     await movementTransportService.disembark({guildId:"guild",countryId:"country-1",actorId:"player",
       armyId:"army-1",coordinate:"AB10"});
     expect(writes).toEqual(["unload","land"]);
+  });
+
+  it("ordu gemiye bindiği turda karaya çıkamaz",async()=>{
+    const writes=fixture(false,false,true);
+    await expect(movementTransportService.disembark({guildId:"guild",countryId:"country-1",actorId:"player",
+      armyId:"army-1",coordinate:"AB10"})).rejects.toThrow("bindiği turda");
+    expect(writes).toEqual([]);
   });
 });

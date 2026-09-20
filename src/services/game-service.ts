@@ -1484,13 +1484,21 @@ export const gameService = {
       const armyRows = (await client.query<{
         id: string; guild_id: string; country_id: string; country_name: string; name: string;
         commander_character_id: string | null; commander_name: string | null; commander_skill_bonus: number;
-        created_turn: number; active_battle_id: string | null;
+        created_turn: number; active_battle_id: string | null; current_hex: string | null;
       }>(`SELECT a.id,a.guild_id,a.country_id,c.name AS country_name,a.name,a.commander_character_id,
                   cc.name AS commander_name,COALESCE(cc.skill_bonus,0)::integer AS commander_skill_bonus,a.created_turn,
+                  COALESCE(hex.coordinate,CASE WHEN cargo.army_id IS NOT NULL THEN
+                    CONCAT('Gemide: ',cargo_fleet.name,' • ',COALESCE(fleet_hex.coordinate,'Filo konumu yok')) END) AS current_hex,
                   (SELECT b.id FROM battle_army_assignments baa JOIN battles b ON b.id=baa.battle_id
                     WHERE baa.army_id=a.id AND b.status NOT IN ('FINISHED','CANCELLED') LIMIT 1) AS active_battle_id
              FROM armies a JOIN countries c ON c.id=a.country_id
              LEFT JOIN country_characters cc ON cc.id=a.commander_character_id
+             LEFT JOIN army_map_positions position ON position.army_id=a.id
+             LEFT JOIN map_hexes hex ON hex.id=position.hex_id
+             LEFT JOIN fleet_cargo_armies cargo ON cargo.army_id=a.id
+             LEFT JOIN fleets cargo_fleet ON cargo_fleet.id=cargo.fleet_id
+             LEFT JOIN fleet_map_positions cargo_position ON cargo_position.fleet_id=cargo.fleet_id
+             LEFT JOIN map_hexes fleet_hex ON fleet_hex.id=cargo_position.hex_id
             WHERE a.country_id=$1 ORDER BY a.created_at,a.name`, [countryId])).rows;
       const armyUnitRows = (await client.query<{
         army_id: string; settlement_id: string; settlement_name: string; unit_type: BattleUnitType; quantity: number;

@@ -109,6 +109,10 @@ export const movementTransportService = {
       if (await activeOrder(client,"ARMY",army.id) || await activeOrder(client,"FLEET",fleet.id)) throw new GameError("Etkin hareket emri bulunan birliklerde yükleme yapılamaz.");
       if(await pendingEncounter(client,"ARMY",army.id)||await pendingEncounter(client,"FLEET",fleet.id))
         throw new GameError("Hex karşılaşması bekleyen birlik gemiye yüklenemez.");
+      if ((await client.query(
+        "SELECT 1 FROM army_muster_orders WHERE army_id=$1 AND status IN ('SUBMITTED','IN_PROGRESS','BLOCKED','WAITING_ARMY') LIMIT 1",
+        [army.id]
+      )).rowCount) throw new GameError("Bu orduya yolda asker geliyor; toplanma emri bitmeden gemiye yüklenemez.");
       const battle = await client.query(
         `SELECT 1 FROM battle_army_assignments ba JOIN battles b ON b.id=ba.battle_id WHERE ba.army_id=$1 AND b.status NOT IN ('FINISHED','CANCELLED')
          UNION ALL SELECT 1 FROM battle_fleet_assignments bf JOIN battles b ON b.id=bf.battle_id WHERE bf.fleet_id=$2 AND b.status NOT IN ('FINISHED','CANCELLED') LIMIT 1`,

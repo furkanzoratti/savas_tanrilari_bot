@@ -1146,6 +1146,8 @@ export const battleService = {
       );
       if (inOtherBattle.rowCount) throw new GameError("Bu ordu başka bir etkin savaşa bağlı.");
       if ((await client.query("SELECT 1 FROM battle_army_assignments WHERE battle_id=$1 AND army_id=$2", [battle.id,army.id])).rowCount) throw new GameError("Bu ordu zaten savaş taslağına ekli.");
+      if ((await client.query("SELECT 1 FROM fleet_cargo_armies WHERE army_id=$1", [army.id])).rowCount)
+        throw new GameError("Gemide taşınan ordu karaya çıkmadan kara veya kuşatma savaşına eklenemez.");
       const participant = await resolveParticipant(client,battle.id,input.side,army.country_name);
       const existingArmyUse = await participantUsesArmies(client,battle.id,army.country_id);
       if (!existingArmyUse && compositionTotal(participant.composition) > 0) throw new GameError("Bu ülkenin manuel savaş kadrosu zaten girilmiş. Kalıcı ordu kullanmak için önce manuel kadroyu temizleyin.");

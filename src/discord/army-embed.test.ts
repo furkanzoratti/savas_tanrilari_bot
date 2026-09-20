@@ -9,7 +9,7 @@ describe("ordu belgesi", () => {
     const army: ArmyView = {
       id: "army-1", guild_id: "guild-1", country_id: "country-1", country_name: "Roma", name: "I. Ordu",
       commander_character_id: "commander-1", commander_name: "Marcus", commander_skill_bonus: 1,
-      created_turn: 3, active_battle_id: null, composition, total: 1_500,
+      created_turn: 3, active_battle_id: null, current_hex: "J22", composition, total: 1_500,
       composition_active: true, composition_activation_turn: null,
       assessment: assessArmyComposition(composition),
       siegeComposition: { catapult: 2 },
@@ -25,10 +25,13 @@ describe("ordu belgesi", () => {
     const embed = renderArmyEmbed(army).toJSON();
     expect(embed.title).toContain("I. Ordu");
     expect(embed.description).toContain("Marcus");
+    expect(embed.description).toContain("Hex / toplanma alanı: **J22**");
     expect(embed.fields?.find((field) => field.name.includes("Kompozisyon"))?.value).toContain("Baskın birim oranı");
     expect(embed.fields?.find((field) => field.name.includes("Kaynak"))?.value).toContain("Roma");
     expect(embed.fields?.find((field) => field.name.includes("Kaynak"))?.value).toContain("Neapolis");
     expect(embed.fields?.find((field) => field.name.includes("Kuşatma"))?.value).toContain("Katapult");
     expect(embed.fields?.find((field) => field.name.includes("Kuşatma"))?.value).toContain("geliştirilmiş");
+    expect(renderArmyEmbed({ ...army, current_hex: "Gemide: Batı Filosu • K22" }).toJSON().description)
+      .toContain("Gemide: Batı Filosu • K22");
   });
 });
