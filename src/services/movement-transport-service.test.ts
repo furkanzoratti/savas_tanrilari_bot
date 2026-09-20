@@ -22,6 +22,38 @@ describe("fleet cargo snapshot", () => {
   });
 });
 
+describe("ordu filo bağlantısı", () => {
+  it("orduyu gemiye alırken kara konumunu kaldırır ve filo yüküne dahil eder", async () => {
+    const writes: string[] = [];
+    transaction.client = { query: async (sql: string) => {
+      if (sql.includes("pg_advisory_xact_lock")) return { rows: [], rowCount: 1 };
+      if (sql.includes("SELECT current_turn,turn_phase FROM guilds")) return { rows: [{ current_turn: 9, turn_phase: "OPEN" }], rowCount: 1 };
+      if (sql.includes("SELECT enabled FROM guild_movement_settings")) return { rows: [{ enabled: true }], rowCount: 1 };
+      if (sql.includes("SELECT unit.id,unit.name,unit.country_id")) {
+        const fleet = sql.includes("FROM fleets unit");
+        return { rows: [{ id: fleet ? "fleet-1" : "army-1", name: fleet ? "Filo" : "Ordu",
+          country_id: "country-1", hex_id: fleet ? "sea-1" : "land-1",
+          coordinate: fleet ? "AA10" : "AB10", domain: fleet ? "SEA" : "LAND",
+          owner_country_id: fleet ? null : "country-1" }], rowCount: 1 };
+      }
+      if (sql.includes("FROM movement_orders") || sql.includes("FROM movement_encounters") ||
+          sql.includes("FROM battle_army_assignments") || sql.includes("SELECT 1 FROM fleet_cargo_armies")) return { rows: [], rowCount: 0 };
+      if (sql.includes("INSERT INTO fleet_cargo_armies")) { writes.push("embark"); return { rows: [], rowCount: 1 }; }
+      if (sql.includes("FROM fleet_ships")) return { rows: [{ ship_type: "trireme", quantity: 2 }], rowCount: 1 };
+      if (sql.includes("FROM fleets fleet JOIN countries")) return { rows: [{ active_formable_key: null }], rowCount: 1 };
+      if (sql.includes("SELECT army_id FROM fleet_cargo_armies")) return { rows: [{ army_id: "army-1" }], rowCount: 1 };
+      if (sql.includes("FROM army_units")) return { rows: [{ soldiers: 500 }], rowCount: 1 };
+      if (sql.includes("FROM army_siege_assets")) return { rows: [], rowCount: 0 };
+      if (sql.includes("DELETE FROM army_map_positions")) { writes.push("remove_land_position"); return { rows: [], rowCount: 1 }; }
+      if (sql.includes("INSERT INTO audit_logs")) return { rows: [], rowCount: 1 };
+      throw new Error(`Unexpected query: ${sql}`);
+    } } as unknown as DbClient;
+    await movementTransportService.embark({ guildId: "guild", countryId: "country-1", actorId: "player",
+      armyId: "army-1", fleetId: "fleet-1" });
+    expect(writes).toEqual(["embark", "remove_land_position"]);
+  });
+});
+
 describe("yönetici kıyı çıkarması",()=>{
   function fixture(enemy=false){
     const writes:string[]=[];

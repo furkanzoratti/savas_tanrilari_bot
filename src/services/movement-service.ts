@@ -525,12 +525,22 @@ export const movementService = {
         ? "battle_army_assignments"
         : "battle_fleet_assignments";
       const battleColumn = input.formationKind === "ARMY" ? "army_id" : "fleet_id";
-      const battle = await client.query(
-        `SELECT 1 FROM ${battleAssignment} assignment JOIN battles battle ON battle.id=assignment.battle_id
-          WHERE assignment.${battleColumn}=$1 AND battle.status NOT IN ('FINISHED','CANCELLED') LIMIT 1`,
+      const coordinate = normalizedCoordinate(input.coordinate);
+      const battles = (await client.query<{ terrain: string; siege_coordinate: string | null }>(
+        `SELECT battle.terrain,siege_hex.coordinate AS siege_coordinate
+           FROM ${battleAssignment} assignment JOIN battles battle ON battle.id=assignment.battle_id
+           LEFT JOIN settlement_map_positions siege_position ON siege_position.settlement_id=battle.defender_settlement_id
+           LEFT JOIN map_hexes siege_hex ON siege_hex.id=siege_position.hex_id
+          WHERE assignment.${battleColumn}=$1 AND battle.status NOT IN ('FINISHED','CANCELLED')`,
         [input.formationId]
-      );
-      if (battle.rowCount) throw new GameError("Etkin savaşa bağlı birliğe başlangıç harita konumu verilemez.");
+      )).rows;
+      if (battles.length) {
+        if (input.formationKind !== "ARMY" || battles.some((battle) => battle.terrain !== "SIEGE" || battle.siege_coordinate !== coordinate)) {
+          throw new GameError("Etkin savaştaki birlik yalnızca kuşatma kentinin Hex'ine başlangıç konumu alabilir.");
+        }
+        const positioned = await client.query("SELECT 1 FROM army_map_positions WHERE army_id=$1", [unit.id]);
+        if (positioned.rowCount) throw new GameError("Kuşatmadaki ordunun mevcut konumu bu komutla değiştirilemez.");
+      }
       const active = await client.query(
         `SELECT 1 FROM movement_orders WHERE guild_id=$1 AND ${input.formationKind === "ARMY" ? "army_id" : "fleet_id"}=$2
           AND status IN ('SUBMITTED','IN_PROGRESS','BLOCKED') LIMIT 1`,
@@ -552,7 +562,6 @@ export const movementService = {
         "SELECT 1 FROM army_muster_orders WHERE army_id=$1 AND status IN ('SUBMITTED','IN_PROGRESS','BLOCKED','WAITING_ARMY') LIMIT 1",
         [input.formationId]
       )).rowCount) throw new GameError("Bu orduya yolda asker geliyor; konumunu düzeltmeden önce toplanma emirlerini çözün.");
-      const coordinate = normalizedCoordinate(input.coordinate);
       const hex = (await client.query<HexRow>(
         "SELECT id,coordinate,q,r,domain,terrain,region_key,owner_country_id,passable FROM map_hexes WHERE guild_id=$1 AND coordinate=$2",
         [input.guildId, coordinate]
