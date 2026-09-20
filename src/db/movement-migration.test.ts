@@ -51,7 +51,7 @@ describe("yetmiş birinci migration", () => {
 describe("yetmiş ikinci migration", () => {
   it("geri çağrılan asker intikalinin yönünü saklar", () => {
     const migration=migrations.find((item)=>item.version===72);
-    expect(migration?.sql).toContain("returning BOOLEAN NOT NULL DEFAULT FALSE");
+    expect(migration?.sql).toContain("is_returning BOOLEAN NOT NULL DEFAULT FALSE");
   });
 });
 

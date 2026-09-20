@@ -11,7 +11,7 @@ function fixture(armyAtDestination=true){
     source_settlement_id:"settlement-1",unit_type:"archer",quantity:500,
     start_hex_id:"hex-a",destination_hex_id:"hex-c",current_hex_id:"hex-a",
     route_hex_ids:["hex-a","hex-b","hex-c"],route_costs:[1,1],
-    movement_allowance:1,current_step:0,status:"SUBMITTED",issued_turn:8,returning:false};
+    movement_allowance:1,current_step:0,status:"SUBMITTED",issued_turn:8,is_returning:false};
   const writes:string[]=[];
   const client={async query(sql:string,params:unknown[]=[]){
     if(sql.includes("FROM army_muster_orders WHERE guild_id=$1"))return {rows:[{...order}],rowCount:1};
@@ -71,7 +71,7 @@ describe("ordu toplama intikali",()=>{
 
   it("geri dönen asker kaynak Hex'e varmadan serbest kalmaz ve orduya katılmaz",async()=>{
     const {client,writes,order}=fixture();
-    order.returning=true;order.status="IN_PROGRESS";order.issued_turn=7;
+    order.is_returning=true;order.status="IN_PROGRESS";order.issued_turn=7;
     order.start_hex_id="hex-c";order.destination_hex_id="hex-a";
     order.route_hex_ids=["hex-c","hex-b","hex-a"];order.current_hex_id="hex-c";
     await resolveArmyMusterStage(client,"guild-1","gm-1",8,"ADVANCE");
@@ -86,8 +86,8 @@ describe("ordu toplama intikali",()=>{
     let recalled:unknown[]=[];
     transaction.client={query:async(sql:string,params:unknown[]=[])=>{
       if(sql.includes("pg_advisory_xact_lock"))return {rows:[],rowCount:1};
-      if(sql.includes("SELECT id,status,returning,current_step"))return {rows:[{
-        id:"aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",status:"BLOCKED",returning:false,
+      if(sql.includes("SELECT id,status,is_returning,current_step"))return {rows:[{
+        id:"aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",status:"BLOCKED",is_returning:false,
         current_step:2,current_hex_id:"hex-c",start_hex_id:"hex-a",
         route_hex_ids:["hex-a","hex-b","hex-c","hex-d"],route_costs:[1,2,3]
       }],rowCount:1};

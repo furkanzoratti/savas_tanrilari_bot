@@ -16,13 +16,18 @@ export async function migrate(): Promise<void> {
 
   for (const migration of migrations) {
     if (appliedVersions.has(migration.version)) continue;
-    await withTransaction(async (client) => {
-      await client.query(migration.sql);
-      await client.query(
-        "INSERT INTO schema_migrations(version, name) VALUES ($1, $2)",
-        [migration.version, migration.name]
-      );
-    });
+    try {
+      await withTransaction(async (client) => {
+        await client.query(migration.sql);
+        await client.query(
+          "INSERT INTO schema_migrations(version, name) VALUES ($1, $2)",
+          [migration.version, migration.name]
+        );
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(`Veritabanı göçü v${migration.version} (${migration.name}) başarısız: ${detail}`, { cause: error });
+    }
     logger.info({ migration: migration.name }, "Veritabanı göçü uygulandı");
   }
 }

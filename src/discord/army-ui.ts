@@ -45,7 +45,7 @@ export async function handleArmyCommand(interaction: ChatInputCommandInteraction
   if (sub === "toplama-emirleri") {
     const orders = await armyMusterService.list(country.id);
     await interaction.editReply(orders.length ? `🪖 **${country.name} • Ordu Toplama Emirleri**\n${orders.map((order) =>
-      `• \`${order.id.slice(0,8)}\` **${order.army_name}** ← ${order.settlement_name}: ${number(order.quantity)} ${BATTLE_UNIT_STATS[order.unit_type]?.label??order.unit_type} • ${order.current_hex} → ${order.destination_hex} • ${order.returning?"Geri dönüyor":musterStatus[order.status]??order.status}${order.blocked_reason ? ` • ${order.blocked_reason}` : ""}`
+      `• \`${order.id.slice(0,8)}\` **${order.army_name}** ← ${order.settlement_name}: ${number(order.quantity)} ${BATTLE_UNIT_STATS[order.unit_type]?.label??order.unit_type} • ${order.current_hex} → ${order.destination_hex} • ${order.is_returning?"Geri dönüyor":musterStatus[order.status]??order.status}${order.blocked_reason ? ` • ${order.blocked_reason}` : ""}`
     ).join("\n")}`.slice(0,1900) : "Etkin veya geçmiş ordu toplama emri bulunmuyor.");
     return;
   }

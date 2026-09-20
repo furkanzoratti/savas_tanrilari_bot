@@ -10,7 +10,7 @@ type MusterStatus = "SUBMITTED" | "IN_PROGRESS" | "BLOCKED" | "WAITING_ARMY" | "
 export interface MusterOrderView {
   id: string; army_name: string; settlement_name: string; unit_type: BattleUnitType;
   quantity: number; status: MusterStatus; current_hex: string; destination_hex: string;
-  issued_turn: number; blocked_reason: string | null; returning:boolean;
+  issued_turn: number; blocked_reason: string | null; is_returning:boolean;
 }
 
 export async function enqueueArmyMuster(client: DbClient, input: {
@@ -77,10 +77,10 @@ export async function resolveArmyMusterStage(
     id:string; country_id:string; army_id:string; source_settlement_id:string; unit_type:BattleUnitType;
     quantity:number; start_hex_id:string; destination_hex_id:string; current_hex_id:string;
     route_hex_ids:string[]; route_costs:number[]; movement_allowance:number; current_step:number;
-    status:MusterStatus; issued_turn:number; returning:boolean;
+    status:MusterStatus; issued_turn:number; is_returning:boolean;
   }>(`SELECT id,country_id,army_id,source_settlement_id,unit_type,quantity,start_hex_id,
              destination_hex_id,current_hex_id,route_hex_ids,route_costs,movement_allowance,
-             current_step,status,issued_turn,returning
+             current_step,status,issued_turn,is_returning
         FROM army_muster_orders WHERE guild_id=$1 AND
           ((${stage === "STOP" ? "status='SUBMITTED' AND issued_turn=$2" : "status IN ('IN_PROGRESS','WAITING_ARMY') AND issued_turn<$2"})
           OR (status='WAITING_ARMY' AND last_processed_turn<$2))
@@ -125,7 +125,7 @@ export async function resolveArmyMusterStage(
            VALUES($1,$2,'ARMY_MUSTER_STAGE','army_muster_order',$3,$4::jsonb)`,
           [guildId,actorId,order.id,JSON.stringify({turn,stage,countryId:order.country_id,armyId:order.army_id,
             quantity:order.quantity,unitType:order.unit_type,from:byId.get(route[step]!),to:byId.get(route[nextStep]!),
-            currentStep:nextStep,totalSteps:route.length-1,returning:order.returning})]
+            currentStep:nextStep,totalSteps:route.length-1,returning:order.is_returning})]
         );
       }
     }
@@ -135,7 +135,7 @@ export async function resolveArmyMusterStage(
       await client.query("UPDATE army_muster_orders SET status='IN_PROGRESS',last_processed_turn=$2,updated_at=NOW() WHERE id=$1",[order.id,turn]);
       continue;
     }
-    if(order.returning){
+    if(order.is_returning){
       await client.query("UPDATE army_muster_orders SET status='CANCELLED',last_processed_turn=$2,updated_at=NOW() WHERE id=$1",[order.id,turn]);
       await client.query(
         `INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details)
@@ -246,14 +246,14 @@ export const armyMusterService = {
       const prefix=input.orderId.trim().toLowerCase();
       if(!/^[0-9a-f-]{8,36}$/.test(prefix))throw new GameError("En az 8 karakterlik geçerli toplanma emri ID'si girin.");
       const matches=(await client.query<{
-        id:string;status:MusterStatus;returning:boolean;current_step:number;current_hex_id:string;
+        id:string;status:MusterStatus;is_returning:boolean;current_step:number;current_hex_id:string;
         start_hex_id:string;route_hex_ids:string[];route_costs:number[];
-      }>(`SELECT id,status,returning,current_step,current_hex_id,start_hex_id,route_hex_ids,route_costs
+      }>(`SELECT id,status,is_returning,current_step,current_hex_id,start_hex_id,route_hex_ids,route_costs
             FROM army_muster_orders WHERE guild_id=$1 AND id::text LIKE $2 || '%' FOR UPDATE`,
         [input.guildId,prefix])).rows;
       if(matches.length!==1)throw new GameError(matches.length?"Toplanma emri ID'si belirsiz.":"Toplanma emri bulunamadı.");
       const order=matches[0]!;
-      if(!["SUBMITTED","IN_PROGRESS","BLOCKED","WAITING_ARMY"].includes(order.status)||order.returning)
+      if(!["SUBMITTED","IN_PROGRESS","BLOCKED","WAITING_ARMY"].includes(order.status)||order.is_returning)
         throw new GameError("Bu asker intikali geri çağrılamaz.");
       const step=Number(order.current_step);
       if(order.route_hex_ids[step]!==order.current_hex_id)throw new GameError("Birliğin konumu rota ile uyuşmuyor.");
@@ -266,7 +266,7 @@ export const armyMusterService = {
         if(!guild)throw new GameError("Sunucu oyun kaydı bulunamadı.");
         await client.query(
           `UPDATE army_muster_orders SET start_hex_id=$2,destination_hex_id=$3,route_hex_ids=$4::uuid[],
-             route_costs=$5::numeric[],current_step=0,returning=TRUE,status='IN_PROGRESS',
+             route_costs=$5::numeric[],current_step=0,is_returning=TRUE,status='IN_PROGRESS',
              blocked_reason=NULL,issued_turn=$6,last_processed_turn=$6,updated_at=NOW() WHERE id=$1`,
           [order.id,order.current_hex_id,order.start_hex_id,route,costs,guild.current_turn]
         );
@@ -281,7 +281,7 @@ export const armyMusterService = {
   async list(countryId:string,armyId?:string):Promise<MusterOrderView[]>{
     return (await pool.query<MusterOrderView>(
       `SELECT muster.id,army.name AS army_name,settlement.name AS settlement_name,muster.unit_type,
-              muster.quantity,muster.status,muster.returning,current_hex.coordinate AS current_hex,
+              muster.quantity,muster.status,muster.is_returning,current_hex.coordinate AS current_hex,
               destination.coordinate AS destination_hex,muster.issued_turn,muster.blocked_reason
          FROM army_muster_orders muster JOIN armies army ON army.id=muster.army_id
          JOIN settlements settlement ON settlement.id=muster.source_settlement_id
