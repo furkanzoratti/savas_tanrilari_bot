@@ -1628,6 +1628,46 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
       return;
     }
   }
+  if (interaction.commandName === "hareket") {
+    if (!interaction.guildId) { await interaction.respond([]); return; }
+    const requestedCountry = isGameMaster(interaction) ? interaction.options.getString("ulke") : null;
+    const country = requestedCountry
+      ? await gameService.countryByName(interaction.guildId, requestedCountry)
+      : await gameService.countryForUser(interaction.guildId, interaction.user.id);
+    if (!country) { await interaction.respond([]); return; }
+    if (["ordu", "filo", "birim"].includes(focused.name)) {
+      const kind = focused.name === "ordu" ? "ARMY" : focused.name === "filo" ? "FLEET" : interaction.options.getString("tur");
+      const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
+      const formations = await movementService.countryPositions(interaction.guildId, country.id);
+      await interaction.respond(formations
+        .filter((item) => (!kind || item.formationKind === kind) &&
+          (!query || item.formationName.toLocaleLowerCase("tr-TR").includes(query) ||
+            (item.coordinate ?? "").toLocaleLowerCase("tr-TR").includes(query)))
+        .slice(0, 25).map((item) => ({
+          name: `${item.formationKind === "ARMY" ? "⚔️" : "⛵"} ${item.formationName} • ${item.coordinate ?? "Konum yok"}`.slice(0, 100),
+          value: item.formationId
+        })));
+      return;
+    }
+    const scoutTypes = {"hafif-suvari":"light_cavalry", "atli-okcu":"horse_archer", "agir-suvari":"heavy_cavalry"} as const;
+    const type = scoutTypes[focused.name as keyof typeof scoutTypes];
+    if (interaction.options.getSubcommand(false) === "kesif-ata" && type) {
+      const armyId = interaction.options.getString("ordu");
+      if (!armyId) { await interaction.respond([]); return; }
+      let army;
+      try { army = await armyService.get(country.id, armyId); }
+      catch { await interaction.respond([]); return; }
+      const available = Math.max(0, army.composition[type] ?? 0);
+      const entered = Number(focused.value);
+      const amounts = [...new Set([0, 200, 400, 800, available, Number.isInteger(entered) ? entered : -1])]
+        .filter((amount) => amount >= 0 && amount <= available).sort((a, b) => a - b);
+      await interaction.respond(amounts.map((amount) => ({
+        name: `${number(amount)} ${focused.name.replaceAll("-", " ")} • orduda ${number(available)} mevcut`.slice(0, 100),
+        value: amount
+      })));
+      return;
+    }
+  }
   if (interaction.commandName === "ordu") {
     if (!interaction.guildId) { await interaction.respond([]); return; }
     const country = await gameService.countryForUser(interaction.guildId, interaction.user.id);

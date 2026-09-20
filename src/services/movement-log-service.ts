@@ -1,12 +1,17 @@
 import { ChannelType, EmbedBuilder, PermissionFlagsBits, type Client } from "discord.js";
 import { config } from "../config.js";
 import { pool } from "../db/pool.js";
+import type { DbClient } from "../db/pool.js";
 import { logger } from "../logger.js";
 import { GameError } from "./game-service.js";
 
 interface MovementAuditRow {
-  id:string; guild_id:string; actor_user_id:string; action:string; entity_id:string|null;
+  id:string; guild_id:string; actor_user_id:string; action:string; entity_type?:string; entity_id:string|null;
   details:Record<string,unknown>; created_at:Date;
+}
+interface MovementLogContext {
+  countryName?:string; formationName?:string; formationKind?:string;
+  fleetName?:string; hexCountries?:Record<string,string>;
 }
 
 const ACTIONS:Record<string,{title:string;color:number}>={
@@ -46,7 +51,11 @@ const FIELD_LABELS:Record<string,string>={
   returning:"Geri dönüş",allowance:"Tur hareket hakkı",enabled:"Sistem açık",
   mode:"Hareket türü",coordinate:"Hex",route:"Rota",processed:"İşlenen emir",
   advanced:"İlerleyen",completed:"Varan",blocked:"Engellenen",ongoing:"Yolda",
-  encounters:"Karşılaşma",reconChecks:"Keşif kontrolü"
+  encounters:"Karşılaşma",reconChecks:"Keşif kontrolü",
+  light_cavalry:"Hafif süvari",horse_archer:"Atlı okçu",heavy_cavalry:"Ağır süvari",
+  effectiveStrength:"Etkin keşif gücü",rollBonus:"Keşif zarı bonusu",
+  detectionBonusForEnemy:"Düşmanın fark etme bonusu",sea:"Deniz Hex",
+  capacity:"Taşıma kapasitesi",before:"Önceki Hex",arrivedTurn:"Varış turu"
 };
 const STATUS_LABELS:Record<string,string>={
   SUBMITTED:"Bekliyor",IN_PROGRESS:"Yolda",BLOCKED:"Yönetici kararı bekliyor",
@@ -57,19 +66,74 @@ function safe(value:unknown):string {
   return String(value??"—").replaceAll("@","＠").replaceAll("`","ˋ").slice(0,1000);
 }
 
-export function movementLogEmbed(row:MovementAuditRow):EmbedBuilder {
+const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function logContext(db:DbClient,row:MovementAuditRow):Promise<MovementLogContext>{
+  const context:MovementLogContext={};
+  const entityId=row.entity_id;
+  const orderId=row.entity_type==="movement_order"?entityId:row.details?.orderId;
+  if(typeof orderId==="string"&&UUID.test(orderId)){
+    const order=(await db.query<{country_name:string;formation_name:string;formation_kind:string}>(
+      `SELECT country.name AS country_name,COALESCE(army.name,fleet.name) AS formation_name,
+              orders.formation_kind
+         FROM movement_orders orders JOIN countries country ON country.id=orders.country_id
+         LEFT JOIN armies army ON army.id=orders.army_id
+         LEFT JOIN fleets fleet ON fleet.id=orders.fleet_id
+        WHERE orders.id=$1 AND orders.guild_id=$2`,[orderId,row.guild_id])).rows[0];
+    if(order){context.countryName=order.country_name;context.formationName=order.formation_name;context.formationKind=order.formation_kind;}
+  }else if(entityId&&UUID.test(entityId)&&(row.entity_type==="army"||row.entity_type==="fleet")){
+    const table=row.entity_type==="army"?"armies":"fleets";
+    const formation=(await db.query<{country_name:string;formation_name:string}>(
+      `SELECT country.name AS country_name,unit.name AS formation_name FROM ${table} unit
+        JOIN countries country ON country.id=unit.country_id WHERE unit.id=$1 AND unit.guild_id=$2`,
+      [entityId,row.guild_id])).rows[0];
+    if(formation){context.countryName=formation.country_name;context.formationName=formation.formation_name;
+      context.formationKind=row.entity_type.toUpperCase();}
+  }
+  if(typeof row.details?.fleetId==="string"&&UUID.test(row.details.fleetId)){
+    const fleetName=(await db.query<{name:string}>(
+      "SELECT name FROM fleets WHERE id=$1 AND guild_id=$2",[row.details.fleetId,row.guild_id])).rows[0]?.name;
+    if(fleetName)context.fleetName=fleetName;
+  }
+  const coordinates=[...new Set([row.details?.start,row.details?.destination,row.details?.from,
+    row.details?.to,row.details?.coordinate,row.details?.before,row.details?.sea]
+    .filter((value):value is string=>typeof value==="string"&&/^[A-Z]{1,3}\d{1,2}$/i.test(value)))];
+  if(coordinates.length){
+    const hexes=(await db.query<{coordinate:string;country_name:string|null}>(
+      `SELECT hex.coordinate,country.name AS country_name FROM map_hexes hex
+        LEFT JOIN countries country ON country.id=hex.owner_country_id
+        WHERE hex.guild_id=$1 AND hex.coordinate=ANY($2::text[])`,[row.guild_id,coordinates])).rows;
+    context.hexCountries=Object.fromEntries(hexes.map((hex)=>[hex.coordinate,hex.country_name??"Sahipsiz / deniz"]));
+  }
+  return context;
+}
+
+export function movementLogEmbed(row:MovementAuditRow,context:MovementLogContext={}):EmbedBuilder {
   const meta=ACTIONS[row.action]??{title:"🗺️ Hareket kaydı",color:0x8191a7};
   const details=row.details??{};
-  const fields=Object.entries(details).filter(([,value])=>value!==null&&value!==undefined).slice(0,18).map(([key,value])=>{
+  const fields=Object.entries(details).filter(([key,value])=>value!==null&&value!==undefined&&
+    !/id$/i.test(key)&&key!=="formation"&&key!=="country"&&key!=="formationKind"&&
+    !(typeof value==="string"&&UUID.test(value))).slice(0,18).map(([key,value])=>{
     const formatted=Array.isArray(value)?value.map(safe).join(" → ")
       : value && typeof value==="object"?JSON.stringify(value)
       : typeof value==="boolean"?(value?"Evet":"Hayır")
-      : key==="status"?(STATUS_LABELS[String(value)]??safe(value)):safe(value);
-    return `**${safe(FIELD_LABELS[key]??key)}:** ${safe(formatted).slice(0,220)}`;
+      : key==="status"?(STATUS_LABELS[String(value)]??safe(value))
+      : key==="mode"?(String(value)==="NORMAL"?"Normal":String(value)==="STRATEGIC"?"Stratejik":safe(value))
+      : safe(value);
+    const place=typeof value==="string"?context.hexCountries?.[value]:undefined;
+    const shown=place?`${formatted} (${safe(place)})`:formatted;
+    return `**${safe(FIELD_LABELS[key]??key)}:** ${safe(shown).slice(0,220)}`;
   });
+  const country=context.countryName??(typeof details.country==="string"?details.country:null);
+  const formation=context.formationName??(typeof details.formation==="string"?details.formation:null);
+  const kind=context.formationKind??details.formationKind;
+  const summary=[country?`**Devlet:** ${safe(country)}`:null,
+    formation?`**${kind==="FLEET"?"Filo":"Ordu"}:** ${safe(formation)}`:null,
+    context.fleetName?`**Bağlı filo:** ${safe(context.fleetName)}`:null,
+    /^\d{15,22}$/.test(row.actor_user_id)?`**Uygulayan:** <@${row.actor_user_id}>`:null,
+    ...fields].filter(Boolean).join("\n");
   return new EmbedBuilder().setColor(meta.color).setTitle(meta.title)
-    .setDescription((`**İşlem:** ${safe(row.action)}\n**Kayıt:** \`${safe(row.entity_id??row.id)}\`\n`+
-      `**Uygulayan:** ${safe(row.actor_user_id)}\n`+(fields.length?fields.join("\n"):"Ayrıntı yok.")).slice(0,3900))
+    .setDescription((summary||"Ayrıntı yok.").slice(0,3900))
     .setFooter({text:`Denetim kaydı ${row.id}`}).setTimestamp(row.created_at);
 }
 
@@ -136,7 +200,7 @@ export const movementLogService={
       if(!config?.movement_log_channel_id||!config.movement_log_started_at)return 0;
       const channel=await privateTextChannel(client,guildId,config.movement_log_channel_id);
       const records=(await db.query<MovementAuditRow>(
-        `SELECT audit.id,audit.guild_id,audit.actor_user_id,audit.action,audit.entity_id,audit.details,audit.created_at
+        `SELECT audit.id,audit.guild_id,audit.actor_user_id,audit.action,audit.entity_type,audit.entity_id,audit.details,audit.created_at
            FROM audit_logs audit LEFT JOIN movement_log_deliveries sent ON sent.audit_log_id=audit.id
           WHERE audit.guild_id=$1 AND audit.created_at >= $2 AND sent.audit_log_id IS NULL
             AND (audit.action LIKE 'MOVEMENT_%' OR audit.action LIKE 'ARMY_MUSTER_%'
@@ -148,7 +212,10 @@ export const movementLogService={
       )).rows;
       let published=0;
       for(const row of records){
-        const message=await channel.send({embeds:[movementLogEmbed(row)],allowedMentions:{parse:[]}});
+        const context=await logContext(db,row).catch((error)=>{
+          logger.error({error,auditId:row.id},"Hareket logunun adları çözülemedi");return {};
+        });
+        const message=await channel.send({embeds:[movementLogEmbed(row,context)],allowedMentions:{parse:[]}});
         await db.query(
           `INSERT INTO movement_log_deliveries(audit_log_id,guild_id,channel_id,message_id)
            VALUES($1,$2,$3,$4) ON CONFLICT(audit_log_id) DO NOTHING`,
