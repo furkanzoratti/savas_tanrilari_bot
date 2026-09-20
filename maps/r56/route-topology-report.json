@@ -1,0 +1,398 @@
+{
+  "mapVersion": "amrp-r56-v2",
+  "landComponents": [
+    {
+      "component": 1,
+      "hexes": 738,
+      "bounds": {
+        "minX": 84,
+        "maxX": 4032,
+        "minY": 242.487,
+        "maxY": 3297.825
+      },
+      "codes": [],
+      "settlements": [
+        "Olisipo",
+        "Brigantium",
+        "Kartuba",
+        "Tingis",
+        "Migdol",
+        "Iol",
+        "Carthago",
+        "Thapsus",
+        "Garama",
+        "Lepcis",
+        "Macomades",
+        "Augila",
+        "Cyrene",
+        "Ammonium",
+        "Alexandria",
+        "Jerusalem",
+        "Tyros",
+        "Salamis",
+        "Side",
+        "Rhodos",
+        "Ephesus",
+        "Athenai",
+        "Sparta",
+        "Apollonia",
+        "Cosentia",
+        "Neapolis",
+        "Roma",
+        "Velathri",
+        "Medhlan",
+        "Genua",
+        "Massalia",
+        "Tarraco",
+        "Arse",
+        "Qart Hadasht",
+        "Ibossim",
+        "Burdigala",
+        "Namnetum",
+        "Iska",
+        "Moridunon",
+        "Eblana",
+        "Eildon",
+        "Eborakon",
+        "Camulodunon",
+        "Bagacum",
+        "Flevum",
+        "Alabu",
+        "Noreia",
+        "Casurgis",
+        "Istros",
+        "Akink",
+        "Delminium",
+        "Epidamnos",
+        "Navissos",
+        "Zarmizegetusa",
+        "Belz",
+        "Mons Regius",
+        "Galic",
+        "Pulpudeva",
+        "Pella",
+        "Antheia",
+        "Odessos",
+        "Tur",
+        "Panticapaeum",
+        "Solokha",
+        "Tanais",
+        "Phanagoria",
+        "Siracena",
+        "Gelonus",
+        "Samandar",
+        "Gazaca",
+        "Eudaemon",
+        "Charmuthas",
+        "Hegra",
+        "Myos Hormos",
+        "Diospolis",
+        "Aksum",
+        "Ptolemais Theron",
+        "Meroe",
+        "Petra",
+        "Palmyra",
+        "Antioch",
+        "Mazaca",
+        "Ancyra",
+        "Pessinus",
+        "Sinope",
+        "Amaseia",
+        "Trapezos",
+        "Phasis",
+        "Armavir",
+        "Tushpa",
+        "Yathrib",
+        "Hatra",
+        "Arsamosata",
+        "Samosata",
+        "Edessa",
+        "Dura",
+        "Adummatu",
+        "Marib",
+        "Maas-gat",
+        "Gerrha",
+        "Charax",
+        "Susa",
+        "Rhaga",
+        "Zadrakarta",
+        "Aktau",
+        "Pura",
+        "Harmozia",
+        "Bam",
+        "Oraea",
+        "Alexandria Arachosia",
+        "Bukhara",
+        "Maracanda",
+        "Eucratideia",
+        "Kapisene",
+        "Baktra",
+        "Phrada",
+        "Artacoana",
+        "Merv",
+        "Amul",
+        "Kath",
+        "Nisa",
+        "Susia",
+        "Hecatompylos",
+        "Persepolis",
+        "Gor",
+        "Seleucia",
+        "Ekbatana",
+        "Gabala",
+        "Mtskheta",
+        "Sarai",
+        "Olbia",
+        "Nicomedia",
+        "Petrodava",
+        "Malva",
+        "Iader",
+        "Singidun",
+        "Ascaucalis",
+        "Budorgis",
+        "Segestica",
+        "Koria",
+        "Nemossos",
+        "Treverorum",
+        "Tulifurdum",
+        "Bibracte",
+        "Vesontio",
+        "Uburzis",
+        "Lupfurdum",
+        "Rhougion",
+        "Nemetocenna",
+        "Cenabum",
+        "Lemonum",
+        "Tolosa",
+        "Octuduron",
+        "Patavium",
+        "Ariminum",
+        "Brundisium",
+        "Larissa",
+        "Pergamon",
+        "Iconium",
+        "Tarsus",
+        "Memphis",
+        "Paraitonion",
+        "Cydamus",
+        "Dimmidi",
+        "Gadira",
+        "Numantia",
+        "Aracillum",
+        "Ebora"
+      ]
+    },
+    {
+      "component": 2,
+      "hexes": 5,
+      "bounds": {
+        "minX": 1176,
+        "maxX": 1344,
+        "minY": 1891.399,
+        "maxY": 2036.892
+      },
+      "codes": [
+        "O21",
+        "P20",
+        "P21",
+        "Q21",
+        "Q22"
+      ],
+      "settlements": [
+        "Lilybaeum",
+        "Syracusae"
+      ]
+    },
+    {
+      "component": 3,
+      "hexes": 3,
+      "bounds": {
+        "minX": 1008,
+        "maxX": 1092,
+        "minY": 1745.907,
+        "maxY": 1842.902
+      },
+      "codes": [
+        "M19",
+        "M20",
+        "N19"
+      ],
+      "settlements": [
+        "Karalis"
+      ]
+    },
+    {
+      "component": 4,
+      "hexes": 2,
+      "bounds": {
+        "minX": 1848,
+        "maxX": 1932,
+        "minY": 2036.892,
+        "maxY": 2085.389
+      },
+      "codes": [
+        "W22",
+        "X22"
+      ],
+      "settlements": [
+        "Hierapytna"
+      ]
+    },
+    {
+      "component": 5,
+      "hexes": 1,
+      "bounds": {
+        "minX": 1092,
+        "maxX": 1092,
+        "minY": 1600.415,
+        "maxY": 1600.415
+      },
+      "codes": [
+        "N17"
+      ],
+      "settlements": [
+        "Alalia"
+      ]
+    }
+  ],
+  "seaComponents": [
+    {
+      "component": 1,
+      "hexes": 148,
+      "bounds": {
+        "minX": 0,
+        "maxX": 1260,
+        "minY": 0,
+        "maxY": 2424.871
+      },
+      "codes": [],
+      "settlements": []
+    },
+    {
+      "component": 2,
+      "hexes": 97,
+      "bounds": {
+        "minX": 2436,
+        "maxX": 4032,
+        "minY": 2473.369,
+        "maxY": 3297.825
+      },
+      "codes": [],
+      "settlements": []
+    },
+    {
+      "component": 3,
+      "hexes": 90,
+      "bounds": {
+        "minX": 420,
+        "maxX": 2352,
+        "minY": 1406.425,
+        "maxY": 2327.876
+      },
+      "codes": [],
+      "settlements": []
+    },
+    {
+      "component": 4,
+      "hexes": 20,
+      "bounds": {
+        "minX": 1344,
+        "maxX": 1848,
+        "minY": 0,
+        "maxY": 436.477
+      },
+      "codes": [],
+      "settlements": []
+    },
+    {
+      "component": 5,
+      "hexes": 20,
+      "bounds": {
+        "minX": 2184,
+        "maxX": 2688,
+        "minY": 1212.436,
+        "maxY": 1600.415
+      },
+      "codes": [],
+      "settlements": []
+    },
+    {
+      "component": 6,
+      "hexes": 17,
+      "bounds": {
+        "minX": 3108,
+        "maxX": 3360,
+        "minY": 1212.436,
+        "maxY": 1891.399
+      },
+      "codes": [],
+      "settlements": []
+    },
+    {
+      "component": 7,
+      "hexes": 5,
+      "bounds": {
+        "minX": 1344,
+        "maxX": 1596,
+        "minY": 1357.928,
+        "maxY": 1600.415
+      },
+      "codes": [
+        "Q15",
+        "Q16",
+        "R16",
+        "S17",
+        "T17"
+      ],
+      "settlements": []
+    },
+    {
+      "component": 8,
+      "hexes": 1,
+      "bounds": {
+        "minX": 420,
+        "maxX": 420,
+        "minY": 533.472,
+        "maxY": 533.472
+      },
+      "codes": [
+        "F06"
+      ],
+      "settlements": []
+    },
+    {
+      "component": 9,
+      "hexes": 1,
+      "bounds": {
+        "minX": 1932,
+        "maxX": 1932,
+        "minY": 1794.405,
+        "maxY": 1794.405
+      },
+      "codes": [
+        "X19"
+      ],
+      "settlements": []
+    },
+    {
+      "component": 10,
+      "hexes": 1,
+      "bounds": {
+        "minX": 2436,
+        "maxX": 2436,
+        "minY": 1988.394,
+        "maxY": 1988.394
+      },
+      "codes": [
+        "AD21"
+      ],
+      "settlements": []
+    }
+  ],
+  "isolatedSeaHexes": [
+    "F06",
+    "X19",
+    "AD21"
+  ],
+  "note": "Ayrık su bileşenleri otomatik bağlanmaz. Cebelitarık, Türk boğazları, Adriyatik ve küçük körfezler için geçiş politikası ayrıca doğrulanmalıdır."
+}

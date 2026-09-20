@@ -92,6 +92,21 @@ async function assertMutable(client: DbClient, fleetId: string): Promise<void> {
       WHERE bfa.fleet_id=$1 AND b.status NOT IN ('FINISHED','CANCELLED') LIMIT 1`, [fleetId]
   );
   if (active.rowCount) throw new GameError("Bu filo etkin bir savaşa bağlıyken gemileri, komutanı veya kaydı değiştirilemez.");
+  if ((await client.query(
+    `SELECT 1 FROM movement_encounters encounter
+       JOIN movement_orders first_order ON first_order.id=encounter.order_a_id
+       LEFT JOIN movement_orders second_order ON second_order.id=encounter.order_b_id
+      WHERE encounter.formation_kind='FLEET' AND encounter.status IN ('PENDING','BATTLE_PENDING','BATTLE_LINKED','SPECIAL')
+        AND (first_order.fleet_id=$1 OR second_order.fleet_id=$1 OR encounter.stationary_formation_id=$1) LIMIT 1`,
+    [fleetId]
+  )).rowCount) throw new GameError("Bu filo Hex karşılaşmasında yönetici kararı bekliyor.");
+  const moving = await client.query(
+    "SELECT 1 FROM movement_orders WHERE fleet_id=$1 AND status IN ('SUBMITTED','IN_PROGRESS','BLOCKED') LIMIT 1",
+    [fleetId]
+  );
+  if (moving.rowCount) throw new GameError("Bu filonun etkin hareket emri varken gemileri veya komutanı değiştirilemez; önce emri iptal edin.");
+  const cargo = await client.query("SELECT 1 FROM fleet_cargo_armies WHERE fleet_id=$1 LIMIT 1", [fleetId]);
+  if (cargo.rowCount) throw new GameError("Asker taşıyan filonun gemileri, komutanı veya kaydı yük boşaltılmadan değiştirilemez.");
 }
 
 export const fleetService = {

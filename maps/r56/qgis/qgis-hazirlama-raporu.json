@@ -1,0 +1,30 @@
+{
+  "mapVersion": 1,
+  "canvas": {
+    "width": 4064,
+    "height": 3328
+  },
+  "expansionPolicy": "fixed-origin-append-only",
+  "grids": [
+    {
+      "layer": "hex-grid-r48",
+      "radius": 48,
+      "features": 2436,
+      "canvas_center_features": 2240
+    },
+    {
+      "layer": "hex-grid-r56",
+      "radius": 56,
+      "features": 1800,
+      "canvas_center_features": 1691
+    }
+  ],
+  "project": "C:\\Users\\Frank\\Documents\\Codex\\2026-08-18\\m\\hex-harita\\qgis\\amrp-harita.qgz",
+  "raster": "C:\\Users\\Frank\\Documents\\Codex\\2026-08-18\\m\\hex-harita\\qgis\\kaynak\\amrp-toprak-georef.tif",
+  "outputs": [
+    "qgis-r48-onizleme.png",
+    "qgis-r56-onizleme.png",
+    "qgis-r48-koordinatli.png",
+    "qgis-r56-koordinatli.png"
+  ]
+}

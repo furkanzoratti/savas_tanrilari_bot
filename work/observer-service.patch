@@ -1,0 +1,70 @@
+diff --git a/src/services/movement-service.ts b/src/services/movement-service.ts
+--- a/src/services/movement-service.ts
++++ b/src/services/movement-service.ts
+@@ -373,6 +373,75 @@ export const movementService = {
+       };
+     });
+   },
++
++  async stationRegionalObserver(input: {
++    guildId: string; countryId: string; actorId: string; settlementId: string; coordinate: string;
++  }): Promise<{ id: string; regionKey: string; coordinate: string; personnel: number }> {
++    return withTransaction(async (client) => {
++      const settlement = (await client.query<{ id: string; name: string }>(
++        "SELECT id,name FROM settlements WHERE id=$1 AND country_id=$2 FOR UPDATE",
++        [input.settlementId, input.countryId]
++      )).rows[0];
++      if (!settlement) throw new GameError("Gözcü kaynağı olan yerleşke bulunamadı veya bu devlete ait değil.");
++      const coordinate = normalizedCoordinate(input.coordinate);
++      const hex = (await client.query<HexRow>(
++        "SELECT id,coordinate,q,r,domain,terrain,region_key,owner_country_id,passable FROM map_hexes WHERE guild_id=$1 AND coordinate=$2",
++        [input.guildId, coordinate]
++      )).rows[0];
++      if (!hex || !hex.passable || hex.domain !== "LAND" || !hex.region_key) throw new GameError("Gözcü yalnızca bölgesi tanımlanmış geçilebilir bir kara Hex'ine yerleştirilebilir.");
++      if (hex.owner_country_id !== input.countryId) throw new GameError("İlk sürümde Bölge Gözcüsü yalnızca kendi devletinizin kontrolündeki bir bölgeye yerleştirilebilir.");
++      const stock = Number((await client.query<{ quantity: number }>(
++        "SELECT COALESCE(SUM(quantity),0)::integer AS quantity FROM unit_stacks WHERE settlement_id=$1 AND unit_type='observer'",
++        [settlement.id]
++      )).rows[0]?.quantity ?? 0);
++      const allocated = Number((await client.query<{ quantity: number }>(
++        `SELECT COALESCE(SUM(observer_quantity),0)::integer AS quantity FROM regional_observer_posts
++          WHERE source_settlement_id=$1 AND status IN ('ACTIVE','INEFFECTIVE')`,
++        [settlement.id]
++      )).rows[0]?.quantity ?? 0);
++      const personnel = stock - allocated;
++      if (personnel <= 0) throw new GameError("Bu yerleşkede başka bir bölgeye atanmamış Gözcü Birliği bulunmuyor.");
++      let id: string;
++      try {
++        id = (await client.query<{ id: string }>(
++          `INSERT INTO regional_observer_posts(
++             guild_id,country_id,region_key,hex_id,source_settlement_id,observer_quantity,stationed_turn,stationed_by
++           ) SELECT $1,$2,$3,$4,$5,$6,current_turn,$7 FROM guilds WHERE discord_id=$1 RETURNING id`,
++          [input.guildId, input.countryId, hex.region_key, hex.id, settlement.id, personnel, input.actorId]
++        )).rows[0]!.id;
++      } catch (error) {
++        if ((error as { code?: string }).code === "23505") throw new GameError("Bu devletin seçilen bölgede zaten etkin bir Gözcü Birliği var.");
++        throw error;
++      }
++      await audit(client, input.guildId, input.actorId, "REGIONAL_OBSERVER_STATION", "regional_observer", id, {
++        countryId: input.countryId, settlementId: settlement.id, settlementName: settlement.name,
++        coordinate, regionKey: hex.region_key, personnel
++      });
++      return { id, regionKey: hex.region_key, coordinate, personnel };
++    });
++  },
++
++  async withdrawRegionalObserver(input: { guildId: string; countryId: string; actorId: string; observerId: string }): Promise<void> {
++    await withTransaction(async (client) => {
++      const observer = (await client.query<{ id: string; region_key: string }>(
++        `UPDATE regional_observer_posts SET status='WITHDRAWN',updated_at=NOW()
++          WHERE id=$1 AND guild_id=$2 AND country_id=$3 AND status IN ('ACTIVE','INEFFECTIVE')
++          RETURNING id,region_key`,
++        [input.observerId, input.guildId, input.countryId]
++      )).rows[0];
++      if (!observer) throw new GameError("Etkin Bölge Gözcüsü bulunamadı.");
++      await audit(client, input.guildId, input.actorId, "REGIONAL_OBSERVER_WITHDRAW", "regional_observer", observer.id, { regionKey: observer.region_key });
++    });
++  },
+ 
+   async setScoutDetachment(input: {
+     guildId: string; countryId: string; actorId: string; armyId: string;

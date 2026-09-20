@@ -28,14 +28,16 @@ async function assertSettlement(client: DbClient, settlementId: string, countryI
 }
 
 async function assertSettlementResourceCapacity(client: DbClient, settlementId: string): Promise<void> {
-  const rawMaterialLevel = Number((await client.query<{ level: number }>(
-    `SELECT level FROM buildings
-      WHERE settlement_id=$1 AND building_type='raw_material'
-        AND status IN ('ACTIVE','BUILDING') AND level>0
-      LIMIT 1`,
+  const capacityRow = (await client.query<{ level: number; bonus: number }>(
+    `SELECT
+       COALESCE((SELECT level FROM buildings
+         WHERE settlement_id=$1 AND building_type='raw_material'
+           AND status IN ('ACTIVE','BUILDING') AND level>0
+         LIMIT 1),0)::integer AS level,
+       COALESCE((SELECT trade_capacity_bonus FROM settlements WHERE id=$1),0)::integer AS bonus`,
     [settlementId]
-  )).rows[0]?.level ?? 0);
-  const capacity = rawMaterialProduction(rawMaterialLevel);
+  )).rows[0];
+  const capacity = rawMaterialProduction(Number(capacityRow?.level ?? 0)) + Number(capacityRow?.bonus ?? 0);
   const used = Number((await client.query<{ count: number }>(
     `SELECT COUNT(*)::integer AS count FROM trade_agreements
       WHERE status IN ('PENDING','ACTIVE')

@@ -39,7 +39,7 @@ export function renderArmyEmbed(army: ArmyView): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(army.active_battle_id ? 0xb33a3a : 0x3f7f5f)
     .setTitle(`⚔️ ${army.name} • Ordu Belgesi`)
-    .setDescription(`**${army.country_name}** • ${state}\nToplam mevcut: **${number(army.total)}**\nKomutan: **${army.commander_name ?? "Atanmamış"}**${army.commander_name ? ` (+${army.commander_skill_bonus})` : ""}`)
+    .setDescription(`**${army.country_name}** • ${state}\nToplam mevcut: **${number(army.total)}**\nHex / toplanma alanı: **${army.current_hex ?? "Henüz belirlenmedi"}**\nKomutan: **${army.commander_name ?? "Atanmamış"}**${army.commander_name ? ` (+${army.commander_skill_bonus})` : ""}`)
     .addFields(
       {
         name: "🧭 Kompozisyon Durumu",

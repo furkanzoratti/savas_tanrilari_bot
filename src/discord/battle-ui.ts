@@ -248,10 +248,11 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
       countryAName: interaction.options.getString("taraf-a", true), countryBName: interaction.options.getString("taraf-b", true),
       terrain: interaction.options.getString("arazi", true) as BattleTerrain, narrative: interaction.options.getString("anlatim") ?? "",
       controllerA: interaction.options.getString("kontrol-a", true) as BattleController, controllerB: interaction.options.getString("kontrol-b", true) as BattleController,
-      defenderSettlementName: interaction.options.getString("savunulan-yerleske") });
+      defenderSettlementName: interaction.options.getString("savunulan-yerleske"),
+      encounterId: interaction.options.getString("karsilasma-id") });
     const rosterCommand = view.battle.terrain === "NAVAL" ? "/savas filo-ayarla" : "/savas kadro-ayarla";
     const supportNote = view.battle.terrain === "SIEGE" ? " Kuşatma aletlerini `/savas kusatma-aleti-ayarla` ile girin." : "";
-    await interaction.editReply({ content: `✅ **${view.sides.A.country_name} — ${view.sides.B.country_name}** savaş taslağı oluşturuldu. Gizli kadroları \`${rosterCommand}\` ile girin.${supportNote}\nİlk zar sırası: **${view.sides[view.battle.first_side].country_name}**.` });
+    await interaction.editReply({ content: `✅ **${view.sides.A.country_name} — ${view.sides.B.country_name}** savaş taslağı oluşturuldu. ${interaction.options.getString("karsilasma-id") ? "Karşılaşmadaki iki ordu otomatik eklendi; kadroları kontrol edin." : `Gizli kadroları \`${rosterCommand}\` ile girin.`}${supportNote}\nİlk zar sırası: **${view.sides[view.battle.first_side].country_name}**. Taslağı hazır olunca \`/savas yayinla\` ile yayımlayın.` });
   } else if (sub === "taraf-ulke") {
     requireGameMaster(interaction);
     const side = interaction.options.getString("taraf", true) as BattleSideKey;

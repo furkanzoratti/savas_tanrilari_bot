@@ -1,3 +1,10 @@
+import { movementMigration } from "./movement-migration.js";
+import { movementCargoMigration } from "./movement-cargo-migration.js";
+import { movementMusterMigration } from "./movement-muster-migration.js";
+import { movementRecallMigration } from "./movement-recall-migration.js";
+import { movementGmReconMigration } from "./movement-gm-recon-migration.js";
+import { movementLogMigration } from "./movement-log-migration.js";
+
 export const migrations = [
   {
     version: 1,
@@ -2205,5 +2212,18 @@ export const migrations = [
       WHERE b.lot_id=l.id AND l.season_id=r.season_id
         AND b.country_id=r.country_id AND b.reserved_amount>0;
     `
-  }
+  },
+  {
+    version: 68,
+    name: "settlement_permanent_trade_capacity_bonus",
+    sql: `
+      ALTER TABLE settlements ADD COLUMN IF NOT EXISTS trade_capacity_bonus INTEGER NOT NULL DEFAULT 0 CHECK (trade_capacity_bonus >= 0);
+    `
+  },
+  movementMigration,
+  movementCargoMigration,
+  movementMusterMigration,
+  movementRecallMigration,
+  movementGmReconMigration,
+  movementLogMigration
 ] as const;

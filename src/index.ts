@@ -11,6 +11,7 @@ import { greatPowerService } from "./services/great-power-service.js";
 import { completedRoleReportRanges, roleReportService, type RoleReportPeriod } from "./services/role-report-service.js";
 import { renderWelcomeMessage, welcomeService } from "./services/welcome-service.js";
 import { publishGreatPowerRanking } from "./discord/great-power-ui.js";
+import { movementLogService } from "./services/movement-log-service.js";
 
 function countWords(content: string): number {
   const cleaned = content
@@ -128,7 +129,16 @@ client.once("clientReady", async (readyClient) => {
   }
   await sendCompletedRoleReports();
   await sendScheduledGreatPowerRanking();
+  await publishMovementLogs();
 });
+
+async function publishMovementLogs():Promise<void>{
+  if(!client.isReady())return;
+  for(const guild of client.guilds.cache.values()){
+    try{await movementLogService.publishPending(client,guild.id,50);}
+    catch(error){logger.error({error,guildId:guild.id},"Hareket logları yayımlanamadı; kayıtlar kuyrukta kalacak");}
+  }
+}
 
 // 23:59:50 sonrası kapanış raporunu yakalar; 00:00'dan itibaren komutlar yeni
 // gün/hafta/ay aralığını kullandığı için sayaçlar mantıksal olarak sıfırlanır.
@@ -140,6 +150,10 @@ const greatPowerTimer = setInterval(() => {
   void sendScheduledGreatPowerRanking().catch((error) => logger.error(error, "Büyük Güçler zamanlayıcısı başarısız"));
 }, 30_000);
 greatPowerTimer.unref();
+const movementLogTimer=setInterval(()=>{
+  void publishMovementLogs().catch((error)=>logger.error(error,"Hareket log yayını başarısız"));
+},10_000);
+movementLogTimer.unref();
 const healthServer = startHealthServer(client);
 await client.login(config.DISCORD_TOKEN);
 
@@ -147,6 +161,7 @@ async function shutdown(signal: string) {
   logger.info({ signal }, "Bot kapatılıyor");
   clearInterval(roleReportTimer);
   clearInterval(greatPowerTimer);
+  clearInterval(movementLogTimer);
   healthServer.close();
   client.destroy();
   await pool.end();

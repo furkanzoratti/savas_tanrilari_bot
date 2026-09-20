@@ -1,0 +1,174 @@
+﻿Yerleşke;Bölge Anahtarı;Arazi Türü;Renk
+Myos Hormos;rom_aegyptos_ta_abt;Çöl;#e8c47b
+Memphis;rom_aegyptos_ta_ament;Düz Ova;#a8d989
+Alexandria;rom_aegyptos_ta_mehu;Bataklık;#8d5aae
+Diospolis;rom_aegyptos_ta_shemau;Çöl;#e8c47b
+Thapsus;rom_africa_byzacium;Düz Ova;#a8d989
+Macomades;rom_africa_syrtis;Çöl;#e8c47b
+Lepcis;rom_africa_tripolis;Düz Ova;#a8d989
+Carthago;rom_africa_zeugitana;Düz Ova;#a8d989
+Aksum;rom_aithiops_ityopya;Dağlık;#8c9098
+Meroe;rom_aithiops_kush;Bozkır;#d8b55b
+Ptolemais Theron;rom_aithiops_medjay;Çöl;#e8c47b
+Burdigala;rom_aquitania_aquitania;Düz Ova;#a8d989
+Nemossos;rom_aquitania_gergovia;Ormanlık;#2f6b3b
+Lemonum;rom_aquitania_pictavis;Düz Ova;#a8d989
+Eudaemon;rom_arabia_felix_himyar;Dağlık;#8c9098
+Maas-gat;rom_arabia_felix_maka;Dağlık;#8c9098
+Marib;rom_arabia_felix_saba;Dağlık;#8c9098
+Gerrha;rom_arabia_magna_dilmun;Çöl;#e8c47b
+Adummatu;rom_arabia_magna_kedar;Çöl;#e8c47b
+Yathrib;rom_arabia_magna_lathrippa;Çöl;#e8c47b
+Alexandria Arachosia;rom_arachosia_arachosia;Dağlık;#8c9098
+Kapisene;rom_arachosia_paropamisadae;Dağlık;#8c9098
+Artacoana;rom_aria_aria;Dağlık;#8c9098
+Phrada;rom_aria_drangiana;Dağlık;#8c9098
+Merv;rom_aria_margiana;Bozkır;#d8b55b
+Armavir;rom_armenia_armenia;Dağlık;#8c9098
+Tushpa;rom_armenia_corduene;Dağlık;#8c9098
+Arsamosata;rom_armenia_sophene;Dağlık;#8c9098
+Ephesus;rom_asia_lydia;Düz Ova;#a8d989
+Pergamon;rom_asia_mysia;Düz Ova;#a8d989
+Pessinus;rom_asia_phrygia;Bozkır;#d8b55b
+Rhodos;rom_asia_rhodes;Dağlık;#8c9098
+Baktra;rom_bactria_baktria;Bozkır;#d8b55b
+Eucratideia;rom_bactria_tocharia;Bozkır;#d8b55b
+Kartuba;rom_baetica_baeturia;Düz Ova;#a8d989
+Gadira;rom_baetica_turdetania;Düz Ova;#a8d989
+Treverorum;rom_belgica_arduenna_silva;Ormanlık;#2f6b3b
+Nemetocenna;rom_belgica_silva_carbonaria;Ormanlık;#2f6b3b
+Nicomedia;rom_bithynia_et_pontus_bythynia;Düz Ova;#a8d989
+Sinope;rom_bithynia_et_pontus_paphlagonia;Düz Ova;#a8d989
+Amaseia;rom_bithynia_et_pontus_pontos;Düz Ova;#a8d989
+Trapezos;rom_bithynia_et_pontus_riza;Dağlık;#8c9098
+Tanais;rom_bosporus_maeotia;Bataklık;#8d5aae
+Phanagoria;rom_bosporus_sindica;Bataklık;#8d5aae
+Panticapaeum;rom_bosporus_taurica;Bozkır;#d8b55b
+Eborakon;rom_britannia_brigantia;Ormanlık;#2f6b3b
+Camulodunon;rom_britannia_britannia;Ormanlık;#2f6b3b
+Moridunon;rom_britannia_demetia;Ormanlık;#2f6b3b
+Iska;rom_britannia_dumnonia;Ormanlık;#2f6b3b
+Eildon;rom_caledonia_et_hibernia_caledonia;Dağlık;#8c9098
+Eblana;rom_caledonia_et_hibernia_hibernia;Ormanlık;#2f6b3b
+Bam;rom_carmania_eremos_karmania;Dağlık;#8c9098
+Harmozia;rom_carmania_karmania;Dağlık;#8c9098
+Ibossim;rom_cartaginensis_baleareis;Düz Ova;#a8d989
+Qart Hadasht;rom_cartaginensis_bastetania;Düz Ova;#a8d989
+Numantia;rom_cartaginensis_celtiberia;Dağlık;#8c9098
+Arse;rom_cartaginensis_edetania;Düz Ova;#a8d989
+Gabala;rom_caucasia_albania;Dağlık;#8c9098
+Phasis;rom_caucasia_colchis;Dağlık;#8c9098
+Mtskheta;rom_caucasia_iberia;Dağlık;#8c9098
+Namnetum;rom_celtica_aremorica;Ormanlık;#2f6b3b
+Bibracte;rom_celtica_lugdunensis;Düz Ova;#a8d989
+Cenabum;rom_celtica_lutetia;Ormanlık;#2f6b3b
+Kath;rom_chorasmia_korasmia;Bozkır;#d8b55b
+Amul;rom_chorasmia_transcaspia;Bozkır;#d8b55b
+Tarsus;rom_cilicia_cilicia;Düz Ova;#a8d989
+Salamis;rom_cilicia_cyprus;Düz Ova;#a8d989
+Side;rom_cilicia_pamphylia;Düz Ova;#a8d989
+Medhlan;rom_cisalpina_insubria;Ormanlık;#2f6b3b
+Genua;rom_cisalpina_liguria;Dağlık;#8c9098
+Patavium;rom_cisalpina_venetia;Ormanlık;#2f6b3b
+Alalia;rom_corsica_et_sardinia_corsica;Düz Ova;#a8d989
+Karalis;rom_corsica_et_sardinia_sardinia;Düz Ova;#a8d989
+Petrodava;rom_dacia_bastarnia;Dağlık;#8c9098
+Malva;rom_dacia_dacia_inferior;Ormanlık;#2f6b3b
+Zarmizegetusa;rom_dacia_dacia_superior;Dağlık;#8c9098
+Mazaca;rom_galatia_et_cappadocia_cappadocia;Dağlık;#8c9098
+Samosata;rom_galatia_et_cappadocia_commagene;Dağlık;#8c9098
+Ancyra;rom_galatia_et_cappadocia_galatia;Bozkır;#d8b55b
+Iconium;rom_galatia_et_cappadocia_lycaonia;Bozkır;#d8b55b
+Pura;rom_gedrosia_gedrosia;Çöl;#e8c47b
+Oraea;rom_gedrosia_rhambacia;Çöl;#e8c47b
+Bagacum;rom_germania_minor_germania_inferior;Düz Ova;#a8d989
+Vesontio;rom_germania_minor_germania_superior;Ormanlık;#2f6b3b
+Athenai;rom_hellas_attiki;Düz Ova;#a8d989
+Hierapytna;rom_hellas_creta;Dağlık;#8c9098
+Sparta;rom_hellas_peloponnesos;Dağlık;#8c9098
+Casurgis;rom_hercynia_hercynia_silva;Ormanlık;#2f6b3b
+Istros;rom_hercynia_luna_silva;Ormanlık;#2f6b3b
+Delminium;rom_illyria_dalmatia;Dağlık;#8c9098
+Epidamnos;rom_illyria_illyria;Dağlık;#8c9098
+Iader;rom_illyria_liburnia;Dağlık;#8c9098
+Velathri;rom_italia_etruria;Düz Ova;#a8d989
+Roma;rom_italia_latium;Düz Ova;#a8d989
+Ariminum;rom_italia_picenum;Bataklık;#8d5aae
+Neapolis;rom_italia_samnium;Düz Ova;#a8d989
+Cyrene;rom_libue_cyrenaica;Düz Ova;#a8d989
+Paraitonion;rom_libue_marmarica;Çöl;#e8c47b
+Augila;rom_libue_oases;Çöl;#e8c47b
+Ammonium;rom_libue_siwa;Çöl;#e8c47b
+Ebora;rom_lusitania_celtica;Düz Ova;#a8d989
+Olisipo;rom_lusitania_lusitania;Düz Ova;#a8d989
+Apollonia;rom_macedonia_epeiros;Düz Ova;#a8d989
+Pella;rom_macedonia_makedonia;Dağlık;#8c9098
+Larissa;rom_macedonia_thessalia;Düz Ova;#a8d989
+Flevum;rom_magna_germania_frisia;Bataklık;#8d5aae
+Tulifurdum;rom_magna_germania_silva_bacenis;Ormanlık;#2f6b3b
+Uburzis;rom_magna_germania_silva_nigra;Ormanlık;#2f6b3b
+Cosentia;rom_magna_graecia_bruttium;Düz Ova;#a8d989
+Brundisium;rom_magna_graecia_calabria;Düz Ova;#a8d989
+Lilybaeum;rom_magna_graecia_lilybaion;Düz Ova;#a8d989
+Syracusae;rom_magna_graecia_sirako;Düz Ova;#a8d989
+Migdol;rom_mauretania_atlas;Dağlık;#8c9098
+Dimmidi;rom_mauretania_gaetulia;Çöl;#e8c47b
+Iol;rom_mauretania_numidia;Düz Ova;#a8d989
+Tingis;rom_mauretania_tingitana;Dağlık;#8c9098
+Gazaca;rom_media_magna_atropatene;Düz Ova;#a8d989
+Ekbatana;rom_media_magna_media;Dağlık;#8c9098
+Rhaga;rom_media_magna_rhagau;Bozkır;#d8b55b
+Hatra;rom_mesopotamia_athura;Bozkır;#d8b55b
+Seleucia;rom_mesopotamia_babylonia;Düz Ova;#a8d989
+Charax;rom_mesopotamia_mesene;Bataklık;#8d5aae
+Edessa;rom_mesopotamia_osroene;Bozkır;#d8b55b
+Charmuthas;rom_nabataea_havilah;Çöl;#e8c47b
+Jerusalem;rom_nabataea_iudaea;Düz Ova;#a8d989
+Petra;rom_nabataea_jordan;Dağlık;#8c9098
+Hegra;rom_nabataea_lihyan;Çöl;#e8c47b
+Singidun;rom_pannonia_pannonia_inferior;Düz Ova;#a8d989
+Segestica;rom_pannonia_pannonia_superior;Düz Ova;#a8d989
+Akink;rom_pannonia_transdanubia;Düz Ova;#a8d989
+Nisa;rom_parthia_astauene;Bozkır;#d8b55b
+Zadrakarta;rom_parthia_hyrcania;Ormanlık;#2f6b3b
+Hecatompylos;rom_parthia_parthia;Bozkır;#d8b55b
+Susia;rom_parthia_traxiane;Çöl;#e8c47b
+Susa;rom_persis_elam;Düz Ova;#a8d989
+Gor;rom_persis_lyan;Dağlık;#8c9098
+Persepolis;rom_persis_parsa;Dağlık;#8c9098
+Cydamus;rom_phazania_tidamensi;Çöl;#e8c47b
+Garama;rom_phazania_zinchecra;Çöl;#e8c47b
+Solokha;rom_ponto_caspia_cimmeria;Bozkır;#d8b55b
+Samandar;rom_ponto_caspia_didoya;Bozkır;#d8b55b
+Olbia;rom_ponto_caspia_oium;Bataklık;#8d5aae
+Siracena;rom_ponto_caspia_zyx;Bozkır;#d8b55b
+Tolosa;rom_provincia_narbonensis;Düz Ova;#a8d989
+Massalia;rom_provincia_transalpina;Düz Ova;#a8d989
+Octuduron;rom_raetia_et_noricum_helvetia;Dağlık;#8c9098
+Noreia;rom_raetia_et_noricum_noricum;Dağlık;#8c9098
+Koria;rom_raetia_et_noricum_raetia;Dağlık;#8c9098
+Mons Regius;rom_sarmatia_aestia;Ormanlık;#2f6b3b
+Galic;rom_sarmatia_galicia;Bozkır;#d8b55b
+Tur;rom_sarmatia_pripet;Bataklık;#8d5aae
+Gelonus;rom_scythia_scythia;Bozkır;#d8b55b
+Sarai;rom_scythia_turan;Bozkır;#d8b55b
+Aktau;rom_scythia_usturt;Bozkır;#d8b55b
+Belz;rom_silesia_leda;Ormanlık;#2f6b3b
+Budorgis;rom_silesia_silesia;Ormanlık;#2f6b3b
+Ascaucalis;rom_suebia_bomeranorum;Ormanlık;#2f6b3b
+Alabu;rom_suebia_cimbria;Düz Ova;#a8d989
+Lupfurdum;rom_suebia_lusatia;Ormanlık;#2f6b3b
+Rhougion;rom_suebia_rugia;Ormanlık;#2f6b3b
+Palmyra;rom_syria_aram;Çöl;#e8c47b
+Dura;rom_syria_eremos_syria;Çöl;#e8c47b
+Tyros;rom_syria_phonecia;Düz Ova;#a8d989
+Antioch;rom_syria_syria;Düz Ova;#a8d989
+Brigantium;rom_tarraconensis_callaecia;Dağlık;#8c9098
+Aracillum;rom_tarraconensis_cantabria;Dağlık;#8c9098
+Tarraco;rom_tarraconensis_tarraconensis;Düz Ova;#a8d989
+Antheia;rom_thracia_byzantion;Düz Ova;#a8d989
+Navissos;rom_thracia_dardania;Dağlık;#8c9098
+Odessos;rom_thracia_moesia;Düz Ova;#a8d989
+Pulpudeva;rom_thracia_thracia;Düz Ova;#a8d989
+Bukhara;rom_transoxania_kangju;Bozkır;#d8b55b
+Maracanda;rom_transoxania_sodgiana;Bozkır;#d8b55b

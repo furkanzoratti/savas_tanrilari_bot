@@ -1,0 +1,58 @@
+{
+  "mapVersion": "amrp-r56-v2",
+  "totalHexes": 1800,
+  "playableHexes": 1149,
+  "typeCounts": {
+    "LAND": 749,
+    "SEA": 400,
+    "IMPASSABLE": 651
+  },
+  "settlements": 173,
+  "boundSettlements": 173,
+  "settlementCollisions": [],
+  "inferredRegionHexes": 33,
+  "ambiguousRegionHexes": [
+    {
+      "code": "J23",
+      "regionKey": "rom_mauretania_numidia",
+      "method": "HEX_POLYGON_SAMPLING",
+      "topVotes": 62,
+      "secondVotes": 58,
+      "needsReview": true
+    },
+    {
+      "code": "N06",
+      "regionKey": "rom_magna_germania_frisia",
+      "method": "HEX_POLYGON_SAMPLING",
+      "topVotes": 39,
+      "secondVotes": 34,
+      "needsReview": true
+    },
+    {
+      "code": "T25",
+      "regionKey": "rom_africa_syrtis",
+      "method": "HEX_POLYGON_SAMPLING",
+      "topVotes": 12,
+      "secondVotes": 11,
+      "needsReview": true
+    },
+    {
+      "code": "X15",
+      "regionKey": "rom_thracia_moesia",
+      "method": "HEX_POLYGON_SAMPLING",
+      "topVotes": 58,
+      "secondVotes": 44,
+      "needsReview": true
+    },
+    {
+      "code": "AD13",
+      "regionKey": "rom_ponto_caspia_cimmeria",
+      "method": "HEX_POLYGON_SAMPLING",
+      "topVotes": 36,
+      "secondVotes": 26,
+      "needsReview": true
+    }
+  ],
+  "unassignedLandHexes": [],
+  "maximumBindingDistance": 52.917
+}

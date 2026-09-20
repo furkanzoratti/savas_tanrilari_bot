@@ -6,9 +6,11 @@ describe("kalıcı ordu komutları", () => {
     const army = commandBuilders.find((command) => command.name === "ordu");
     expect(army?.options?.map((option) => option.name)).toEqual([
       "olustur", "asker-ekle", "asker-cikar", "kusatma-aleti-ekle", "kusatma-aleti-cikar",
-      "komutan-ata", "komutan-kaldir", "bilgi", "dagit"
+      "komutan-ata", "komutan-kaldir", "bilgi", "toplama-emirleri", "toplama-iptal", "dagit"
     ]);
     const add = army?.options?.find((option) => option.name === "asker-ekle");
+    const create = army?.options?.find((option) => option.name === "olustur");
+    expect(create?.options?.find((option) => option.name === "toplanma-yerleskesi")).toMatchObject({ autocomplete: true });
     expect(add?.options?.find((option) => option.name === "ordu")).toMatchObject({ required: true, autocomplete: true });
     expect(add?.options?.find((option) => option.name === "yerleske")).toMatchObject({ required: true, autocomplete: true });
     const addAsset = army?.options?.find((option) => option.name === "kusatma-aleti-ekle");

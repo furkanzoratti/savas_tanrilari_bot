@@ -17,6 +17,23 @@ import { formableModifiers, type FormableCountryKey } from "../domain/formable-c
 import { specializationLevel, type CharacterSpecialization, type CommanderDoctrine } from "../domain/characters.js";
 
 export type BattleStatus = "DRAFT" | "WAITING_FIRST_ROLL" | "WAITING_SECOND_ROLL" | "READY_TO_RESOLVE" | "FINISHED" | "CANCELLED";
+
+async function settleLinkedEncounter(client:DbClient,battleId:string,cancelled:boolean):Promise<void>{
+  const linked=(await client.query<{id:string;order_a_id:string;order_b_id:string|null}>(
+    "SELECT id,order_a_id,order_b_id FROM movement_encounters WHERE battle_id=$1 FOR UPDATE",[battleId]
+  )).rows;
+  for(const encounter of linked){
+    if(cancelled){
+      await client.query("UPDATE movement_encounters SET status='BATTLE_PENDING',battle_id=NULL WHERE id=$1",[encounter.id]);
+      continue;
+    }
+    await client.query("UPDATE movement_encounters SET status='RESOLVED' WHERE id=$1",[encounter.id]);
+    for(const orderId of [encounter.order_a_id,encounter.order_b_id].filter((id):id is string=>Boolean(id))){
+      await client.query("UPDATE movement_orders SET status='CANCELLED',blocked_reason='Karşılaşma savaşı sonuçlandı.',updated_at=NOW() WHERE id=$1 AND status='BLOCKED'",[orderId]);
+      await client.query("UPDATE movement_order_steps SET status='SKIPPED' WHERE order_id=$1 AND status IN ('PENDING','BLOCKED')",[orderId]);
+    }
+  }
+}
 export type SiegePhase = "BOMBARDMENT" | "ASSAULT";
 
 export function siegePhaseRevealColumn(phase: SiegePhase): "bombardment_revealed" | "assault_revealed" {
@@ -880,7 +897,7 @@ export const battleService = {
     return { view: await loadView(pool as unknown as DbClient, battle.id), rows: await casualtyRows(pool as unknown as DbClient, battle.id) };
   },
 
-  async create(input: { guildId: string; channelId: string; actorId: string; countryAName: string; countryBName: string; terrain: BattleTerrain; narrative: string; controllerA: BattleController; controllerB: BattleController; defenderSettlementName?: string | null }): Promise<BattleView> {
+  async create(input: { guildId: string; channelId: string; actorId: string; countryAName: string; countryBName: string; terrain: BattleTerrain; narrative: string; controllerA: BattleController; controllerB: BattleController; defenderSettlementName?: string | null; encounterId?: string | null }): Promise<BattleView> {
     return withTransaction(async (client) => {
       if (await activeInChannel(client, input.guildId, input.channelId)) throw new GameError("Bu kanalda zaten etkin bir savaş var.");
       const countries = await client.query<{ id: string; name: string }>("SELECT id,name FROM countries WHERE guild_id=$1 AND status='ACTIVE' AND LOWER(name) IN (LOWER($2),LOWER($3))", [input.guildId, input.countryAName, input.countryBName]);
@@ -888,6 +905,42 @@ export const battleService = {
       const b = countries.rows.find((country) => country.name.toLocaleLowerCase("tr-TR") === input.countryBName.toLocaleLowerCase("tr-TR"));
       if (!a || !b) throw new GameError("Taraf ülkelerden biri bulunamadı.");
       if (a.id === b.id) throw new GameError("Bir ülke kendisiyle savaşamaz.");
+      let encounterArmies: Array<{armyId:string;countryId:string}> = [];
+      let linkedEncounterId: string | null = null;
+      if (input.encounterId?.trim()) {
+        const encounterId=input.encounterId.trim().toLowerCase();
+        if(!/^[0-9a-f-]{8,36}$/.test(encounterId))
+          throw new GameError("En az 8 karakterlik geçerli karşılaşma ID'si girin.");
+        if (input.terrain === "SIEGE" || input.terrain === "NAVAL")
+          throw new GameError("Hex karşılaşmasından otomatik kadro aktarımı yalnız kara meydan savaşında kullanılabilir.");
+        const matches = (await client.query<{
+          id:string;status:string;formation_kind:string;order_a_id:string;order_b_id:string|null;
+          stationary_formation_id:string|null;
+        }>(`SELECT id,status,formation_kind,order_a_id,order_b_id,stationary_formation_id
+              FROM movement_encounters WHERE guild_id=$1 AND id::text LIKE $2 || '%' FOR UPDATE`,
+          [input.guildId,encounterId])).rows;
+        if (matches.length !== 1) throw new GameError(matches.length ? "Karşılaşma ID'si belirsiz; tam ID yazın." : "Karşılaşma dosyası bulunamadı.");
+        const encounter = matches[0]!;
+        if (encounter.status !== "BATTLE_PENDING" || encounter.formation_kind !== "ARMY")
+          throw new GameError("Bu karşılaşma henüz savaş bekliyor durumunda değil.");
+        const first = (await client.query<{army_id:string;country_id:string;status:string}>(
+          "SELECT army_id,country_id,status FROM movement_orders WHERE id=$1 FOR UPDATE",[encounter.order_a_id]
+        )).rows[0];
+        const second = encounter.order_b_id
+          ? (await client.query<{army_id:string;country_id:string;status:string}>(
+            "SELECT army_id,country_id,status FROM movement_orders WHERE id=$1 FOR UPDATE",[encounter.order_b_id]
+          )).rows[0]
+          : (await client.query<{army_id:string;country_id:string;status:string}>(
+            "SELECT id AS army_id,country_id,'BLOCKED'::text AS status FROM armies WHERE id=$1 FOR UPDATE",
+            [encounter.stationary_formation_id]
+          )).rows[0];
+        if (!first?.army_id || !second?.army_id || first.status !== "BLOCKED" || second.status !== "BLOCKED")
+          throw new GameError("Karşılaşmadaki ordulardan biri artık savaş bekleyen konumda değil.");
+        if (![a.id,b.id].includes(first.country_id) || ![a.id,b.id].includes(second.country_id) || first.country_id===second.country_id)
+          throw new GameError("Seçilen A/B ülkeleri karşılaşmadaki iki ordunun devletleriyle uyuşmuyor.");
+        encounterArmies=[{armyId:first.army_id,countryId:first.country_id},{armyId:second.army_id,countryId:second.country_id}];
+        linkedEncounterId=encounter.id;
+      }
       let defenderSettlementId: string | null = null;
       if (input.terrain === "SIEGE") {
         if (!input.defenderSettlementName?.trim()) throw new GameError("Kuşatma savaşı için savunulan yerleşke yazılmalıdır.");
@@ -934,6 +987,28 @@ export const battleService = {
           [id, b.id, defenderSettlementId, JSON.stringify(garrisonComposition)]
         );
         await rebuildDraftSide(client, id, "B");
+      }
+      if (linkedEncounterId) {
+        for (const member of encounterArmies) {
+          const side: BattleSideKey = member.countryId === a.id ? "A" : "B";
+          const occupied = await client.query(
+            `SELECT 1 FROM battle_army_assignments assigned JOIN battles battle ON battle.id=assigned.battle_id
+               WHERE assigned.army_id=$1 AND battle.status NOT IN ('FINISHED','CANCELLED') LIMIT 1`,[member.armyId]
+          );
+          if (occupied.rowCount) throw new GameError("Karşılaşma ordularından biri başka bir etkin savaşa bağlanmış.");
+          const composition = Object.fromEntries((await client.query<{unit_type:string;quantity:number}>(
+            `SELECT unit_type,COALESCE(SUM(quantity),0)::integer AS quantity FROM army_units
+               WHERE army_id=$1 GROUP BY unit_type HAVING SUM(quantity)>0`,[member.armyId]
+          )).rows.map((row)=>[row.unit_type,Number(row.quantity)])) as BattleComposition;
+          if (!compositionTotal(composition)) throw new GameError("Karşılaşma ordularından birinde savaşa girecek asker bulunmuyor.");
+          await client.query(
+            `INSERT INTO battle_army_assignments(battle_id,side_key,army_id,country_id,initial_composition)
+             VALUES($1,$2,$3,$4,$5::jsonb)`,[id,side,member.armyId,member.countryId,JSON.stringify(composition)]
+          );
+          await rebuildParticipantFromArmies(client,id,member.countryId);
+          await rebuildDraftSide(client,id,side);
+        }
+        await client.query("UPDATE movement_encounters SET status='BATTLE_LINKED',battle_id=$2 WHERE id=$1",[linkedEncounterId,id]);
       }
       await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'battle.create','battle',$3,$4::jsonb)", [input.guildId, input.actorId, id, JSON.stringify({ terrain: input.terrain, a: a.name, b: b.name })]);
       return loadView(client, id);
@@ -1030,6 +1105,15 @@ export const battleService = {
       )).rows[0];
       if (!army) throw new GameError("Ordu bulunamadı veya seçilen savaş tarafındaki bir devlete ait değil.");
       if (input.action === "REMOVE") {
+        const fromEncounter=await client.query(
+          `SELECT 1 FROM movement_encounters encounter
+            JOIN movement_orders first_order ON first_order.id=encounter.order_a_id
+            LEFT JOIN movement_orders second_order ON second_order.id=encounter.order_b_id
+           WHERE encounter.battle_id=$1 AND
+             (first_order.army_id=$2 OR second_order.army_id=$2 OR encounter.stationary_formation_id=$2) LIMIT 1`,
+          [battle.id,army.id]
+        );
+        if(fromEncounter.rowCount)throw new GameError("Karşılaşmanın asli ordusu taslaktan çıkarılamaz; gerekirse taslağı iptal edip dosyayı yeniden açın.");
         const assignment = (await client.query<{ initial_assets: SiegeComposition; initial_enhanced: SiegeComposition }>(
           "SELECT initial_assets,initial_enhanced FROM battle_army_assignments WHERE battle_id=$1 AND army_id=$2 FOR UPDATE",
           [battle.id, army.id]
@@ -1896,6 +1980,7 @@ export const battleService = {
         wall_current_hp=COALESCE($6,wall_current_hp),gate_current_hp=COALESCE($7,gate_current_hp),updated_at=NOW() WHERE id=$8`,
       [ended ? "FINISHED" : "WAITING_FIRST_ROLL", ended ? 0 : 1, nextFirst, winner, reason, wallAfter, gateAfter, active.id]);
       if (ended) {
+        await settleLinkedEncounter(client,active.id,false);
         const currentTurn = Number((await client.query<{ current_turn: number }>("SELECT current_turn FROM guilds WHERE discord_id=$1", [input.guildId])).rows[0]?.current_turn ?? 0);
         await recordCommanderVictory(client,active.id,winner,currentTurn);
       }
@@ -1937,6 +2022,7 @@ export const battleService = {
       const winner: BattleSideKey = side === "A" ? "B" : "A";
       const finishReason = `${view.sides[side].country_name} geri çekildi.${applied.applied ? ` Takip sırasında ${applied.applied} kayıp verdi.` : " İlk turda temas kesildiği için ek kayıp yaşanmadı."}`;
       await client.query("UPDATE battles SET status='FINISHED',winner_side=$1,finish_reason=$2,updated_at=NOW() WHERE id=$3", [winner, finishReason, active.id]);
+      await settleLinkedEncounter(client,active.id,false);
       const currentTurn = Number((await client.query<{ current_turn: number }>("SELECT current_turn FROM guilds WHERE discord_id=$1", [input.guildId])).rows[0]?.current_turn ?? 0);
       await recordCommanderVictory(client,active.id,winner,currentTurn);
       const report = await applyLossesToDocuments(client, active.id, input.guildId, input.actorId);
@@ -1949,6 +2035,7 @@ export const battleService = {
       const active = await activeInChannel(client, input.guildId, input.channelId);
       if (!active) throw new GameError("Bu kanalda etkin savaş yok.");
       await client.query("UPDATE battles SET status='FINISHED',winner_side=$1,finish_reason=$2,updated_at=NOW() WHERE id=$3", [input.winner, input.reason, active.id]);
+      await settleLinkedEncounter(client,active.id,false);
       const currentTurn = Number((await client.query<{ current_turn: number }>("SELECT current_turn FROM guilds WHERE discord_id=$1", [input.guildId])).rows[0]?.current_turn ?? 0);
       await recordCommanderVictory(client,active.id,input.winner,currentTurn);
       const report = await applyLossesToDocuments(client, active.id, input.guildId, input.actorId);
@@ -1961,6 +2048,7 @@ export const battleService = {
       const active = await activeInChannel(client, input.guildId, input.channelId);
       if (!active) throw new GameError("Bu kanalda etkin savaş yok.");
       await client.query("UPDATE battles SET status='CANCELLED',finish_reason='Yönetici tarafından iptal edildi.',updated_at=NOW() WHERE id=$1", [active.id]);
+      await settleLinkedEncounter(client,active.id,true);
       return loadView(client, active.id);
     });
   }

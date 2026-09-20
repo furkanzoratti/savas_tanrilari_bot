@@ -19,6 +19,8 @@ import { calculateTreasuryTransferQuota } from "../domain/treasury-transfer.js";
 import { assimilationCompletionTurn } from "../domain/assimilation.js";
 import type { ArmyView } from "./army-service.js";
 import type { FleetView } from "./fleet-service.js";
+import { resolveMovementStage, type MovementStageSummary } from "./movement-turn-service.js";
+import { syncObserverPosts } from "./movement-observer-service.js";
 
 export class GameError extends Error {}
 
@@ -246,6 +248,7 @@ export interface CountryDocument {
 export interface TurnAdvanceResult {
   turn: number;
   acquisition: boolean;
+  movement: MovementStageSummary;
   completedBuildings: number;
   recruitmentArrivals: number;
   completedShips: number;
@@ -2205,6 +2208,24 @@ export const gameService = {
          SELECT 1 FROM recruitment_orders WHERE settlement_id=$1 AND unit_type='observer' AND status='TRAINING' LIMIT 1`, [settlement.id]
       );
       if (existing.rowCount) throw new GameError("Bu yerleşkede zaten bir Gözcü Birliği var veya eğitiliyor.");
+      const regionalExisting = await client.query(
+        `WITH target_region AS (
+           SELECT hex.region_key FROM settlement_map_positions position
+           JOIN map_hexes hex ON hex.id=position.hex_id
+           WHERE position.settlement_id=$1 AND hex.guild_id=$3 AND hex.region_key IS NOT NULL
+         )
+         SELECT 1 FROM settlements other
+         JOIN settlement_map_positions position ON position.settlement_id=other.id
+         JOIN map_hexes hex ON hex.id=position.hex_id AND hex.guild_id=$3
+         WHERE other.country_id=$2 AND other.id<>$1
+           AND hex.region_key IN (SELECT region_key FROM target_region)
+           AND (EXISTS (SELECT 1 FROM unit_stacks stack WHERE stack.settlement_id=other.id
+                         AND stack.unit_type='observer' AND stack.quantity>0)
+             OR EXISTS (SELECT 1 FROM recruitment_orders order_record WHERE order_record.settlement_id=other.id
+                         AND order_record.unit_type='observer' AND order_record.status='TRAINING'))
+         LIMIT 1`, [settlement.id,country.id,input.guildId]
+      );
+      if (regionalExisting.rowCount) throw new GameError("Bu eyalette başka bir yerleşkenin Gözcü Birliği var veya yetiştiriliyor; eyalet başına bir gözcü sınırı geçerlidir.");
 
       const personLoad = formableModifiers(country.active_formable_key).observerManpower ?? 200;
       const marshalPartial = await hasActiveMarshalPartialMobilization(client, country.id, country.mobilization);
@@ -2496,6 +2517,7 @@ export const gameService = {
     return withTransaction(async (client) => {
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`turn:${guildId}`]);
       const guild = await getGuild(client, guildId);
+      await client.query("SELECT 1 FROM guilds WHERE discord_id=$1 FOR UPDATE", [guildId]);
       const newTurn = guild.current_turn + 1;
       const acquisition = isAcquisitionTurn(newTurn, guild.acquisition_interval);
       const eventKey = `TURN_ADVANCE:${newTurn}`;
@@ -2610,6 +2632,7 @@ export const gameService = {
         await client.query("UPDATE recruitment_orders SET remaining_quantity=remaining_quantity-$1 WHERE id=$2", [wave.quantity, wave.order_id]);
       }
       await client.query("UPDATE recruitment_orders SET status='COMPLETED' WHERE status='TRAINING' AND remaining_quantity=0");
+      await syncObserverPosts(client, guildId, newTurn, actorId);
 
       const dueShips = await client.query<{ id: string; settlement_id: string; settlement_name: string; ship_type: keyof typeof SHIPS; quantity: number }>(
         `SELECT no.id,no.settlement_id,s.name AS settlement_name,no.ship_type,no.quantity FROM naval_orders no JOIN countries c ON c.id=no.country_id JOIN settlements s ON s.id=no.settlement_id
@@ -2815,6 +2838,7 @@ export const gameService = {
       const garrisonReplenishmentStartedDetails = startedGarrisons.map((order) => ({ settlementName: order.settlementName, personnel: order.personnel, cost: order.cost, completionTurn: order.completionTurn, reason: order.reason }));
       await snapshotTreasuryTransferTurn(client, guildId, newTurn);
       await client.query("UPDATE guilds SET current_turn=$1,turn_phase='OPEN',updated_at=NOW() WHERE discord_id=$2", [newTurn, guildId]);
+      const movement = await resolveMovementStage(client, guildId, actorId, newTurn, "ADVANCE");
       await audit(client, guildId, actorId, "TURN_ADVANCE", "guild", guildId, {
         from: guild.current_turn, to: newTurn, acquisition, garrisonUpgrades, startedGarrisons: garrisonReplenishmentStartedDetails, incomePenaltyDetails,
         mercenaryArrivals: mercenaryArrivalDetails.length, mercenaryUpkeep: mercenaryUpkeepDetails,
@@ -2822,7 +2846,7 @@ export const gameService = {
         assimilatedSettlements: assimilatedSettlementDetails
       });
       return {
-        turn: newTurn, acquisition,
+        turn: newTurn, acquisition, movement,
         completedBuildings: completedBuildings.rowCount ?? 0,
         recruitmentArrivals: dueWaves.rows.reduce((sum, row) => sum + row.quantity, 0),
         completedShips: dueShips.rows.reduce((sum, row) => sum + row.quantity, 0),
@@ -2849,9 +2873,31 @@ export const gameService = {
     });
   },
 
+  async stopTurn(guildId: string, actorId: string): Promise<MovementStageSummary> {
+    return withTransaction(async (client) => {
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`turn:${guildId}`]);
+      const guild = await ensureGuild(client, guildId);
+      await client.query("UPDATE guilds SET turn_phase='RESOLVING',updated_at=NOW() WHERE discord_id=$1", [guildId]);
+      const movement = await resolveMovementStage(client, guildId, actorId, guild.current_turn, "STOP");
+      await audit(client, guildId, actorId, "TURN_PHASE", "guild", guildId, { phase: "RESOLVING", movement });
+      return movement;
+    });
+  },
+
   async setTurnPhase(guildId: string, actorId: string, phase: "OPEN" | "CLOSED" | "RESOLVING"): Promise<void> {
     await withTransaction(async (client) => {
-      await ensureGuild(client, guildId);
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`turn:${guildId}`]);
+      const guild = await ensureGuild(client, guildId);
+      if (phase === "OPEN" && guild.turn_phase !== "OPEN") {
+        const resolved = await client.query(
+          `SELECT 1 FROM movement_resolution_runs run
+             JOIN guild_movement_settings settings ON settings.guild_id=run.guild_id
+            WHERE run.guild_id=$1 AND run.game_turn=$2 AND settings.enabled
+              AND run.summary ? 'STOP' LIMIT 1`,
+          [guildId, guild.current_turn]
+        );
+        if (resolved.rowCount) throw new GameError("Hareketleri çözülmüş tur yeniden açılamaz; sonraki tura geçin.");
+      }
       await client.query("UPDATE guilds SET turn_phase=$1,updated_at=NOW() WHERE discord_id=$2", [phase, guildId]);
       await audit(client, guildId, actorId, "TURN_PHASE", "guild", guildId, { phase });
     });

@@ -24,10 +24,18 @@ import { RESOURCES, shipCostMultiplier, type ResourceType } from "../domain/reso
 import { buildingPurchaseTerms, unitPurchaseCost, gameService, GameError } from "../services/game-service.js";
 import { battleService } from "../services/battle-service.js";
 import { armyService, type MobileSiegeAssetType } from "../services/army-service.js";
+import { armyMusterService } from "../services/army-muster-service.js";
 import { fleetService } from "../services/fleet-service.js";
 import { cityService } from "../services/city-service.js";
 import { commandLogService } from "../services/command-log-service.js";
 import { greatPowerService } from "../services/great-power-service.js";
+import { movementMapService } from "../services/movement-map-service.js";
+import { movementReadinessService } from "../services/movement-readiness-service.js";
+import { movementLogService } from "../services/movement-log-service.js";
+import { movementTransportService } from "../services/movement-transport-service.js";
+import { movementService } from "../services/movement-service.js";
+import { movementEncounterService, type EncounterDecision } from "../services/movement-encounter-service.js";
+import { adminIssueReconReport, adminReconChecks } from "../services/movement-recon-service.js";
 import { roleReportService, type RoleReportPeriod } from "../services/role-report-service.js";
 import { npcAutoPurchaseService, type NpcAutoPurchaseScope, type NpcCountryOverrideStatus } from "../services/npc-auto-purchase-service.js";
 import { warDeclarationService } from "../services/war-declaration-service.js";
@@ -43,6 +51,7 @@ import { turnAnnouncement } from "./turn-announcements.js";
 import { handleBattleButton, handleBattleCommand, refreshActiveBattleCards } from "./battle-ui.js";
 import { handleArmyCommand } from "./army-ui.js";
 import { handleFleetCommand } from "./fleet-ui.js";
+import { handleMovementButton, handleMovementCommand, handleMovementModal, handleMovementSelect } from "./movement-ui.js";
 import { handleCityAutocomplete, handleCityButton, handleCityCommand, handleCityModal } from "./city-ui.js";
 import { addCountryRoleToMember, deleteCountryRole, ensureCountryRole, removeCountryRoleFromMember } from "./country-roles.js";
 import { setEventManagerRole } from "./event-manager-role.js";
@@ -358,8 +367,10 @@ async function handleTurn(interaction: ChatInputCommandInteraction): Promise<voi
   await interaction.deferReply();
   let embed: EmbedBuilder;
   let characterAutomationWarnings:string[] = [];
+  let movementSummary: Awaited<ReturnType<typeof gameService.stopTurn>> | null = null;
   if (sub === "atla") {
     const result = await gameService.advanceTurn(interaction.guildId, interaction.user.id);
+    movementSummary = result.movement;
     const characterAutomation = await processDueCharacterSystems(interaction.client, interaction.guildId, result.turn, result.acquisition);
     characterAutomationWarnings = characterAutomation.warnings;
     await refreshActiveBattleCards(interaction.client, interaction.guildId);
@@ -387,17 +398,239 @@ async function handleTurn(interaction: ChatInputCommandInteraction): Promise<voi
     });
   } else {
     const phase = sub === "ac" ? "OPEN" : sub === "durdur" ? "RESOLVING" : "CLOSED";
-    await gameService.setTurnPhase(interaction.guildId, interaction.user.id, phase);
+    if (sub === "durdur") movementSummary = await gameService.stopTurn(interaction.guildId, interaction.user.id);
+    else await gameService.setTurnPhase(interaction.guildId, interaction.user.id, phase);
     const guild = await gameService.guildState(interaction.guildId);
     embed = turnAnnouncement({ kind: sub === "ac" ? "OPEN" : sub === "durdur" ? "PAUSE" : "CLOSE", turn: guild.current_turn });
   }
   await interaction.editReply({ embeds: [embed], files: [new AttachmentBuilder(TURN_BANNER_PATH, { name: TURN_BANNER_NAME })] });
+  if (movementSummary?.enabled) {
+    await interaction.followUp({
+      content: `🗺️ **Hareket çözümlemesi • Tur ${movementSummary.turn}**\n` +
+        `Emir: **${movementSummary.processed}** • İlerleyen: **${movementSummary.advanced}** • Varan: **${movementSummary.completed}** • ` +
+        `Devam eden: **${movementSummary.ongoing}** • Yönetici kararı bekleyen: **${movementSummary.blocked}** • ` +
+        `Gizli keşif kontrolü: **${movementSummary.reconChecks}** • Hex dosyası: **${movementSummary.encounters}**\n` +
+        `Ordu toplama: **${movementSummary.muster.processed}** emir • **${movementSummary.muster.advanced}** ilerledi • ` +
+        `**${movementSummary.muster.joined}** orduya katıldı • **${movementSummary.muster.blocked}** engelli • ` +
+        `**${movementSummary.muster.waiting}** orduyu bekliyor` +
+        (movementSummary.alreadyProcessed ? "\nBu aşama önceden çözülmüştü; tekrar hareket uygulanmadı." : ""),
+      ephemeral: true
+    });
+  }
   if (characterAutomationWarnings.length) {
     await interaction.followUp({
       content:"⚠️ **Yalnızca yöneticiye görünen karakter otomasyonu uyarısı:**\n"+characterAutomationWarnings.join("\n⚠️ "),
       ephemeral:true
     });
   }
+}
+
+async function handleMap(interaction: ChatInputCommandInteraction): Promise<void> {
+  requireGameMaster(interaction);
+  if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
+  await interaction.deferReply({ ephemeral: true });
+  const sub = interaction.options.getSubcommand();
+  if (sub === "log-kanali") {
+    const channel=interaction.options.getChannel("kanal",true);
+    await movementLogService.setChannel(interaction.client,interaction.guildId,channel.id);
+    await interaction.editReply(`✅ Hareket log kanalı <#${channel.id}> olarak ayarlandı. Bundan sonraki emirler, intikaller ve tur çözüm kayıtları bu özel kanala gönderilir.`);
+    return;
+  }
+  if (sub === "hazirlik") {
+    const report=await movementReadinessService.inspect(interaction.guildId);
+    const count=report.counts;
+    await interaction.editReply((`🧭 **Hareket Açılış Kontrolü** • ${report.ready?"Hazır":"Eksikler var"}\n`+
+      `Harita sürümü: **${report.mapRevision}** • Hex: **${number(count.hexes)}** • Yerleşke: **${number(count.settlementsPositioned)}/${number(count.settlements)}**\n`+
+      `Konumsuz etkin ordu: **${count.armiesNeedingPosition}** • filo: **${count.fleetsNeedingPosition}** • geçersiz konum: **${count.invalidPositions}**\n`+
+      `Etkin hareket/toplanma/karşılaşma: **${count.activeOrders}/${count.activeMusters}/${count.unresolvedEncounters}**\n`+
+      (report.blockers.length?`**Açılışı engelleyenler**\n${report.blockers.map((item)=>`• ${item}`).join("\n")}\n`:"")+
+      (report.warnings.length?`**Yönetici kontrolü**\n${report.warnings.map((item)=>`• ${item}`).join("\n")}`:"")+
+      (report.ready?"\nİlk test için `/harita sistem aktif: Evet onay: Evet` kullanılabilir.":"" )).slice(0,1900));
+    return;
+  }
+  if (sub === "sistem") {
+    if(interaction.options.getBoolean("onay",true)!==true)throw new GameError("Sunucu geneli hareket değişikliği için onay: Evet seçin.");
+    const enabled=interaction.options.getBoolean("aktif",true);
+    if(enabled)await movementLogService.ensureChannel(interaction.client,interaction.guildId);
+    const settings=await movementService.configure({guildId:interaction.guildId,actorId:interaction.user.id,enabled});
+    await interaction.editReply(`✅ Koordinatlı hareket **${settings.enabled?"açıldı":"duraklatıldı"}**. ${settings.enabled
+      ? "Oyuncular hareket emri verebilir; `/tur durdur` o turun emirlerini çözer."
+      : "Yeni emirler ve otomatik tur çözümü durur. Mevcut kayıtlar silinmez."}`);
+    return;
+  }
+  if (sub === "emir-devam") {
+    const order=await movementService.resumeBlockedOrder({guildId:interaction.guildId,actorId:interaction.user.id,
+      orderId:interaction.options.getString("emir-id",true),reason:interaction.options.getString("gerekce",true)});
+    await interaction.editReply(`✅ **${order.formationName.replaceAll("@","＠")}** emrinin kalan rotası yeniden doğrulandı. `+
+      `Emir ${order.currentStep}/${order.route.length} adımdan bir sonraki tur çözümünde devam edecek.`);
+    return;
+  }
+  if (sub === "toplama-devam") {
+    await armyMusterService.resumeBlocked({guildId:interaction.guildId,actorId:interaction.user.id,
+      orderId:interaction.options.getString("emir-id",true),note:interaction.options.getString("gerekce",true)});
+    await interaction.editReply("✅ Engelli toplanma emri yeniden denemeye açıldı. Bir sonraki tur hareket çözümünde Hex, sahiplik ve düşman varlığı yeniden kontrol edilir.");
+    return;
+  }
+  if (sub === "toplama-geri-cagir") {
+    await armyMusterService.recall({guildId:interaction.guildId,actorId:interaction.user.id,
+      orderId:interaction.options.getString("emir-id",true),note:interaction.options.getString("gerekce",true)});
+    await interaction.editReply("✅ Askerler kaynak yerleşkeye geri çağrıldı. Yoldalarsa aynı Hex rotasını geri izlerler; kaynağa ulaşana kadar başka bir orduya ayrılamazlar.");
+    return;
+  }
+  if (sub === "karsilasmalar") {
+    const cases = await movementEncounterService.list(interaction.guildId);
+    const labels:Record<string,string>={PENDING:"Karar bekliyor",BATTLE_PENDING:"Savaş bekliyor",SPECIAL:"Özel inceleme"};
+    await interaction.editReply(cases.length ? `⚔️ **Yönetici Kararı Bekleyen Hex Dosyaları**\n${cases.map((item) =>
+      `• \`${item.id.slice(0,8)}\` Tur ${item.game_turn} • ${item.coordinate} • ${labels[item.status]??item.status} • **${item.country_a.replaceAll("@","＠")} / ${item.formation_a.replaceAll("@","＠")}**${item.formation_b ? ` ↔ **${item.country_b?.replaceAll("@","＠")} / ${item.formation_b.replaceAll("@","＠")}** • Bilgi ${item.a_information_level}/${item.b_information_level} (pusu zarı +${Math.min(3,Math.abs(item.a_information_level-item.b_information_level))} üstün tarafa)` : " • sınır geçişi"}`
+    ).join("\n")}`.slice(0,1900) : "Karar bekleyen karşılaşma bulunmuyor.");
+    return;
+  }
+  if (sub === "karsilasma-karari") {
+    const decision = interaction.options.getString("karar",true) as EncounterDecision;
+    const item = await movementEncounterService.decide({guildId:interaction.guildId,actorId:interaction.user.id,
+      caseId:interaction.options.getString("dosya-id",true),decision,note:interaction.options.getString("gerekce",true)});
+    await interaction.editReply(`✅ **${item.coordinate}** dosyasında **${decision}** kararı kaydedildi. ${decision === "BATTLE_PENDING"
+      ? `Ordular yerlerinde kilitli kalır. Savaş kanalı seçip \`/savas baslat\` komutunda karşılaşma ID'sini \`${item.id}\` girin; taslak iki orduyu kendiliğinden alır.`
+      : decision === "PASSAGE" ? "Geçiş izni kaydedildi. Bu turdan kullanılmamış hareket hakkı varsa sınır Hex'ine hemen ilerler; yoksa sonraki tur sürer."
+      : decision === "RESOLVED" ? "Özel sonuç kaydedildi; bağlı hareket emirleri mevcut Hex'te kapatıldı. Gerekliyse birimleri /harita birim-yerlestir ile gerekçeli düzeltin."
+      : "Karar denetim kaydına işlendi."}`);
+    return;
+  }
+  if (sub === "kesif-kayitlari") {
+    const page = interaction.options.getInteger("sayfa") ?? 1;
+    const checks = await adminReconChecks(interaction.guildId,page);
+    await interaction.editReply(checks.length ?
+      `🕵️ **Gizli Keşif Zarları • Sayfa ${page}**\n${checks.map((row) =>
+        `• Tur ${row.game_turn} • ${row.check_kind} • ${(row.observer_name ?? "Gözcüsüz").replaceAll("@","＠")} → ${row.target_name.replaceAll("@","＠")} ` +
+        `• ${row.region_key ?? "Bölge yok"} • Zar ${row.natural_roll ?? "?"} ${row.modifier >= 0 ? "+" : ""}${row.modifier} = ${row.total ?? "?"} • ${row.result_tier ?? "Bekliyor"}`
+      ).join("\n")}` : "Bu sayfada keşif zarı bulunmuyor.");
+    return;
+  }
+  if (sub === "istihbarat-ekle") {
+    const recipient=await gameService.countryByName(interaction.guildId,interaction.options.getString("alan-ulke",true));
+    const target=await gameService.countryByName(interaction.guildId,interaction.options.getString("hedef-ulke",true));
+    if(!recipient||!target)throw new GameError("Alan veya hedef ülke bulunamadı.");
+    await adminIssueReconReport({guildId:interaction.guildId,actorId:interaction.user.id,
+      recipientCountryId:recipient.id,targetCountryId:target.id,
+      informationLevel:interaction.options.getInteger("bilgi-seviyesi",true),
+      note:interaction.options.getString("bilgi",true),coordinate:interaction.options.getString("hex",true)});
+    await interaction.editReply(`✅ **${recipient.name.replaceAll("@","＠")}** devletine ${target.name.replaceAll("@","＠")} hakkında `+
+      `yönetici istihbaratı kaydedildi. Oyuncu /hareket istihbarat listesinde görür; orijinal zar kaydı korunur.`);
+    return;
+  }
+  if (sub === "emir-incele" || sub === "emir-iptal") {
+    const selected = await movementService.adminOrder(interaction.guildId, interaction.options.getString("emir-id", true));
+    const order = selected.order;
+    if (sub === "emir-iptal") {
+      const reason = interaction.options.getString("neden", true).trim();
+      if (!reason) throw new GameError("Emir iptali için gerekçe yazmalısınız.");
+      await movementService.cancelOrder({
+        guildId: interaction.guildId, countryId: selected.countryId,
+        actorId: interaction.user.id, orderId: order.id, reason
+      });
+      await interaction.editReply(`✅ **${selected.countryName.replaceAll("@", "＠")} / ${order.formationName.replaceAll("@", "＠")}** emri iptal edildi. Gerekçe denetim kaydına yazıldı.`);
+      return;
+    }
+    const route = order.route.slice(0, 15).map((step) =>
+      `${step.step}. ${step.from} → ${step.to} • ${step.status}`
+    );
+    await interaction.editReply(
+      `🧭 **Hareket Emri İncelemesi**\n` +
+      `Ülke: **${selected.countryName.replaceAll("@", "＠")}** • Birlik: **${order.formationName.replaceAll("@", "＠")}**\n` +
+      `ID: \`${order.id}\`\nDurum: **${order.status}** • Tur: **${order.issuedTurn}** • ` +
+      `Adım: **${order.currentStep}/${order.route.length}** • Hareket hakkı: **${number(order.effectiveAllowance)}**\n` +
+      `Başlangıç: **${order.start}** • Hedef: **${order.destination}**\n` +
+      (order.blockedReason ? `⚠️ **Durma nedeni:** ${order.blockedReason.replaceAll("@", "＠").slice(0, 200)}\n` : "") +
+      (order.note ? `📝 **Oyuncu notu:** ${order.note.replaceAll("@", "＠").slice(0, 500)}\n` : "") +
+      `**Rota**\n${route.join("\n")}` +
+      (order.route.length > route.length ? `\n…ve ${order.route.length - route.length} adım daha.` : "")
+    );
+    return;
+  }
+  if (sub === "durum") {
+    const status = await movementMapService.status(interaction.guildId);
+    const musterBlocked=await armyMusterService.blockedForGuild(interaction.guildId);
+    const blocked = status.blockedOrders.slice(0, 5).map((order) =>
+      `• **${order.country} / ${order.formation}** (${order.id.slice(0, 8)}): ${order.reason.slice(0, 110)}`
+    );
+    await interaction.editReply({ content: (
+      `🗺️ **R56 Hareket Durumu**\n` +
+      `Hareket: **${status.enabled ? "Açık" : "Kapalı"}** • Harita sürümü: **${status.mapRevision}**\n` +
+      `Hex: **${number(status.hexes)}** • Yerleşke: **${number(status.settlementsPositioned)}**\n` +
+      `Konumlandırılmış ordu: **${number(status.armiesPositioned)}/${number(status.armiesTotal)}** • ` +
+      `filo: **${number(status.fleetsPositioned)}/${number(status.fleetsTotal)}**\n` +
+      `Etkin emir: **${number(status.activeOrders)}**` +
+      (blocked.length ? `\n**Yönetici kararı bekleyenler**\n${blocked.join("\n")}` : "") +
+      (musterBlocked.length ? `\n**Engelli / bekleyen asker intikalleri**\n${musterBlocked.slice(0,5).map((item)=>
+        `• \`${item.id.slice(0,8)}\` ${item.country.replaceAll("@","＠")} / ${item.army.replaceAll("@","＠")} • ${item.coordinate}: ${item.reason.replaceAll("@","＠").slice(0,80)}`
+      ).join("\n")}` : "")).slice(0,1900)
+    });
+    return;
+  }
+  if (sub === "konum-listesi") {
+    const page=interaction.options.getInteger("sayfa")??1;
+    const missingOnly=interaction.options.getBoolean("yalniz-eksik")??false;
+    const listing=await movementService.adminPositionsPage(interaction.guildId,page,missingOnly);
+    const pages=Math.max(1,Math.ceil(listing.total/12));
+    const rows=listing.rows.map((item)=>
+      `• ${item.formationKind==="ARMY"?"⚔️":"⛵"} **${item.countryName.replaceAll("@","＠")} / ${item.formationName.replaceAll("@","＠")}** — `+
+      `${item.coordinate??(item.requiresPosition?"❗ Konum eksik":"Boş birlik; konum zorunlu değil")}`);
+    await interaction.editReply((`🗺️ **Yönetici Birlik Konumları** • Sayfa ${page}/${pages}\n`+
+      `Gösterilen: **${listing.total}** • Konumu eksik: **${listing.missing}**\n`+
+      (rows.join("\n")||"Bu sayfada birlik bulunmuyor.")).slice(0,1900));
+    return;
+  }
+  if (sub === "birim-yerlestir" || sub === "ordu-konum-gir") {
+    const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
+    if (!country) throw new GameError("Ülke bulunamadı.");
+    const kind = sub === "ordu-konum-gir" ? "ARMY" : interaction.options.getString("tur", true) as "ARMY" | "FLEET";
+    const value = interaction.options.getString(sub === "ordu-konum-gir" ? "ordu" : "birim", true);
+    const formation = kind === "ARMY" ? await armyService.get(country.id, value) : await fleetService.get(country.id, value);
+    const guild = await gameService.guildState(interaction.guildId);
+    const position = await movementService.positionFormation({
+      guildId: interaction.guildId, countryId: country.id, actorId: interaction.user.id,
+      formationKind: kind, formationId: formation.id,
+      coordinate: interaction.options.getString("hex", true), arrivedTurn: guild.current_turn,
+      correctionReason:interaction.options.getString("gerekce")??undefined
+    });
+    await interaction.editReply(`✅ **${country.name.replaceAll("@","＠")} / ${formation.name.replaceAll("@","＠")}** `+
+      `${kind==="ARMY"?"ordusunun":"filosunun"} harita konumu **${position.coordinate}** olarak kaydedildi. Hareket sistemi bu Hex'i başlangıç kabul eder.`);
+    return;
+  }
+  if (sub === "cikarma") {
+    const country=await gameService.countryByName(interaction.guildId,interaction.options.getString("ulke",true));
+    if(!country)throw new GameError("Ülke bulunamadı.");
+    const army=await armyService.get(country.id,interaction.options.getString("ordu",true));
+    const coordinate=interaction.options.getString("hex",true);
+    await movementTransportService.disembark({guildId:interaction.guildId,countryId:country.id,
+      actorId:interaction.user.id,armyId:army.id,coordinate,
+      adminReason:interaction.options.getString("gerekce",true)});
+    await interaction.editReply(`✅ **${country.name.replaceAll("@","＠")} / ${army.name.replaceAll("@","＠")}** `+
+      `ordusu **${coordinate.toUpperCase()}** kıyısına yönetici kararıyla çıkarıldı. Bu tur yeniden hareket edemez.`);
+    return;
+  }
+  if (sub === "bogaz-tanimla") {
+    await movementService.setSeaPassage({ guildId:interaction.guildId,actorId:interaction.user.id,
+      from:interaction.options.getString("baslangic",true),to:interaction.options.getString("hedef",true),
+      bidirectional:interaction.options.getBoolean("cift-yon",true),reason:interaction.options.getString("gerekce",true) });
+    await interaction.editReply("✅ Deniz geçişi haritaya eklendi ve sürüm yükseltildi. Komşu olmayan başka deniz Hex'leri kendiliğinden açılmadı.");
+    return;
+  }
+  if (sub === "aktar" && interaction.options.getBoolean("sinir-onayi", true) !== true) {
+    throw new GameError("R56 aktarımı için beş sınır Hex'inin mevcut çoğunluk atamasını onaylamalısınız.");
+  }
+  const preview = sub === "kontrol"
+    ? await movementMapService.previewR56Import(interaction.guildId)
+    : await movementMapService.importR56Map({ guildId: interaction.guildId, actorId: interaction.user.id });
+  const lines = [
+    `Sürüm: **${preview.mapVersion}**`,
+    `Hex: **${number(preview.hexes)}** • Kara: **${number(preview.land)}** • Deniz: **${number(preview.sea)}** • Geçilemez: **${number(preview.void)}**`,
+    `Eşleşen yerleşke: **${number(preview.settlements)}**`,
+    `Sınır incelemesi: **${preview.ambiguousRegions.join(", ") || "yok"}**`
+  ];
+  if (sub === "kontrol") lines.push("Bu denetim veritabanına hiçbir şey yazmadı.");
+  else lines.push("Hex ve yerleşke konumları aktarıldı. Hareket sistemi **kapalı** kaldı.");
+  await interaction.editReply({ content: `${sub === "kontrol" ? "🗺️ **R56 Harita Kontrolü**" : "✅ **R56 Harita Aktarımı**"}\n${lines.join("\n")}` });
 }
 
 async function handleWelcomeCommand(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -1140,6 +1373,10 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     await handleTrade(interaction);
   } else if (interaction.commandName === "tur") {
     await handleTurn(interaction);
+  } else if (interaction.commandName === "hareket") {
+    await handleMovementCommand(interaction);
+  } else if (interaction.commandName === "harita") {
+    await handleMap(interaction);
   } else if (interaction.commandName === "zar") {
     const count = interaction.options.getInteger("adet", true);
     const sides = interaction.options.getInteger("yuz", true);
@@ -1225,6 +1462,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
 }
 
 async function handleSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+  if (await handleMovementSelect(interaction)) return;
   if (await handleGreatGamesSelect(interaction)) return;
   if (await handleSettlementEventSelect(interaction)) return;
   const [kind, countryId, settlementIdFromId] = interaction.customId.split("|");
@@ -1305,6 +1543,7 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
 }
 
 async function handleButton(interaction: ButtonInteraction): Promise<void> {
+  if (await handleMovementButton(interaction)) return;
   if (await handleGreatGamesButton(interaction)) return;
   if (await handleWarDeclarationButton(interaction)) return;
   if (await handleDiplomacyButton(interaction)) return;
@@ -1343,6 +1582,7 @@ async function handleButton(interaction: ButtonInteraction): Promise<void> {
 }
 
 async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
+  if (await handleMovementModal(interaction)) return;
   if (await handleGreatGamesModal(interaction)) return;
   if (await handleWarDeclarationModal(interaction)) return;
   if (await handleCityModal(interaction)) return;
@@ -1368,6 +1608,26 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
   if (await handleEspionageAutocomplete(interaction)) return;
   if (await handleCityAutocomplete(interaction)) return;
   const focused = interaction.options.getFocused(true);
+  if(interaction.commandName==="harita"&&interaction.options.getSubcommand(false)==="ordu-konum-gir"){
+    if(!interaction.guildId||!isGameMaster(interaction)){await interaction.respond([]);return;}
+    const query=String(focused.value).toLocaleLowerCase("tr-TR").trim();
+    if(focused.name==="ulke"){
+      const countries=await gameService.listCountries(interaction.guildId);
+      await interaction.respond(countries.filter((item)=>!query||item.name.toLocaleLowerCase("tr-TR").includes(query))
+        .slice(0,25).map((item)=>({name:item.name.slice(0,100),value:item.name})));
+      return;
+    }
+    if(focused.name==="ordu"){
+      const countryName=interaction.options.getString("ulke");
+      const country=countryName?await gameService.countryByName(interaction.guildId,countryName):null;
+      if(!country){await interaction.respond([]);return;}
+      const units=await movementService.countryPositions(interaction.guildId,country.id);
+      await interaction.respond(units.filter((item)=>item.formationKind==="ARMY"&&
+        (!query||item.formationName.toLocaleLowerCase("tr-TR").includes(query)))
+        .slice(0,25).map((item)=>({name:`${item.formationName} • ${item.coordinate??"Konum eksik"}`.slice(0,100),value:item.formationId})));
+      return;
+    }
+  }
   if (interaction.commandName === "ordu") {
     if (!interaction.guildId) { await interaction.respond([]); return; }
     const country = await gameService.countryForUser(interaction.guildId, interaction.user.id);
@@ -1439,7 +1699,7 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
         })));
       return;
     }
-    if (focused.name === "yerleske") {
+    if (focused.name === "yerleske" || focused.name === "toplanma-yerleskesi") {
       const sub = interaction.options.getSubcommand(false) ?? "";
       const armyId = interaction.options.getString("ordu");
       if ((sub === "asker-cikar" || sub === "kusatma-aleti-cikar") && armyId) {
