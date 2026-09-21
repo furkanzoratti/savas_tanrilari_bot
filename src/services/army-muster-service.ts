@@ -6,6 +6,8 @@ import type { BattleUnitType } from "../domain/battle.js";
 import type { MovementResolutionStage } from "../domain/movement-resolution.js";
 import { GameError } from "./game-service.js";
 import { depositArmyStock } from "./unit-inventory-service.js";
+import { countryResourceAccess } from "./resource-service.js";
+import { RESOURCES, movementSpeedResourceBonus } from "../domain/resources.js";
 
 type MusterStatus = "SUBMITTED" | "IN_PROGRESS" | "BLOCKED" | "WAITING_ARMY" | "COMPLETED" | "CANCELLED";
 export interface MusterOrderView {
@@ -49,8 +51,10 @@ export async function enqueueArmyMuster(client: DbClient, input: {
   if (!route || route.coordinates.length < 2) throw new GameError("Kendi topraklarınız üzerinden toplanma alanına geçilebilir kara rotası bulunamadı.");
   const byCoordinate = new Map(hexes.map((hex) => [hex.coordinate, hex.id]));
   const routeIds = route.coordinates.map((coordinate) => byCoordinate.get(coordinate)!);
+  const resourceBonus=movementSpeedResourceBonus("ARMY",await countryResourceAccess(client,input.countryId));
   const movement = calculateArmyMovement({
-    totalTroops: input.quantity, composition: { [input.unitType]: input.quantity }, friendlyTerritoryRoute: true
+    totalTroops:input.quantity,composition:{[input.unitType]:input.quantity},
+    speedPercent:resourceBonus.percent,friendlyTerritoryRoute:true
   });
   const row = (await client.query<{ id: string }>(
     `INSERT INTO army_muster_orders(guild_id,country_id,army_id,source_settlement_id,unit_type,quantity,
@@ -63,7 +67,8 @@ export async function enqueueArmyMuster(client: DbClient, input: {
     `INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details)
      VALUES($1,$2,'ARMY_MUSTER_SUBMIT','army_muster_order',$3,$4::jsonb)`,
     [input.guildId,input.actorId,row.id,JSON.stringify({ armyId:input.armyId,sourceSettlementId:input.sourceSettlementId,
-      unitType:input.unitType,quantity:input.quantity,route:route.coordinates,allowance:movement.allowance })]
+      unitType:input.unitType,quantity:input.quantity,route:route.coordinates,allowance:movement.allowance,
+      speedBonus:movement.speedBonus,speedSources:resourceBonus.resources.map((resource)=>RESOURCES[resource].label) })]
   );
   return { id:row.id, start:source.coordinate, destination:destination.coordinate,
     steps:route.coordinates.length-1, allowance:movement.allowance };

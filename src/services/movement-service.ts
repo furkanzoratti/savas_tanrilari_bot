@@ -25,6 +25,8 @@ import { fleetAccessibleHex, fleetAccessibleStep } from "../domain/coastal-navig
 import { coastalPortSql } from "./coastal-navigation-sql.js";
 import { fleetCargoSnapshot } from "./movement-transport-service.js";
 import { inspectMovementReadiness } from "./movement-readiness-service.js";
+import { RESOURCES, movementSpeedResourceBonus } from "../domain/resources.js";
+import { countryResourceAccess } from "./resource-service.js";
 
 export interface MovementSettings {
   guildId: string;
@@ -94,6 +96,8 @@ export interface MovementOrderView {
   destination: string;
   currentStep: number;
   effectiveAllowance: number;
+  speedBonus: number;
+  speedSources: string[];
   blockedReason: string | null;
   note: string | null;
   route: Array<{ step: number; from: string; to: string; cost: number; status: string }>;
@@ -185,7 +189,9 @@ async function movementSettings(client: DbClient, guildId: string): Promise<Move
     : { guildId, enabled: false, visibilityMode: "INTELLIGENCE", mapRevision: 1, rules: {} };
 }
 
-async function armyMovementSnapshot(client: DbClient, armyId: string, mode: MovementMode, strategicEligible: boolean, friendlyTerritoryRoute: boolean): Promise<ArmyMovementResult> {
+type ResourceMovementSnapshot<T> = T & { resourceSpeedSources:string[] };
+
+export async function armyMovementSnapshot(client: DbClient, armyId: string, countryId:string, mode: MovementMode, strategicEligible: boolean, friendlyTerritoryRoute: boolean): Promise<ResourceMovementSnapshot<ArmyMovementResult>> {
   const unitRows = (await client.query<{ unit_type: BattleUnitType; quantity: number }>(
     "SELECT unit_type,SUM(quantity)::integer AS quantity FROM army_units WHERE army_id=$1 GROUP BY unit_type",
     [armyId]
@@ -199,17 +205,19 @@ async function armyMovementSnapshot(client: DbClient, armyId: string, mode: Move
   )).rows;
   const siegeAssets: MobileSiegeLoad = {};
   for (const row of assetRows) siegeAssets[row.asset_type] = Number(row.quantity);
-  return calculateArmyMovement({
+  const resourceBonus=movementSpeedResourceBonus("ARMY",await countryResourceAccess(client,countryId));
+  return {...calculateArmyMovement({
     totalTroops: Object.values(composition).reduce<number>((sum, quantity) => sum + Number(quantity ?? 0), 0),
     composition,
     siegeAssets,
+    speedPercent:resourceBonus.percent,
     mode,
     strategicRedeploymentEligible: strategicEligible,
     friendlyTerritoryRoute
-  });
+  }),resourceSpeedSources:resourceBonus.resources.map((resource)=>RESOURCES[resource].label)};
 }
 
-async function fleetMovementSnapshot(client: DbClient, fleetId: string, friendlyTerritoryRoute: boolean): Promise<FleetMovementResult> {
+async function fleetMovementSnapshot(client: DbClient, fleetId: string, countryId:string, friendlyTerritoryRoute: boolean): Promise<ResourceMovementSnapshot<FleetMovementResult>> {
   const rows = (await client.query<{ ship_type: NavalUnitType; quantity: number }>(
     "SELECT ship_type,SUM(quantity)::integer AS quantity FROM fleet_ships WHERE fleet_id=$1 GROUP BY ship_type",
     [fleetId]
@@ -217,7 +225,10 @@ async function fleetMovementSnapshot(client: DbClient, fleetId: string, friendly
   const composition: Partial<Record<NavalUnitType, number>> = {};
   for (const row of rows) composition[row.ship_type] = Number(row.quantity);
   const cargo = await fleetCargoSnapshot(client, fleetId);
-  const result = calculateFleetMovement({ composition, cargoLoad: cargo.utilization, cargoCapacity: 1, friendlyTerritoryRoute });
+  const resourceBonus=movementSpeedResourceBonus("FLEET",await countryResourceAccess(client,countryId));
+  const result = {...calculateFleetMovement({ composition, cargoLoad: cargo.utilization, cargoCapacity: 1,
+    speedPercent:resourceBonus.percent,friendlyTerritoryRoute }),
+    resourceSpeedSources:resourceBonus.resources.map((resource)=>RESOURCES[resource].label)};
   if (!cargo.valid) return { ...result, canMove: false, allowance: 0,
     reason: `Filo yükü kapasiteyi aşıyor: ${cargo.occupiedSoldiers}/${cargo.soldiers} asker; ${cargo.occupiedSiegeLoads}/${cargo.siegeLoads} kuşatma yükü.` };
   return result;
@@ -300,6 +311,8 @@ async function loadOrder(client: DbClient, orderId: string, countryId?: string):
     params
   )).rows[0];
   if (!row) throw new GameError("Hareket emri bulunamadı.");
+  const calculation=row.metadata?.calculation&&typeof row.metadata.calculation==="object"
+    ? row.metadata.calculation as Record<string,unknown>:{};
   const route = (await client.query<{ step_index: number; from_coordinate: string; to_coordinate: string; movement_cost: number; status: string }>(
     `SELECT step.step_index,source.coordinate AS from_coordinate,target.coordinate AS to_coordinate,step.movement_cost,step.status
        FROM movement_order_steps step JOIN map_hexes source ON source.id=step.from_hex_id
@@ -318,6 +331,8 @@ async function loadOrder(client: DbClient, orderId: string, countryId?: string):
     destination: row.destination,
     currentStep: Number(row.current_step),
     effectiveAllowance: Number(row.effective_allowance),
+    speedBonus:Number(calculation.speedBonus??0),
+    speedSources:Array.isArray(calculation.resourceSpeedSources)?calculation.resourceSpeedSources.map(String):[],
     blockedReason: row.blocked_reason,
     note: typeof row.metadata?.note === "string" ? row.metadata.note : null,
     route
@@ -808,8 +823,8 @@ export const movementService = {
         throw new GameError("Özel yürüyüş kipleri, yorgunluk ve istihbarat çözümlemesi tamamlanana kadar kullanılamaz.");
       }
       const snapshot = input.formationKind === "ARMY"
-        ? await armyMovementSnapshot(client, unit.id, input.mode, strategicEligible, friendlyTerritoryRoute)
-        : await fleetMovementSnapshot(client, unit.id, friendlyTerritoryRoute);
+        ? await armyMovementSnapshot(client,unit.id,input.countryId,input.mode,strategicEligible,friendlyTerritoryRoute)
+        : await fleetMovementSnapshot(client,unit.id,input.countryId,friendlyTerritoryRoute);
       if (!snapshot.canMove) throw new GameError(snapshot.reason ?? "Bu birlik mevcut yapısıyla hareket edemez.");
       const orderId = (await client.query<{ id: string }>(
         `INSERT INTO movement_orders(
@@ -831,7 +846,8 @@ export const movementService = {
       }
       await audit(client, input.guildId, input.actorId, "MOVEMENT_ORDER_SUBMIT", input.formationKind.toLowerCase(), unit.id, {
         orderId, mode: input.mode, start: route[0]!.coordinate, destination: route[route.length - 1]!.coordinate,
-        steps: route.length - 1, allowance: snapshot.allowance
+        steps:route.length-1,allowance:snapshot.allowance,speedBonus:snapshot.speedBonus,
+        speedSources:snapshot.resourceSpeedSources
       });
       return loadOrder(client, orderId, input.countryId);
     });
@@ -900,8 +916,8 @@ export const movementService = {
       const costs=validateRoute(order.formation_kind,order.country_id,route,await edgeOverrides(client,route));
       const friendly=route.every((hex)=>hex.owner_country_id===order.country_id);
       const snapshot=order.formation_kind==="ARMY"
-        ? await armyMovementSnapshot(client,formationId,"NORMAL",false,friendly)
-        : await fleetMovementSnapshot(client,formationId,friendly);
+        ? await armyMovementSnapshot(client,formationId,order.country_id,"NORMAL",false,friendly)
+        : await fleetMovementSnapshot(client,formationId,order.country_id,friendly);
       if(!snapshot.canMove)throw new GameError(snapshot.reason??"Birlik güncel yüküyle hareket edemez.");
       const settings=await movementSettings(client,input.guildId);
       const metadata={...order.metadata,mapRevision:settings.mapRevision,calculation:snapshot,
@@ -916,7 +932,8 @@ export const movementService = {
         [order.id,steps[index]!.step_index,costs[index]!]
       );
       await audit(client,input.guildId,input.actorId,"MOVEMENT_ORDER_RESUME","movement_order",order.id,
-        {reason,from:position.coordinate,mapRevision:settings.mapRevision});
+        {reason,from:position.coordinate,mapRevision:settings.mapRevision,speedBonus:snapshot.speedBonus,
+          speedSources:snapshot.resourceSpeedSources});
       return loadOrder(client,order.id,order.country_id);
     });
   },

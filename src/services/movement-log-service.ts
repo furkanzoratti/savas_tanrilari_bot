@@ -51,6 +51,7 @@ const FIELD_LABELS:Record<string,string>={
   currentStep:"Tamamlanan adım",totalSteps:"Rota uzunluğu",blockedReason:"Durma nedeni",
   reason:"Gerekçe",note:"Not",quantity:"Asker sayısı",unitType:"Birim türü",
   returning:"Geri dönüş",allowance:"Tur hareket hakkı",enabled:"Sistem açık",
+  speedBonus:"Kaynak hız bonusu (Hex)",speedSources:"Hız sağlayan kaynaklar",
   mode:"Hareket türü",coordinate:"Hex",route:"Rota",processed:"İşlenen emir",
   advanced:"İlerleyen",completed:"Varan",blocked:"Engellenen",ongoing:"Yolda",
   encounters:"Karşılaşma",reconChecks:"Keşif kontrolü",

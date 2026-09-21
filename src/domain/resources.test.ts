@@ -3,7 +3,7 @@ import { calculatePopulationGain, calculateUnitUpkeep } from "./economy.js";
 import { calculateCategorizedIncome, incomeTotal } from "./income.js";
 import {
   buildingCostMultiplier, buildingDurationReduction, shipCostMultiplier,
-  tradeAgreementLimit, unitCostMultiplier
+  movementSpeedResourceBonus, tradeAgreementLimit, unitCostMultiplier
 } from "./resources.js";
 
 describe("hammadde etkileri", () => {
@@ -65,5 +65,11 @@ describe("hammadde etkileri", () => {
   it("Mor Boya ticaret sınırını bir artırır", () => {
     expect(tradeAgreementLimit([])).toBe(2);
     expect(tradeAgreementLimit(["PURPLE_DYE"])).toBe(3);
+  });
+
+  it("At kaynağını kara ordusuna yüzde 25 hareket hızı olarak uygular ve çoğaltmaz",()=>{
+    expect(movementSpeedResourceBonus("ARMY",["HORSES"])).toEqual({percent:0.25,resources:["HORSES"]});
+    expect(movementSpeedResourceBonus("ARMY",["HORSES","HORSES"])).toEqual({percent:0.25,resources:["HORSES"]});
+    expect(movementSpeedResourceBonus("FLEET",["HORSES"])).toEqual({percent:0,resources:[]});
   });
 });

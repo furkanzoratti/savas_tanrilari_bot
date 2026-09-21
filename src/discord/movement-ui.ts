@@ -213,6 +213,7 @@ export async function handleMovementCommand(interaction: ChatInputCommandInterac
     await interaction.editReply(
       `✅ **${safe(order.formationName)}** için hareket emri kaydedildi.\n` +
       `Rota: **${order.start} → ${order.destination}** • ${order.route.length} adım • Tur hareket hakkı: **${number(order.effectiveAllowance)}**\n` +
+      (order.speedBonus>0?`Kaynak hız bonusu: **+${number(order.speedBonus)} Hex** (${order.speedSources.map(safe).join(", ")})\n`:"")+
       `Emir ID: \`${order.id}\`\n` +
       "Bu emir /tur durdur aşamasında çözülecek. Yabancı bölge veya düşman teması otomatik geçilmez."
     );
@@ -304,6 +305,7 @@ export async function handleMovementModal(interaction:ModalSubmitInteraction):Pr
     .setTitle(`✅ ${safe(formation.name)} • Hareket Emri`)
     .setDescription(`**Rota:** ${order.start} → ${order.destination}\n**Adım:** ${order.route.length} • `+
       `**Tur hareket hakkı:** ${number(order.effectiveAllowance)}\n**Durum:** ${STATUS[order.status]}\n`+
+      (order.speedBonus>0?`**Kaynak hız bonusu:** +${number(order.speedBonus)} Hex (${order.speedSources.map(safe).join(", ")})\n`:"")+
       `**Emir ID:** \`${order.id}\`\n\n/tur durdur aşamasında çözülecek.`)]});
   return true;
 }

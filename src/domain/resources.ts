@@ -18,10 +18,26 @@ export const RESOURCES = {
 
 export type ResourceType = keyof typeof RESOURCES;
 
+const MOVEMENT_SPEED_RESOURCE_BONUSES:Record<"ARMY"|"FLEET",Partial<Record<ResourceType,number>>>={
+  ARMY:{HORSES:0.25},
+  FLEET:{}
+};
+
 export const RESOURCE_CHOICES = Object.entries(RESOURCES).map(([value, resource]) => ({ name: resource.label, value }));
 
 export function isResourceType(value: string): value is ResourceType {
   return Object.prototype.hasOwnProperty.call(RESOURCES, value);
+}
+
+export function movementSpeedResourceBonus(
+  formationKind:"ARMY"|"FLEET",resources:readonly ResourceType[]
+):{percent:number;resources:ResourceType[]} {
+  const rules=MOVEMENT_SPEED_RESOURCE_BONUSES[formationKind];
+  const active=[...new Set(resources)].filter((resource)=>Number(rules[resource]??0)>0);
+  return {
+    percent:active.reduce((sum,resource)=>sum+Number(rules[resource]??0),0),
+    resources:active
+  };
 }
 
 function has(resources: readonly ResourceType[], resource: ResourceType): boolean {
