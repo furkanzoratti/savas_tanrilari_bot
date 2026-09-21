@@ -222,6 +222,10 @@ export const commandBuilders = [
       .addStringOption((o) => o.setName("diplomat").setDescription("Görevi bitecek Diplomat").setRequired(true).setAutocomplete(true))),
   new SlashCommandBuilder()
     .setName("karakter-yonetim").setDescription("Yalnızca yönetici: Akademi, karakter görevi ve casus sonuç kanalını ayarlar")
+    .addSubcommand((sub) => sub.setName("casus-ekle").setDescription("Bir devlete manuel casus karakter ekler")
+      .addStringOption((o) => o.setName("ulke").setDescription("Casusun ekleneceği devlet").setRequired(true))
+      .addStringOption((o) => o.setName("ad").setDescription("Casusun adı").setRequired(true).setMinLength(2).setMaxLength(60))
+      .addIntegerOption((o) => o.setName("bonus").setDescription("Casusun yetenek bonusu").setRequired(true).setMinValue(0).setMaxValue(5)))
     .addSubcommand((sub) => sub.setName("log-kanali").setDescription("Bütün karakter etkinliklerinin yönetici log kanalını ayarlar")
       .addStringOption((o) => o.setName("islem").setDescription("İşlem").setRequired(true)
         .addChoices(
@@ -585,10 +589,10 @@ export const commandBuilders = [
       .addStringOption((o) => o.setName("yerleske").setDescription("Askerlerin bağlı olduğu yerleşke").setRequired(true).setAutocomplete(true))
       .addStringOption((o) => o.setName("birim").setDescription("Yerleşkedeki müsait birlik").setRequired(true).setAutocomplete(true))
       .addIntegerOption((o) => o.setName("miktar").setDescription("Orduya eklenecek asker").setMinValue(1).setRequired(true)))
-    .addSubcommand((sub) => sub.setName("asker-cikar").setDescription("Askerlerin ordu tahsisini kaldırır")
+    .addSubcommand((sub) => sub.setName("asker-cikar").setDescription("Askerleri ordunun bulunduğu dost yerleşkenin stokuna aktarır")
       .addStringOption((o) => o.setName("ordu").setDescription("Asker çıkarılacak ordu").setRequired(true).setAutocomplete(true))
-      .addStringOption((o) => o.setName("yerleske").setDescription("Askerlerin bağlı olduğu yerleşke").setRequired(true).setAutocomplete(true))
-      .addStringOption((o) => o.setName("birim").setDescription("Orduda bu yerleşkeye bağlı birlik").setRequired(true).setAutocomplete(true))
+      .addStringOption((o) => o.setName("yerleske").setDescription("Çıkarılacak askerlerin tarihsel kökeni").setRequired(true).setAutocomplete(true))
+      .addStringOption((o) => o.setName("birim").setDescription("Orduda bu kökene bağlı birlik").setRequired(true).setAutocomplete(true))
       .addIntegerOption((o) => o.setName("miktar").setDescription("Ordudan çıkarılacak asker").setMinValue(1).setRequired(true)))
     .addSubcommand((sub) => sub.setName("kusatma-aleti-ekle").setDescription("Yerleşkedeki taşınabilir kuşatma aletlerini orduya tahsis eder")
       .addStringOption((o) => o.setName("ordu").setDescription("Alet eklenecek ordu").setRequired(true).setAutocomplete(true))
@@ -610,7 +614,7 @@ export const commandBuilders = [
     .addSubcommand((sub) => sub.setName("toplama-emirleri").setDescription("Farklı yerleşkelerden orduya gelen asker intikallerini gösterir"))
     .addSubcommand((sub) => sub.setName("toplama-iptal").setDescription("Henüz yola çıkmamış asker intikalini iptal eder")
       .addStringOption((o) => o.setName("emir-id").setDescription("Toplama emrinin tam ID'si").setRequired(true)))
-    .addSubcommand((sub) => sub.setName("dagit").setDescription("Ordu kaydını dağıtır; askerler yerleşkelerde kalır")
+    .addSubcommand((sub) => sub.setName("dagit").setDescription("Dost yerleşkedeki orduyu dağıtır; askerleri o yerleşkenin stokuna aktarır")
       .addStringOption((o) => o.setName("ordu").setDescription("Dağıtılacak ordu").setRequired(true).setAutocomplete(true))
       .addStringOption((o) => o.setName("onay").setDescription("Onaylamak için DAGIT yazın").setRequired(true))),
   new SlashCommandBuilder()

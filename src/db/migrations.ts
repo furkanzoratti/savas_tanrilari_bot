@@ -4,6 +4,8 @@ import { movementMusterMigration } from "./movement-muster-migration.js";
 import { movementRecallMigration } from "./movement-recall-migration.js";
 import { movementGmReconMigration } from "./movement-gm-recon-migration.js";
 import { movementLogMigration } from "./movement-log-migration.js";
+import { movementDisembarkMigration } from "./movement-disembark-migration.js";
+import { independentArmyInventoryMigration } from "./independent-army-inventory-migration.js";
 
 export const migrations = [
   {
@@ -2225,5 +2227,7 @@ export const migrations = [
   movementMusterMigration,
   movementRecallMigration,
   movementGmReconMigration,
-  movementLogMigration
+  movementLogMigration,
+  movementDisembarkMigration,
+  independentArmyInventoryMigration
 ] as const;

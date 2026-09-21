@@ -241,6 +241,18 @@ export async function handleCharacterCommand(interaction: ChatInputCommandIntera
   if (interaction.commandName === "karakter-yonetim") {
     requireGameMaster(interaction);
     await interaction.deferReply({ ephemeral: true });
+    const sub=interaction.options.getSubcommand();
+    if(sub==="casus-ekle"){
+      const country=await gameService.countryByName(interaction.guildId,interaction.options.getString("ulke",true));
+      if(!country)throw new GameError("Ülke bulunamadı.");
+      const character=await characterService.createManualSpy({
+        guildId:interaction.guildId,countryId:country.id,actorId:interaction.user.id,
+        name:interaction.options.getString("ad",true),skillBonus:interaction.options.getInteger("bonus",true)
+      });
+      await interaction.editReply(`✅ **${country.name}** devletine **${character.name} (+${character.skillBonus})** casusu eklendi.`);
+      await logCharacterCommand(interaction,country.name,`Yönetici tarafından **${character.name} (+${character.skillBonus})** casusu eklendi.`);
+      return true;
+    }
     const operation = interaction.options.getString("islem",true);
     const channel = interaction.options.getChannel("kanal");
     if (operation === "set" && !channel) throw new GameError("Bir log kanalı seçmelisiniz.");

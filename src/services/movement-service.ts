@@ -788,6 +788,9 @@ export const movementService = {
         [input.guildId, unit.id, guild.current_turn]
       );
       if (alreadyMoved.rowCount) throw new GameError("Bu birlik bu tur hareket hakkını kullandı; yeni emir sonraki turda verilebilir.");
+      if(input.formationKind==="FLEET"&&(await client.query(
+        "SELECT 1 FROM fleet_disembark_orders WHERE fleet_id=$1 AND status IN ('SUBMITTED','BLOCKED') LIMIT 1",
+        [unit.id])).rowCount)throw new GameError("Bu filonun bekleyen çıkarma emri varken yeni hareket emri verilemez.");
       const position = await formationPosition(client, input.formationKind, unit.id, true);
       if (position.fatigue_until_turn !== null && Number(position.fatigue_until_turn) >= guild.current_turn) {
         throw new GameError("Bu birlik karaya çıkış veya önceki zorlanma nedeniyle bu tur yeniden hareket edemez.");

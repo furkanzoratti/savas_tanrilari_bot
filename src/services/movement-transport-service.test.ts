@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { DbClient } from "../db/pool.js";
-import { fleetCargoSnapshot, movementTransportService } from "./movement-transport-service.js";
+import { fleetCargoSnapshot, movementTransportService, resolveDisembarkationStage } from "./movement-transport-service.js";
 
 const transaction=vi.hoisted(()=>({client:null as DbClient|null}));
 vi.mock("../db/pool.js", () => ({ pool: {}, withTransaction:async(work:(client:DbClient)=>Promise<unknown>)=>work(transaction.client!) }));
@@ -39,6 +39,7 @@ describe("ordu filo bağlantısı", () => {
       }
       if (sql.includes("FROM movement_orders") || sql.includes("FROM movement_encounters") ||
           sql.includes("FROM battle_army_assignments") || sql.includes("SELECT 1 FROM fleet_cargo_armies")) return { rows: [], rowCount: 0 };
+      if (sql.includes("FROM fleet_disembark_orders")) return { rows: [], rowCount: 0 };
       if (sql.includes("FROM army_muster_orders")) return { rows: [], rowCount: pendingMuster ? 1 : 0 };
       if (sql.includes("INSERT INTO fleet_cargo_armies")) { writes.push("embark"); return { rows: [], rowCount: 1 }; }
       if (sql.includes("FROM fleet_ships")) return { rows: [{ ship_type: "trireme", quantity: 2 }], rowCount: 1 };
@@ -78,6 +79,7 @@ describe("yönetici kıyı çıkarması",()=>{
     transaction.client={query:async(sql:string)=>{
       if(sql.includes("pg_advisory_xact_lock"))return {rows:[],rowCount:1};
       if(sql.includes("SELECT current_turn,turn_phase FROM guilds"))return {rows:[{current_turn:9,turn_phase:"OPEN"}],rowCount:1};
+      if(sql.includes("SELECT enabled FROM guild_movement_settings"))return {rows:[{enabled:true}],rowCount:1};
       if(sql.includes("SELECT cargo.fleet_id,cargo.embarked_turn"))return {rows:[{fleet_id:"fleet-1",embarked_turn:sameTurn?9:8}],rowCount:1};
       if(sql.includes("SELECT unit.id,unit.name,unit.country_id"))return {rows:[{
         id:"fleet-1",name:"Filo",country_id:"country-1",hex_id:sharedCoast?"land-1":"sea-1",
@@ -89,8 +91,8 @@ describe("yönetici kıyı çıkarması",()=>{
         id:"land-1",coordinate:"AB10",domain:"LAND",passable:true,owner_country_id:sharedCoast?"country-1":"country-2"
       }],rowCount:1};
       if(sql.includes("FROM army_map_positions position JOIN armies army"))return {rows:[],rowCount:enemy?1:0};
-      if(sql.includes("DELETE FROM fleet_cargo_armies")){writes.push("unload");return {rows:[],rowCount:1};}
-      if(sql.includes("INSERT INTO army_map_positions")){writes.push("land");return {rows:[],rowCount:1};}
+      if(sql.includes("SELECT id FROM fleet_disembark_orders"))return {rows:[],rowCount:0};
+      if(sql.includes("INSERT INTO fleet_disembark_orders")){writes.push("queue");return {rows:[{id:"landing-1"}],rowCount:1};}
       if(sql.includes("INSERT INTO audit_logs"))return {rows:[],rowCount:1};
       throw new Error(`Unexpected query: ${sql}`);
     }} as unknown as DbClient;
@@ -101,8 +103,9 @@ describe("yönetici kıyı çıkarması",()=>{
     const writes=fixture();
     const common={guildId:"guild",countryId:"country-1",actorId:"gm",armyId:"army-1",coordinate:"AB10"};
     await expect(movementTransportService.disembark(common)).rejects.toThrow("yönetici gerekçesi");
-    await movementTransportService.disembark({...common,adminReason:"GM çıkarma kararı"});
-    expect(writes).toEqual(["unload","land"]);
+    const result=await movementTransportService.disembark({...common,adminReason:"GM çıkarma kararı"});
+    expect(result).toEqual({orderId:"landing-1",completionTurn:9});
+    expect(writes).toEqual(["queue"]);
   });
 
   it("düşman ordusu bulunan kıyıya sessizce birlik bindirmez",async()=>{
@@ -116,7 +119,7 @@ describe("yönetici kıyı çıkarması",()=>{
     const writes=fixture(false,true);
     await movementTransportService.disembark({guildId:"guild",countryId:"country-1",actorId:"player",
       armyId:"army-1",coordinate:"AB10"});
-    expect(writes).toEqual(["unload","land"]);
+    expect(writes).toEqual(["queue"]);
   });
 
   it("ordu gemiye bindiği turda karaya çıkamaz",async()=>{
@@ -124,5 +127,31 @@ describe("yönetici kıyı çıkarması",()=>{
     await expect(movementTransportService.disembark({guildId:"guild",countryId:"country-1",actorId:"player",
       armyId:"army-1",coordinate:"AB10"})).rejects.toThrow("bindiği turda");
     expect(writes).toEqual([]);
+  });
+
+  it("çıkarma emrini Hex hakkına bakmadan tur durdur aşamasında tamamlar",async()=>{
+    const writes:string[]=[];
+    const client={query:async(sql:string)=>{
+      if(sql.includes("FROM fleet_disembark_orders WHERE guild_id=$1"))return {rows:[{
+        id:"landing-1",country_id:"country-1",army_id:"army-1",fleet_id:"fleet-1",
+        fleet_hex_id:"sea-1",destination_hex_id:"land-1",admin_reason:null,issued_by:"player"
+      }],rowCount:1};
+      if(sql.includes("SELECT fleet_id FROM fleet_cargo_armies"))return {rows:[{fleet_id:"fleet-1"}],rowCount:1};
+      if(sql.includes("FROM fleets fleet JOIN fleet_map_positions"))return {rows:[{
+        hex_id:"sea-1",coordinate:"AA10",domain:"SEA",coastal_port:false
+      }],rowCount:1};
+      if(sql.includes("FROM map_hexes WHERE id=$1"))return {rows:[{
+        id:"land-1",coordinate:"AB10",domain:"LAND",passable:true,owner_country_id:"country-1"
+      }],rowCount:1};
+      if(sql.includes("FROM army_map_positions position JOIN armies army"))return {rows:[],rowCount:0};
+      if(sql.includes("DELETE FROM fleet_cargo_armies")){writes.push("unload");return {rows:[],rowCount:1};}
+      if(sql.includes("INSERT INTO army_map_positions")){writes.push("land");return {rows:[],rowCount:1};}
+      if(sql.includes("UPDATE fleet_disembark_orders SET status='COMPLETED'")){writes.push("complete");return {rows:[],rowCount:1};}
+      if(sql.includes("INSERT INTO audit_logs"))return {rows:[],rowCount:1};
+      throw new Error(`Unexpected query: ${sql}`);
+    }} as unknown as DbClient;
+    const result=await resolveDisembarkationStage(client,"guild","gm",9,"STOP");
+    expect(result).toEqual({processed:1,completed:1,blocked:0});
+    expect(writes).toEqual(["unload","land","complete"]);
   });
 });

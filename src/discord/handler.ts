@@ -412,7 +412,10 @@ async function handleTurn(interaction: ChatInputCommandInteraction): Promise<voi
         `Gizli keşif kontrolü: **${movementSummary.reconChecks}** • Hex dosyası: **${movementSummary.encounters}**\n` +
         `Ordu toplama: **${movementSummary.muster.processed}** emir • **${movementSummary.muster.advanced}** ilerledi • ` +
         `**${movementSummary.muster.joined}** orduya katıldı • **${movementSummary.muster.blocked}** engelli • ` +
-        `**${movementSummary.muster.waiting}** orduyu bekliyor` +
+        `**${movementSummary.muster.waiting}** orduyu bekliyor\n`+
+        `Çıkarma: **${movementSummary.disembarkations.processed}** emir • `+
+        `**${movementSummary.disembarkations.completed}** tamamlandı • `+
+        `**${movementSummary.disembarkations.blocked}** engelli` +
         (movementSummary.alreadyProcessed ? "\nBu aşama önceden çözülmüştü; tekrar hareket uygulanmadı." : ""),
       ephemeral: true
     });
@@ -602,11 +605,12 @@ async function handleMap(interaction: ChatInputCommandInteraction): Promise<void
     if(!country)throw new GameError("Ülke bulunamadı.");
     const army=await armyService.get(country.id,interaction.options.getString("ordu",true));
     const coordinate=interaction.options.getString("hex",true);
-    await movementTransportService.disembark({guildId:interaction.guildId,countryId:country.id,
+    const order=await movementTransportService.disembark({guildId:interaction.guildId,countryId:country.id,
       actorId:interaction.user.id,armyId:army.id,coordinate,
       adminReason:interaction.options.getString("gerekce",true)});
     await interaction.editReply(`✅ **${country.name.replaceAll("@","＠")} / ${army.name.replaceAll("@","＠")}** `+
-      `ordusu **${coordinate.toUpperCase()}** kıyısına yönetici kararıyla çıkarıldı. Bu tur yeniden hareket edemez.`);
+      `ordusu için **${coordinate.toUpperCase()}** kıyısına çıkarma emri kaydedildi. `+
+      `Emir bu turun kapanışında tamamlanacak ve Hex hareket hakkından düşmeyecek.\nEmir ID: \`${order.orderId}\``);
     return;
   }
   if (sub === "bogaz-tanimla") {

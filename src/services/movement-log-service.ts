@@ -31,6 +31,8 @@ const ACTIONS:Record<string,{title:string;color:number}>={
   ARMY_SCOUT_WITHDRAW:{title:"🕵️ Keşif birliği geri çekildi",color:0x8881bd},
   ARMY_EMBARK:{title:"⛵ Ordu gemiye bindi",color:0x4975b9},
   ARMY_DISEMBARK:{title:"⚓ Ordu karaya çıktı",color:0x4975b9},
+  ARMY_DISEMBARK_SUBMIT:{title:"⚓ Çıkarma emri verildi",color:0x4975b9},
+  ARMY_DISEMBARK_BLOCKED:{title:"⚠️ Çıkarma emri durduruldu",color:0xc28649},
   ARMY_DISEMBARK_GM:{title:"⚓ Yönetici çıkarma kararı",color:0xc28649},
   ARMY_MUSTER_SUBMIT:{title:"⚔️ Asker intikali başladı",color:0x4975b9},
   ARMY_MUSTER_STAGE:{title:"⚔️ Asker intikali çözüldü",color:0x4975b9},

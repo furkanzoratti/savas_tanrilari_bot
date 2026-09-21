@@ -51,7 +51,7 @@ export function renderArmyEmbed(army: ArmyView): EmbedBuilder {
         ].join("\n")
       },
       { name: "🪖 Birlikler", value: trimField(unitTotals) },
-      { name: "🏛️ Kaynak Yerleşkeler", value: trimField(sourceText) },
+      { name: "🏛️ Köken Yerleşkeler", value: trimField(sourceText) },
       { name: "🛠️ Kuşatma Aletleri", value: trimField(`${siegeAssets}${siegeSourceText ? `\n\n${siegeSourceText}` : ""}`) }
     );
 }

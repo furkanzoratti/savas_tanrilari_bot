@@ -30,6 +30,7 @@ function fakeClient(foreignSecondStep = false) {
           domain: "LAND", passable: true, owner_country_id: foreignSecondStep ? "country-2" : "country-1" }
       ], rowCount: 2 };
       if (sql.includes("FROM army_muster_orders WHERE guild_id=$1")) return { rows: [], rowCount: 0 };
+      if (sql.includes("FROM fleet_disembark_orders WHERE guild_id=$1")) return { rows: [], rowCount: 0 };
       if (sql.includes("INSERT INTO movement_encounters")) return { rows: [], rowCount: 1 };
       if (sql.includes("FROM map_hexes WHERE guild_id=$1")) return { rows: [], rowCount: 0 };
       if (sql.includes("SELECT id,coordinate FROM map_hexes WHERE id=ANY"))
@@ -90,6 +91,7 @@ describe("movement stage transaction", () => {
       }
       if(sql.includes("INSERT INTO movement_encounters")){cases.push(params);return {rows:[],rowCount:1};}
       if(sql.includes("FROM army_muster_orders WHERE guild_id=$1"))return {rows:[],rowCount:0};
+      if(sql.includes("FROM fleet_disembark_orders WHERE guild_id=$1"))return {rows:[],rowCount:0};
       if(sql.includes("SELECT id,coordinate FROM map_hexes WHERE id=ANY"))
         return {rows:(params[0] as string[]).map((id)=>({id,coordinate:id.toUpperCase()})),rowCount:2};
       if(sql.includes("UPDATE movement_resolution_runs")){summary=JSON.parse(params[5] as string) as Record<string,unknown>;return {rows:[],rowCount:1};}

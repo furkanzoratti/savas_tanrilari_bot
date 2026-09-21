@@ -5,6 +5,7 @@ import { calculateArmyMovement, DEFAULT_MOVEMENT_RULES } from "../domain/movemen
 import type { BattleUnitType } from "../domain/battle.js";
 import type { MovementResolutionStage } from "../domain/movement-resolution.js";
 import { GameError } from "./game-service.js";
+import { depositArmyStock } from "./unit-inventory-service.js";
 
 type MusterStatus = "SUBMITTED" | "IN_PROGRESS" | "BLOCKED" | "WAITING_ARMY" | "COMPLETED" | "CANCELLED";
 export interface MusterOrderView {
@@ -136,6 +137,13 @@ export async function resolveArmyMusterStage(
       continue;
     }
     if(order.is_returning){
+      const owner=(await client.query<{country_id:string}>(
+        "SELECT country_id FROM settlements WHERE id=$1 FOR UPDATE",[order.source_settlement_id])).rows[0];
+      if(owner?.country_id!==order.country_id){
+        await blockMuster(client,guildId,actorId,order.id,turn,"Kaynak yerleşke el değiştirdi; dönen askerler için yönetici yeni bir dost yerleşke belirlemelidir.");
+        summary.blocked++;continue;
+      }
+      await depositArmyStock(client,order.source_settlement_id,order.unit_type,Number(order.quantity));
       await client.query("UPDATE army_muster_orders SET status='CANCELLED',last_processed_turn=$2,updated_at=NOW() WHERE id=$1",[order.id,turn]);
       await client.query(
         `INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details)
@@ -164,27 +172,12 @@ export async function resolveArmyMusterStage(
       await client.query("UPDATE army_muster_orders SET status='WAITING_ARMY',last_processed_turn=$2,updated_at=NOW() WHERE id=$1",[order.id,turn]);
       summary.waiting++; continue;
     }
-    const owner=(await client.query<{country_id:string}>("SELECT country_id FROM settlements WHERE id=$1",[order.source_settlement_id])).rows[0];
-    if(owner?.country_id!==order.country_id){
-      await blockMuster(client,guildId,actorId,order.id,turn,"Kaynak yerleşke başka devlete geçti; yönetici kararı gerekiyor.");
-      summary.blocked++;continue;
-    }
-    const stock = Number((await client.query<{quantity:number}>(
-      `SELECT COALESCE(SUM(quantity),0)::integer AS quantity FROM unit_stacks
-        WHERE settlement_id=$1 AND unit_type=$2 AND force_type='ARMY'`,[order.source_settlement_id,order.unit_type]
-    )).rows[0]?.quantity ?? 0);
-    const assigned = Number((await client.query<{quantity:number}>(
-      `SELECT COALESCE(SUM(quantity),0)::integer AS quantity FROM army_units
-        WHERE settlement_id=$1 AND unit_type=$2`,[order.source_settlement_id,order.unit_type]
-    )).rows[0]?.quantity ?? 0);
-    if (stock < assigned + Number(order.quantity)) {
-      await blockMuster(client,guildId,actorId,order.id,turn,"Kaynak yerleşkedeki asker stoku değişti; yönetici mutabakatı gerekiyor.");
-      summary.blocked++; continue;
-    }
+    const origin=(await client.query<{name:string}>("SELECT name FROM settlements WHERE id=$1",[order.source_settlement_id])).rows[0];
+    if(!origin){await blockMuster(client,guildId,actorId,order.id,turn,"Asker intikalinin köken kaydı bulunamadı.");summary.blocked++;continue;}
     await client.query(
-      `INSERT INTO army_units(army_id,settlement_id,unit_type,quantity) VALUES($1,$2,$3,$4)
+      `INSERT INTO army_units(army_id,settlement_id,origin_settlement_name,unit_type,quantity) VALUES($1,$2,$3,$4,$5)
        ON CONFLICT(army_id,settlement_id,unit_type) DO UPDATE SET quantity=army_units.quantity+EXCLUDED.quantity`,
-      [order.army_id,order.source_settlement_id,order.unit_type,order.quantity]
+      [order.army_id,order.source_settlement_id,origin.name,order.unit_type,order.quantity]
     );
     await client.query("UPDATE armies SET updated_at=NOW() WHERE id=$1",[order.army_id]);
     await client.query("UPDATE army_muster_orders SET status='COMPLETED',last_processed_turn=$2,updated_at=NOW() WHERE id=$1",[order.id,turn]);
@@ -246,9 +239,9 @@ export const armyMusterService = {
       const prefix=input.orderId.trim().toLowerCase();
       if(!/^[0-9a-f-]{8,36}$/.test(prefix))throw new GameError("En az 8 karakterlik geçerli toplanma emri ID'si girin.");
       const matches=(await client.query<{
-        id:string;status:MusterStatus;is_returning:boolean;current_step:number;current_hex_id:string;
+        id:string;country_id:string;status:MusterStatus;is_returning:boolean;current_step:number;current_hex_id:string;
         start_hex_id:string;route_hex_ids:string[];route_costs:number[];
-      }>(`SELECT id,status,is_returning,current_step,current_hex_id,start_hex_id,route_hex_ids,route_costs
+      }>(`SELECT id,country_id,status,is_returning,current_step,current_hex_id,start_hex_id,route_hex_ids,route_costs
             FROM army_muster_orders WHERE guild_id=$1 AND id::text LIKE $2 || '%' FOR UPDATE`,
         [input.guildId,prefix])).rows;
       if(matches.length!==1)throw new GameError(matches.length?"Toplanma emri ID'si belirsiz.":"Toplanma emri bulunamadı.");
@@ -258,6 +251,13 @@ export const armyMusterService = {
       const step=Number(order.current_step);
       if(order.route_hex_ids[step]!==order.current_hex_id)throw new GameError("Birliğin konumu rota ile uyuşmuyor.");
       if(step===0){
+        const orderDetails=(await client.query<{source_settlement_id:string;unit_type:string;quantity:number}>(
+          "SELECT source_settlement_id,unit_type,quantity FROM army_muster_orders WHERE id=$1",[order.id])).rows[0]!;
+        const owner=(await client.query<{country_id:string}>(
+          "SELECT country_id FROM settlements WHERE id=$1 FOR UPDATE",[orderDetails.source_settlement_id])).rows[0];
+        if(owner?.country_id!==order.country_id)
+          throw new GameError("Kaynak yerleşke artık bu devlete ait değil; asker intikali yönetici kararı olmadan iptal edilemez.");
+        await depositArmyStock(client,orderDetails.source_settlement_id,orderDetails.unit_type,Number(orderDetails.quantity));
         await client.query("UPDATE army_muster_orders SET status='CANCELLED',updated_at=NOW() WHERE id=$1",[order.id]);
       }else{
         const route=order.route_hex_ids.slice(0,step+1).reverse();
@@ -293,13 +293,17 @@ export const armyMusterService = {
   },
   async cancelUnstarted(input:{guildId:string;countryId:string;actorId:string;orderId:string}):Promise<void>{
     await withTransaction(async(client)=>{
-      const row=(await client.query<{status:MusterStatus;current_step:number}>(
-        "SELECT status,current_step FROM army_muster_orders WHERE id=$1 AND guild_id=$2 AND country_id=$3 FOR UPDATE",
+      const row=(await client.query<{status:MusterStatus;current_step:number;source_settlement_id:string;unit_type:string;quantity:number}>(
+        "SELECT status,current_step,source_settlement_id,unit_type,quantity FROM army_muster_orders WHERE id=$1 AND guild_id=$2 AND country_id=$3 FOR UPDATE",
         [input.orderId,input.guildId,input.countryId]
       )).rows[0];
       if(!row)throw new GameError("Toplanma emri bulunamadı.");
       if(!["SUBMITTED","IN_PROGRESS","BLOCKED"].includes(row.status)||Number(row.current_step)!==0)
         throw new GameError("Yola çıkan birliği iptal ederek kaynağına ışınlayamazsınız; yönetici incelemesi gerekir.");
+      const owner=(await client.query<{country_id:string}>(
+        "SELECT country_id FROM settlements WHERE id=$1 FOR UPDATE",[row.source_settlement_id])).rows[0];
+      if(owner?.country_id!==input.countryId)throw new GameError("Kaynak yerleşke artık bu devlete ait değil; asker intikali yönetici kararı olmadan iptal edilemez.");
+      await depositArmyStock(client,row.source_settlement_id,row.unit_type,Number(row.quantity));
       await client.query("UPDATE army_muster_orders SET status='CANCELLED',updated_at=NOW() WHERE id=$1",[input.orderId]);
       await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'ARMY_MUSTER_CANCEL','army_muster_order',$3,'{}'::jsonb)",
         [input.guildId,input.actorId,input.orderId]);

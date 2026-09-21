@@ -27,8 +27,8 @@ describe("ordu belgesi", () => {
     expect(embed.description).toContain("Marcus");
     expect(embed.description).toContain("Hex / toplanma alanı: **J22**");
     expect(embed.fields?.find((field) => field.name.includes("Kompozisyon"))?.value).toContain("Baskın birim oranı");
-    expect(embed.fields?.find((field) => field.name.includes("Kaynak"))?.value).toContain("Roma");
-    expect(embed.fields?.find((field) => field.name.includes("Kaynak"))?.value).toContain("Neapolis");
+    expect(embed.fields?.find((field) => field.name.includes("Köken"))?.value).toContain("Roma");
+    expect(embed.fields?.find((field) => field.name.includes("Köken"))?.value).toContain("Neapolis");
     expect(embed.fields?.find((field) => field.name.includes("Kuşatma"))?.value).toContain("Katapult");
     expect(embed.fields?.find((field) => field.name.includes("Kuşatma"))?.value).toContain("geliştirilmiş");
     expect(renderArmyEmbed({ ...army, current_hex: "Gemide: Batı Filosu • K22" }).toJSON().description)

@@ -9,6 +9,8 @@ import { coastalPortSql } from "./coastal-navigation-sql.js";
 
 interface LocatedFormation { id: string; name: string; country_id: string; hex_id: string; coordinate: string; domain: string; coastal_port: boolean; owner_country_id: string | null; }
 
+export interface DisembarkationStageSummary { processed:number;completed:number;blocked:number; }
+
 async function located(client: DbClient, guildId: string, countryId: string, kind: "ARMY" | "FLEET", id: string): Promise<LocatedFormation> {
   const table = kind === "ARMY" ? "armies" : "fleets";
   const positions = kind === "ARMY" ? "army_map_positions" : "fleet_map_positions";
@@ -107,6 +109,9 @@ export const movementTransportService = {
       }
       if (army.owner_country_id !== input.countryId) throw new GameError("Gemiye binme kendi kontrolünüzdeki kıyıdan yapılmalıdır.");
       if (await activeOrder(client,"ARMY",army.id) || await activeOrder(client,"FLEET",fleet.id)) throw new GameError("Etkin hareket emri bulunan birliklerde yükleme yapılamaz.");
+      if((await client.query(
+        "SELECT 1 FROM fleet_disembark_orders WHERE fleet_id=$1 AND status IN ('SUBMITTED','BLOCKED') LIMIT 1",
+        [fleet.id])).rowCount)throw new GameError("Filonun bekleyen bir çıkarma emri varken yeni ordu yüklenemez.");
       if(await pendingEncounter(client,"ARMY",army.id)||await pendingEncounter(client,"FLEET",fleet.id))
         throw new GameError("Hex karşılaşması bekleyen birlik gemiye yüklenemez.");
       if ((await client.query(
@@ -135,13 +140,16 @@ export const movementTransportService = {
     });
   },
 
-  async disembark(input: { guildId: string; countryId: string; actorId: string; armyId: string; coordinate: string; adminReason?: string | undefined }): Promise<void> {
-    await withTransaction(async (client) => {
+  async disembark(input: { guildId: string; countryId: string; actorId: string; armyId: string; coordinate: string; adminReason?: string | undefined }): Promise<{orderId:string;completionTurn:number}> {
+    return withTransaction(async (client) => {
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`turn:${input.guildId}`]);
       const guild = (await client.query<{ current_turn: number; turn_phase: string }>(
         "SELECT current_turn,turn_phase FROM guilds WHERE discord_id=$1 FOR UPDATE", [input.guildId]
       )).rows[0];
       if (!guild || guild.turn_phase !== "OPEN") throw new GameError("Karaya çıkma yalnızca açık turda yapılabilir.");
+      const enabled=(await client.query<{enabled:boolean}>(
+        "SELECT enabled FROM guild_movement_settings WHERE guild_id=$1",[input.guildId])).rows[0]?.enabled;
+      if(!enabled)throw new GameError("Çıkarma emri koordinatlı hareket açılana kadar kullanılamaz.");
       const cargo = (await client.query<{ fleet_id: string; embarked_turn: number }>(
         `SELECT cargo.fleet_id,cargo.embarked_turn FROM fleet_cargo_armies cargo
          JOIN armies army ON army.id=cargo.army_id
@@ -171,16 +179,96 @@ export const movementTransportService = {
           WHERE position.hex_id=$1 AND army.country_id<>$2 LIMIT 1`,[destination.id,input.countryId]
       );
       if(enemy.rowCount)throw new GameError("Çıkış Hex'inde düşman ordusu var; önce savaş/temas sonucunu yönetici çözmelidir.");
-      await client.query("DELETE FROM fleet_cargo_armies WHERE army_id=$1", [input.armyId]);
+      const existing=(await client.query<{id:string}>(
+        "SELECT id FROM fleet_disembark_orders WHERE army_id=$1 AND status IN ('SUBMITTED','BLOCKED') FOR UPDATE",
+        [input.armyId])).rows[0];
+      const orderId=existing
+        ? (await client.query<{id:string}>(
+          `UPDATE fleet_disembark_orders SET fleet_id=$2,fleet_hex_id=$3,destination_hex_id=$4,
+             issued_turn=$5,status='SUBMITTED',admin_reason=$6,issued_by=$7,blocked_reason=NULL,
+             resolved_turn=NULL,updated_at=NOW() WHERE id=$1 RETURNING id`,
+          [existing.id,fleet.id,fleet.hex_id,destination.id,guild.current_turn,reason??null,input.actorId])).rows[0]!.id
+        : (await client.query<{id:string}>(
+          `INSERT INTO fleet_disembark_orders(
+             guild_id,country_id,army_id,fleet_id,fleet_hex_id,destination_hex_id,issued_turn,admin_reason,issued_by)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+          [input.guildId,input.countryId,input.armyId,fleet.id,fleet.hex_id,destination.id,
+            guild.current_turn,reason??null,input.actorId])).rows[0]!.id;
       await client.query(
-        "INSERT INTO army_map_positions(army_id,hex_id,arrived_turn,fatigue_until_turn) VALUES($1,$2,$3,$3)",
-        [input.armyId,destination.id,guild.current_turn]
+        "INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'ARMY_DISEMBARK_SUBMIT','army',$3,$4::jsonb)",
+        [input.guildId,input.actorId,input.armyId,
+          JSON.stringify({orderId,fleetId:fleet.id,sea:fleet.coordinate,destination:destination.coordinate,
+            completionTurn:guild.current_turn,reason:reason??null})]
       );
-      await client.query(
-        "INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,'army',$4,$5::jsonb)",
-        [input.guildId,input.actorId,reason?"ARMY_DISEMBARK_GM":"ARMY_DISEMBARK",input.armyId,
-          JSON.stringify({ fleetId:fleet.id, sea:fleet.coordinate, destination:destination.coordinate,reason:reason??null })]
-      );
+      return {orderId,completionTurn:Number(guild.current_turn)};
     });
   }
 };
+
+export async function resolveDisembarkationStage(
+  client:DbClient,guildId:string,actorId:string,turn:number,stage:"STOP"|"ADVANCE"
+):Promise<DisembarkationStageSummary>{
+  const summary:DisembarkationStageSummary={processed:0,completed:0,blocked:0};
+  const orders=(await client.query<{
+    id:string;country_id:string;army_id:string;fleet_id:string;fleet_hex_id:string;
+    destination_hex_id:string;admin_reason:string|null;issued_by:string;
+  }>(`SELECT id,country_id,army_id,fleet_id,fleet_hex_id,destination_hex_id,admin_reason,issued_by
+        FROM fleet_disembark_orders WHERE guild_id=$1 AND status='SUBMITTED' AND ${stage==="STOP"?"issued_turn=$2":"issued_turn<$2"}
+        ORDER BY created_at,id FOR UPDATE`,[guildId,turn])).rows;
+  summary.processed=orders.length;
+  for(const order of orders){
+    let blockedReason:string|null=null;
+    const cargo=(await client.query<{fleet_id:string}>(
+      "SELECT fleet_id FROM fleet_cargo_armies WHERE army_id=$1 FOR UPDATE",[order.army_id])).rows[0];
+    const fleet=(await client.query<{hex_id:string;coordinate:string;domain:string;coastal_port:boolean}>(
+      `SELECT position.hex_id,hex.coordinate,hex.domain,${coastalPortSql("hex")} AS coastal_port
+         FROM fleets fleet JOIN fleet_map_positions position ON position.fleet_id=fleet.id
+         JOIN map_hexes hex ON hex.id=position.hex_id
+        WHERE fleet.id=$1 AND fleet.country_id=$2 AND fleet.guild_id=$3 FOR UPDATE OF fleet,position`,
+      [order.fleet_id,order.country_id,guildId])).rows[0];
+    const destination=(await client.query<{id:string;coordinate:string;domain:string;passable:boolean;owner_country_id:string|null}>(
+      "SELECT id,coordinate,domain,passable,owner_country_id FROM map_hexes WHERE id=$1 AND guild_id=$2",
+      [order.destination_hex_id,guildId])).rows[0];
+    if(!cargo||cargo.fleet_id!==order.fleet_id)blockedReason="Ordu artık kayıtlı filoda taşınmıyor.";
+    else if(!fleet||fleet.hex_id!==order.fleet_hex_id)blockedReason="Filo çıkarma emrinden sonra konum değiştirdi.";
+    else if(!destination||!destination.passable||destination.domain!=="LAND")blockedReason="Çıkarma hedefi artık geçilebilir bir kara Hex'i değil.";
+    else if(!(fleet.coastal_port&&destination.id===fleet.hex_id)&&
+      !(fleet.domain==="SEA"&&hexDistance(parseHexCoordinate(fleet.coordinate),parseHexCoordinate(destination.coordinate))===1))
+      blockedReason="Çıkarma hedefi filoya bitişik değil.";
+    else if(destination.owner_country_id!==order.country_id&&!order.admin_reason)
+      blockedReason="Yabancı veya sahipsiz kıyı için yönetici kararı gerekiyor.";
+    else if((await client.query(
+      `SELECT 1 FROM army_map_positions position JOIN armies army ON army.id=position.army_id
+        WHERE position.hex_id=$1 AND army.country_id<>$2 LIMIT 1`,[order.destination_hex_id,order.country_id])).rowCount)
+      blockedReason="Çıkarma Hex'inde düşman ordusu var; savaş veya temas kararı gerekiyor.";
+    if(blockedReason){
+      await client.query(
+        "UPDATE fleet_disembark_orders SET status='BLOCKED',blocked_reason=$2,updated_at=NOW() WHERE id=$1",
+        [order.id,blockedReason]);
+      await client.query(
+        `INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details)
+         VALUES($1,$2,'ARMY_DISEMBARK_BLOCKED','army',$3,$4::jsonb)`,
+        [guildId,actorId,order.army_id,JSON.stringify({orderId:order.id,reason:blockedReason})]);
+      summary.blocked+=1;
+      continue;
+    }
+    await client.query("DELETE FROM fleet_cargo_armies WHERE army_id=$1",[order.army_id]);
+    await client.query(
+      `INSERT INTO army_map_positions(army_id,hex_id,arrived_turn,fatigue_until_turn)
+       VALUES($1,$2,$3,$3) ON CONFLICT(army_id) DO UPDATE SET hex_id=EXCLUDED.hex_id,
+         arrived_turn=EXCLUDED.arrived_turn,fatigue_until_turn=EXCLUDED.fatigue_until_turn,
+         version=army_map_positions.version+1,updated_at=NOW()`,
+      [order.army_id,order.destination_hex_id,turn]);
+    await client.query(
+      "UPDATE fleet_disembark_orders SET status='COMPLETED',resolved_turn=$2,blocked_reason=NULL,updated_at=NOW() WHERE id=$1",
+      [order.id,turn]);
+    await client.query(
+      `INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details)
+       VALUES($1,$2,$3,'army',$4,$5::jsonb)`,
+      [guildId,actorId,order.admin_reason?"ARMY_DISEMBARK_GM":"ARMY_DISEMBARK",order.army_id,
+        JSON.stringify({orderId:order.id,fleetId:order.fleet_id,destination:destination!.coordinate,
+          turn,reason:order.admin_reason})]);
+    summary.completed+=1;
+  }
+  return summary;
+}

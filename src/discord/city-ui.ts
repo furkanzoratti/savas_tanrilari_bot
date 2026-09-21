@@ -94,7 +94,8 @@ export async function handleCityAutocomplete(interaction: AutocompleteInteractio
   const assignment = interaction.options.getString("gorev-yeri");
   let settlements = document.settlements;
   if (sub === "egit") {
-    settlements = settlements.filter((item) => item.buildings.some((building) => building.building_type === "academy" && building.status === "ACTIVE"));
+    settlements = settlements.filter((item) => item.buildings.some((building) =>
+      building.building_type === "academy" && building.level > 0 && ["ACTIVE","BUILDING"].includes(building.status)));
   } else if (sub === "ata" && assignment) {
     const buildingType = assignment === "CURIA" ? "curia" : "agora";
     settlements = settlements.filter((item) => item.buildings.some((building) => building.building_type === buildingType && building.status === "ACTIVE" && building.level >= 2));

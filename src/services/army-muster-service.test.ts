@@ -30,6 +30,7 @@ function fixture(armyAtDestination=true){
       return {rows:[{hex_id:armyAtDestination?"hex-c":"hex-b",country_id:"country-1"}],rowCount:1};
     if(sql.includes("FROM battle_army_assignments assigned") || sql.includes("FROM movement_encounters incident"))
       return {rows:[],rowCount:0};
+    if(sql.includes("SELECT name FROM settlements"))return {rows:[{name:"Roma"}],rowCount:1};
     if(sql.includes("SELECT country_id FROM settlements"))return {rows:[{country_id:"country-1"}],rowCount:1};
     if(sql.includes("FROM unit_stacks"))return {rows:[{quantity:500}],rowCount:1};
     if(sql.includes("FROM army_units"))return {rows:[{quantity:0}],rowCount:1};
@@ -41,6 +42,7 @@ function fixture(armyAtDestination=true){
     if(sql.includes("UPDATE army_muster_orders SET status='CANCELLED'")){
       order.status="CANCELLED";writes.push("returned");return {rows:[],rowCount:1};
     }
+    if(sql.includes("INSERT INTO unit_stacks")){writes.push("deposit");return {rows:[],rowCount:1};}
     if(sql.includes("UPDATE army_muster_orders SET status='WAITING_ARMY'")){
       order.status="WAITING_ARMY";writes.push("waiting");return {rows:[],rowCount:1};
     }
@@ -79,6 +81,7 @@ describe("ordu toplama intikali",()=>{
     expect(writes).not.toContain("returned");
     await resolveArmyMusterStage(client,"guild-1","gm-1",9,"ADVANCE");
     expect(writes).toContain("returned");
+    expect(writes).toContain("deposit");
     expect(writes).not.toContain("join");
   });
 
@@ -86,8 +89,8 @@ describe("ordu toplama intikali",()=>{
     let recalled:unknown[]=[];
     transaction.client={query:async(sql:string,params:unknown[]=[])=>{
       if(sql.includes("pg_advisory_xact_lock"))return {rows:[],rowCount:1};
-      if(sql.includes("SELECT id,status,is_returning,current_step"))return {rows:[{
-        id:"aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",status:"BLOCKED",is_returning:false,
+      if(sql.includes("SELECT id,country_id,status,is_returning,current_step"))return {rows:[{
+        id:"aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",country_id:"country-1",status:"BLOCKED",is_returning:false,
         current_step:2,current_hex_id:"hex-c",start_hex_id:"hex-a",
         route_hex_ids:["hex-a","hex-b","hex-c","hex-d"],route_costs:[1,2,3]
       }],rowCount:1};
@@ -99,5 +102,26 @@ describe("ordu toplama intikali",()=>{
     await armyMusterService.recall({guildId:"guild-1",actorId:"gm-1",orderId:"aaaaaaaa",note:"Geri çekil"});
     expect(recalled[3]).toEqual(["hex-c","hex-b","hex-a"]);
     expect(recalled[4]).toEqual([2,1]);
+  });
+
+  it("kaynak şehir el değiştirdiyse başlangıç Hex'indeki askerleri yeni sahibin stokuna yazmaz",async()=>{
+    let deposited=false;
+    transaction.client={query:async(sql:string)=>{
+      if(sql.includes("pg_advisory_xact_lock"))return {rows:[],rowCount:1};
+      if(sql.includes("SELECT id,country_id,status,is_returning,current_step"))return {rows:[{
+        id:"bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb",country_id:"country-1",status:"SUBMITTED",is_returning:false,
+        current_step:0,current_hex_id:"hex-a",start_hex_id:"hex-a",route_hex_ids:["hex-a","hex-b"],route_costs:[1]
+      }],rowCount:1};
+      if(sql.includes("SELECT source_settlement_id,unit_type,quantity"))return {rows:[{
+        source_settlement_id:"settlement-1",unit_type:"archer",quantity:500
+      }],rowCount:1};
+      if(sql.includes("SELECT country_id FROM settlements"))return {rows:[{country_id:"enemy-country"}],rowCount:1};
+      if(sql.includes("INSERT INTO unit_stacks")){deposited=true;return {rows:[],rowCount:1};}
+      throw new Error(`Unexpected query: ${sql}`);
+    }} as unknown as DbClient;
+    await expect(armyMusterService.recall({
+      guildId:"guild-1",actorId:"gm-1",orderId:"bbbbbbbb",note:"Fetih sonrası iptal"
+    })).rejects.toThrow("artık bu devlete ait değil");
+    expect(deposited).toBe(false);
   });
 });

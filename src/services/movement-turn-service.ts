@@ -3,7 +3,7 @@ import { eligibleForMovementStage, selectTurnMovementSteps, type MovementResolut
 import type { FormationKind, MovementOrderStatus } from "../domain/movement.js";
 import { GameError } from "./game-service.js";
 import { resolveMovementRecon } from "./movement-recon-service.js";
-import { fleetCargoSnapshot } from "./movement-transport-service.js";
+import { fleetCargoSnapshot, resolveDisembarkationStage, type DisembarkationStageSummary } from "./movement-transport-service.js";
 import { resolveArmyMusterStage, type MusterStageSummary } from "./army-muster-service.js";
 import { fleetAccessibleStep } from "../domain/coastal-navigation.js";
 import { coastalPortSql } from "./coastal-navigation-sql.js";
@@ -22,6 +22,7 @@ export interface MovementStageSummary {
   reconChecks: number;
   muster: MusterStageSummary;
   encounters: number;
+  disembarkations:DisembarkationStageSummary;
 }
 
 interface OrderRow {
@@ -104,7 +105,8 @@ export async function resolveMovementStage(
   const disabled: MovementStageSummary = {
     enabled: false, stage, turn, processed: 0, advanced: 0, completed: 0,
     blocked: 0, ongoing: 0, ownershipUpdates: 0, alreadyProcessed: false, reconChecks: 0,
-    muster: { processed:0,advanced:0,joined:0,blocked:0,waiting:0 }, encounters:0
+    muster: { processed:0,advanced:0,joined:0,blocked:0,waiting:0 }, encounters:0,
+    disembarkations:{processed:0,completed:0,blocked:0}
   };
   const settings = (await client.query<{ enabled: boolean; map_revision: number }>(
     "SELECT enabled,map_revision FROM guild_movement_settings WHERE guild_id=$1 FOR UPDATE", [guildId]
@@ -127,7 +129,8 @@ export async function resolveMovementStage(
   )).rows[0]!;
   const previous = run.summary?.[stage];
   if (previous) return { ...disabled,...previous,muster:previous.muster??disabled.muster,
-    encounters:previous.encounters??0,alreadyProcessed:true };
+    encounters:previous.encounters??0,disembarkations:previous.disembarkations??disabled.disembarkations,
+    alreadyProcessed:true };
 
   // Yerleşke devri haritanın ilk ithalindeki ülke rengini kalıcı sahipliğe dönüştürmez.
   const ownership = await client.query(
@@ -301,7 +304,8 @@ export async function resolveMovementStage(
   const summary: MovementStageSummary = {
     enabled: true, stage, turn, processed: plans.length, advanced: 0, completed: 0,
     blocked: 0, ongoing: 0, ownershipUpdates, alreadyProcessed: false, reconChecks: 0,
-    muster: { processed:0,advanced:0,joined:0,blocked:0,waiting:0 }, encounters
+    muster: { processed:0,advanced:0,joined:0,blocked:0,waiting:0 }, encounters,
+    disembarkations:{processed:0,completed:0,blocked:0}
   };
   summary.reconChecks = await resolveMovementRecon(client,guildId,turn,plans
     .filter((plan) => plan.order.formation_kind === "ARMY" && plan.traversed.length)
@@ -360,8 +364,10 @@ export async function resolveMovementStage(
     else summary.ongoing += 1;
   }
   summary.muster = await resolveArmyMusterStage(client,guildId,actorId,turn,stage);
+  summary.disembarkations=await resolveDisembarkationStage(client,guildId,actorId,turn,stage);
   const merged = { ...(run.summary ?? {}), [stage]: summary };
-  const hasBlockedOrders = Object.values(merged).some((item) => item.blocked > 0 || item.muster?.blocked > 0);
+  const hasBlockedOrders = Object.values(merged).some((item) =>
+    item.blocked > 0 || item.muster?.blocked > 0 || item.disembarkations?.blocked > 0);
   await client.query(
     `UPDATE movement_resolution_runs SET status=$3,processed_orders=processed_orders+$4,
             failed_orders=failed_orders+$5,summary=$6::jsonb,started_at=COALESCE(started_at,NOW()),

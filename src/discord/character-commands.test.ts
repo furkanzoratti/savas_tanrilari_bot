@@ -72,6 +72,9 @@ describe("Akademi karakter komutları", () => {
 
     expect(operations?.choices?.map((choice) => choice.value)).toEqual(["set","clear","status","test"]);
     expect(command?.options?.map((item)=>item.name)).toContain("tur-gorevlerini-isle");
+    const manualSpy=command?.options?.find((item)=>item.name==="casus-ekle");
+    expect(manualSpy?.options?.map((item)=>item.name)).toEqual(["ulke","ad","bonus"]);
+    expect(manualSpy?.options?.find((item)=>item.name==="bonus")).toMatchObject({required:true,min_value:0,max_value:5});
   });
 
   it("yönetici mali hareket dökümünde ülke ve isteğe bağlı tur seçtirir", () => {

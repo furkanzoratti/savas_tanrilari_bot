@@ -295,10 +295,8 @@ export async function applyEspionageEffect(
       const lost = Math.floor(Number(unit.quantity)*rate/100); if (!lost) continue; total += lost;
       await client.query("UPDATE army_units SET quantity=quantity-$1 WHERE army_id=$2 AND settlement_id=$3 AND unit_type=$4",[lost,operation.target_army_id,unit.settlement_id,unit.unit_type]);
       await client.query("DELETE FROM army_units WHERE army_id=$1 AND settlement_id=$2 AND unit_type=$3 AND quantity<=0",[operation.target_army_id,unit.settlement_id,unit.unit_type]);
-      await client.query("UPDATE unit_stacks SET quantity=GREATEST(0,quantity-$1) WHERE id=(SELECT id FROM unit_stacks WHERE settlement_id=$2 AND unit_type=$3 AND force_type='ARMY' ORDER BY quantity DESC LIMIT 1)",[lost,unit.settlement_id,unit.unit_type]);
-      await client.query("UPDATE settlements SET population=population+$1 WHERE id=$2",[lost,unit.settlement_id]);
     }
-    return "Ordunun %"+rate+"'i firar etti; "+total.toLocaleString("tr-TR")+" kişi kaynak yerleşkelerinin nüfusuna döndü.";
+    return "Ordunun %"+rate+"'i firar etti; "+total.toLocaleString("tr-TR")+" asker saha ordusundan ayrıldı.";
   }
   if (operation.target_type === "POISON_GARRISON") {
     const rate = percent(severity,5,10,20);

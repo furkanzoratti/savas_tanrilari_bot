@@ -138,9 +138,11 @@ export async function handleMovementCommand(interaction: ChatInputCommandInterac
   if (sub === "karaya-cik") {
     const army = await armyService.get(country.id, interaction.options.getString("ordu", true));
     const destination = coordinate(interaction.options.getString("hex", true));
-    await movementTransportService.disembark({ guildId: interaction.guildId, countryId: country.id,
+    const order=await movementTransportService.disembark({ guildId: interaction.guildId, countryId: country.id,
       actorId: interaction.user.id, armyId: army.id, coordinate: destination });
-    await interaction.editReply(`✅ **${safe(army.name)}** ordusu **${destination}** kıyısına çıktı.`);
+    await interaction.editReply(`✅ **${safe(army.name)}** ordusu için **${destination}** kıyısına çıkarma emri verildi.\n`+
+      `Çıkarma bu turun kapanışında tamamlanacak; ordunun veya filonun Hex hareket hakkından düşmeyecek.\n`+
+      `Emir ID: \`${order.orderId}\``);
     return;
   }
 
