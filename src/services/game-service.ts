@@ -409,6 +409,7 @@ async function settlementTransferMaintenanceReserve(
   const units = (await client.query<{ unit_type: keyof typeof UNITS; quantity: number; status: UnitStatus }>(
     "SELECT unit_type,quantity,status FROM unit_stacks WHERE settlement_id=$1", [settlement.id]
   )).rows;
+  const detachedUnits=await originBoundUnits(client,country.id,[settlement.id]);
   const ships = (await client.query<{ ship_type: keyof typeof SHIPS; quantity: number; status: ShipStatus }>(
     "SELECT ship_type,quantity,status FROM naval_units WHERE settlement_id=$1", [settlement.id]
   )).rows;
@@ -416,7 +417,7 @@ async function settlementTransferMaintenanceReserve(
     "SELECT COALESCE(SUM(turn_upkeep),0)::bigint AS total FROM mercenary_contracts WHERE settlement_id=$1 AND status IN ('ACTIVE','UNPAID')",
     [settlement.id]
   )).rows[0]?.total ?? 0;
-  const unitUpkeep = units.reduce((sum, unit) => sum + calculateUnitUpkeep(
+  const unitUpkeep = [...units,...detachedUnits.map((unit)=>({...unit,status:"GARRISON" as UnitStatus}))].reduce((sum, unit) => sum + calculateUnitUpkeep(
     unit.unit_type, unit.quantity, unit.status, country.mobilization, effectiveResources, country.manpower_penalty_active
   ), 0);
   const shipUpkeep = applyFormableShipUpkeepDiscount(ships.reduce((sum, ship) => sum + calculateShipUpkeep(
@@ -583,6 +584,27 @@ async function settlementManpower(client: DbClient, settlementId: string): Promi
   const shipManpower = [...ships.rows, ...pendingShips.rows].reduce((sum, row) => sum + (SHIPS[row.ship_type]?.manpower ?? 0) * row.quantity, 0);
   return (units.rows[0]?.total??0)+(fieldArmies.rows[0]?.total??0)+(musteringUnits.rows[0]?.total??0)+(pending.rows[0]?.total??0)+
     (pendingGarrison.rows[0]?.total??0)+shipManpower;
+}
+
+type OriginBoundUnitRow={settlement_id:string;unit_type:keyof typeof UNITS;quantity:number};
+
+async function originBoundUnits(
+  client:DbClient,countryId:string,settlementIds:string[]
+):Promise<OriginBoundUnitRow[]> {
+  if(!settlementIds.length)return [];
+  return (await client.query<OriginBoundUnitRow>(
+    `SELECT detached.settlement_id,detached.unit_type,SUM(detached.quantity)::integer AS quantity FROM (
+       SELECT unit.settlement_id,unit.unit_type,unit.quantity
+         FROM army_units unit JOIN armies army ON army.id=unit.army_id
+        WHERE army.country_id=$1
+       UNION ALL
+       SELECT muster.source_settlement_id AS settlement_id,muster.unit_type,muster.quantity
+         FROM army_muster_orders muster
+        WHERE muster.country_id=$1 AND muster.status IN ('SUBMITTED','IN_PROGRESS','BLOCKED','WAITING_ARMY')
+     ) detached
+     WHERE detached.settlement_id=ANY($2::uuid[])
+     GROUP BY detached.settlement_id,detached.unit_type`,[countryId,settlementIds]
+  )).rows;
 }
 
 async function countryHasMaintenanceDebt(client: DbClient, countryId: string): Promise<boolean> {
@@ -1585,6 +1607,7 @@ export const gameService = {
         };
       });
       const units = settlementIds.length ? (await client.query<{ settlement_id: string; unit_type: keyof typeof UNITS; quantity: number; status: UnitStatus; force_type: ForceType }>("SELECT * FROM unit_stacks WHERE settlement_id = ANY($1::uuid[]) ORDER BY force_type,unit_type", [settlementIds])).rows : [];
+      const detachedOriginUnits=await originBoundUnits(client,countryId,settlementIds);
       const ships = settlementIds.length ? (await client.query<{ settlement_id: string; ship_type: keyof typeof SHIPS; quantity: number; status: ShipStatus }>("SELECT * FROM naval_units WHERE settlement_id = ANY($1::uuid[]) ORDER BY ship_type", [settlementIds])).rows : [];
       const assets = (await client.query<{ settlement_id: string | null; asset_type: string; quantity: number; location_note: string | null }>("SELECT * FROM siege_assets WHERE country_id = $1 ORDER BY asset_type", [countryId])).rows;
       const waves = (await client.query<{ settlement_id: string; unit_type: keyof typeof UNITS; due_turn: number; quantity: number }>(
@@ -1687,10 +1710,12 @@ export const gameService = {
           marshalPartial
         }), settlement.ruin_stage, country.active_formable_key);
         const settlementUnits = units.filter((unit) => unit.settlement_id === settlement.id);
+        const settlementDetachedUnits=detachedOriginUnits.filter((unit)=>unit.settlement_id===settlement.id);
         const settlementShips = ships.filter((ship) => ship.settlement_id === settlement.id);
         const settlementMercenaries = mercenaries.filter((contract) => contract.settlement_id === settlement.id);
         const activeSettlementMercenaries = settlementMercenaries.filter((contract) => contract.status === "ACTIVE" || contract.status === "UNPAID");
-        const unitUpkeep = settlementUnits.reduce((sum, unit) => sum + calculateUnitUpkeep(unit.unit_type, unit.quantity, unit.status, country.mobilization, effectiveResources, country.manpower_penalty_active), 0);
+        const unitUpkeep = [...settlementUnits,...settlementDetachedUnits.map((unit)=>({...unit,status:"GARRISON" as UnitStatus}))]
+          .reduce((sum, unit) => sum + calculateUnitUpkeep(unit.unit_type, unit.quantity, unit.status, country.mobilization, effectiveResources, country.manpower_penalty_active), 0);
         const shipUpkeep = applyFormableShipUpkeepDiscount(
           settlementShips.reduce((sum, ship) => sum + calculateShipUpkeep(ship.ship_type, ship.quantity, ship.status, country.mobilization, country.manpower_penalty_active), 0),
           country.active_formable_key
@@ -1698,6 +1723,7 @@ export const gameService = {
         const mercenaryUpkeep = activeSettlementMercenaries.reduce((sum, contract) => sum + contract.turn_upkeep, 0);
         const totalSettlementUpkeep = economy.buildingUpkeep + unitUpkeep + shipUpkeep + mercenaryUpkeep;
         const settlementMilitaryUsed = settlementUnits.reduce((sum, unit) => sum + unit.quantity, 0)
+          + settlementDetachedUnits.reduce((sum,unit)=>sum+Number(unit.quantity),0)
           + settlementShips.reduce((sum, ship) => sum + SHIPS[ship.ship_type].manpower * ship.quantity, 0)
           + waves.filter((wave) => wave.settlement_id === settlement.id).reduce((sum, wave) => sum + wave.quantity, 0)
           + pendingShips.filter((ship) => ship.settlement_id === settlement.id).reduce((sum, ship) => sum + SHIPS[ship.ship_type].manpower * ship.quantity, 0)
@@ -2736,6 +2762,7 @@ export const gameService = {
         for (const country of countries) {
           const marshalPartial = await hasActiveMarshalPartialMobilization(client, country.id, country.mobilization);
           const settlements = (await client.query<SettlementRow>("SELECT * FROM settlements WHERE country_id=$1 FOR UPDATE", [country.id])).rows;
+          const detachedOriginUnits=await originBoundUnits(client,country.id,settlements.map((settlement)=>settlement.id));
           const tradeBonuses = await activeTradeBonuses(client, country.id);
           const resourceAccess = await settlementResourceAccess(client, country.id);
           let incomeBreakdown: IncomeBreakdown = { building: 0, tax: 0, landTrade: 0, seaTrade: 0 };
@@ -2776,8 +2803,10 @@ export const gameService = {
             const mobilizedIncome = scaleIncome(economy.payable, marshalPartial ? 1 : MOBILIZATION_RULES[country.mobilization].incomeMultiplier);
             const adjustedSettlementIncome = applyIncomePenalty(mobilizedIncome, Number(incomePenalty?.penalty_percent ?? 0));
             const settlementUnits = (await client.query<{ unit_type: keyof typeof UNITS; quantity: number; status: UnitStatus }>("SELECT unit_type,quantity,status FROM unit_stacks WHERE settlement_id=$1", [settlement.id])).rows;
+            const settlementDetachedUnits=detachedOriginUnits.filter((unit)=>unit.settlement_id===settlement.id);
             const settlementShips = (await client.query<{ ship_type: keyof typeof SHIPS; quantity: number; status: ShipStatus }>("SELECT ship_type,quantity,status FROM naval_units WHERE settlement_id=$1", [settlement.id])).rows;
-            const unitUpkeep = settlementUnits.reduce((sum, unit) => sum + calculateUnitUpkeep(unit.unit_type, unit.quantity, unit.status, country.mobilization, effectiveResources, country.manpower_penalty_active), 0);
+            const unitUpkeep = [...settlementUnits,...settlementDetachedUnits.map((unit)=>({...unit,status:"GARRISON" as UnitStatus}))]
+              .reduce((sum, unit) => sum + calculateUnitUpkeep(unit.unit_type, unit.quantity, unit.status, country.mobilization, effectiveResources, country.manpower_penalty_active), 0);
             const shipUpkeep = applyFormableShipUpkeepDiscount(
                 settlementShips.reduce((sum, ship) => sum + calculateShipUpkeep(ship.ship_type, ship.quantity, ship.status, country.mobilization, country.manpower_penalty_active), 0),
                 country.active_formable_key
