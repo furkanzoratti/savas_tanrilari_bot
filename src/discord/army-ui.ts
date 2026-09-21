@@ -64,11 +64,12 @@ export async function handleArmyCommand(interaction: ChatInputCommandInteraction
       quantity: interaction.options.getInteger("miktar", true)
     };
     const army = sub === "asker-ekle" ? await armyService.addUnits(input) : await armyService.removeUnits(input);
+    const discharge="discharge" in army?army.discharge as {settlementId:string;settlementName:string}:undefined;
     await interaction.editReply({ content: sub === "asker-ekle"
       ? army.muster
         ? `🪖 Toplanma intikali başladı: **${army.muster.start} → ${army.muster.destination}**, ${army.muster.steps} Hex; tur başına ${army.muster.allowance} Hex. Emir: \`${army.muster.id}\`. Askerler varıncaya kadar ordu mevcuduna eklenmez.`
         : "✅ Askerler orduya tahsis edildi."
-      : "✅ Askerler ordunun bulunduğu dost yerleşkenin askerî stokuna aktarıldı.", embeds: [renderArmyEmbed(army)] });
+      : `✅ Askerler **${discharge?.settlementName ?? "dost yerleşke"}** askerî stokuna aktarıldı ve başka bir orduya yeniden eklenebilir.`, embeds: [renderArmyEmbed(army)] });
   } else if (sub === "kusatma-aleti-ekle" || sub === "kusatma-aleti-cikar") {
     const input = {
       guildId: interaction.guildId, countryId: country.id, actorId: interaction.user.id, army: armyValue,

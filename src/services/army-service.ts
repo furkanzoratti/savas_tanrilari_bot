@@ -154,14 +154,28 @@ async function assertMutable(client: DbClient, armyId: string): Promise<void> {
   if (embarked.rowCount) throw new GameError("Gemideki ordunun kadrosu, komutanı veya kaydı karaya çıkmadan değiştirilemez.");
 }
 
-async function armyDischargeSettlement(client:DbClient,armyId:string,countryId:string):Promise<{id:string;name:string}>{
+export async function resolveArmyDischargeSettlement(
+  client:DbClient,armyId:string,countryId:string,originSettlementId?:string
+):Promise<{id:string;name:string}>{
+  const movementEnabled=Boolean((await client.query<{enabled:boolean}>(
+    `SELECT COALESCE(settings.enabled,FALSE) AS enabled FROM armies army
+       LEFT JOIN guild_movement_settings settings ON settings.guild_id=army.guild_id
+      WHERE army.id=$1`,[armyId])).rows[0]?.enabled);
+  if(!movementEnabled&&originSettlementId){
+    const origin=(await client.query<{id:string;name:string}>(
+      "SELECT id,name FROM settlements WHERE id=$1 AND country_id=$2 FOR UPDATE",
+      [originSettlementId,countryId])).rows[0];
+    if(origin)return origin;
+  }
   const row=(await client.query<{id:string;name:string}>(
     `SELECT settlement.id,settlement.name FROM army_map_positions army_position
        JOIN settlement_map_positions settlement_position ON settlement_position.hex_id=army_position.hex_id
        JOIN settlements settlement ON settlement.id=settlement_position.settlement_id
       WHERE army_position.army_id=$1 AND settlement.country_id=$2
       ORDER BY settlement.name LIMIT 1 FOR UPDATE OF settlement`,[armyId,countryId])).rows[0];
-  if(!row)throw new GameError("Askerler yalnız ordunun bulunduğu, size ait bir yerleşkede ordudan çıkarılabilir veya terhis edilebilir.");
+  if(!row)throw new GameError(movementEnabled
+    ? "Askerler yalnız ordunun bulunduğu, size ait bir yerleşkede ordudan çıkarılabilir veya terhis edilebilir."
+    : "Köken yerleşke artık size ait değil ve ordunun bulunduğu Hex'te askerlerin aktarılabileceği dost yerleşke yok.");
   return row;
 }
 
@@ -348,7 +362,7 @@ export const armyService = {
     });
   },
 
-  async removeUnits(input: { guildId: string; countryId: string; actorId: string; army: string; settlement: string; unitType: BattleUnitType; quantity: number }): Promise<ArmyView> {
+  async removeUnits(input: { guildId: string; countryId: string; actorId: string; army: string; settlement: string; unitType: BattleUnitType; quantity: number }): Promise<ArmyView & { discharge:{ settlementId:string; settlementName:string } }> {
     return withTransaction(async (client) => {
       if (!Number.isInteger(input.quantity) || input.quantity < 1) throw new GameError("Çıkarılacak asker miktarı pozitif tam sayı olmalıdır.");
       const army = await resolveArmy(client, input.countryId, input.army, true);
@@ -361,7 +375,7 @@ export const armyService = {
         [army.id, input.unitType, input.settlement.trim()]
       )).rows[0];
       if (!row) throw new GameError("Bu orduda seçilen kökene ait böyle bir birlik bulunmuyor.");
-      const destination=await armyDischargeSettlement(client,army.id,input.countryId);
+      const destination=await resolveArmyDischargeSettlement(client,army.id,input.countryId,row.settlement_id);
       if (input.quantity > Number(row.quantity)) throw new GameError(`Orduda bu kaynak için yalnızca ${row.quantity} asker var.`);
       const next = Number(row.quantity) - input.quantity;
       if (next === 0) await client.query("DELETE FROM army_units WHERE army_id=$1 AND settlement_id=$2 AND unit_type=$3", [army.id, row.settlement_id, input.unitType]);
@@ -369,7 +383,7 @@ export const armyService = {
       await depositArmyStock(client,destination.id,input.unitType,input.quantity);
       await client.query("UPDATE armies SET updated_at=NOW() WHERE id=$1", [army.id]);
       await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'army.units.remove','army',$3,$4::jsonb)", [input.guildId,input.actorId,army.id,JSON.stringify({originSettlementId:row.settlement_id,originSettlementName:row.origin_settlement_name,destinationSettlementId:destination.id,destinationSettlementName:destination.name,unitType:input.unitType,quantity:input.quantity})]);
-      return loadArmy(client, army.id, input.countryId);
+      return {...await loadArmy(client,army.id,input.countryId),discharge:{settlementId:destination.id,settlementName:destination.name}};
     });
   },
 
@@ -484,7 +498,7 @@ export const armyService = {
         "SELECT 1 FROM army_muster_orders WHERE army_id=$1 AND status IN ('SUBMITTED','IN_PROGRESS','BLOCKED','WAITING_ARMY') LIMIT 1",
         [army.id]
       )).rowCount) throw new GameError("Bu orduya askerler yoldayken ordu dağıtılamaz.");
-      const destination=await armyDischargeSettlement(client,army.id,input.countryId);
+      const destination=await resolveArmyDischargeSettlement(client,army.id,input.countryId);
       for(const unit of army.units)await depositArmyStock(client,destination.id,unit.unit_type,unit.quantity);
       for(const source of new Set(army.siegeAssets.map((item)=>item.settlement_id)))
         await assertAssetReleaseAtSource(client,army.id,source);
