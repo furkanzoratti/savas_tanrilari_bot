@@ -29,7 +29,21 @@ export interface GreatPowerScoreRow {
   breakdown: GreatPowerBreakdown;
 }
 
+function allocationKey(settlementId: string, unitType: string): string {
+  return `${settlementId}:${unitType}`;
+}
+
 export function scoreDocument(document: CountryDocument): GreatPowerBreakdown {
+  const allocatedUnits = new Map<string, number>();
+  const reserve = (settlementId: string, unitType: string, quantity: number): void => {
+    const key = allocationKey(settlementId, unitType);
+    allocatedUnits.set(key, (allocatedUnits.get(key) ?? 0) + Math.max(0, Number(quantity)));
+  };
+  for (const army of document.armies) {
+    for (const unit of army.units) reserve(unit.settlement_id, unit.unit_type, unit.quantity);
+  }
+  for (const unit of document.musteringUnits) reserve(unit.settlement_id, unit.unit_type, unit.quantity);
+
   return calculateGreatPower({
     payableIncome: document.totalPayableIncome,
     fieldUnits: document.armies.flatMap((army) => army.units.map((unit) => ({
@@ -40,7 +54,14 @@ export function scoreDocument(document: CountryDocument): GreatPowerBreakdown {
       is_conquered: settlement.is_conquered,
       temporaryMilitia: settlement.temporaryMilitia,
       buildings: settlement.buildings,
-      units: settlement.units,
+      units: settlement.units.map((unit) => {
+        if (unit.force_type !== "ARMY") return unit;
+        const key = allocationKey(settlement.id, unit.unit_type);
+        const allocated = allocatedUnits.get(key) ?? 0;
+        const deducted = Math.min(Math.max(0, Number(unit.quantity)), allocated);
+        allocatedUnits.set(key, allocated - deducted);
+        return { ...unit, quantity: Math.max(0, Number(unit.quantity) - deducted) };
+      }),
       ships: settlement.ships,
       pendingRecruitment: settlement.pendingRecruitment,
       pendingGarrison: settlement.pendingGarrison ?? [],
