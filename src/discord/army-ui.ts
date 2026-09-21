@@ -64,12 +64,9 @@ export async function handleArmyCommand(interaction: ChatInputCommandInteraction
       quantity: interaction.options.getInteger("miktar", true)
     };
     const army = sub === "asker-ekle" ? await armyService.addUnits(input) : await armyService.removeUnits(input);
-    const discharge="discharge" in army?army.discharge as {settlementId:string;settlementName:string}:undefined;
     await interaction.editReply({ content: sub === "asker-ekle"
-      ? army.muster
-        ? `🪖 Toplanma intikali başladı: **${army.muster.start} → ${army.muster.destination}**, ${army.muster.steps} Hex; tur başına ${army.muster.allowance} Hex. Emir: \`${army.muster.id}\`. Askerler varıncaya kadar ordu mevcuduna eklenmez.`
-        : "✅ Askerler orduya tahsis edildi."
-      : `✅ Askerler **${discharge?.settlementName ?? "dost yerleşke"}** askerî stokuna aktarıldı ve başka bir orduya yeniden eklenebilir.`, embeds: [renderArmyEmbed(army)] });
+      ? "✅ Askerler orduya tahsis edildi."
+      : "✅ Askerlerin ordu tahsisi kaldırıldı; askerler yerleşke stokunda kullanılabilir.", embeds: [renderArmyEmbed(army)] });
   } else if (sub === "kusatma-aleti-ekle" || sub === "kusatma-aleti-cikar") {
     const input = {
       guildId: interaction.guildId, countryId: country.id, actorId: interaction.user.id, army: armyValue,
@@ -96,6 +93,6 @@ export async function handleArmyCommand(interaction: ChatInputCommandInteraction
   } else if (sub === "dagit") {
     if (interaction.options.getString("onay", true).trim().toLocaleUpperCase("tr-TR") !== "DAGIT") throw new GameError("Orduyu dağıtmak için onay alanına DAGIT yazın.");
     const name = await armyService.disband({ guildId: interaction.guildId, countryId: country.id, actorId: interaction.user.id, army: armyValue });
-    await interaction.editReply(`✅ **${name}** dağıtıldı. Askerler ordunun bulunduğu dost yerleşkenin askerî stokuna aktarıldı.`);
+    await interaction.editReply(`✅ **${name}** dağıtıldı. Askerler bağlı oldukları yerleşkelerin stokunda kalmaya devam ediyor.`);
   }
 }

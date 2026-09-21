@@ -176,7 +176,15 @@ async function validateParticipantAvailability(
       GROUP BY u.unit_type`,
     [participant.country_id, sourceSettlementId]
   )).rows;
-  const available=new Map(stocks.map((row)=>[row.unit_type,Number(row.quantity)]));
+  const allocations = (await client.query<{ unit_type:string;quantity:number }>(
+    `SELECT au.unit_type,COALESCE(SUM(au.quantity),0)::integer AS quantity
+       FROM army_units au JOIN armies army ON army.id=au.army_id
+      WHERE army.country_id=$1 AND ($2::uuid IS NULL OR au.settlement_id=$2)
+      GROUP BY au.unit_type`,[participant.country_id,sourceSettlementId])).rows;
+  const allocated=new Map(allocations.map((row)=>[row.unit_type,Number(row.quantity)]));
+  const available=new Map(stocks.map((row)=>[
+    row.unit_type,Math.max(0,Number(row.quantity)-(allocated.get(row.unit_type)??0))
+  ]));
   for (const [forceType, quantity] of Object.entries(composition)) {
     const requested = Number(quantity ?? 0);
     const stock = available.get(forceType) ?? 0;
@@ -704,7 +712,27 @@ async function applyLossesToDocuments(client: DbClient, battleId: string, guildI
             for (const sourceShare of sourceShares) {
               const allocation = allocations.find((row) => row.settlement_id === sourceShare.contractId);
               if (!allocation) continue;
-              const sourceApplied=Math.min(Number(allocation.quantity),sourceShare.loss);
+              const stackRows=(await client.query<{id:string;quantity:number}>(
+                `SELECT id,quantity FROM unit_stacks
+                  WHERE settlement_id=$1 AND unit_type=$2 AND force_type='ARMY'
+                  ORDER BY CASE status WHEN 'FIELD_HOSTILE' THEN 0 WHEN 'FIELD_FRIENDLY' THEN 1 ELSE 2 END,id
+                  FOR UPDATE`,[allocation.settlement_id,forceType])).rows;
+              const stackTotal=stackRows.reduce((sum,row)=>sum+Number(row.quantity),0);
+              const stackShares=stackTotal>0
+                ? allocateLossBySource(Math.min(sourceShare.loss,stackTotal),stackTotal,
+                    stackRows.map((row)=>({contractId:row.id,quantity:Number(row.quantity)}))).mercenaries
+                : [];
+              let sourceApplied=0;
+              for(const stackShare of stackShares){
+                const stack=stackRows.find((row)=>row.id===stackShare.contractId);
+                if(!stack)continue;
+                const deducted=Math.min(Number(stack.quantity),stackShare.loss);
+                if(!deducted)continue;
+                const nextStack=Number(stack.quantity)-deducted;
+                if(nextStack===0)await client.query("DELETE FROM unit_stacks WHERE id=$1",[stack.id]);
+                else await client.query("UPDATE unit_stacks SET quantity=$1 WHERE id=$2",[nextStack,stack.id]);
+                sourceApplied+=deducted;
+              }
               if (!sourceApplied) continue;
               const nextAllocation = Number(allocation.quantity) - sourceApplied;
               if (nextAllocation <= 0) await client.query("DELETE FROM army_units WHERE army_id=$1 AND settlement_id=$2 AND unit_type=$3", [armyShare.contractId, allocation.settlement_id, forceType]);
@@ -750,17 +778,20 @@ async function applyLossesToDocuments(client: DbClient, battleId: string, guildI
                   ORDER BY CASE u.status WHEN 'FIELD_HOSTILE' THEN 0 WHEN 'FIELD_FRIENDLY' THEN 1 ELSE 2 END,u.id FOR UPDATE OF u`,
                 [participant.country_id, forceType]
               )).rows;
-        const allocatedBySettlement=naval?new Map(
-          (await client.query<{settlement_id:string;quantity:number}>(
-            `SELECT fs.settlement_id,COALESCE(SUM(fs.quantity),0)::integer AS quantity
-               FROM fleet_ships fs JOIN fleets f ON f.id=fs.fleet_id
-              WHERE f.country_id=$1 AND fs.ship_type=$2 GROUP BY fs.settlement_id`,
+        const allocatedBySettlement=new Map(
+          (await client.query<{settlement_id:string;quantity:number}>(naval
+            ? `SELECT fs.settlement_id,COALESCE(SUM(fs.quantity),0)::integer AS quantity
+                 FROM fleet_ships fs JOIN fleets fleet ON fleet.id=fs.fleet_id
+                WHERE fleet.country_id=$1 AND fs.ship_type=$2 GROUP BY fs.settlement_id`
+            : `SELECT au.settlement_id,COALESCE(SUM(au.quantity),0)::integer AS quantity
+                 FROM army_units au JOIN armies army ON army.id=au.army_id
+                WHERE army.country_id=$1 AND au.unit_type=$2 GROUP BY au.settlement_id`,
             [participant.country_id,forceType])).rows
             .map((row)=>[row.settlement_id,Number(row.quantity)] as const)
-        ):new Map<string,number>();
+        );
         const deductibleRows = rows.map((row) => {
           let availableQuantity = Number(row.quantity);
-          if (naval) {
+          if (naval || (row as {force_type?:string}).force_type==="ARMY") {
             const reserved = allocatedBySettlement.get(row.settlement_id) ?? 0;
             const protectedHere = Math.min(availableQuantity, reserved);
             availableQuantity -= protectedHere;
