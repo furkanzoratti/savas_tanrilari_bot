@@ -29,9 +29,13 @@ export interface GreatPowerScoreRow {
   breakdown: GreatPowerBreakdown;
 }
 
-function scoreDocument(document: CountryDocument): GreatPowerBreakdown {
+export function scoreDocument(document: CountryDocument): GreatPowerBreakdown {
   return calculateGreatPower({
     payableIncome: document.totalPayableIncome,
+    fieldUnits: document.armies.flatMap((army) => army.units.map((unit) => ({
+      unit_type: unit.unit_type, quantity: unit.quantity
+    }))),
+    musteringUnits: document.musteringUnits,
     settlements: document.settlements.map((settlement) => ({
       is_conquered: settlement.is_conquered,
       temporaryMilitia: settlement.temporaryMilitia,

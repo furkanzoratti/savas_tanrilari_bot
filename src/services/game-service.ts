@@ -188,6 +188,7 @@ export interface CountryDocument {
   specialUnitUnlocks?: SpecialUnitType[];
   characters: CountryCharacter[];
   armies: ArmyView[];
+  musteringUnits: Array<{ unit_type: keyof typeof UNITS; quantity: number }>;
   fleets: FleetView[];
   allies: Array<{ id: string; name: string }>;
   pacts: Array<{ id: string; name: string; purpose: string; founder_name: string }>;
@@ -1607,6 +1608,11 @@ export const gameService = {
         };
       });
       const units = settlementIds.length ? (await client.query<{ settlement_id: string; unit_type: keyof typeof UNITS; quantity: number; status: UnitStatus; force_type: ForceType }>("SELECT * FROM unit_stacks WHERE settlement_id = ANY($1::uuid[]) ORDER BY force_type,unit_type", [settlementIds])).rows : [];
+      const musteringUnits = (await client.query<{ unit_type:keyof typeof UNITS; quantity:number }>(
+        `SELECT unit_type,SUM(quantity)::integer AS quantity FROM army_muster_orders
+          WHERE country_id=$1 AND status IN ('SUBMITTED','IN_PROGRESS','BLOCKED','WAITING_ARMY')
+          GROUP BY unit_type ORDER BY unit_type`,[countryId]
+      )).rows.map((unit)=>({...unit,quantity:Number(unit.quantity)}));
       const detachedOriginUnits=await originBoundUnits(client,countryId,settlementIds);
       const ships = settlementIds.length ? (await client.query<{ settlement_id: string; ship_type: keyof typeof SHIPS; quantity: number; status: ShipStatus }>("SELECT * FROM naval_units WHERE settlement_id = ANY($1::uuid[]) ORDER BY ship_type", [settlementIds])).rows : [];
       const assets = (await client.query<{ settlement_id: string | null; asset_type: string; quantity: number; location_note: string | null }>("SELECT * FROM siege_assets WHERE country_id = $1 ORDER BY asset_type", [countryId])).rows;
@@ -1784,6 +1790,7 @@ export const gameService = {
         specialUnitUnlocks,
         characters,
         armies,
+        musteringUnits,
         fleets,
         allies,
         pacts,

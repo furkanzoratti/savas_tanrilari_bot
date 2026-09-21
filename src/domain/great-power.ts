@@ -67,6 +67,8 @@ export interface GreatPowerSettlementInput {
 
 export interface GreatPowerInput {
   payableIncome: number;
+  fieldUnits: PowerUnit[];
+  musteringUnits: PowerUnit[];
   settlements: GreatPowerSettlementInput[];
 }
 
@@ -90,7 +92,8 @@ function shipPower(shipType: string, quantity: number): number {
 }
 
 export function calculateGreatPower(input: GreatPowerInput): GreatPowerBreakdown {
-  let land = 0;
+  let land = input.fieldUnits.reduce((sum, unit) => sum + unitPower(unit.unit_type, unit.quantity), 0);
+  land += input.musteringUnits.reduce((sum, unit) => sum + unitPower(unit.unit_type, unit.quantity), 0);
   let navy = 0;
   let buildingScore = 0;
   let assimilatedSettlements = 0;

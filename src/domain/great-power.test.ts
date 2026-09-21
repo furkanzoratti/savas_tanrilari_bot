@@ -5,6 +5,8 @@ describe("Büyük Güç puanı", () => {
   it("tamamlanmış, eğitimde ve geçici güçleri kendi katsayılarıyla toplar", () => {
     const result = calculateGreatPower({
       payableIncome: 1_000,
+      fieldUnits: [],
+      musteringUnits: [],
       settlements: [{
         is_conquered: false,
         temporaryMilitia: 500,
@@ -44,6 +46,8 @@ describe("Büyük Güç puanı", () => {
   it("fethedilmiş şehre, bitmemiş binaya ve kaldırılmış Lupanara puan vermez", () => {
     expect(calculateGreatPower({
       payableIncome: -500,
+      fieldUnits: [],
+      musteringUnits: [],
       settlements: [{
         is_conquered: true,
         temporaryMilitia: 0,
@@ -54,6 +58,29 @@ describe("Büyük Güç puanı", () => {
         ]
       }]
     })).toEqual({ land: 0, economy: 0, settlements: 0, navy: 0, buildings: 0, total: 0 });
+  });
+
+  it("askeri yerleşkeden orduya veya intikale taşırken kara gücünü değiştirmez", () => {
+    const settlement = {
+      is_conquered: false, temporaryMilitia: 0, buildings: [], ships: [], pendingRecruitment: [],
+      pendingGarrison: [], mercenaries: []
+    };
+    const stationed = calculateGreatPower({
+      payableIncome: 0, fieldUnits: [], musteringUnits: [],
+      settlements: [{ ...settlement, units: [{ unit_type: "heavy_infantry", quantity: 1_000 }] }]
+    });
+    const fielded = calculateGreatPower({
+      payableIncome: 0, fieldUnits: [{ unit_type: "heavy_infantry", quantity: 1_000 }], musteringUnits: [],
+      settlements: [{ ...settlement, units: [] }]
+    });
+    const mustering = calculateGreatPower({
+      payableIncome: 0, fieldUnits: [], musteringUnits: [{ unit_type: "heavy_infantry", quantity: 1_000 }],
+      settlements: [{ ...settlement, units: [] }]
+    });
+
+    expect(stationed.land).toBe(2_600);
+    expect(fielded.land).toBe(stationed.land);
+    expect(mustering.land).toBe(stationed.land);
   });
 });
 
