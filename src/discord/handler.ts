@@ -190,7 +190,8 @@ async function startPurchase(interaction: ChatInputCommandInteraction, kind: "bu
 
 async function findSettlement(countryId: string, name: string) {
   const settlements = await gameService.listSettlements(countryId);
-  const settlement = settlements.find((item) => item.name.toLocaleLowerCase("tr-TR") === name.trim().toLocaleLowerCase("tr-TR"));
+  const value=name.trim();
+  const settlement = settlements.find((item) => item.id===value || item.name.toLocaleLowerCase("tr-TR") === value.toLocaleLowerCase("tr-TR"));
   if (!settlement) throw new GameError("Yerleşke bulunamadı. Adı belgede göründüğü biçimde yazın.");
   return settlement;
 }
