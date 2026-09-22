@@ -9,7 +9,7 @@ describe("şehir geliştirme ve Akademi komutları", () => {
     const pantheon = commandBuilders.find((command) => command.name === "panteon");
 
     expect(policy?.options?.map((option) => option.name)).toEqual(["uygula", "kaldir", "liste"]);
-    expect(academy?.options?.map((option) => option.name)).toEqual(["egit", "karakterler", "ata", "gorevden-al"]);
+    expect(academy?.options?.map((option) => option.name)).toEqual(["egit", "karakterler", "ata", "gorevden-al", "karakteri-gorevden-al"]);
     expect(pantheon?.options?.map((option) => option.name)).toEqual(["kredi-al", "kredi-ode"]);
   });
 
@@ -57,6 +57,12 @@ describe("şehir geliştirme ve Akademi komutları", () => {
     expect(train?.options?.map((option) => option.name)).toEqual(expect.arrayContaining([
       "yerleske", "elenen-gorev", "secilen-gorev", "ulke"
     ]));
+  });
+
+  it("bina yıkımında yerleşke ve bina seçimlerini otomatik tamamlar", () => {
+    const demolition = commandBuilders.find((command) => command.name === "bina-yik");
+    expect(demolition?.options?.find((option) => option.name === "yerleske")).toMatchObject({required:true,autocomplete:true});
+    expect(demolition?.options?.find((option) => option.name === "bina")).toMatchObject({required:true,autocomplete:true});
   });
 
   it("tur duyurusunda politika, huzursuzluk, erzak ve kredi sonuçlarını gösterir", () => {

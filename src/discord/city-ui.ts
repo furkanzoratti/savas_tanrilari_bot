@@ -78,6 +78,8 @@ export async function handleCityAutocomplete(interaction: AutocompleteInteractio
       .filter((character) => character.character_status === "ACTIVE");
     if (sub === "gorevden-al") {
       characters = characters.filter((character) => ["CURIA", "AGORA"].includes(character.assignment));
+    } else if (sub === "karakteri-gorevden-al") {
+      characters = characters.filter((character) => character.assignment === "NONE" && !character.operation_status);
     } else if (sub === "ata") {
       characters = characters.filter((character) => ["NONE", "CURIA", "AGORA"].includes(character.assignment));
     }
@@ -169,7 +171,12 @@ export async function handleCityCommand(interaction: ChatInputCommandInteraction
 
   if (interaction.commandName === "akademi") {
     if (sub === "karakterler") {
-      await interaction.editReply({embeds:[charactersEmbed(country.name,await characterService.list(country.id))]});
+      const [characters,capacity] = await Promise.all([characterService.list(country.id),cityService.academyCapacity(country.id)]);
+      const embed = charactersEmbed(country.name,characters).addFields({
+        name:"🏛️ Akademi Kapasitesi",
+        value:`**${capacity.characters}/${capacity.capacity}** etkin karakter${capacity.pending ? ` • **${capacity.pending}** eğitimde` : ""}\n**${capacity.academies} Akademi × 5** karakter sınırı`
+      });
+      await interaction.editReply({embeds:[embed]});
       await logAcademyAction(interaction,country.name,"Akademi karakterlerini görüntüledi.");
       return true;
     }
@@ -177,6 +184,15 @@ export async function handleCityCommand(interaction: ChatInputCommandInteraction
       const character = await cityService.unassignCharacter({ guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id, characterName: interaction.options.getString("karakter", true) });
       await interaction.editReply({ content: `✅ **${character.name}** mevcut görevinden alındı.` });
       await logAcademyAction(interaction,country.name,"**"+character.name+"** görevden alındı.");
+      return true;
+    }
+    if (sub === "karakteri-gorevden-al") {
+      const character = await cityService.dismissCharacter({
+        guildId:interaction.guildId,actorId:interaction.user.id,countryId:country.id,
+        characterName:interaction.options.getString("karakter",true)
+      });
+      await interaction.editReply({content:`✅ **${character.name}** kalıcı olarak Akademi kadrosundan çıkarıldı. Karakter silinmedi; tarihî kaydı korunuyor ve aktif kapasitede yer tutmuyor.`});
+      await logAcademyAction(interaction,country.name,"**"+character.name+"** kalıcı olarak Akademi kadrosundan çıkarıldı.");
       return true;
     }
     const settlement = await findSettlement(country.id, interaction.options.getString("yerleske", true));

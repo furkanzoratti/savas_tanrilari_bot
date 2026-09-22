@@ -21,6 +21,7 @@ import type { ArmyView } from "./army-service.js";
 import type { FleetView } from "./fleet-service.js";
 import { resolveMovementStage, type MovementStageSummary } from "./movement-turn-service.js";
 import { syncObserverPosts } from "./movement-observer-service.js";
+import { awardCharacterSpecializationProgress } from "./character-specialization-progress.js";
 
 export class GameError extends Error {}
 
@@ -68,7 +69,8 @@ export interface SettlementPolicyRow {
 }
 export interface CountryCharacter {
   id: string; country_id: string; name: string; role: CharacterRole; skill_bonus: number;
-  character_status: "ACTIVE" | "DEAD";
+  character_status: "ACTIVE" | "DEAD" | "DISMISSED";
+  is_admiral: boolean;
   specialization: string | null; specialization_progress: number; specialization_level: number;
   assignment: "NONE" | "CURIA" | "AGORA" | "ARMY" | "FLEET" | "ESPIONAGE" | "ESPIONAGE_RETURNING" | "CAPTURED" | "COUNTERINTELLIGENCE_TRAVELING_COUNTRY" | "COUNTERINTELLIGENCE_TRAVELING_SETTLEMENT" | "COUNTERINTELLIGENCE_COUNTRY" | "COUNTERINTELLIGENCE_SETTLEMENT" | "ASSIMILATION"; assignment_ready_turn: number | null; trained_settlement_id: string | null;
   assigned_settlement_id: string | null; assigned_settlement_name: string | null; assigned_country_name: string | null; assigned_army_name: string | null; assigned_fleet_name: string | null;
@@ -331,17 +333,11 @@ async function applyPurchaseAgentDiscount(
   );
   await client.query(
     `UPDATE country_characters
-        SET assignment='NONE',assigned_settlement_id=NULL,assignment_ready_turn=NULL,
-            specialization_progress=specialization_progress+1,
-            specialization=CASE WHEN specialization IS NULL AND specialization_progress+1>=3
-                                THEN 'FINANCIAL_ADVISOR' ELSE specialization END,
-            specialization_level=CASE
-              WHEN specialization='FINANCIAL_ADVISOR' OR (specialization IS NULL AND specialization_progress+1>=3)
-              THEN CASE WHEN specialization_progress+1>=9 THEN 3 WHEN specialization_progress+1>=6 THEN 2 ELSE 1 END
-              ELSE specialization_level END
+        SET assignment='NONE',assigned_settlement_id=NULL,assignment_ready_turn=NULL
       WHERE id=$1`,
     [discount.merchant_character_id]
   );
+  await awardCharacterSpecializationProgress(client,discount.merchant_character_id,"FINANCIAL_ADVISOR");
   return discountedCost;
 }
 
@@ -1499,9 +1495,10 @@ export const gameService = {
                     WHERE baa.army_id=a.id AND b.status NOT IN ('FINISHED','CANCELLED') LIMIT 1) AS active_battle_id
              FROM armies a JOIN countries c ON c.id=a.country_id
              LEFT JOIN country_characters cc ON cc.id=a.commander_character_id
+             LEFT JOIN guild_movement_settings movement_settings ON movement_settings.guild_id=a.guild_id
              LEFT JOIN army_map_positions position ON position.army_id=a.id
              LEFT JOIN map_hexes hex ON hex.id=position.hex_id
-             LEFT JOIN fleet_cargo_armies cargo ON cargo.army_id=a.id
+             LEFT JOIN fleet_cargo_armies cargo ON cargo.army_id=a.id AND COALESCE(movement_settings.enabled,FALSE)=TRUE
              LEFT JOIN fleets cargo_fleet ON cargo_fleet.id=cargo.fleet_id
              LEFT JOIN fleet_map_positions cargo_position ON cargo_position.fleet_id=cargo.fleet_id
              LEFT JOIN map_hexes fleet_hex ON fleet_hex.id=cargo_position.hex_id
@@ -2074,6 +2071,81 @@ export const gameService = {
     });
   },
 
+  async demolishableBuildings(countryId: string, settlementId: string): Promise<Array<{ buildingType: string; buildingName: string; level: number; targetLevel: number | null; status: BuildingRow["status"] }>> {
+    const settlement = (await pool.query<{ id:string }>("SELECT id FROM settlements WHERE id=$1 AND country_id=$2",[settlementId,countryId])).rows[0];
+    if(!settlement)throw new GameError("Yerleşke bulunamadı.");
+    const rows=(await pool.query<BuildingRow>(
+      `SELECT * FROM buildings
+        WHERE settlement_id=$1 AND building_type<>'lupanar' AND (level>0 OR status='BUILDING')
+        ORDER BY building_type`,[settlementId]
+    )).rows;
+    return rows.filter((building)=>Boolean(BUILDINGS[building.building_type])).map((building)=>({
+      buildingType:building.building_type,buildingName:BUILDINGS[building.building_type]!.name,
+      level:Number(building.level),targetLevel:building.target_level===null?null:Number(building.target_level),status:building.status
+    }));
+  },
+
+  async demolishBuilding(input: { guildId:string; actorId:string; countryId:string; settlementId:string; buildingType:string }): Promise<{ buildingName:string; level:number; status:BuildingRow["status"]; releasedCharacters:number; cancelledTraining:number; cancelledProduction:number }> {
+    return withTransaction(async(client)=>{
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))",[`country:${input.countryId}`]);
+      const country=await getCountry(client,input.countryId);
+      if(country.guild_id!==input.guildId)throw new GameError("Ülke bu sunucuya ait değil.");
+      const settlement=(await client.query<SettlementRow>("SELECT * FROM settlements WHERE id=$1 AND country_id=$2 FOR UPDATE",[input.settlementId,input.countryId])).rows[0];
+      if(!settlement)throw new GameError("Yerleşke bulunamadı.");
+      const definition=BUILDINGS[input.buildingType];
+      if(!definition||input.buildingType==="lupanar")throw new GameError("Yıkılabilecek bina bulunamadı.");
+      const building=(await client.query<BuildingRow & {construction_paid_amount:number}>(
+        "SELECT * FROM buildings WHERE settlement_id=$1 AND building_type=$2 FOR UPDATE",[settlement.id,input.buildingType]
+      )).rows[0];
+      if(!building||(building.level<=0&&building.status!=="BUILDING"))throw new GameError("Seçilen bina bu yerleşkede bulunamadı.");
+      if(input.buildingType==="port"){
+        const dependent=(await client.query<{building_type:string}>(
+          `SELECT building_type FROM buildings
+            WHERE settlement_id=$1 AND building_type IN ('shipyard','customs_house') AND (level>0 OR status='BUILDING')`,[settlement.id]
+        )).rows;
+        if(dependent.length){
+          const names=dependent.map((row)=>BUILDINGS[row.building_type]?.name??row.building_type).join(", ");
+          throw new GameError(`Liman yıkılmadan önce ona bağlı binalar yıkılmalıdır: ${names}.`);
+        }
+      }
+      let releasedCharacters=0;
+      if(input.buildingType==="curia"||input.buildingType==="agora"){
+        const assignment=input.buildingType==="curia"?"CURIA":"AGORA";
+        const released=await client.query(
+          `UPDATE country_characters
+              SET assignment='NONE',assigned_settlement_id=NULL,assignment_ready_turn=NULL,protected_character_id=NULL
+            WHERE country_id=$1 AND assigned_settlement_id=$2 AND assignment=$3`,
+          [input.countryId,settlement.id,assignment]
+        );
+        releasedCharacters=released.rowCount??0;
+      }
+      if(input.buildingType==="curia")await client.query("DELETE FROM settlement_policies WHERE settlement_id=$1",[settlement.id]);
+      let cancelledTraining=0;
+      if(input.buildingType==="academy"){
+        const cancelled=await client.query(
+          `UPDATE academy_training_sessions SET status='CANCELLED'
+            WHERE settlement_id=$1 AND status IN ('PENDING_ROLL','AWAITING_NAME')`,[settlement.id]
+        );
+        cancelledTraining=cancelled.rowCount??0;
+      }
+      let cancelledProduction=0;
+      if(input.buildingType==="shipyard"||input.buildingType==="port"){
+        const cancelled=await client.query("UPDATE naval_orders SET status='CANCELLED' WHERE settlement_id=$1 AND status='BUILDING'",[settlement.id]);
+        cancelledProduction+=cancelled.rowCount??0;
+      }
+      if(input.buildingType==="engineering"){
+        const cancelled=await client.query("UPDATE siege_orders SET status='CANCELLED' WHERE settlement_id=$1 AND status='BUILDING'",[settlement.id]);
+        cancelledProduction+=cancelled.rowCount??0;
+      }
+      await client.query("DELETE FROM buildings WHERE settlement_id=$1 AND building_type=$2",[settlement.id,input.buildingType]);
+      await audit(client,input.guildId,input.actorId,"BUILDING_DEMOLISH","settlement",settlement.id,{
+        buildingType:input.buildingType,level:building.level,targetLevel:building.target_level,status:building.status,
+        constructionPaidAmount:Number(building.construction_paid_amount??0),refund:0,releasedCharacters,cancelledTraining,cancelledProduction
+      });
+      return {buildingName:definition.name,level:Number(building.level),status:building.status,releasedCharacters,cancelledTraining,cancelledProduction};
+    });
+  },
+
   async purchaseBuilding(input: { guildId: string; actorId: string; countryId: string; settlementId: string; buildingType: string }): Promise<{ targetLevel: number; completionTurn: number; cost: number }> {
     return withTransaction(async (client) => {
       const guild = await getGuild(client, input.guildId);
@@ -2637,6 +2709,7 @@ export const gameService = {
         await client.query("DELETE FROM settlement_assimilation_diplomats WHERE settlement_id=$1", [item.settlement_id]);
         if (item.character_id) {
           await client.query("UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL,assignment_ready_turn=NULL WHERE id=$1", [item.character_id]);
+          await awardCharacterSpecializationProgress(client,item.character_id,"PROVINCIAL_GOVERNOR");
         }
         assimilatedSettlementDetails.push({ countryName: item.country_name, settlementName: item.settlement_name, diplomatName: item.diplomat_name });
         const wineAccess=(assimilationResourceAccess.get(item.country_id)?.get(item.settlement_id)??[]).includes("WINE");

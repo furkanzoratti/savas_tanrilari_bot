@@ -6,6 +6,7 @@ import { gameService, GameError } from "../services/game-service.js";
 import { characterService } from "../services/character-service.js";
 import { isGameMaster, requireGameMaster, resolveCountry } from "./auth.js";
 import { queueCharacterLog } from "./character-ui.js";
+import { CHARACTER_SPECIALIZATIONS, type CharacterSpecialization } from "../domain/characters.js";
 
 const assignmentLabels: Record<string, string> = {
   NONE: "Müsait",
@@ -125,9 +126,18 @@ export async function handleEspionageCommand(interaction: ChatInputCommandIntera
     }
     if (sub === "casuslarim") {
       const spies = await espionageService.spies(country.id);
-      const text = spies.length ? spies.map((spy) => `• **${spy.name}** (+${spy.skill_bonus}) — ${assignmentLabels[spy.assignment] ?? spy.assignment}${spy.country_name && spy.settlement_name ? `\n↳ ${spy.country_name} • ${spy.settlement_name}` : ""}`).join("\n\n") : "Akademide yetişmiş casus bulunmuyor.";
+      const text = spies.length ? spies.map((spy) => `• **${spy.name}** (+${spy.skill_bonus}) — ${assignmentLabels[spy.assignment] ?? spy.assignment}${spy.specialization ? ` • ${CHARACTER_SPECIALIZATIONS[spy.specialization].label}` : spy.specialization_progress>0 ? ` • Uzmanlık ilerlemesi ${spy.specialization_progress}/3` : ""}${spy.country_name && spy.settlement_name ? `\n↳ ${spy.country_name} • ${spy.settlement_name}` : ""}`).join("\n\n") : "Akademide yetişmiş casus bulunmuyor.";
       await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x4b4d52).setTitle(`🕵️ ${country.name} • Casuslar`).setDescription(text.slice(0, 4_000))] });
       await logEspionageCommand(interaction,country.name,"Casus listesini görüntüledi.");
+      return true;
+    }
+    if (sub === "uzmanlik-sec") {
+      const characterId=interaction.options.getString("casus",true);
+      const specialization=interaction.options.getString("uzmanlik",true) as CharacterSpecialization;
+      const spy=(await espionageService.spies(country.id)).find((item)=>item.id===characterId);
+      const progress=await characterService.setCharacterSpecialization({countryId:country.id,characterId,role:"SPY",specialization});
+      await interaction.editReply("✅ Casusun kalıcı uzmanlığı **"+CHARACTER_SPECIALIZATIONS[specialization].label+"** olarak seçildi (Sv"+Math.min(3,Math.floor(progress/3))+").");
+      await logEspionageCommand(interaction,country.name,"Casus **"+(spy?.name??"Bilinmeyen Casus")+"** için kalıcı uzmanlık **"+CHARACTER_SPECIALIZATIONS[specialization].label+"** seçildi.");
       return true;
     }
     if (sub === "savunma-ata") {
@@ -179,6 +189,21 @@ export async function handleEspionageCommand(interaction: ChatInputCommandIntera
       await interaction.editReply("✅ Yoldaki operasyon iptal edildi ve casus yeniden müsait duruma getirildi. Hazırlık bedeli iade edilmedi.");
       return true;
     }
+    if (sub === "idam-et") {
+      const result=await espionageService.executeCapturedSpy({
+        guildId:interaction.guildId,characterId:interaction.options.getString("casus",true),actorId:interaction.user.id
+      });
+      await interaction.editReply(
+        "☠️ **"+result.name+"** kalıcı olarak idam edildi. Casus artık **"+result.origin_country_name+"** devletine dönmeyecek.\n"+
+        "Yakalayan devlet: **"+result.captor_country_name+"** • Gözaltı yeri: **"+result.captured_settlement_name+"**"
+      );
+      await queueCharacterLog({
+        client:interaction.client,guildId:interaction.guildId,interactionId:interaction.id,
+        actorUserId:interaction.user.id,title:"Casusluk Yönetimi",source:"CAPTURED_SPY_EXECUTION",
+        entry:"☠️ <@"+interaction.user.id+"> tarafından **"+result.name+"** idam edildi.\n↳ Köken: **"+result.origin_country_name+"** • Yakalayan: **"+result.captor_country_name+"** • Yer: **"+result.captured_settlement_name+"**"
+      }).catch(()=>undefined);
+      return true;
+    }
   }
   return false;
 }
@@ -193,14 +218,43 @@ export async function handleEspionageAutocomplete(interaction: AutocompleteInter
     await interaction.respond(rows.filter((item) => !query || `${item.attacker_country_name} ${item.target_country_name} ${item.target_settlement_name}`.toLocaleLowerCase("tr-TR").includes(query)).slice(0,25).map((item) => ({ name: `${item.attacker_country_name} → ${item.target_country_name} / ${item.target_settlement_name}`.slice(0,100), value: item.id })));
     return true;
   }
+  if (interaction.commandName === "casusluk-yonetim" && focused.name === "casus") {
+    if (!isGameMaster(interaction)) { await interaction.respond([]); return true; }
+    const spies=await espionageService.capturedSpies(interaction.guildId);
+    await interaction.respond(spies
+      .filter((spy)=>!query||`${spy.name} ${spy.origin_country_name} ${spy.captor_country_name}`.toLocaleLowerCase("tr-TR").includes(query))
+      .slice(0,25)
+      .map((spy)=>({
+        name:(spy.name+" • "+spy.origin_country_name+" → "+spy.captor_country_name+" • dönüş Tur "+spy.automatic_return_turn).slice(0,100),
+        value:spy.id
+      })));
+    return true;
+  }
   const own = await gameService.countryForUser(interaction.guildId, interaction.user.id);
   if (!own) { await interaction.respond([]); return true; }
+  if (focused.name === "uzmanlik") {
+    const selectedId=interaction.options.getString("casus");
+    const character=selectedId ? (await characterService.list(own.id)).find((item)=>item.id===selectedId) : null;
+    if (!character || character.role!=="SPY" || character.specialization) { await interaction.respond([]); return true; }
+    const trackEntries=Object.entries(character.specialization_tracks??{});
+    const legacyCredit=Number(character.specialization_choice_credit??0);
+    const unlocked=trackEntries.length
+      ? trackEntries.filter(([,progress])=>Number(progress)+legacyCredit>=3).map(([key])=>key as CharacterSpecialization)
+      : legacyCredit>=3
+        ? (Object.keys(CHARACTER_SPECIALIZATIONS) as CharacterSpecialization[]).filter((key)=>CHARACTER_SPECIALIZATIONS[key].role==="SPY")
+        : [];
+    await interaction.respond(unlocked
+      .filter((key)=>!query||CHARACTER_SPECIALIZATIONS[key].label.toLocaleLowerCase("tr-TR").includes(query))
+      .slice(0,25).map((key)=>({name:CHARACTER_SPECIALIZATIONS[key].label,value:key})));
+    return true;
+  }
   if (focused.name === "casus") {
     const spies = await espionageService.spies(own.id);
     const sub = interaction.options.getSubcommand(false);
     const filtered = sub === "gorev-baslat" ? spies.filter((spy) => spy.assignment === "NONE")
       : sub === "savunma-ata" ? spies.filter((spy) => spy.assignment === "NONE" || isSpyDefenseAssignment(spy.assignment))
       : sub === "savunma-kaldir" ? spies.filter((spy) => isSpyDefenseAssignment(spy.assignment))
+      : sub === "uzmanlik-sec" ? spies.filter((spy) => !spy.specialization && spy.specialization_progress>=3)
       : spies.filter((spy) => spy.assignment === "NONE" || spy.assignment.startsWith("COUNTERINTELLIGENCE"));
     await interaction.respond(filtered.filter((spy) => !query || spy.name.toLocaleLowerCase("tr-TR").includes(query)).slice(0,25).map((spy) => ({ name: `${spy.name} (+${spy.skill_bonus}) • ${assignmentLabels[spy.assignment] ?? spy.assignment}`.slice(0,100), value: spy.id })));
     return true;

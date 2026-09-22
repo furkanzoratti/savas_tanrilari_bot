@@ -9,6 +9,9 @@ import { independentArmyInventoryMigration } from "./independent-army-inventory-
 import { classicArmyAllocationMigration } from "./classic-army-allocation-migration.js";
 import { classicArmyMusterMigration } from "./classic-army-muster-migration.js";
 import { recruitmentPopulationMigration } from "./recruitment-population-migration.js";
+import { characterSpecializationChoiceMigration } from "./character-specialization-choice-migration.js";
+import { capturedSpyExecutionMigration } from "./captured-spy-execution-migration.js";
+import { academyCapacityAdmiralsMigration } from "./academy-capacity-admirals-migration.js";
 
 export const migrations = [
   {
@@ -2235,5 +2238,8 @@ export const migrations = [
   independentArmyInventoryMigration,
   classicArmyAllocationMigration,
   classicArmyMusterMigration,
-  recruitmentPopulationMigration
+  recruitmentPopulationMigration,
+  characterSpecializationChoiceMigration,
+  capturedSpyExecutionMigration,
+  academyCapacityAdmiralsMigration
 ] as const;

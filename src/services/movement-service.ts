@@ -354,9 +354,10 @@ export const movementService = {
                 (EXISTS(SELECT 1 FROM army_units unit WHERE unit.army_id=army.id AND unit.quantity>0)
                   OR EXISTS(SELECT 1 FROM army_siege_assets asset WHERE asset.army_id=army.id AND asset.quantity>0))) AS needs_position
          FROM armies army JOIN countries country ON country.id=army.country_id
+         LEFT JOIN guild_movement_settings movement_settings ON movement_settings.guild_id=army.guild_id
          LEFT JOIN army_map_positions position ON position.army_id=army.id
          LEFT JOIN map_hexes hex ON hex.id=position.hex_id
-         LEFT JOIN fleet_cargo_armies cargo ON cargo.army_id=army.id
+         LEFT JOIN fleet_cargo_armies cargo ON cargo.army_id=army.id AND COALESCE(movement_settings.enabled,FALSE)=TRUE
          LEFT JOIN fleet_map_positions fleet_position ON fleet_position.fleet_id=cargo.fleet_id
          LEFT JOIN map_hexes fleet_hex ON fleet_hex.id=fleet_position.hex_id
         WHERE army.guild_id=$1 AND country.status='ACTIVE'
@@ -386,9 +387,10 @@ export const movementService = {
       }>(
         `SELECT 'ARMY'::text AS formation_kind,army.id AS formation_id,army.name AS formation_name,
                 COALESCE(hex.coordinate,'Gemide: ' || fleet_hex.coordinate) AS coordinate,orders.status AS active_order_status
-           FROM armies army LEFT JOIN army_map_positions position ON position.army_id=army.id
+           FROM armies army LEFT JOIN guild_movement_settings movement_settings ON movement_settings.guild_id=army.guild_id
+           LEFT JOIN army_map_positions position ON position.army_id=army.id
            LEFT JOIN map_hexes hex ON hex.id=position.hex_id
-           LEFT JOIN fleet_cargo_armies cargo ON cargo.army_id=army.id
+           LEFT JOIN fleet_cargo_armies cargo ON cargo.army_id=army.id AND COALESCE(movement_settings.enabled,FALSE)=TRUE
            LEFT JOIN fleet_map_positions fleet_position ON fleet_position.fleet_id=cargo.fleet_id
            LEFT JOIN map_hexes fleet_hex ON fleet_hex.id=fleet_position.hex_id
            LEFT JOIN movement_orders orders ON orders.army_id=army.id AND orders.status IN ('SUBMITTED','IN_PROGRESS','BLOCKED')

@@ -59,6 +59,24 @@ function ensureRole(value: string | null | undefined): CharacterRole | null {
 }
 
 export const cityService = {
+  async academyCapacity(countryId: string): Promise<{ academies: number; characters: number; pending: number; capacity: number }> {
+    const row = (await pool.query<{ academies: number; characters: number; pending: number }>(
+      `SELECT
+         (SELECT COUNT(*)::integer FROM buildings building
+           JOIN settlements settlement ON settlement.id=building.settlement_id
+          WHERE settlement.country_id=$1 AND building.building_type='academy' AND building.level>0) AS academies,
+         (SELECT COUNT(*)::integer FROM country_characters
+          WHERE country_id=$1 AND character_status='ACTIVE') AS characters,
+         (SELECT COUNT(*)::integer FROM academy_training_sessions
+          WHERE country_id=$1 AND status IN ('PENDING_ROLL','AWAITING_NAME')) AS pending`,
+      [countryId]
+    )).rows[0]??{academies:0,characters:0,pending:0};
+    return {
+      academies:Number(row.academies),characters:Number(row.characters),pending:Number(row.pending),
+      capacity:Number(row.academies)*5
+    };
+  },
+
   async setCoastal(input: { guildId: string; actorId: string; countryId: string; settlementId: string; coastal: boolean }): Promise<void> {
     await withTransaction(async (client) => {
       await getCountry(client, input.guildId, input.countryId);
@@ -140,6 +158,22 @@ export const cityService = {
       if (existing) {
         if (existing.status === "COMPLETED") throw new GameError("Bu Akademi mevcut Alım Turunda eğitim hakkını kullandı.");
         return existing;
+      }
+      const capacity = (await client.query<{ academies:number; characters:number; pending:number }>(
+        `SELECT
+           (SELECT COUNT(*)::integer FROM buildings building
+             JOIN settlements own_settlement ON own_settlement.id=building.settlement_id
+            WHERE own_settlement.country_id=$1 AND building.building_type='academy' AND building.level>0) AS academies,
+           (SELECT COUNT(*)::integer FROM country_characters
+            WHERE country_id=$1 AND character_status='ACTIVE') AS characters,
+           (SELECT COUNT(*)::integer FROM academy_training_sessions
+            WHERE country_id=$1 AND status IN ('PENDING_ROLL','AWAITING_NAME')) AS pending`,
+        [input.countryId]
+      )).rows[0]!;
+      const characterLimit=Number(capacity.academies)*5;
+      const reserved=Number(capacity.characters)+Number(capacity.pending);
+      if (reserved>=characterLimit) {
+        throw new GameError(`Akademi karakter sınırına ulaşıldı: ${Number(capacity.characters)}/${characterLimit}. Her Akademi 5 karakter kapasitesi sağlar; yeni eğitim için Akademi kurmalı veya müsait bir karakteri kalıcı olarak görevden almalısınız.`);
       }
       const resources = (await settlementResourceAccess(client, input.countryId)).get(settlement.id) ?? [];
       const skillBonus = (level === 1 ? 0 : level === 2 ? 1 : 2) + (resources.includes("SILK") ? 1 : 0);
@@ -274,6 +308,36 @@ export const cityService = {
       );
       await audit(client, input.guildId, input.actorId, "CHARACTER_UNASSIGN", "character", result.rows[0]!.id, {});
       return result.rows[0]!;
+    });
+  },
+
+  async dismissCharacter(input: { guildId: string; actorId: string; countryId: string; characterName: string }): Promise<CountryCharacter> {
+    return withTransaction(async (client) => {
+      await getCountry(client,input.guildId,input.countryId);
+      const character=(await client.query<CountryCharacter>(
+        "SELECT *,NULL::text AS assigned_settlement_name,NULL::text AS trained_settlement_name FROM country_characters WHERE country_id=$1 AND lower(name)=lower($2) FOR UPDATE",
+        [input.countryId,input.characterName.trim()]
+      )).rows[0];
+      if(!character)throw new GameError("Belirtilen karakter bulunamadı.");
+      if(character.character_status!=="ACTIVE")throw new GameError("Yalnızca etkin karakterler görevden alınabilir.");
+      if(character.assignment!=="NONE")throw new GameError("Karakter kalıcı olarak görevden alınmadan önce mevcut görevi sona erdirilmelidir.");
+      const liveOperation=await client.query(
+        `SELECT 1 FROM merchant_operations WHERE merchant_character_id=$1 AND status IN ('PENDING_ACCEPTANCE','TRAVELING','ACTIVE','CONTROLLED')
+         UNION ALL SELECT 1 FROM diplomat_operations WHERE diplomat_character_id=$1 AND status IN ('TRAVELING','ACTIVE','PAUSED')
+         UNION ALL SELECT 1 FROM espionage_operations WHERE spy_character_id=$1 AND status='TRAVELING'
+         LIMIT 1`,[character.id]
+      );
+      if(liveOperation.rowCount)throw new GameError("Karakterin devam eden görevi bulunuyor; önce ilgili görev-bitir veya iptal komutunu kullanın.");
+      const result=(await client.query<CountryCharacter>(
+        `UPDATE country_characters
+            SET character_status='DISMISSED',dismissed_at=NOW(),dismissed_by=$1,
+                assigned_settlement_id=NULL,protected_character_id=NULL,assignment_ready_turn=NULL
+          WHERE id=$2
+          RETURNING *,NULL::text AS assigned_settlement_name,NULL::text AS trained_settlement_name`,
+        [input.actorId,character.id]
+      )).rows[0]!;
+      await audit(client,input.guildId,input.actorId,"ACADEMY_CHARACTER_DISMISS","character",character.id,{name:character.name,role:character.role});
+      return result;
     });
   },
 

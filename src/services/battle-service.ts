@@ -19,6 +19,14 @@ import { deductPopulationForCasualties } from "./population-loss.js";
 
 export type BattleStatus = "DRAFT" | "WAITING_FIRST_ROLL" | "WAITING_SECOND_ROLL" | "READY_TO_RESOLVE" | "FINISHED" | "CANCELLED";
 
+export async function armyEmbarkationBlocksBattle(client:DbClient,guildId:string,armyId:string):Promise<boolean>{
+  return Boolean((await client.query(
+    `SELECT 1 FROM fleet_cargo_armies cargo
+      JOIN guild_movement_settings settings ON settings.guild_id=$2 AND settings.enabled=TRUE
+     WHERE cargo.army_id=$1`,[armyId,guildId]
+  )).rowCount);
+}
+
 async function settleLinkedEncounter(client:DbClient,battleId:string,cancelled:boolean):Promise<void>{
   const linked=(await client.query<{id:string;order_a_id:string;order_b_id:string|null}>(
     "SELECT id,order_a_id,order_b_id FROM movement_encounters WHERE battle_id=$1 FOR UPDATE",[battleId]
@@ -1129,7 +1137,7 @@ export const battleService = {
       );
       if (inOtherBattle.rowCount) throw new GameError("Bu ordu başka bir etkin savaşa bağlı.");
       if ((await client.query("SELECT 1 FROM battle_army_assignments WHERE battle_id=$1 AND army_id=$2", [battle.id,army.id])).rowCount) throw new GameError("Bu ordu zaten savaş taslağına ekli.");
-      if ((await client.query("SELECT 1 FROM fleet_cargo_armies WHERE army_id=$1", [army.id])).rowCount)
+      if (await armyEmbarkationBlocksBattle(client,input.guildId,army.id))
         throw new GameError("Gemide taşınan ordu karaya çıkmadan kara veya kuşatma savaşına eklenemez.");
       const participant = await resolveParticipant(client,battle.id,input.side,army.country_name);
       const existingArmyUse = await participantUsesArmies(client,battle.id,army.country_id);

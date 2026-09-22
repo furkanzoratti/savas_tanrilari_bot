@@ -1338,6 +1338,21 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     }
   } else if (interaction.commandName === "alim") {
     await startPurchase(interaction, "build");
+  } else if (interaction.commandName === "bina-yik") {
+    if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
+    await interaction.deferReply({ephemeral:true});
+    const country=await resolveCountry(interaction,interaction.options.getString("ulke"));
+    const settlement=await findSettlement(country.id,interaction.options.getString("yerleske",true));
+    const result=await gameService.demolishBuilding({
+      guildId:interaction.guildId,actorId:interaction.user.id,countryId:country.id,settlementId:settlement.id,
+      buildingType:interaction.options.getString("bina",true)
+    });
+    const notes=[
+      result.releasedCharacters?`${result.releasedCharacters} bina görevlisi müsait duruma geçti.`:null,
+      result.cancelledTraining?`${result.cancelledTraining} tamamlanmamış Akademi eğitimi iptal edildi.`:null,
+      result.cancelledProduction?`${result.cancelledProduction} tamamlanmamış üretim emri ücret iadesiz iptal edildi.`:null
+    ].filter(Boolean);
+    await interaction.editReply(`🏚️ **${settlement.name}** yerleşkesindeki **${result.buildingName}${result.level>0?` Sv${result.level}`:" inşaatı"}** anında yıkıldı. Bina etkileri kaldırıldı ve altın iadesi yapılmadı.${notes.length?"\n"+notes.join("\n"):""}`);
   } else if (interaction.commandName === "asker-alimi") {
     await startPurchase(interaction, "unit");
   } else if (interaction.commandName === "asker-terhis") {
@@ -1612,6 +1627,34 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
   if (await handleEspionageAutocomplete(interaction)) return;
   if (await handleCityAutocomplete(interaction)) return;
   const focused = interaction.options.getFocused(true);
+  if(interaction.commandName==="bina-yik"){
+    if(!interaction.guildId){await interaction.respond([]);return;}
+    const requested=isGameMaster(interaction)?interaction.options.getString("ulke"):null;
+    const country=requested
+      ?await gameService.countryByName(interaction.guildId,requested)
+      :await gameService.countryForUser(interaction.guildId,interaction.user.id);
+    if(!country){await interaction.respond([]);return;}
+    const query=String(focused.value).toLocaleLowerCase("tr-TR").trim();
+    if(focused.name==="yerleske"){
+      const settlements=await gameService.listSettlements(country.id);
+      await interaction.respond(settlements.filter((item)=>!query||item.name.toLocaleLowerCase("tr-TR").includes(query))
+        .slice(0,25).map((item)=>({name:item.name.slice(0,100),value:item.id})));
+      return;
+    }
+    if(focused.name==="bina"){
+      const settlementValue=interaction.options.getString("yerleske");
+      if(!settlementValue){await interaction.respond([]);return;}
+      let settlement;
+      try{settlement=await findSettlement(country.id,settlementValue);}catch{await interaction.respond([]);return;}
+      const buildings=await gameService.demolishableBuildings(country.id,settlement.id);
+      await interaction.respond(buildings.filter((item)=>!query||item.buildingName.toLocaleLowerCase("tr-TR").includes(query))
+        .slice(0,25).map((item)=>({
+          name:`${item.buildingName} • ${item.level>0?`Sv${item.level}`:`Sv${item.targetLevel??1} inşaatı`} • ${item.status}`.slice(0,100),
+          value:item.buildingType
+        })));
+      return;
+    }
+  }
   if(interaction.commandName==="harita"&&interaction.options.getSubcommand(false)==="ordu-konum-gir"){
     if(!interaction.guildId||!isGameMaster(interaction)){await interaction.respond([]);return;}
     const query=String(focused.value).toLocaleLowerCase("tr-TR").trim();
@@ -1774,7 +1817,7 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
     if (focused.name === "komutan") {
       const commanders = await fleetService.commanders(country.id);
       await interaction.respond(commanders.filter((commander) => !query || commander.name.toLocaleLowerCase("tr-TR").includes(query)).slice(0,25)
-        .map((commander) => ({ name:`${commander.name} • Komutan +${commander.skill_bonus}${commander.assignment_name ? ` • ${commander.assignment_name}` : ""}`.slice(0,100),value:commander.id })));
+        .map((commander) => ({ name:`${commander.name} • Amiral +${commander.skill_bonus}${commander.assignment_name ? ` • ${commander.assignment_name}` : ""}`.slice(0,100),value:commander.id })));
       return;
     }
     if (focused.name === "gemi") {

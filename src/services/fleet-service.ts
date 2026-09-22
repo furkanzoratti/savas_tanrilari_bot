@@ -118,7 +118,7 @@ async function assertMutable(
     );
     if (moving.rowCount) throw new GameError("Bu filonun etkin hareket emri varken gemileri veya komutanı değiştirilemez; önce emri iptal edin.");
   }
-  if (!options.allowCargo) {
+  if (!options.allowCargo && movementEnabled) {
     const cargo = await client.query("SELECT 1 FROM fleet_cargo_armies WHERE fleet_id=$1 LIMIT 1", [fleetId]);
     if (cargo.rowCount) throw new GameError("Asker taşıyan filodan gemi çıkarılamaz; komutanı veya kaydı yük boşaltılmadan değiştirilemez.");
   }
@@ -253,8 +253,9 @@ export const fleetService = {
   },
 
   async assignCommanderInTransaction(client: DbClient, countryId: string, fleetId: string, commanderId: string): Promise<void> {
-    const character = (await client.query<{ id: string; role: string; character_status: string }>("SELECT id,role,character_status FROM country_characters WHERE id=$1 AND country_id=$2 FOR UPDATE", [commanderId,countryId])).rows[0];
-    if (!character || character.role !== "COMMANDER" || character.character_status !== "ACTIVE") throw new GameError("Seçilen karakter bu devlete ait etkin bir komutan değil.");
+    const character = (await client.query<{ id: string; role: string; character_status: string; is_admiral:boolean }>("SELECT id,role,character_status,is_admiral FROM country_characters WHERE id=$1 AND country_id=$2 FOR UPDATE", [commanderId,countryId])).rows[0];
+    if (!character || character.role !== "COMMANDER" || character.character_status !== "ACTIVE") throw new GameError("Seçilen karakter bu devlete ait etkin bir Amiral değil.");
+    if(!character.is_admiral)throw new GameError("Filolara yalnızca kalıcı olarak Amirale dönüştürülmüş Komutanlar atanabilir.");
     const army = (await client.query<{ name: string }>("SELECT name FROM armies WHERE commander_character_id=$1", [character.id])).rows[0];
     if (army) throw new GameError(`Bu komutan hâlihazırda ${army.name} ordusunun başında.`);
     const occupied = (await client.query<{ name: string }>("SELECT name FROM fleets WHERE commander_character_id=$1 AND id<>$2", [character.id,fleetId])).rows[0];
@@ -304,7 +305,7 @@ export const fleetService = {
       `SELECT cc.id,cc.name,cc.skill_bonus,COALESCE(a.name,f.name) AS assignment_name
          FROM country_characters cc LEFT JOIN armies a ON a.commander_character_id=cc.id
          LEFT JOIN fleets f ON f.commander_character_id=cc.id
-        WHERE cc.country_id=$1 AND cc.role='COMMANDER' AND cc.character_status='ACTIVE' ORDER BY cc.name`, [countryId]
+        WHERE cc.country_id=$1 AND cc.role='COMMANDER' AND cc.character_status='ACTIVE' AND cc.is_admiral=TRUE ORDER BY cc.name`, [countryId]
     )).rows;
   }
 };

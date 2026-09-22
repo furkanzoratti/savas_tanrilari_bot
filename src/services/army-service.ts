@@ -73,9 +73,10 @@ async function loadArmy(client: DbClient, armyId: string, countryId?: string): P
               WHERE baa.army_id=a.id AND b.status NOT IN ('FINISHED','CANCELLED') LIMIT 1) AS active_battle_id
        FROM armies a JOIN countries c ON c.id=a.country_id JOIN guilds g ON g.discord_id=a.guild_id
        LEFT JOIN country_characters cc ON cc.id=a.commander_character_id
+       LEFT JOIN guild_movement_settings movement_settings ON movement_settings.guild_id=a.guild_id
        LEFT JOIN army_map_positions position ON position.army_id=a.id
        LEFT JOIN map_hexes hex ON hex.id=position.hex_id
-       LEFT JOIN fleet_cargo_armies cargo ON cargo.army_id=a.id
+       LEFT JOIN fleet_cargo_armies cargo ON cargo.army_id=a.id AND COALESCE(movement_settings.enabled,FALSE)=TRUE
        LEFT JOIN fleets cargo_fleet ON cargo_fleet.id=cargo.fleet_id
        LEFT JOIN fleet_map_positions cargo_position ON cargo_position.fleet_id=cargo.fleet_id
        LEFT JOIN map_hexes fleet_hex ON fleet_hex.id=cargo_position.hex_id
@@ -378,8 +379,9 @@ export const armyService = {
   },
 
   async assignCommanderInTransaction(client: DbClient, countryId: string, armyId: string, commanderId: string): Promise<void> {
-    const character = (await client.query<{ id: string; role: string }>("SELECT id,role FROM country_characters WHERE id=$1 AND country_id=$2 FOR UPDATE", [commanderId, countryId])).rows[0];
-    if (!character || character.role !== "COMMANDER") throw new GameError("Seçilen karakter bu devlete ait bir komutan değil.");
+    const character = (await client.query<{ id: string; role: string; character_status:string; is_admiral:boolean }>("SELECT id,role,character_status,is_admiral FROM country_characters WHERE id=$1 AND country_id=$2 FOR UPDATE", [commanderId, countryId])).rows[0];
+    if (!character || character.role !== "COMMANDER" || character.character_status!=="ACTIVE") throw new GameError("Seçilen karakter bu devlete ait etkin bir Komutan değil.");
+    if(character.is_admiral)throw new GameError("Amiraller kara ordularına atanamaz; yalnızca filolara komuta edebilir.");
     const occupied = (await client.query<{ name: string }>("SELECT name FROM armies WHERE commander_character_id=$1 AND id<>$2", [character.id, armyId])).rows[0];
     if (occupied) throw new GameError(`Bu komutan hâlihazırda ${occupied.name} ordusunun başında.`);
     const fleet = (await client.query<{ name: string }>("SELECT name FROM fleets WHERE commander_character_id=$1", [character.id])).rows[0];
@@ -433,7 +435,7 @@ export const armyService = {
       `SELECT cc.id,cc.name,cc.skill_bonus,COALESCE(a.name,f.name) AS army_name FROM country_characters cc
        LEFT JOIN armies a ON a.commander_character_id=cc.id
        LEFT JOIN fleets f ON f.commander_character_id=cc.id
-       WHERE cc.country_id=$1 AND cc.role='COMMANDER' AND cc.character_status='ACTIVE' ORDER BY cc.name`, [countryId]
+       WHERE cc.country_id=$1 AND cc.role='COMMANDER' AND cc.character_status='ACTIVE' AND cc.is_admiral=FALSE ORDER BY cc.name`, [countryId]
     )).rows;
   }
 };

@@ -24,7 +24,7 @@ export function renderFleetEmbed(fleet: FleetView): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(fleet.active_battle_id ? 0xb33a3a : 0x2878a8)
     .setTitle(`🚢 ${fleet.name} • Filo Belgesi`)
-    .setDescription(`**${fleet.country_name}** • ${state}\nToplam gemi: **${number(fleet.totalShips)}**\nKomutan: **${fleet.commander_name ?? "Atanmamış"}**${fleet.commander_name ? ` (+${fleet.commander_skill_bonus})` : ""}`)
+    .setDescription(`**${fleet.country_name}** • ${state}\nToplam gemi: **${number(fleet.totalShips)}**\nAmiral: **${fleet.commander_name ?? "Atanmamış"}**${fleet.commander_name ? ` (+${fleet.commander_skill_bonus})` : ""}`)
     .addFields(
       { name:"🚢 Gemiler",value:trimField(ships) },
       { name:"⚓ Kaynak Limanlar",value:trimField(sourceText) },

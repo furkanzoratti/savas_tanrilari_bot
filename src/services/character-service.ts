@@ -10,6 +10,7 @@ import type { CharacterRole } from "../domain/types.js";
 import { caravanseraiForeignConcessionBonus } from "../domain/catalog.js";
 import { greatPowerService } from "./great-power-service.js";
 import { GameError } from "./game-service.js";
+import { awardCharacterSpecializationProgress, chooseCharacterSpecialization } from "./character-specialization-progress.js";
 
 export interface CharacterView {
   id: string;
@@ -24,7 +25,10 @@ export interface CharacterView {
   specialization: CharacterSpecialization | null;
   specialization_progress: number;
   specialization_level: number;
-  character_status: "ACTIVE" | "DEAD";
+  specialization_choice_credit?: number;
+  specialization_tracks?: Record<string, number>;
+  character_status: "ACTIVE" | "DEAD" | "DISMISSED";
+  is_admiral: boolean;
   unavailable_until_turn: number | null;
   trained_settlement_name: string | null;
   assigned_settlement_name: string | null;
@@ -160,13 +164,7 @@ async function progressSpecialization(
   character: BasicCharacter,
   taskSpecialization: CharacterSpecialization
 ): Promise<void> {
-  if (character.specialization && character.specialization !== taskSpecialization) return;
-  const progress = Number(character.specialization_progress) + 1;
-  const specialization = character.specialization ?? (progress >= 3 ? taskSpecialization : null);
-  await client.query(
-    "UPDATE country_characters SET specialization_progress=$1,specialization=COALESCE(specialization,$2),specialization_level=$3 WHERE id=$4",
-    [progress, specialization, specialization ? specializationLevel(progress) : 0, character.id]
-  );
+  await awardCharacterSpecializationProgress(client,character.id,taskSpecialization);
 }
 
 async function curiaBonus(client: DbClient, settlementId: string | null): Promise<number> {
@@ -236,7 +234,9 @@ export const characterService = {
       `SELECT character.id,character.country_id,character.name,character.role,character.skill_bonus,
               character.assignment,character.assignment_ready_turn,character.doctrine,
               character.commander_victories,character.specialization,character.specialization_progress,
-              character.specialization_level,character.character_status,character.unavailable_until_turn,
+              character.specialization_level,character.specialization_choice_credit,
+              character.character_status,character.is_admiral,character.unavailable_until_turn,
+              COALESCE(specialization_tracks.tracks,'{}'::jsonb) AS specialization_tracks,
               trained.name AS trained_settlement_name,assigned.name AS assigned_settlement_name,
               assigned_country.name AS assigned_country_name,army.name AS assigned_army_name,fleet.name AS assigned_fleet_name,
               COALESCE(merchant.task_type,diplomat.task_type,espionage.target_type) AS operation_type,
@@ -270,6 +270,11 @@ export const characterService = {
          ) espionage ON TRUE
          LEFT JOIN settlements spy_settlement ON spy_settlement.id=espionage.target_settlement_id
          LEFT JOIN countries spy_country ON spy_country.id=espionage.target_country_id
+         LEFT JOIN LATERAL (
+           SELECT jsonb_object_agg(progress.specialization,progress.successes) AS tracks
+             FROM character_specialization_progress progress
+            WHERE progress.character_id=character.id
+         ) specialization_tracks ON TRUE
         WHERE character.country_id=$1
         ORDER BY character.character_status,character.role,character.name`,
       [countryId]
@@ -301,6 +306,43 @@ export const characterService = {
         "UPDATE country_characters SET specialization=$1,specialization_progress=commander_victories,specialization_level=$2 WHERE id=$3",
         [input.specialization, specializationLevel(Number(state.commander_victories)), character.id]
       );
+    });
+  },
+
+  async promoteCommanderToAdmiral(input: { guildId: string; actorId: string; countryId: string; characterId: string }): Promise<{ name:string }> {
+    return withTransaction(async(client)=>{
+      const character=await activeCharacter(client,input.countryId,input.characterId,"COMMANDER");
+      const state=(await client.query<{is_admiral:boolean;assignment:string}>(
+        "SELECT is_admiral,assignment FROM country_characters WHERE id=$1 FOR UPDATE",[character.id]
+      )).rows[0]!;
+      if(state.is_admiral)throw new GameError("Bu karakter zaten Amiraldir.");
+      if(state.assignment==="ARMY" || (await client.query("SELECT 1 FROM armies WHERE commander_character_id=$1",[character.id])).rowCount) {
+        throw new GameError("Ordu başındaki Komutan önce ordu görevinden alınmalıdır.");
+      }
+      if(!["NONE","FLEET"].includes(state.assignment))throw new GameError("Komutan Amirale dönüştürülmeden önce mevcut görevi sona erdirilmelidir.");
+      await client.query("UPDATE country_characters SET is_admiral=TRUE WHERE id=$1",[character.id]);
+      await client.query(
+        `INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details)
+         VALUES($1,$2,'COMMANDER_PROMOTED_TO_ADMIRAL','character',$3,$4::jsonb)`,
+        [input.guildId,input.actorId,character.id,JSON.stringify({name:character.name})]
+      );
+      return {name:character.name};
+    });
+  },
+
+  async setCharacterSpecialization(input: {
+    countryId: string; characterId: string; role: "MERCHANT" | "DIPLOMAT" | "SPY";
+    specialization: CharacterSpecialization;
+  }): Promise<number> {
+    return withTransaction(async (client) => {
+      const character = await activeCharacter(client,input.countryId,input.characterId,input.role);
+      if (CHARACTER_SPECIALIZATIONS[input.specialization]?.role !== input.role) {
+        throw new GameError("Seçilen uzmanlık bu karakter türüne ait değil.");
+      }
+      if (character.specialization) throw new GameError("Bu karakterin kalıcı uzmanlığı daha önce seçilmiş; değiştirilemez.");
+      const progress = await chooseCharacterSpecialization(client,character.id,input.specialization);
+      if (progress<3) throw new GameError("Bu uzmanlık dalını seçmek için aynı dalda en az 3 başarı gerekir. Güncel ilerleme: "+Math.max(0,progress)+"/3.");
+      return progress;
     });
   },
 
@@ -784,17 +826,6 @@ export async function processCharacterTurn(
       for (const merchant of agoraMerchants) {
         await progressSpecialization(client,merchant,"AGORA_MASTER");
       }
-    }
-    const assimilationDiplomats = (await client.query<BasicCharacter>(
-      `SELECT character.id,character.name,character.role,character.skill_bonus,character.assignment,
-              character.specialization,character.specialization_progress
-         FROM country_characters character
-         JOIN settlements settlement ON settlement.id=character.assigned_settlement_id
-        WHERE character.role='DIPLOMAT' AND character.assignment='ASSIMILATION'
-          AND character.character_status='ACTIVE' AND settlement.is_conquered=TRUE`
-    )).rows;
-    for (const diplomat of assimilationDiplomats) {
-      await progressSpecialization(client,diplomat,"PROVINCIAL_GOVERNOR");
     }
     const merchantArrivals = (await client.query<{
       id: string; merchant_character_id: string; task_type: MerchantTask; target_settlement_id: string;

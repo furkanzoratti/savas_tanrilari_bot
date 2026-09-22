@@ -11,7 +11,7 @@ import { characterAvailableForCommand, charactersEmbed } from "./character-ui.js
 
 const availableCharacter = {
   role:"DIPLOMAT", assignment:"NONE", operation_status:null, character_status:"ACTIVE",
-  doctrine:null, commander_victories:0, specialization:null
+  doctrine:null, commander_victories:0, specialization:null, specialization_progress:0, is_admiral:false
 } as const;
 
 describe("Akademi karakter komutları", () => {
@@ -22,8 +22,19 @@ describe("Akademi karakter komutları", () => {
       expect(sub?.options?.find((item) => item.name === "karakter")).toMatchObject({autocomplete:true});
       expect(sub?.options?.find((item) => item.name === "yerleske")).toMatchObject({autocomplete:true});
     }
-    expect(command?.options?.find((item) => item.name === "gorevden-al")?.options?.find((item) => item.name === "karakter"))
-      .toMatchObject({autocomplete:true});
+    for (const subcommand of ["gorevden-al","karakteri-gorevden-al"]) {
+      expect(command?.options?.find((item) => item.name === subcommand)?.options?.find((item) => item.name === "karakter"))
+        .toMatchObject({autocomplete:true});
+    }
+  });
+
+  it("yalnız müsait ve henüz dönüşmemiş Komutanı Amiralliğe sunar", () => {
+    const command = commandBuilders.find((item) => item.name === "komutan");
+    expect(command?.options?.map((item)=>item.name)).toContain("amirale-donustur");
+    const commander={...availableCharacter,role:"COMMANDER" as const};
+    expect(characterAvailableForCommand(commander,"komutan","amirale-donustur")).toBe(true);
+    expect(characterAvailableForCommand({...commander,is_admiral:true},"komutan","amirale-donustur")).toBe(false);
+    expect(characterAvailableForCommand({...commander,assignment:"ARMY"},"komutan","amirale-donustur")).toBe(false);
   });
 
   it("aynı turda yeniden görevlendirilebilen Diplomat ve Tüccarı doğru filtreler", () => {
@@ -38,7 +49,7 @@ describe("Akademi karakter komutları", () => {
   it("Diplomat görevlerinde yalnızca göreve ait seçenekleri gösterir", () => {
     const command = commandBuilders.find((item) => item.name === "diplomat");
     expect(command?.options?.map((item) => item.name)).toEqual([
-      "halkla-uzlas","kultur-degistir","asimilasyon","vassallastir","vassal-entegre-et","savunma-ata","gorev-bitir"
+      "halkla-uzlas","kultur-degistir","asimilasyon","vassallastir","vassal-entegre-et","savunma-ata","uzmanlik-sec","gorev-bitir"
     ]);
     const reconciliation = command?.options?.find((item) => item.name === "halkla-uzlas");
     const culture = command?.options?.find((item) => item.name === "kultur-degistir");
@@ -55,7 +66,7 @@ describe("Akademi karakter komutları", () => {
   it("Tüccar görevlerinde yalnızca göreve ait seçenekleri gösterir", () => {
     const command = commandBuilders.find((item) => item.name === "tuccar");
     expect(command?.options?.map((item) => item.name)).toEqual([
-      "yerel-ticaret","ticari-imtiyaz","satin-alma-temsilciligi","karaborsa-tasfiyesi","imtiyaz-yanit","gorev-bitir"
+      "yerel-ticaret","ticari-imtiyaz","satin-alma-temsilciligi","karaborsa-tasfiyesi","imtiyaz-yanit","uzmanlik-sec","gorev-bitir"
     ]);
     expect(command?.options?.find((item) => item.name === "yerel-ticaret")?.options?.map((item) => item.name))
       .toEqual(["tuccar","hedef-sehir"]);
@@ -88,9 +99,9 @@ describe("Akademi karakter komutları", () => {
       id:"00000000-0000-4000-8000-000000000001",country_id:"00000000-0000-4000-8000-000000000002",
       name:"Yiğit Oçku",role:"MERCHANT",skill_bonus:0,assignment:"MERCHANT_FOREIGN",
       assignment_ready_turn:null,doctrine:null,commander_victories:0,specialization:null,
-      specialization_progress:0,specialization_level:0,character_status:"ACTIVE",unavailable_until_turn:null,
+      specialization_progress:0,specialization_level:0,character_status:"ACTIVE",is_admiral:false,unavailable_until_turn:null,
       trained_settlement_name:null,assigned_settlement_name:"Persepolis",assigned_country_name:"Persler",
-      assigned_army_name:null,operation_type:"FOREIGN_CONCESSION",operation_status:"ACTIVE",
+      assigned_army_name:null,assigned_fleet_name:null,operation_type:"FOREIGN_CONCESSION",operation_status:"ACTIVE",
       operation_progress:null,operation_goal:null,target_country_name:"Persler",target_settlement_name:"Persepolis"
     }]).toJSON();
 

@@ -93,3 +93,36 @@ describe("fleet mutations with transported armies", () => {
     })).rejects.toThrow("etkin hareket emri");
   });
 });
+
+describe("fleet admiral assignments", () => {
+  it("rejects a regular Commander before assigning a fleet", async () => {
+    const client={
+      async query(sql:string){
+        if(sql.includes("FROM country_characters"))return {rows:[{id:"character-1",role:"COMMANDER",character_status:"ACTIVE",is_admiral:false}],rowCount:1};
+        throw new Error(`Unexpected query: ${sql}`);
+      }
+    } as unknown as DbClient;
+
+    await expect(fleetService.assignCommanderInTransaction(client,"country-1","fleet-1","character-1"))
+      .rejects.toThrow("yalnızca kalıcı olarak Amirale dönüştürülmüş");
+  });
+
+  it("assigns a converted Admiral to a fleet", async () => {
+    const queries:string[]=[];
+    const client={
+      async query(sql:string){
+        queries.push(sql);
+        if(sql.includes("FROM country_characters"))return {rows:[{id:"character-1",role:"COMMANDER",character_status:"ACTIVE",is_admiral:true}],rowCount:1};
+        if(sql.includes("SELECT name FROM armies"))return {rows:[],rowCount:0};
+        if(sql.includes("SELECT name FROM fleets"))return {rows:[],rowCount:0};
+        if(sql.includes("SELECT commander_character_id FROM fleets"))return {rows:[{commander_character_id:null}],rowCount:1};
+        if(sql.startsWith("UPDATE fleets")||sql.startsWith("UPDATE country_characters"))return {rows:[],rowCount:1};
+        throw new Error(`Unexpected query: ${sql}`);
+      }
+    } as unknown as DbClient;
+
+    await expect(fleetService.assignCommanderInTransaction(client,"country-1","fleet-1","character-1")).resolves.toBeUndefined();
+    expect(queries.some((sql)=>sql.includes("UPDATE fleets SET commander_character_id"))).toBe(true);
+    expect(queries.some((sql)=>sql.includes("SET assignment='FLEET'"))).toBe(true);
+  });
+});

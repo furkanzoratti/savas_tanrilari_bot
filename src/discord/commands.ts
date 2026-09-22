@@ -165,6 +165,8 @@ export const commandBuilders = [
         .addChoices(...Object.entries(CHARACTER_SPECIALIZATIONS)
           .filter(([, item]) => item.role === "COMMANDER")
           .map(([value, item]) => ({ name: item.label, value })))))
+    .addSubcommand((sub) => sub.setName("amirale-donustur").setDescription("Müsait bir Komutanı kalıcı olarak Amirale dönüştürür")
+      .addStringOption((o) => o.setName("komutan").setDescription("Amirale dönüştürülecek müsait Komutan").setRequired(true).setAutocomplete(true)))
     .addSubcommand((sub) => sub.setName("baskomutan-sec").setDescription("Etkin bir savaşta taraf bonuslarını uygulayacak Başkomutanı seçer")
       .addStringOption((o) => o.setName("savas").setDescription("Başkomutan atanacak etkin savaş").setRequired(true).setAutocomplete(true))
       .addStringOption((o) => o.setName("komutan").setDescription("Ordusuyla bu savaşa katılan Komutan").setRequired(true).setAutocomplete(true))),
@@ -191,6 +193,9 @@ export const commandBuilders = [
     .addSubcommand((sub) => sub.setName("imtiyaz-yanit").setDescription("Ülkenize gelen ticari imtiyaz teklifini yanıtlar")
       .addStringOption((o) => o.setName("teklif").setDescription("Bekleyen teklif").setRequired(true).setAutocomplete(true))
       .addBooleanOption((o) => o.setName("kabul").setDescription("Kabul edilsin mi?").setRequired(true)))
+    .addSubcommand((sub) => sub.setName("uzmanlik-sec").setDescription("En az 3 başarısı olan Tüccarın kalıcı uzmanlığını seçer")
+      .addStringOption((o) => o.setName("tuccar").setDescription("Uzmanlaşacak Tüccar").setRequired(true).setAutocomplete(true))
+      .addStringOption((o) => o.setName("uzmanlik").setDescription("Kilidi açılmış uzmanlık dalı").setRequired(true).setAutocomplete(true)))
     .addSubcommand((sub) => sub.setName("gorev-bitir").setDescription("Etkin Tüccar görevini sona erdirir")
       .addStringOption((o) => o.setName("tuccar").setDescription("Görevi bitecek Tüccar").setRequired(true).setAutocomplete(true))),
   new SlashCommandBuilder()
@@ -218,6 +223,9 @@ export const commandBuilders = [
     .addSubcommand((sub) => sub.setName("savunma-ata").setDescription("Diplomatı devlet veya yerleşke diplomatik savunmasına atar")
       .addStringOption((o) => o.setName("diplomat").setDescription("Atanacak Diplomat").setRequired(true).setAutocomplete(true))
       .addStringOption((o) => o.setName("sehir").setDescription("Boş bırakılırsa ülke çapında savunma").setAutocomplete(true)))
+    .addSubcommand((sub) => sub.setName("uzmanlik-sec").setDescription("En az 3 başarısı olan Diplomatın kalıcı uzmanlığını seçer")
+      .addStringOption((o) => o.setName("diplomat").setDescription("Uzmanlaşacak Diplomat").setRequired(true).setAutocomplete(true))
+      .addStringOption((o) => o.setName("uzmanlik").setDescription("Kilidi açılmış uzmanlık dalı").setRequired(true).setAutocomplete(true)))
     .addSubcommand((sub) => sub.setName("gorev-bitir").setDescription("Etkin Diplomat görevini sona erdirir")
       .addStringOption((o) => o.setName("diplomat").setDescription("Görevi bitecek Diplomat").setRequired(true).setAutocomplete(true))),
   new SlashCommandBuilder()
@@ -397,6 +405,11 @@ export const commandBuilders = [
     .setName("alim").setDescription("Yerleşkede etkileşimli bina alımı başlatır")
     .addStringOption(countryOption),
   new SlashCommandBuilder()
+    .setName("bina-yik").setDescription("Bir yerleşkedeki binayı anında ve ücret iadesiz yıkar")
+    .addStringOption((o) => o.setName("yerleske").setDescription("Binası yıkılacak yerleşke").setRequired(true).setAutocomplete(true))
+    .addStringOption((o) => o.setName("bina").setDescription("Yıkılacak bina").setRequired(true).setAutocomplete(true))
+    .addStringOption(countryOption),
+  new SlashCommandBuilder()
     .setName("asker-alimi").setDescription("Etkileşimli asker alımı başlatır")
     .addStringOption(countryOption),
   new SlashCommandBuilder()
@@ -494,6 +507,9 @@ export const commandBuilders = [
       .addStringOption(countryOption))
     .addSubcommand((sub) => sub.setName("gorevden-al").setDescription("Karakterin bina atamasını kaldırır")
       .addStringOption((o) => o.setName("karakter").setDescription("Curia veya Agora görevinden alınacak karakter").setRequired(true).setAutocomplete(true))
+      .addStringOption(countryOption))
+    .addSubcommand((sub) => sub.setName("karakteri-gorevden-al").setDescription("Müsait bir Akademi karakterini kalıcı olarak görevden alır")
+      .addStringOption((o) => o.setName("karakter").setDescription("Kalıcı olarak görevden alınacak müsait karakter").setRequired(true).setAutocomplete(true))
       .addStringOption(countryOption)),
   new SlashCommandBuilder()
     .setName("panteon").setDescription("Panteon Sv3 savaş dönemi kredisini yönetir")
@@ -621,7 +637,7 @@ export const commandBuilders = [
     .setName("filo").setDescription("Devletinizin kalıcı filolarını oluşturur ve yönetir")
     .addSubcommand((sub) => sub.setName("olustur").setDescription("Yeni bir filo kurar")
       .addStringOption((o) => o.setName("ad").setDescription("Filo adı").setRequired(true).setMinLength(2).setMaxLength(60))
-      .addStringOption((o) => o.setName("komutan").setDescription("İsteğe bağlı akademi komutanı").setAutocomplete(true)))
+      .addStringOption((o) => o.setName("komutan").setDescription("İsteğe bağlı Amiral").setAutocomplete(true)))
     .addSubcommand((sub) => sub.setName("gemi-ekle").setDescription("Bir limandaki gemileri filoya tahsis eder")
       .addStringOption((o) => o.setName("filo").setDescription("Gemi eklenecek filo").setRequired(true).setAutocomplete(true))
       .addStringOption((o) => o.setName("yerleske").setDescription("Gemilerin bağlı olduğu liman").setRequired(true).setAutocomplete(true))
@@ -632,11 +648,11 @@ export const commandBuilders = [
       .addStringOption((o) => o.setName("yerleske").setDescription("Gemilerin bağlı olduğu liman").setRequired(true).setAutocomplete(true))
       .addStringOption((o) => o.setName("gemi").setDescription("Filodaki gemi türü").setRequired(true).setAutocomplete(true))
       .addIntegerOption((o) => o.setName("miktar").setDescription("Filodan çıkarılacak gemi sayısı").setMinValue(1).setRequired(true)))
-    .addSubcommand((sub) => sub.setName("komutan-ata").setDescription("Akademide yetişen bir komutanı filonun başına atar")
-      .addStringOption((o) => o.setName("filo").setDescription("Komutan atanacak filo").setRequired(true).setAutocomplete(true))
-      .addStringOption((o) => o.setName("komutan").setDescription("Atanacak komutan").setRequired(true).setAutocomplete(true)))
-    .addSubcommand((sub) => sub.setName("komutan-kaldir").setDescription("Filonun komutanını görevden alır")
-      .addStringOption((o) => o.setName("filo").setDescription("Komutanı kaldırılacak filo").setRequired(true).setAutocomplete(true)))
+    .addSubcommand((sub) => sub.setName("komutan-ata").setDescription("Bir Amirali filonun başına atar")
+      .addStringOption((o) => o.setName("filo").setDescription("Amiral atanacak filo").setRequired(true).setAutocomplete(true))
+      .addStringOption((o) => o.setName("komutan").setDescription("Atanacak Amiral").setRequired(true).setAutocomplete(true)))
+    .addSubcommand((sub) => sub.setName("komutan-kaldir").setDescription("Filonun Amiralini görevden alır")
+      .addStringOption((o) => o.setName("filo").setDescription("Amirali kaldırılacak filo").setRequired(true).setAutocomplete(true)))
     .addSubcommand((sub) => sub.setName("bilgi").setDescription("Bir filonun veya bütün filoların güncel durumunu gösterir")
       .addStringOption((o) => o.setName("filo").setDescription("Boş bırakılırsa bütün filolar").setAutocomplete(true)))
     .addSubcommand((sub) => sub.setName("dagit").setDescription("Filo kaydını dağıtır; gemiler limanlarda kalır")
@@ -892,6 +908,9 @@ export const commandBuilders = [
       .addStringOption((o) => o.setName("ozel-hedef").setDescription("Görev gerektiriyorsa hedef karakter veya ordu").setAutocomplete(true)))
     .addSubcommand((sub) => sub.setName("operasyonlarim").setDescription("Devletinizin son casusluk operasyonlarını gösterir"))
     .addSubcommand((sub) => sub.setName("casuslarim").setDescription("Casuslarınızı, görevlerini ve konumlarını gösterir"))
+    .addSubcommand((sub) => sub.setName("uzmanlik-sec").setDescription("En az 3 başarısı olan Casusun kalıcı uzmanlığını seçer")
+      .addStringOption((o) => o.setName("casus").setDescription("Uzmanlaşacak Casus").setRequired(true).setAutocomplete(true))
+      .addStringOption((o) => o.setName("uzmanlik").setDescription("Kilidi açılmış uzmanlık dalı").setRequired(true).setAutocomplete(true)))
     .addSubcommand((sub) => sub.setName("savunma-ata").setDescription("Müsait bir casusu karşı casusluğa atar")
       .addStringOption((o) => o.setName("casus").setDescription("Atanacak casus").setRequired(true).setAutocomplete(true))
       .addStringOption((o) => o.setName("kapsam").setDescription("Savunma kapsamı").setRequired(true).addChoices(
@@ -913,7 +932,9 @@ export const commandBuilders = [
       .addChannelOption((o) => o.setName("kanal").setDescription("Yalnız DM ekibinin görebildiği kanal").addChannelTypes(ChannelType.GuildText)))
     .addSubcommand((sub) => sub.setName("listele").setDescription("Son casusluk operasyonlarını yönetici ayrıntılarıyla listeler"))
     .addSubcommand((sub) => sub.setName("iptal").setDescription("Yoldaki bir casusluk operasyonunu iptal eder")
-      .addStringOption((o) => o.setName("operasyon").setDescription("İptal edilecek operasyon").setRequired(true).setAutocomplete(true))),
+      .addStringOption((o) => o.setName("operasyon").setDescription("İptal edilecek operasyon").setRequired(true).setAutocomplete(true)))
+    .addSubcommand((sub) => sub.setName("idam-et").setDescription("Yakalanmış bir casusu kalıcı olarak öldürür")
+      .addStringOption((o) => o.setName("casus").setDescription("Hâlen gözaltında bulunan casus").setRequired(true).setAutocomplete(true))),
   new SlashCommandBuilder()
     .setName("buyuk-gucler").setDescription("Yalnızca yönetici: Büyük Güçler sıralamasını yönetir")
     .addSubcommand((sub) => sub.setName("kanal").setDescription("Günlük Büyük Güçler paylaşım kanalını ayarlar")

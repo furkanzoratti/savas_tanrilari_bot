@@ -8,7 +8,7 @@ import { renderFleetEmbed } from "./fleet-embed.js";
 
 async function logCommanderAssignment(interaction:ChatInputCommandInteraction,countryName:string,entry:string):Promise<void>{
   await queueCharacterLog({client:interaction.client,guildId:interaction.guildId!,interactionId:interaction.id,
-    actorUserId:interaction.user.id,title:"Komutan Görev Günlüğü",source:"COMMANDER_COMMAND",
+    actorUserId:interaction.user.id,title:"Amiral Görev Günlüğü",source:"COMMANDER_COMMAND",
     entry:"⚓ <@"+interaction.user.id+"> • **"+countryName+"**\n↳ "+entry}).catch(()=>undefined);
 }
 
@@ -51,12 +51,12 @@ export async function handleFleetCommand(interaction: ChatInputCommandInteractio
       guildId:interaction.guildId,countryId:country.id,actorId:interaction.user.id,fleet:fleetValue,
       commanderId:interaction.options.getString("komutan",true)
     });
-    await interaction.editReply({ content:"✅ Komutan filonun başına atandı.",embeds:[renderFleetEmbed(fleet)] });
-    await logCommanderAssignment(interaction,country.name,`**${fleet.commander_name ?? "Komutan"}**, **${fleet.name}** filosunun başına atandı.`);
+    await interaction.editReply({ content:"✅ Amiral filonun başına atandı.",embeds:[renderFleetEmbed(fleet)] });
+    await logCommanderAssignment(interaction,country.name,`**${fleet.commander_name ?? "Amiral"}**, **${fleet.name}** filosunun başına atandı.`);
   } else if (sub === "komutan-kaldir") {
     const fleet = await fleetService.removeCommander({ guildId:interaction.guildId,countryId:country.id,actorId:interaction.user.id,fleet:fleetValue });
-    await interaction.editReply({ content:"✅ Komutanın filo görevi kaldırıldı.",embeds:[renderFleetEmbed(fleet)] });
-    await logCommanderAssignment(interaction,country.name,`**${fleet.name}** filosundaki Komutan görevi kaldırıldı.`);
+    await interaction.editReply({ content:"✅ Amiralin filo görevi kaldırıldı.",embeds:[renderFleetEmbed(fleet)] });
+    await logCommanderAssignment(interaction,country.name,`**${fleet.name}** filosundaki Amiral görevi kaldırıldı.`);
   } else if (sub === "dagit") {
     if (interaction.options.getString("onay",true).trim().toLocaleUpperCase("tr-TR") !== "DAGIT") throw new GameError("Filoyu dağıtmak için onay alanına DAGIT yazın.");
     const name = await fleetService.disband({ guildId:interaction.guildId,countryId:country.id,actorId:interaction.user.id,fleet:fleetValue });

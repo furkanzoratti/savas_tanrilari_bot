@@ -8,6 +8,8 @@ import {
 } from "../domain/espionage.js";
 import { applyEspionageEffect, espionageTargetExists, type EspionageEffectOperation } from "./espionage-effects.js";
 import { GameError } from "./game-service.js";
+import { awardCharacterSpecializationProgress } from "./character-specialization-progress.js";
+import type { CharacterSpecialization } from "../domain/characters.js";
 
 export const SPY_DEFENSE_ASSIGNMENTS = [
   "COUNTERINTELLIGENCE_TRAVELING_COUNTRY", "COUNTERINTELLIGENCE_TRAVELING_SETTLEMENT",
@@ -60,6 +62,17 @@ export interface EspionageOperationView {
   effect_text: string | null;
   resolved_at: Date | null;
   log_posted_at: Date | null;
+}
+
+export interface CapturedSpyView {
+  id: string;
+  name: string;
+  origin_country_name: string;
+  captor_country_name: string;
+  captured_settlement_name: string;
+  captured_turn: number;
+  automatic_return_turn: number;
+  operation_id: string;
 }
 
 export interface EspionageResolutionFailure {
@@ -137,22 +150,6 @@ function defenseBuildingBonus(buildings: Array<{ building_type: string; level: n
   return Math.min(3, buildings
     .filter((building) => relevant.includes(building.building_type))
     .reduce((sum, building) => sum + (building.level >= 3 ? 2 : building.level >= 2 ? 1 : 0), 0));
-}
-
-async function progressSpySpecialization(client: DbClient, characterId: string, specialization: string): Promise<void> {
-  const row = (await client.query<{ specialization: string | null }>("SELECT specialization FROM country_characters WHERE id=$1 FOR UPDATE",[characterId])).rows[0];
-  if (!row || (row.specialization && row.specialization !== specialization)) return;
-  const result = (await client.query<{ successes: number }>(
-    `INSERT INTO spy_specialization_progress(character_id,specialization,successes) VALUES($1,$2,1)
-     ON CONFLICT(character_id,specialization) DO UPDATE SET successes=spy_specialization_progress.successes+1 RETURNING successes`,
-    [characterId,specialization]
-  )).rows[0]!;
-  const successes = Number(result.successes);
-  const locked = row.specialization ?? (successes >= 3 ? specialization : null);
-  if (locked === specialization) await client.query(
-    "UPDATE country_characters SET specialization=$1,specialization_progress=$2,specialization_level=LEAST(3,FLOOR($2/3.0)::integer) WHERE id=$3",
-    [specialization,successes,characterId]
-  );
 }
 
 export function randomEspionageCandidate<T>(validTarget:boolean,candidates:readonly T[]):T|null {
@@ -255,8 +252,8 @@ export async function resolveDueEspionageOperations(guildId: string, turn: numbe
         [operation.id, selected?.building_type ?? null, validTarget, attackRoll, attackTotal, defenseRoll, defenseTotal, margin, severity,
           detectionRoll, detectionTotal, detectionLevel, captured, effectText]
       );
-      if (severity !== "NONE") await progressSpySpecialization(client,operation.spy_character_id,specialization);
-      if (counter && (severity === "NONE" || detectionLevel > 0)) await progressSpySpecialization(client,counter.id,"COUNTER_SPY");
+      if (severity !== "NONE") await awardCharacterSpecializationProgress(client,operation.spy_character_id,specialization as CharacterSpecialization);
+      if (counter && (severity === "NONE" || detectionLevel > 0)) await awardCharacterSpecializationProgress(client,counter.id,"COUNTER_SPY");
       if (captured && operation.target_type === "ASSASSINATE") {
         await client.query("UPDATE country_characters SET character_status='DEAD',assignment='NONE',assigned_settlement_id=NULL WHERE id=$1",[operation.spy_character_id]);
       } else if (captured) {
@@ -336,13 +333,14 @@ export const espionageService = {
     return (await pool.query<{ id: string; name: string; skill_bonus: number }>("SELECT id,name,skill_bonus FROM country_characters WHERE country_id=$1 AND role='SPY' AND assignment='NONE' ORDER BY name", [countryId])).rows;
   },
 
-  async spies(countryId: string): Promise<Array<{ id: string; name: string; skill_bonus: number; assignment: string; settlement_name: string | null; country_name: string | null }>> {
+  async spies(countryId: string): Promise<Array<{ id: string; name: string; skill_bonus: number; assignment: string; settlement_name: string | null; country_name: string | null; specialization: CharacterSpecialization | null; specialization_progress: number }>> {
     return (await pool.query(
-      `SELECT spy.id,spy.name,spy.skill_bonus,spy.assignment,settlement.name AS settlement_name,target.name AS country_name
+      `SELECT spy.id,spy.name,spy.skill_bonus,spy.assignment,spy.specialization,spy.specialization_progress,
+              settlement.name AS settlement_name,target.name AS country_name
          FROM country_characters spy LEFT JOIN settlements settlement ON settlement.id=spy.assigned_settlement_id
          LEFT JOIN countries target ON target.id=settlement.country_id
         WHERE spy.country_id=$1 AND spy.role='SPY' ORDER BY spy.name`, [countryId]
-    )).rows as Array<{ id: string; name: string; skill_bonus: number; assignment: string; settlement_name: string | null; country_name: string | null }>;
+    )).rows as Array<{ id: string; name: string; skill_bonus: number; assignment: string; settlement_name: string | null; country_name: string | null; specialization: CharacterSpecialization | null; specialization_progress: number }>;
   },
 
   async targets(countryId: string, kind: "CHARACTER"|"ARMY"): Promise<Array<{id:string;name:string}>> {
@@ -444,6 +442,76 @@ export const espionageService = {
 
   async adminList(guildId: string): Promise<EspionageOperationView[]> {
     return (await pool.query<EspionageOperationView>(`${operationViewSql} WHERE operation.guild_id=$1 ORDER BY operation.created_at DESC LIMIT 50`, [guildId])).rows;
+  },
+
+  async capturedSpies(guildId: string): Promise<CapturedSpyView[]> {
+    return (await pool.query<CapturedSpyView>(
+      `SELECT spy.id,spy.name,origin.name AS origin_country_name,captor.name AS captor_country_name,
+              settlement.name AS captured_settlement_name,operation.resolve_turn AS captured_turn,
+              operation.return_turn+2 AS automatic_return_turn,operation.id AS operation_id
+         FROM country_characters spy
+         JOIN countries origin ON origin.id=spy.country_id
+         JOIN LATERAL (
+           SELECT operation.id,operation.target_country_id,operation.target_settlement_id,
+                  operation.resolve_turn,operation.return_turn
+             FROM espionage_operations operation
+            WHERE operation.spy_character_id=spy.id AND operation.status='RESOLVED' AND operation.captured=TRUE
+            ORDER BY operation.resolved_at DESC NULLS LAST,operation.created_at DESC
+            LIMIT 1
+         ) operation ON TRUE
+         JOIN countries captor ON captor.id=operation.target_country_id
+         JOIN settlements settlement ON settlement.id=operation.target_settlement_id
+        WHERE origin.guild_id=$1 AND spy.role='SPY' AND spy.character_status='ACTIVE'
+          AND spy.assignment='CAPTURED'
+        ORDER BY captor.name,origin.name,spy.name`,
+      [guildId]
+    )).rows;
+  },
+
+  async executeCapturedSpy(input: { guildId: string; characterId: string; actorId: string }): Promise<CapturedSpyView> {
+    return withTransaction(async (client) => {
+      const spy = (await client.query<CapturedSpyView>(
+        `SELECT spy.id,spy.name,origin.name AS origin_country_name,captor.name AS captor_country_name,
+                settlement.name AS captured_settlement_name,operation.resolve_turn AS captured_turn,
+                operation.return_turn+2 AS automatic_return_turn,operation.id AS operation_id
+           FROM country_characters spy
+           JOIN countries origin ON origin.id=spy.country_id AND origin.guild_id=$2
+           JOIN LATERAL (
+             SELECT operation.id,operation.target_country_id,operation.target_settlement_id,
+                    operation.resolve_turn,operation.return_turn
+               FROM espionage_operations operation
+              WHERE operation.spy_character_id=spy.id AND operation.status='RESOLVED' AND operation.captured=TRUE
+              ORDER BY operation.resolved_at DESC NULLS LAST,operation.created_at DESC
+              LIMIT 1
+           ) operation ON TRUE
+           JOIN countries captor ON captor.id=operation.target_country_id
+           JOIN settlements settlement ON settlement.id=operation.target_settlement_id
+          WHERE spy.id=$1 AND spy.role='SPY' AND spy.character_status='ACTIVE' AND spy.assignment='CAPTURED'
+          FOR UPDATE OF spy`,
+        [input.characterId,input.guildId]
+      )).rows[0];
+      if (!spy) throw new GameError("Seçilen casus şu anda yakalanmış ve idam edilebilir durumda değil.");
+      await client.query(
+        `UPDATE country_characters
+            SET character_status='DEAD',assignment='NONE',assigned_settlement_id=NULL,
+                protected_character_id=NULL,assignment_ready_turn=NULL,unavailable_until_turn=NULL
+          WHERE id=$1`,
+        [spy.id]
+      );
+      await client.query(
+        "UPDATE espionage_operations SET executed_at=NOW(),executed_by=$1,effect_text=COALESCE(effect_text,'') || $2 WHERE id=$3",
+        [input.actorId," Casus, yakalayan devlet tarafından idam edildi.",spy.operation_id]
+      );
+      await client.query(
+        `INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details)
+         VALUES($1,$2,'CAPTURED_SPY_EXECUTED','character',$3,$4::jsonb)`,
+        [input.guildId,input.actorId,spy.id,JSON.stringify({
+          operationId:spy.operation_id,originCountry:spy.origin_country_name,
+          captorCountry:spy.captor_country_name,settlement:spy.captured_settlement_name
+        })]
+      );
+      return spy;
+    });
   },
 
   async cancel(input: { guildId: string; operationId: string }): Promise<void> {
