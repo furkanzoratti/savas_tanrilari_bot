@@ -447,22 +447,24 @@ export const espionageService = {
   async capturedSpies(guildId: string): Promise<CapturedSpyView[]> {
     return (await pool.query<CapturedSpyView>(
       `SELECT spy.id,spy.name,origin.name AS origin_country_name,captor.name AS captor_country_name,
-              settlement.name AS captured_settlement_name,operation.resolve_turn AS captured_turn,
+              COALESCE(settlement.name,'Bilinmeyen yerleşke') AS captured_settlement_name,operation.resolve_turn AS captured_turn,
               operation.return_turn+2 AS automatic_return_turn,operation.id AS operation_id
          FROM country_characters spy
          JOIN countries origin ON origin.id=spy.country_id
+         JOIN guilds state ON state.discord_id=origin.guild_id
          JOIN LATERAL (
            SELECT operation.id,operation.target_country_id,operation.target_settlement_id,
-                  operation.resolve_turn,operation.return_turn
+                  operation.resolve_turn,operation.return_turn,operation.captured,operation.executed_at
              FROM espionage_operations operation
-            WHERE operation.spy_character_id=spy.id AND operation.status='RESOLVED' AND operation.captured=TRUE
+            WHERE operation.spy_character_id=spy.id AND operation.guild_id=$1 AND operation.status='RESOLVED'
             ORDER BY operation.resolved_at DESC NULLS LAST,operation.created_at DESC
             LIMIT 1
          ) operation ON TRUE
          JOIN countries captor ON captor.id=operation.target_country_id
-         JOIN settlements settlement ON settlement.id=operation.target_settlement_id
+         LEFT JOIN settlements settlement ON settlement.id=operation.target_settlement_id
         WHERE origin.guild_id=$1 AND spy.role='SPY' AND spy.character_status='ACTIVE'
-          AND spy.assignment='CAPTURED'
+          AND operation.captured=TRUE AND operation.executed_at IS NULL
+          AND operation.return_turn+2>state.current_turn
         ORDER BY captor.name,origin.name,spy.name`,
       [guildId]
     )).rows;
@@ -472,21 +474,24 @@ export const espionageService = {
     return withTransaction(async (client) => {
       const spy = (await client.query<CapturedSpyView>(
         `SELECT spy.id,spy.name,origin.name AS origin_country_name,captor.name AS captor_country_name,
-                settlement.name AS captured_settlement_name,operation.resolve_turn AS captured_turn,
+                COALESCE(settlement.name,'Bilinmeyen yerleşke') AS captured_settlement_name,operation.resolve_turn AS captured_turn,
                 operation.return_turn+2 AS automatic_return_turn,operation.id AS operation_id
            FROM country_characters spy
            JOIN countries origin ON origin.id=spy.country_id AND origin.guild_id=$2
+           JOIN guilds state ON state.discord_id=origin.guild_id
            JOIN LATERAL (
              SELECT operation.id,operation.target_country_id,operation.target_settlement_id,
-                    operation.resolve_turn,operation.return_turn
+                    operation.resolve_turn,operation.return_turn,operation.captured,operation.executed_at
                FROM espionage_operations operation
-              WHERE operation.spy_character_id=spy.id AND operation.status='RESOLVED' AND operation.captured=TRUE
+              WHERE operation.spy_character_id=spy.id AND operation.guild_id=$2 AND operation.status='RESOLVED'
               ORDER BY operation.resolved_at DESC NULLS LAST,operation.created_at DESC
               LIMIT 1
            ) operation ON TRUE
            JOIN countries captor ON captor.id=operation.target_country_id
-           JOIN settlements settlement ON settlement.id=operation.target_settlement_id
-          WHERE spy.id=$1 AND spy.role='SPY' AND spy.character_status='ACTIVE' AND spy.assignment='CAPTURED'
+           LEFT JOIN settlements settlement ON settlement.id=operation.target_settlement_id
+          WHERE spy.id=$1 AND spy.role='SPY' AND spy.character_status='ACTIVE'
+            AND operation.captured=TRUE AND operation.executed_at IS NULL
+            AND operation.return_turn+2>state.current_turn
           FOR UPDATE OF spy`,
         [input.characterId,input.guildId]
       )).rows[0];
