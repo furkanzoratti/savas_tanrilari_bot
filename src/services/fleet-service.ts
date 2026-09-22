@@ -86,27 +86,42 @@ async function resolveFleet(client: DbClient, countryId: string, fleetValue: str
   return loadFleet(client, row.id, countryId);
 }
 
-async function assertMutable(client: DbClient, fleetId: string): Promise<void> {
+async function assertMutable(
+  client: DbClient,
+  fleetId: string,
+  options: { allowCargo?: boolean } = {}
+): Promise<void> {
   const active = await client.query(
     `SELECT 1 FROM battle_fleet_assignments bfa JOIN battles b ON b.id=bfa.battle_id
       WHERE bfa.fleet_id=$1 AND b.status NOT IN ('FINISHED','CANCELLED') LIMIT 1`, [fleetId]
   );
   if (active.rowCount) throw new GameError("Bu filo etkin bir savaşa bağlıyken gemileri, komutanı veya kaydı değiştirilemez.");
-  if ((await client.query(
-    `SELECT 1 FROM movement_encounters encounter
-       JOIN movement_orders first_order ON first_order.id=encounter.order_a_id
-       LEFT JOIN movement_orders second_order ON second_order.id=encounter.order_b_id
-      WHERE encounter.formation_kind='FLEET' AND encounter.status IN ('PENDING','BATTLE_PENDING','BATTLE_LINKED','SPECIAL')
-        AND (first_order.fleet_id=$1 OR second_order.fleet_id=$1 OR encounter.stationary_formation_id=$1) LIMIT 1`,
+  const movementEnabled = Boolean((await client.query<{ enabled: boolean }>(
+    `SELECT COALESCE(settings.enabled,FALSE) AS enabled
+       FROM fleets fleet
+       LEFT JOIN guild_movement_settings settings ON settings.guild_id=fleet.guild_id
+      WHERE fleet.id=$1`,
     [fleetId]
-  )).rowCount) throw new GameError("Bu filo Hex karşılaşmasında yönetici kararı bekliyor.");
-  const moving = await client.query(
-    "SELECT 1 FROM movement_orders WHERE fleet_id=$1 AND status IN ('SUBMITTED','IN_PROGRESS','BLOCKED') LIMIT 1",
-    [fleetId]
-  );
-  if (moving.rowCount) throw new GameError("Bu filonun etkin hareket emri varken gemileri veya komutanı değiştirilemez; önce emri iptal edin.");
-  const cargo = await client.query("SELECT 1 FROM fleet_cargo_armies WHERE fleet_id=$1 LIMIT 1", [fleetId]);
-  if (cargo.rowCount) throw new GameError("Asker taşıyan filonun gemileri, komutanı veya kaydı yük boşaltılmadan değiştirilemez.");
+  )).rows[0]?.enabled);
+  if (movementEnabled) {
+    if ((await client.query(
+      `SELECT 1 FROM movement_encounters encounter
+         JOIN movement_orders first_order ON first_order.id=encounter.order_a_id
+         LEFT JOIN movement_orders second_order ON second_order.id=encounter.order_b_id
+        WHERE encounter.formation_kind='FLEET' AND encounter.status IN ('PENDING','BATTLE_PENDING','BATTLE_LINKED','SPECIAL')
+          AND (first_order.fleet_id=$1 OR second_order.fleet_id=$1 OR encounter.stationary_formation_id=$1) LIMIT 1`,
+      [fleetId]
+    )).rowCount) throw new GameError("Bu filo Hex karşılaşmasında yönetici kararı bekliyor.");
+    const moving = await client.query(
+      "SELECT 1 FROM movement_orders WHERE fleet_id=$1 AND status IN ('SUBMITTED','IN_PROGRESS','BLOCKED') LIMIT 1",
+      [fleetId]
+    );
+    if (moving.rowCount) throw new GameError("Bu filonun etkin hareket emri varken gemileri veya komutanı değiştirilemez; önce emri iptal edin.");
+  }
+  if (!options.allowCargo) {
+    const cargo = await client.query("SELECT 1 FROM fleet_cargo_armies WHERE fleet_id=$1 LIMIT 1", [fleetId]);
+    if (cargo.rowCount) throw new GameError("Asker taşıyan filodan gemi çıkarılamaz; komutanı veya kaydı yük boşaltılmadan değiştirilemez.");
+  }
 }
 
 export const fleetService = {
@@ -186,7 +201,10 @@ export const fleetService = {
       if (!Number.isInteger(input.quantity) || input.quantity < 1) throw new GameError("Eklenecek gemi miktarı pozitif tam sayı olmalıdır.");
       if (!SHIPS[input.shipType]) throw new GameError("Geçersiz gemi türü.");
       const fleet = await resolveFleet(client,input.countryId,input.fleet,true);
-      await assertMutable(client,fleet.id);
+      // Bir filoya gemi eklemek mevcut yük kapasitesini azaltmaz. Bu nedenle
+      // hareket sistemi döneminden kalan veya hâlen taşınan ordular yeni gemi
+      // tahsisini engellememelidir. Etkin savaş/hareket kilitleri korunur.
+      await assertMutable(client,fleet.id,{ allowCargo:true });
       const settlement = (await client.query<{ id: string; name: string }>(
         "SELECT id,name FROM settlements WHERE country_id=$1 AND (id::text=$2 OR lower(name)=lower($2)) FOR UPDATE",
         [input.countryId,input.settlement.trim()]
