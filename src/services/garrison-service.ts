@@ -86,13 +86,11 @@ export async function scheduleMandatoryGarrisonReplenishment(
     await client.query("UPDATE settlements SET garrison_level=$1 WHERE id=$2", [garrisonLevel(Number(settlement.population)), settlement.id]);
     return null;
   }
-  if (Number(settlement.population) < personnel) throw new Error(`${settlement.name} garnizonu için yeterli özgür nüfus yok.`);
-
   const cost = garrisonRecruitmentCost(deficit);
   const completionTurn = input.currentTurn + 2;
   await client.query(
-    "UPDATE settlements SET population=population-$1,local_treasury=local_treasury-$2 WHERE id=$3",
-    [personnel, cost, settlement.id]
+    "UPDATE settlements SET local_treasury=local_treasury-$1 WHERE id=$2",
+    [cost, settlement.id]
   );
   const order = (await client.query<{ id: string }>(
     `INSERT INTO garrison_replenishment_orders(

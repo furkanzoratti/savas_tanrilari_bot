@@ -15,6 +15,7 @@ import { scheduleMandatoryGarrisonReplenishment } from "./garrison-service.js";
 import { GameError } from "./game-service.js";
 import { formableModifiers, type FormableCountryKey } from "../domain/formable-countries.js";
 import { specializationLevel, type CharacterSpecialization, type CommanderDoctrine } from "../domain/characters.js";
+import { deductPopulationForCasualties } from "./population-loss.js";
 
 export type BattleStatus = "DRAFT" | "WAITING_FIRST_ROLL" | "WAITING_SECOND_ROLL" | "READY_TO_RESOLVE" | "FINISHED" | "CANCELLED";
 
@@ -566,6 +567,7 @@ async function applyLossesToDocuments(client: DbClient, battleId: string, guildI
         if (temporaryLoss > 0) {
           stateApplied += temporaryLoss;
           stateRequested -= temporaryLoss;
+          populationApplied += await deductPopulationForCasualties(client, battle.defender_settlement_id, temporaryLoss);
         }
       }
 
@@ -604,6 +606,7 @@ async function applyLossesToDocuments(client: DbClient, battleId: string, guildI
           }
           if (appliedGarrisonLoss > 0) {
             stateApplied += appliedGarrisonLoss;
+            populationApplied += await deductPopulationForCasualties(client, garrison.settlement_id, appliedGarrisonLoss);
             garrisonLossSettlements.add(garrison.settlement_id);
           }
           stateRequested = participantLoss;
@@ -677,9 +680,7 @@ async function applyLossesToDocuments(client: DbClient, battleId: string, guildI
               else await client.query("UPDATE fleet_ships SET quantity=$1 WHERE fleet_id=$2 AND settlement_id=$3 AND ship_type=$4", [nextAllocation,fleetShare.contractId,allocation.settlement_id,forceType]);
               await client.query("UPDATE fleets SET updated_at=NOW() WHERE id=$1", [fleetShare.contractId]);
               const personnelLoss = shipCrewRequirement(forceType as keyof typeof import("../domain/catalog.js").SHIPS,sourceApplied);
-              const population = Number((await client.query<{ population:number }>("SELECT population FROM settlements WHERE id=$1 FOR UPDATE", [allocation.settlement_id])).rows[0]?.population ?? 0);
-              const populationLoss = Math.min(population,personnelLoss);
-              if (populationLoss > 0) await client.query("UPDATE settlements SET population=population-$1 WHERE id=$2", [populationLoss,allocation.settlement_id]);
+              const populationLoss = await deductPopulationForCasualties(client, allocation.settlement_id, personnelLoss);
               populationApplied += populationLoss;
               stateApplied += sourceApplied;
             }
@@ -738,6 +739,7 @@ async function applyLossesToDocuments(client: DbClient, battleId: string, guildI
               if (nextAllocation <= 0) await client.query("DELETE FROM army_units WHERE army_id=$1 AND settlement_id=$2 AND unit_type=$3", [armyShare.contractId, allocation.settlement_id, forceType]);
               else await client.query("UPDATE army_units SET quantity=$1 WHERE army_id=$2 AND settlement_id=$3 AND unit_type=$4", [nextAllocation, armyShare.contractId, allocation.settlement_id, forceType]);
               await client.query("UPDATE armies SET updated_at=NOW() WHERE id=$1", [armyShare.contractId]);
+              populationApplied += await deductPopulationForCasualties(client, allocation.settlement_id, sourceApplied);
               stateApplied += sourceApplied;
             }
           }
@@ -814,14 +816,10 @@ async function applyLossesToDocuments(client: DbClient, battleId: string, guildI
           if (next === 0) await client.query(`DELETE FROM ${naval ? "naval_units" : "unit_stacks"} WHERE id=$1`, [row.id]);
           else await client.query(`UPDATE ${naval ? "naval_units" : "unit_stacks"} SET quantity=$1 WHERE id=$2`, [next, row.id]);
           if (deducted > 0) {
-            let populationLoss=0;
-            if(naval){
-              const personnelLoss=shipCrewRequirement(forceType as keyof typeof import("../domain/catalog.js").SHIPS,deducted);
-              const population=Number((await client.query<{population:number}>(
-                "SELECT population FROM settlements WHERE id=$1 FOR UPDATE",[row.settlement_id])).rows[0]?.population??0);
-              populationLoss=Math.min(population,personnelLoss);
-              if(populationLoss>0)await client.query("UPDATE settlements SET population=population-$1 WHERE id=$2",[populationLoss,row.settlement_id]);
-            }
+            const personnelLoss=naval
+              ? shipCrewRequirement(forceType as keyof typeof import("../domain/catalog.js").SHIPS,deducted)
+              : deducted;
+            const populationLoss=await deductPopulationForCasualties(client,row.settlement_id,personnelLoss);
             if (!naval && "force_type" in row && row.force_type === "GARRISON") garrisonLossSettlements.add(row.settlement_id);
             populationApplied += populationLoss;
             stateApplied += deducted;
@@ -831,7 +829,8 @@ async function applyLossesToDocuments(client: DbClient, battleId: string, guildI
 
       const applied = mercenaryApplied + stateApplied;
       const expectedPopulationLoss=naval
-        ? shipCrewRequirement(forceType as keyof typeof import("../domain/catalog.js").SHIPS,stateApplied):0;
+        ? shipCrewRequirement(forceType as keyof typeof import("../domain/catalog.js").SHIPS,stateApplied)
+        : stateApplied;
       const populationShortfall = Math.max(0, expectedPopulationLoss - populationApplied);
       const shortfall = Math.max(0, calculated - applied);
       await client.query(

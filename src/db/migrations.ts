@@ -8,6 +8,7 @@ import { movementDisembarkMigration } from "./movement-disembark-migration.js";
 import { independentArmyInventoryMigration } from "./independent-army-inventory-migration.js";
 import { classicArmyAllocationMigration } from "./classic-army-allocation-migration.js";
 import { classicArmyMusterMigration } from "./classic-army-muster-migration.js";
+import { recruitmentPopulationMigration } from "./recruitment-population-migration.js";
 
 export const migrations = [
   {
@@ -2233,5 +2234,6 @@ export const migrations = [
   movementDisembarkMigration,
   independentArmyInventoryMigration,
   classicArmyAllocationMigration,
-  classicArmyMusterMigration
+  classicArmyMusterMigration,
+  recruitmentPopulationMigration
 ] as const;

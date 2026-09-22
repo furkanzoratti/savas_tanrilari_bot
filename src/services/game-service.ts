@@ -2165,7 +2165,6 @@ export const gameService = {
       if (await countryHasMaintenanceDebt(client, country.id)) throw new GameError("Ödenmemiş bakım açığı giderilmeden yeni asker emri verilemez.");
       const unit = UNITS[input.unitType];
       if (!unit) throw new GameError("Birim türü bulunamadı.");
-      if(settlement.population<input.quantity)throw new GameError("Yerleşkede bu eğitim için yeterli özgür nüfus yok.");
       if (isSpecialUnitType(input.unitType)) {
         const unlocked = await client.query(
           "SELECT 1 FROM country_special_unit_unlocks WHERE country_id=$1 AND unit_type=$2",
@@ -2199,13 +2198,13 @@ export const gameService = {
       if (settlement.local_treasury < cost) throw new GameError("Yerel hazinede yeterli altın yok.");
       const waves = createRecruitmentWaves(input.quantity, country.mobilization, guild.current_turn);
       const order = await client.query<{ id: string }>(
-        `INSERT INTO recruitment_orders(country_id,settlement_id,unit_type,total_quantity,remaining_quantity,paid_amount,ordered_turn)
-         VALUES($1,$2,$3,$4,$4,$5,$6) RETURNING id`, [country.id, settlement.id, input.unitType, input.quantity, cost, guild.current_turn]
+        `INSERT INTO recruitment_orders(country_id,settlement_id,unit_type,total_quantity,remaining_quantity,paid_amount,ordered_turn,population_reserved)
+         VALUES($1,$2,$3,$4,$4,$5,$6,FALSE) RETURNING id`, [country.id, settlement.id, input.unitType, input.quantity, cost, guild.current_turn]
       );
       for (const wave of waves) await client.query("INSERT INTO recruitment_waves(order_id,due_turn,quantity) VALUES($1,$2,$3)", [order.rows[0]!.id, wave.dueTurn, wave.quantity]);
       await client.query(`INSERT INTO recruitment_usage(settlement_id,acquisition_turn,quantity) VALUES($1,$2,$3)
         ON CONFLICT(settlement_id,acquisition_turn) DO UPDATE SET quantity=recruitment_usage.quantity+EXCLUDED.quantity`, [settlement.id, guild.current_turn, input.quantity]);
-      await client.query("UPDATE settlements SET local_treasury=local_treasury-$1,population=population-$2 WHERE id=$3",[cost,input.quantity,settlement.id]);
+      await client.query("UPDATE settlements SET local_treasury=local_treasury-$1 WHERE id=$2",[cost,settlement.id]);
       await syncCountryTreasury(client, country.id);
       await client.query("INSERT INTO transactions(country_id,turn,kind,amount,description) VALUES($1,$2,'UNIT_PURCHASE',$3,$4)", [country.id, guild.current_turn, -cost, `${settlement.name}: ${input.quantity} ${unit.name}`]);
       await audit(client, input.guildId, input.actorId, "UNIT_PURCHASE", "settlement", settlement.id, { unitType: input.unitType, quantity: input.quantity, cost, waves, trainingCapacity });
@@ -2251,7 +2250,6 @@ export const gameService = {
       if (regionalExisting.rowCount) throw new GameError("Bu eyalette başka bir yerleşkenin Gözcü Birliği var veya yetiştiriliyor; eyalet başına bir gözcü sınırı geçerlidir.");
 
       const personLoad = formableModifiers(country.active_formable_key).observerManpower ?? 200;
-      if(settlement.population<personLoad)throw new GameError("Yerleşkede Gözcü Birliği için yeterli özgür nüfus yok.");
       const marshalPartial = await hasActiveMarshalPartialMobilization(client, country.id, country.mobilization);
       const localUsed = await settlementManpower(client, settlement.id);
       const localLimit = settlementMobilizationLimit(settlement.population, country.mobilization, marshalPartial);
@@ -2269,13 +2267,13 @@ export const gameService = {
       if (settlement.local_treasury < cost) throw new GameError("Yerel hazinede yeterli altın yok.");
       const dueTurn = guild.current_turn + 1;
       const order = await client.query<{ id: string }>(
-        `INSERT INTO recruitment_orders(country_id,settlement_id,unit_type,total_quantity,remaining_quantity,paid_amount,ordered_turn)
-         VALUES($1,$2,'observer',$3,$3,$4,$5) RETURNING id`, [country.id, settlement.id, personLoad, cost, guild.current_turn]
+        `INSERT INTO recruitment_orders(country_id,settlement_id,unit_type,total_quantity,remaining_quantity,paid_amount,ordered_turn,population_reserved)
+         VALUES($1,$2,'observer',$3,$3,$4,$5,FALSE) RETURNING id`, [country.id, settlement.id, personLoad, cost, guild.current_turn]
       );
       await client.query("INSERT INTO recruitment_waves(order_id,due_turn,quantity) VALUES($1,$2,$3)", [order.rows[0]!.id, dueTurn, personLoad]);
       await client.query(`INSERT INTO recruitment_usage(settlement_id,acquisition_turn,quantity) VALUES($1,$2,$3)
         ON CONFLICT(settlement_id,acquisition_turn) DO UPDATE SET quantity=recruitment_usage.quantity+EXCLUDED.quantity`, [settlement.id, guild.current_turn, personLoad]);
-      await client.query("UPDATE settlements SET local_treasury=local_treasury-$1,population=population-$2 WHERE id=$3",[cost,personLoad,settlement.id]);
+      await client.query("UPDATE settlements SET local_treasury=local_treasury-$1 WHERE id=$2",[cost,settlement.id]);
       await syncCountryTreasury(client, country.id);
       await client.query("INSERT INTO transactions(country_id,turn,kind,amount,description) VALUES($1,$2,\'OBSERVER_PURCHASE\',$3,$4)", [country.id, guild.current_turn, -cost, `${settlement.name}: 1 Gözcü Birliği`]);
       await audit(client, input.guildId, input.actorId, "OBSERVER_PURCHASE", "settlement", settlement.id, { cost, personLoad, dueTurn });
