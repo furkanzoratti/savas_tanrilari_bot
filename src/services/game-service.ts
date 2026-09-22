@@ -13,7 +13,7 @@ import { countryResourceAccess, settlementResourceAccess, settlementResourceStat
 import { MERCENARY_COMPANIES, MERCENARY_CONTRACT_LIMITS, importedMercenarySchedule, mercenaryContractSchedule, mercenaryPriceTerms, mercenaryTerminationUpkeep, type MercenaryCompanyKey, type MercenaryPriceTerms } from "../domain/mercenaries.js";
 import { cancelActiveGarrisonReplenishment, completeDueGarrisonReplenishments, scheduleAllMissingGarrisons, scheduleMandatoryGarrisonReplenishment, type GarrisonReplenishmentReason } from "./garrison-service.js";
 import { isSpecialUnitType, type SpecialUnitType } from "../domain/special-units.js";
-import { applyFormableShipUpkeepDiscount, FORMABLE_COUNTRIES, formableBuildingDiscount, formableModifiers, formableUnitDiscount, isFormableCountryKey, type FormableCountryKey } from "../domain/formable-countries.js";
+import { applyFormableShipUpkeepDiscount, FORMABLE_COUNTRIES, formableBuildingDiscount, formableModifiers, formableUnitDiscount, isFormableCountryKey, missingFormableTerritories, type FormableCountryKey } from "../domain/formable-countries.js";
 import { assessArmyComposition, type BattleComposition, type BattleUnitType } from "../domain/battle.js";
 import { calculateTreasuryTransferQuota } from "../domain/treasury-transfer.js";
 import { assimilationCompletionTurn } from "../domain/assimilation.js";
@@ -726,6 +726,10 @@ export const gameService = {
       if (nameConflict.rowCount) throw new GameError(`Sunucuda ${definition.name} adlı başka bir devlet bulunuyor.`);
       const settlements = (await client.query<SettlementRow>("SELECT * FROM settlements WHERE country_id=$1 FOR UPDATE", [country.id])).rows;
       if (!settlements.length) throw new GameError("Topraksız bir devlet kurulabilir ülkeye dönüşemez.");
+      const missingTerritories = missingFormableTerritories(formableKey, settlements.map((settlement) => settlement.name));
+      if (missingTerritories.length) {
+        throw new GameError(`${definition.name} için gerekli topraklar eksik: **${missingTerritories.join(", ")}**.`);
+      }
       const unstable = settlements.find((settlement) => settlement.is_conquered || settlement.rebellion_active);
       if (unstable) throw new GameError(`**${unstable.name}** işgal/asimilasyon veya açık isyan durumunda. Formlama için bütün yerleşkeler istikrarlı olmalıdır.`);
       for (const settlement of settlements) {

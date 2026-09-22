@@ -16,6 +16,7 @@ export interface FormableModifiers {
   buildingDiscountTypes?: readonly string[];
   buildingDurationReduction?: number;
   incomePercent?: number;
+  seaTradeIncomePercent?: number;
   buildingIncomePercent?: Partial<Record<string, number>>;
   portFlatIncome?: number;
   curiaFlatIncome?: number;
@@ -41,6 +42,10 @@ export interface FormableCountryDefinition {
   emoji: string;
   buffs: readonly string[];
   modifiers: FormableModifiers;
+  requiredTerritories?: readonly {
+    label: string;
+    settlementNames: readonly string[];
+  }[];
 }
 
 export const FORMABLE_COUNTRIES = {
@@ -93,6 +98,26 @@ export const FORMABLE_COUNTRIES = {
   THRACE: { name: "Trakya", emoji: "🗡️", buffs: ["Kara birlikleri %5 ucuzdur.", "Kara yağması zarlarına +1.", "Savaş Hazırlığı 250 ek milis verir."], modifiers: { unitDiscount: 0.05, warPreparationMilitia: 750 } },
   MACEDONIA: { name: "Makedonya", emoji: "☀️", buffs: ["Süvari alımı %5 ucuzdur.", "Akademiden yetişen Komutanlar +1 ek özellik puanı alır."], modifiers: { cavalryDiscount: 0.05, academyRoleSkillBonus: { COMMANDER: 1 } } },
   HELLAS: { name: "Hellas", emoji: "🏛️", buffs: ["Akademi bakımı 250 Altındır.", "Agora sabit geliri %10 artar.", "Her Tersane kapasitesine +1 Trireme ekler."], modifiers: { academyUpkeep: 250, buildingIncomePercent: { agora: 0.10 }, shipyardPointBonus: { trireme: 1 } } },
+  MEDITERRANEAN_LEAGUE: {
+    name: "Akdeniz Ligi",
+    emoji: "🔱",
+    buffs: [
+      "Deniz Ticareti gelirleri %10 artar.",
+      "Gemi alım maliyeti ve gemi bakımı %10 azalır.",
+      "Gemi taşıma kapasitesi %10 artar."
+    ],
+    modifiers: {
+      seaTradeIncomePercent: 0.10,
+      shipDiscount: 0.10,
+      shipUpkeepDiscount: 0.10,
+      shipTransportMultiplier: 1.10
+    },
+    requiredTerritories: [
+      { label: "Kıbrıs", settlementNames: ["Salamis", "Kıbrıs"] },
+      { label: "Rodos", settlementNames: ["Rodos"] },
+      { label: "Hierapytna", settlementNames: ["Hierapytna"] }
+    ]
+  },
   CARTHAGE: {
     name: "Büyük Kartaca",
     emoji: "🐘",
@@ -140,6 +165,21 @@ export function isFormableCountryKey(value: string): value is FormableCountryKey
 
 export function formableModifiers(key: FormableCountryKey | null | undefined): FormableModifiers {
   return key ? FORMABLE_COUNTRIES[key]?.modifiers ?? {} : {};
+}
+
+function normalizeTerritoryName(value: string): string {
+  return value.trim().toLocaleLowerCase("tr-TR");
+}
+
+export function missingFormableTerritories(
+  key: FormableCountryKey,
+  ownedSettlementNames: readonly string[]
+): string[] {
+  const owned = new Set(ownedSettlementNames.map(normalizeTerritoryName));
+  const definition: FormableCountryDefinition = FORMABLE_COUNTRIES[key];
+  return (definition.requiredTerritories ?? [])
+    .filter((requirement) => !requirement.settlementNames.some((name) => owned.has(normalizeTerritoryName(name))))
+    .map((requirement) => requirement.label);
 }
 
 export function applyFormableShipUpkeepDiscount(baseUpkeep: number, key: FormableCountryKey | null | undefined): number {

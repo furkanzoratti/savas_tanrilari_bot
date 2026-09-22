@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { commandBuilders } from "../discord/commands.js";
 import { migrations } from "../db/migrations.js";
 import { calculateCategorizedIncome } from "./income.js";
-import { applyFormableShipUpkeepDiscount, FORMABLE_COUNTRIES, formableBuildingDiscount, formableUnitDiscount } from "./formable-countries.js";
+import { applyFormableShipUpkeepDiscount, FORMABLE_COUNTRIES, formableBuildingDiscount, formableUnitDiscount, missingFormableTerritories } from "./formable-countries.js";
 import { unitCostMultiplier } from "./resources.js";
 
 describe("kurulabilir ülkeler", () => {
@@ -63,6 +63,28 @@ describe("kurulabilir ülkeler", () => {
       buildings:[{ buildingType:"port",level:1 }],formableKey:"CARTHAGE"
     });
     expect(income.gross.seaTrade).toBe(900);
+  });
+
+  it("Akdeniz Ligi hedef topraklarını ve deniz-ticaret bonuslarını uygular", () => {
+    const definition = FORMABLE_COUNTRIES.MEDITERRANEAN_LEAGUE;
+    expect(definition.name).toBe("Akdeniz Ligi");
+    expect(definition.requiredTerritories.map((territory) => territory.label)).toEqual(["Kıbrıs", "Rodos", "Hierapytna"]);
+    expect(missingFormableTerritories("MEDITERRANEAN_LEAGUE", ["Salamis", "Rodos", "Hierapytna"])).toEqual([]);
+    expect(missingFormableTerritories("MEDITERRANEAN_LEAGUE", ["Rodos"])).toEqual(["Kıbrıs", "Hierapytna"]);
+    expect(definition.modifiers).toMatchObject({
+      seaTradeIncomePercent: 0.10,
+      shipDiscount: 0.10,
+      shipUpkeepDiscount: 0.10,
+      shipTransportMultiplier: 1.10
+    });
+    expect(applyFormableShipUpkeepDiscount(1_000, "MEDITERRANEAN_LEAGUE")).toBe(900);
+
+    const income = calculateCategorizedIncome({
+      settlementIncome: 0, taxIncome: 0, landTradeIncome: 0, seaTradeIncome: 1_000,
+      manualFlatIncome: 0, manualIncomePercent: 0, ruinStage: 0,
+      buildings: [], formableKey: "MEDITERRANEAN_LEAGUE"
+    });
+    expect(income.gross.seaTrade).toBe(1_100);
   });
 
   it("Büyük Britanya Britanya mirasını ve üç üst devlet bonusunu birlikte taşır", () => {

@@ -128,6 +128,7 @@ export function calculateCategorizedIncome(input: {
 
   if (landTradeIncomePercent > 0) gross.landTrade += Math.floor(gross.landTrade * landTradeIncomePercent);
   if (taxIncomePercent > 0) gross.tax += Math.floor(gross.tax * taxIncomePercent);
+  seaIncomePercent += formable.seaTradeIncomePercent ?? 0;
   if (seaIncomePercent > 0) gross.seaTrade += Math.floor(gross.seaTrade * seaIncomePercent);
   const resourceMultiplier = (resources.includes("GOLD") ? 1.10 : 1) * (resources.includes("SPICES") ? 1.20 : 1);
   const totalPercent = Math.max(0, Math.min(MAX_SETTLEMENT_PERCENT_BONUS, globalIncomePercent + resourceMultiplier - 1 + (formable.incomePercent ?? 0)));
