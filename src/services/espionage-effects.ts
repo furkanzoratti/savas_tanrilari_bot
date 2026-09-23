@@ -2,6 +2,7 @@ import { randomInt } from "node:crypto";
 import type { DbClient } from "../db/pool.js";
 import { BUILDINGS, SHIPS, SIEGE_ASSETS, UNITS, buildingBaseCost } from "../domain/catalog.js";
 import type { EspionageSeverity, EspionageTarget } from "../domain/espionage.js";
+import { markCharacterDead } from "./character-death-service.js";
 
 export interface EspionageEffectOperation {
   attacker_country_id: string;
@@ -324,7 +325,10 @@ export async function applyEspionageEffect(
       : operation.target_type === "KIDNAP" ? (severity === "LIGHT" ? 2 : severity === "MEDIUM" ? 4 : 0)
       : severity === "LIGHT" ? 3 : severity === "MEDIUM" ? 6 : 0;
     if (operation.target_type === "ASSASSINATE" && severity === "HEAVY") {
-      await client.query("UPDATE country_characters SET character_status='DEAD',assignment='NONE',assigned_settlement_id=NULL,unavailable_until_turn=NULL WHERE id=$1",[operation.target_character_id]);
+      await markCharacterDead({
+        client,characterId:operation.target_character_id,deathSettlementId:operation.target_settlement_id,
+        reason:"Karakter öldürüldüğü için devam eden casusluk görevi iptal edildi."
+      });
       return "Hedef karakter kalıcı olarak öldürüldü; bütün görevleri sona erdi.";
     }
     await client.query("UPDATE merchant_operations SET status='CANCELLED',updated_at=NOW() WHERE merchant_character_id=$1 AND status IN ('PENDING_ACCEPTANCE','TRAVELING','ACTIVE','CONTROLLED')",[operation.target_character_id]);

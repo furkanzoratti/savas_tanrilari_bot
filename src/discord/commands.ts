@@ -6,7 +6,7 @@ import { BATTLE_TERRAINS, BATTLE_UNIT_STATS, NAVAL_UNIT_STATS, SIEGE_ASSET_BATTL
 import { NPC_AUTO_PURCHASE_DOCTRINES } from "../domain/npc-auto-purchase.js";
 import { SPECIAL_UNITS } from "../domain/special-units.js";
 import { ESPIONAGE_PREPARATIONS, ESPIONAGE_TARGETS } from "../domain/espionage.js";
-import { CHARACTER_SPECIALIZATIONS, COMMANDER_DOCTRINES } from "../domain/characters.js";
+import { ADMIRAL_DOCTRINES, ADMIRAL_SPECIALIZATIONS, CHARACTER_SPECIALIZATIONS, COMMANDER_DOCTRINES } from "../domain/characters.js";
 
 const countryOption = (option: any) => option.setName("ulke").setDescription("Yalnızca DM: işlem yapılacak ülke").setRequired(false);
 const CHARACTER_ROLE_CHOICES = Object.entries(CHARACTER_ROLES).map(([value, role]) => ({ name: role.label, value }));
@@ -170,6 +170,60 @@ export const commandBuilders = [
     .addSubcommand((sub) => sub.setName("baskomutan-sec").setDescription("Etkin bir savaşta taraf bonuslarını uygulayacak Başkomutanı seçer")
       .addStringOption((o) => o.setName("savas").setDescription("Başkomutan atanacak etkin savaş").setRequired(true).setAutocomplete(true))
       .addStringOption((o) => o.setName("komutan").setDescription("Ordusuyla bu savaşa katılan Komutan").setRequired(true).setAutocomplete(true))),
+  new SlashCommandBuilder()
+    .setName("amiral").setDescription("Amiralin kalıcı deniz doktrini ve uzmanlığını yönetir")
+    .addSubcommand((sub)=>sub.setName("doktrin-sec").setDescription("Amiral için bir kez seçilebilen kalıcı deniz doktrinini belirler")
+      .addStringOption((o)=>o.setName("amiral").setDescription("Doktrin verilecek Amiral").setRequired(true).setAutocomplete(true))
+      .addStringOption((o)=>o.setName("doktrin").setDescription("Kalıcı Amiral doktrini").setRequired(true)
+        .addChoices(...Object.entries(ADMIRAL_DOCTRINES).map(([value,item])=>({name:item.label,value})))))
+    .addSubcommand((sub)=>sub.setName("uzmanlik-sec").setDescription("En az 3 deniz zaferli Amiralin kalıcı uzmanlığını belirler")
+      .addStringOption((o)=>o.setName("amiral").setDescription("Uzmanlaşacak Amiral").setRequired(true).setAutocomplete(true))
+      .addStringOption((o)=>o.setName("uzmanlik").setDescription("Kalıcı Amiral uzmanlığı").setRequired(true)
+        .addChoices(...Object.entries(ADMIRAL_SPECIALIZATIONS).map(([value,item])=>({name:item.label,value}))))),
+  new SlashCommandBuilder()
+    .setName("abluka").setDescription("Yalnızca yönetici: kıyı yerleşkelerine uygulanan deniz ablukalarını yönetir")
+    .addSubcommand((sub)=>sub.setName("baslat").setDescription("Bir filoyu hedef kıyı yerleşkesine bağlayarak abluka başlatır")
+      .addStringOption((o)=>o.setName("ablukaci-ulke").setDescription("Ablukayı uygulayan devlet").setRequired(true).setAutocomplete(true))
+      .addStringOption((o)=>o.setName("filo").setDescription("Ablukayı uygulayan filo").setRequired(true).setAutocomplete(true))
+      .addStringOption((o)=>o.setName("hedef-ulke").setDescription("Abluka altına alınan devlet").setRequired(true).setAutocomplete(true))
+      .addStringOption((o)=>o.setName("hedef-yerleske").setDescription("Abluka altına alınan KIYI yerleşkesi").setRequired(true).setAutocomplete(true)))
+    .addSubcommand((sub)=>sub.setName("kaldir").setDescription("Etkin bir ablukayı kaldırır")
+      .addStringOption((o)=>o.setName("abluka").setDescription("Kaldırılacak etkin abluka").setRequired(true).setAutocomplete(true))),
+  new SlashCommandBuilder()
+    .setName("deniz-yagmasi").setDescription("Yalnızca yönetici: oyuncu zarıyla çözülen deniz yağmalarını yönetir")
+    .addSubcommand((sub)=>sub.setName("baslat").setDescription("Yağma taraflarını belirler ve herkese açık zar düğmesini yayımlar")
+      .addStringOption((o)=>o.setName("yagmaci-ulke").setDescription("Yağmayı yapan devlet").setRequired(true).setAutocomplete(true))
+      .addStringOption((o)=>o.setName("filo").setDescription("Yağmayı yapan filo").setRequired(true).setAutocomplete(true))
+      .addStringOption((o)=>o.setName("hedef-ulke").setDescription("Yağmalanan devlet").setRequired(true).setAutocomplete(true))
+      .addStringOption((o)=>o.setName("hedef-yerleske").setDescription("Yağmalanan KIYI yerleşkesi").setRequired(true).setAutocomplete(true)))
+    .addSubcommand((sub)=>sub.setName("iptal").setDescription("Zarı henüz atılmamış bir deniz yağmasını iptal eder")
+      .addStringOption((o)=>o.setName("yagma").setDescription("İptal edilecek bekleyen yağma").setRequired(true).setAutocomplete(true)))
+    .addSubcommand((sub)=>sub.setName("detay").setDescription("Gizli yağma ve yakalanma zarlarını yalnızca yöneticiye gösterir")
+      .addStringOption((o)=>o.setName("yagma").setDescription("İncelenecek deniz yağması").setRequired(true).setAutocomplete(true))),
+  new SlashCommandBuilder()
+    .setName("bolgesel-yagma").setDescription("Yalnızca yönetici: bölgesel yağma formunu yönetir")
+    .addSubcommand((sub)=>sub.setName("baslat").setDescription("Bölgesel yağma formunu ve gizli 1d20 zar düğmesini yayımlar")
+      .addStringOption((o)=>o.setName("yagmaci-ulke").setDescription("Yağmayı yapan devlet").setRequired(true).setAutocomplete(true))
+      .addStringOption((o)=>o.setName("ordu").setDescription("Yağmayı yapan ordu").setRequired(true).setAutocomplete(true))
+      .addStringOption((o)=>o.setName("hedef-ulke").setDescription("Yağmalanan devlet").setRequired(true).setAutocomplete(true))
+      .addStringOption((o)=>o.setName("hedef-yerleske").setDescription("Yağmalanan bölgenin yerleşkesi").setRequired(true).setAutocomplete(true))
+      .addStringOption((o)=>o.setName("kazanc-yerleskesi").setDescription("Altın ve kölenin doğrudan aktarılacağı dost yerleşke").setRequired(true).setAutocomplete(true)))
+    .addSubcommand((sub)=>sub.setName("iptal").setDescription("Zarı atılmamış bölgesel yağmayı iptal eder")
+      .addStringOption((o)=>o.setName("yagma").setDescription("İptal edilecek yağma").setRequired(true).setAutocomplete(true)))
+    .addSubcommand((sub)=>sub.setName("detay").setDescription("Gizli bölgesel yağma zarını yöneticiye gösterir")
+      .addStringOption((o)=>o.setName("yagma").setDescription("İncelenecek yağma").setRequired(true).setAutocomplete(true))),
+  new SlashCommandBuilder()
+    .setName("sehir-talani").setDescription("Yalnızca yönetici: şehir talanı formunu yönetir")
+    .addSubcommand((sub)=>sub.setName("baslat").setDescription("Şehir talanı formunu ve gizli 1d100 zar düğmesini yayımlar")
+      .addStringOption((o)=>o.setName("yagmaci-ulke").setDescription("Talanı yapan devlet").setRequired(true).setAutocomplete(true))
+      .addStringOption((o)=>o.setName("ordu").setDescription("Talanı yapan ordu").setRequired(true).setAutocomplete(true))
+      .addStringOption((o)=>o.setName("hedef-ulke").setDescription("Talan edilen devlet").setRequired(true).setAutocomplete(true))
+      .addStringOption((o)=>o.setName("hedef-yerleske").setDescription("Talan edilen şehir").setRequired(true).setAutocomplete(true))
+      .addStringOption((o)=>o.setName("kazanc-yerleskesi").setDescription("Altın ve kölenin doğrudan aktarılacağı dost yerleşke").setRequired(true).setAutocomplete(true)))
+    .addSubcommand((sub)=>sub.setName("iptal").setDescription("Zarı atılmamış şehir talanını iptal eder")
+      .addStringOption((o)=>o.setName("yagma").setDescription("İptal edilecek talan").setRequired(true).setAutocomplete(true)))
+    .addSubcommand((sub)=>sub.setName("detay").setDescription("Gizli şehir talanı zarını yöneticiye gösterir")
+      .addStringOption((o)=>o.setName("yagma").setDescription("İncelenecek talan").setRequired(true).setAutocomplete(true))),
   new SlashCommandBuilder()
     .setName("tuccar").setDescription("Tüccar görevlerini tek merkezden yönetir")
     .addSubcommand((sub) => sub.setName("yerel-ticaret").setDescription("Tüccarı kendi yerleşkenizde gelir üretmeye gönderir")

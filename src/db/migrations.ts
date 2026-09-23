@@ -12,6 +12,11 @@ import { recruitmentPopulationMigration } from "./recruitment-population-migrati
 import { characterSpecializationChoiceMigration } from "./character-specialization-choice-migration.js";
 import { capturedSpyExecutionMigration } from "./captured-spy-execution-migration.js";
 import { academyCapacityAdmiralsMigration } from "./academy-capacity-admirals-migration.js";
+import { characterDeathLocationMigration } from "./character-death-location-migration.js";
+import { admiralProgressionMigration } from "./admiral-progression-migration.js";
+import { navalOperationsMigration } from "./naval-operations-migration.js";
+import { navalRaidIncomeMigration } from "./naval-raid-income-migration.js";
+import { landRaidsMigration } from "./land-raids-migration.js";
 
 export const migrations = [
   {
@@ -2241,5 +2246,10 @@ export const migrations = [
   recruitmentPopulationMigration,
   characterSpecializationChoiceMigration,
   capturedSpyExecutionMigration,
-  academyCapacityAdmiralsMigration
+  academyCapacityAdmiralsMigration,
+  characterDeathLocationMigration,
+  admiralProgressionMigration,
+  navalOperationsMigration,
+  navalRaidIncomeMigration,
+  landRaidsMigration
 ] as const;

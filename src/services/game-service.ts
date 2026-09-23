@@ -2846,7 +2846,31 @@ export const gameService = {
               [settlement.id]
             )).rows[0];
             const mobilizedIncome = scaleIncome(economy.payable, marshalPartial ? 1 : MOBILIZATION_RULES[country.mobilization].incomeMultiplier);
-            const adjustedSettlementIncome = applyIncomePenalty(mobilizedIncome, Number(incomePenalty?.penalty_percent ?? 0));
+            const incomeAfterGeneralPenalty = applyIncomePenalty(mobilizedIncome, Number(incomePenalty?.penalty_percent ?? 0));
+            const activeBlockade = (await client.query<{ sea_trade_loss_percent: number }>(
+              "SELECT sea_trade_loss_percent FROM naval_blockades WHERE target_settlement_id=$1 AND status='ACTIVE' LIMIT 1",
+              [settlement.id]
+            )).rows[0];
+            const blockadePercent = Number(activeBlockade?.sea_trade_loss_percent ?? 0);
+            const blockadeDeduction = Math.floor(incomeAfterGeneralPenalty.seaTrade * blockadePercent / 100);
+            const incomeAfterBlockade: IncomeBreakdown = {
+              ...incomeAfterGeneralPenalty,
+              seaTrade: Math.max(0,incomeAfterGeneralPenalty.seaTrade-blockadeDeduction)
+            };
+            const raidIncomePenalties=(await client.query<{id:string;income_deduction_remaining:number}>(
+              `SELECT id,income_deduction_remaining FROM naval_raids
+                WHERE target_settlement_id=$1 AND status='RESOLVED' AND income_deduction_remaining>0
+                ORDER BY resolved_at,id FOR UPDATE`,[settlement.id]
+            )).rows.map((row)=>({...row,income_deduction_remaining:Number(row.income_deduction_remaining)}));
+            const pendingRaidDeduction=raidIncomePenalties.reduce((sum,row)=>sum+row.income_deduction_remaining,0);
+            const raidIncomeDeduction=Math.min(incomeTotal(incomeAfterBlockade),pendingRaidDeduction);
+            const adjustedSettlementIncome:IncomeBreakdown={...incomeAfterBlockade};
+            let deductionToAllocate=raidIncomeDeduction;
+            for(const key of ["seaTrade","landTrade","building","tax"] as const){
+              const deducted=Math.min(adjustedSettlementIncome[key],deductionToAllocate);
+              adjustedSettlementIncome[key]-=deducted;
+              deductionToAllocate-=deducted;
+            }
             const settlementUnits = (await client.query<{ unit_type: keyof typeof UNITS; quantity: number; status: UnitStatus }>("SELECT unit_type,quantity,status FROM unit_stacks WHERE settlement_id=$1", [settlement.id])).rows;
             const settlementShips = (await client.query<{ ship_type: keyof typeof SHIPS; quantity: number; status: ShipStatus }>("SELECT ship_type,quantity,status FROM naval_units WHERE settlement_id=$1", [settlement.id])).rows;
             const unitUpkeep = settlementUnits
@@ -2862,12 +2886,26 @@ export const gameService = {
             upkeep += settlementUpkeep;
             const nextPopulation = settlement.population + popGain;
             await client.query("UPDATE settlements SET population=$1,ruin_stage=$2,local_treasury=local_treasury+$3,last_acquisition_income=$4 WHERE id=$5", [nextPopulation, nextRuinStage(settlement.ruin_stage), settlementNet, settlementGross, settlement.id]);
-            const penaltyDeduction = Math.max(0,incomeTotal(mobilizedIncome)-settlementGross);
+            let remainingRaidDeduction=raidIncomeDeduction;
+            for(const penalty of raidIncomePenalties){
+              if(remainingRaidDeduction<=0)break;
+              const applied=Math.min(penalty.income_deduction_remaining,remainingRaidDeduction);
+              await client.query(
+                `UPDATE naval_raids
+                    SET income_deduction_remaining=income_deduction_remaining-$1,
+                        income_deduction_applied_turn=CASE WHEN income_deduction_remaining-$1=0 THEN $2 ELSE NULL END
+                  WHERE id=$3`,[applied,newTurn,penalty.id]
+              );
+              remainingRaidDeduction-=applied;
+            }
+            const penaltyDeduction = Math.max(0,incomeTotal(mobilizedIncome)-incomeTotal(incomeAfterGeneralPenalty));
             const mobilizationDeduction = Math.max(0,incomeTotal(economy.payable)-incomeTotal(mobilizedIncome));
             const effects = [
               settlement.ruin_stage ? "Haraplık Sv"+settlement.ruin_stage : null,
               country.mobilization !== "PEACE" ? MOBILIZATION_RULES[country.mobilization].label+" −"+mobilizationDeduction.toLocaleString("tr-TR") : null,
               incomePenalty ? "Gelir cezası %"+incomePenalty.penalty_percent : null,
+              activeBlockade ? "Deniz ablukası %"+blockadePercent+" −"+blockadeDeduction.toLocaleString("tr-TR") : null,
+              raidIncomeDeduction ? "Deniz yağması gelir kaybı −"+raidIncomeDeduction.toLocaleString("tr-TR") : null,
               ...activePolicies.map((policy)=>CITY_POLICIES[policy].label),
               ...effectiveResources.map((resource)=>RESOURCES[resource].label)
             ].filter((item): item is string => Boolean(item));
@@ -2880,7 +2918,8 @@ export const gameService = {
                   buildingIncome:adjustedSettlementIncome.building,taxIncome:adjustedSettlementIncome.tax,
                   landTradeIncome:adjustedSettlementIncome.landTrade,seaTradeIncome:adjustedSettlementIncome.seaTrade,
                   buildingUpkeep:economy.buildingUpkeep,unitUpkeep,shipUpkeep,
-                  penaltyDeduction,mobilizationDeduction,populationGain:popGain,effects
+                  penaltyDeduction,mobilizationDeduction,blockadeDeduction,blockadePercent,
+                  raidIncomeDeduction,raidIncomeDeductionPending:Math.max(0,pendingRaidDeduction-raidIncomeDeduction),populationGain:popGain,effects
                 })]
             );
             if (incomePenalty) {
@@ -2896,7 +2935,7 @@ export const gameService = {
               incomePenaltyDetails.push({
                 settlementName: settlement.name,
                 percent: Number(incomePenalty.penalty_percent),
-                deductedAmount: Math.max(0, incomeTotal(mobilizedIncome) - settlementGross),
+                deductedAmount: Math.max(0, incomeTotal(mobilizedIncome) - incomeTotal(incomeAfterGeneralPenalty)),
                 remainingAcquisitionTurns,
                 reason: incomePenalty.reason
               });

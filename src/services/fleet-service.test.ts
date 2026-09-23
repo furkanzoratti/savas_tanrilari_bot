@@ -28,6 +28,7 @@ function fleetClient(options: { cargo?: boolean; movementEnabled?: boolean; movi
         rowCount: 1
       };
       if (sql.includes("FROM battle_fleet_assignments")) return { rows: [], rowCount: 0 };
+      if (sql.includes("FROM naval_blockades") || sql.includes("FROM naval_raids")) return { rows: [], rowCount: 0 };
       if (sql.includes("COALESCE(settings.enabled,FALSE)")) return {
         rows: [{ enabled: options.movementEnabled ?? true }], rowCount: 1
       };

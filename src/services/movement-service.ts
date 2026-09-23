@@ -545,6 +545,14 @@ export const movementService = {
       if (input.formationKind === "ARMY" && (await client.query("SELECT 1 FROM fleet_cargo_armies WHERE army_id=$1", [unit.id])).rowCount) {
         throw new GameError("Gemide taşınan ordu elle kara Hex'ine konumlandırılamaz; önce karaya çıkarılmalıdır.");
       }
+      if(input.formationKind==="ARMY"&&(await client.query("SELECT 1 FROM land_raids WHERE army_id=$1 AND status='WAITING_ROLL' LIMIT 1",[unit.id])).rowCount)
+        throw new GameError("Yağma zarı bekleyen ordunun konumu değiştirilemez.");
+      if(input.formationKind==="FLEET"){
+        if((await client.query("SELECT 1 FROM naval_blockades WHERE fleet_id=$1 AND status='ACTIVE' LIMIT 1",[unit.id])).rowCount)
+          throw new GameError("Etkin abluka filosunun konumu abluka kaldırılmadan değiştirilemez.");
+        if((await client.query("SELECT 1 FROM naval_raids WHERE fleet_id=$1 AND status='WAITING_ROLL' LIMIT 1",[unit.id])).rowCount)
+          throw new GameError("Deniz yağması zarı bekleyen filonun konumu değiştirilemez.");
+      }
       const battleAssignment = input.formationKind === "ARMY"
         ? "battle_army_assignments"
         : "battle_fleet_assignments";
@@ -781,6 +789,14 @@ export const movementService = {
       if (guild.turn_phase !== "OPEN") throw new GameError("Hareket emri yalnızca tur açıkken verilebilir.");
       const unit = await formation(client, input.formationKind, input.formationId, input.countryId, true);
       if (unit.guild_id !== input.guildId) throw new GameError("Birlik bu sunucuya ait değil.");
+      if(input.formationKind==="ARMY"&&(await client.query("SELECT 1 FROM land_raids WHERE army_id=$1 AND status='WAITING_ROLL' LIMIT 1",[unit.id])).rowCount)
+        throw new GameError("Yağma zarı bekleyen ordu yeni hareket emri alamaz.");
+      if(input.formationKind==="FLEET"){
+        if((await client.query("SELECT 1 FROM naval_blockades WHERE fleet_id=$1 AND status='ACTIVE' LIMIT 1",[unit.id])).rowCount)
+          throw new GameError("Etkin abluka filosu abluka kaldırılmadan hareket emri alamaz.");
+        if((await client.query("SELECT 1 FROM naval_raids WHERE fleet_id=$1 AND status='WAITING_ROLL' LIMIT 1",[unit.id])).rowCount)
+          throw new GameError("Deniz yağması zarı bekleyen filo yeni hareket emri alamaz.");
+      }
       const assignedTable=input.formationKind==="ARMY" ? "battle_army_assignments" : "battle_fleet_assignments";
       const assignedColumn=input.formationKind==="ARMY" ? "army_id" : "fleet_id";
       if ((await client.query(

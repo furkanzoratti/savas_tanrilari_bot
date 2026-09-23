@@ -7,6 +7,9 @@ export const PACT_BANNER_NAME = "ancient-diplomatic-pact-banner.png";
 export const STATE_PROFILE_BANNER_NAME = "ancient-state-profile-banner.png";
 export const WAR_DECLARATION_BANNER_NAME = "ancient-war-declaration-banner.png";
 export const PEACE_TREATY_BANNER_NAME = "ancient-peace-treaty-banner.png";
+export const NAVAL_RAID_BANNER_NAME = "amrp-naval-raid-banner.png";
+export const LAND_RAID_BANNER_NAME = "amrp-land-raid-banner.png";
+export const HARBOR_BLOCKADE_BANNER_NAME = "amrp-harbor-blockade-banner.png";
 
 export const TEMPLE_BANNER_PATH = resolve(process.cwd(), "assets", TEMPLE_BANNER_NAME);
 export const BRAND_BANNER_PATH = resolve(process.cwd(), "assets", BRAND_BANNER_NAME);
@@ -15,6 +18,9 @@ export const PACT_BANNER_PATH = resolve(process.cwd(), "assets", PACT_BANNER_NAM
 export const STATE_PROFILE_BANNER_PATH = resolve(process.cwd(), "assets", STATE_PROFILE_BANNER_NAME);
 export const WAR_DECLARATION_BANNER_PATH = resolve(process.cwd(), "assets", WAR_DECLARATION_BANNER_NAME);
 export const PEACE_TREATY_BANNER_PATH = resolve(process.cwd(), "assets", PEACE_TREATY_BANNER_NAME);
+export const NAVAL_RAID_BANNER_PATH = resolve(process.cwd(), "assets", NAVAL_RAID_BANNER_NAME);
+export const LAND_RAID_BANNER_PATH = resolve(process.cwd(), "assets", LAND_RAID_BANNER_NAME);
+export const HARBOR_BLOCKADE_BANNER_PATH = resolve(process.cwd(), "assets", HARBOR_BLOCKADE_BANNER_NAME);
 
 export const TEMPLE_BANNER_URL = `attachment://${TEMPLE_BANNER_NAME}`;
 export const BRAND_BANNER_URL = `attachment://${BRAND_BANNER_NAME}`;
@@ -23,6 +29,9 @@ export const PACT_BANNER_URL = `attachment://${PACT_BANNER_NAME}`;
 export const STATE_PROFILE_BANNER_URL = `attachment://${STATE_PROFILE_BANNER_NAME}`;
 export const WAR_DECLARATION_BANNER_URL = `attachment://${WAR_DECLARATION_BANNER_NAME}`;
 export const PEACE_TREATY_BANNER_URL = `attachment://${PEACE_TREATY_BANNER_NAME}`;
+export const NAVAL_RAID_BANNER_URL = `attachment://${NAVAL_RAID_BANNER_NAME}`;
+export const LAND_RAID_BANNER_URL = `attachment://${LAND_RAID_BANNER_NAME}`;
+export const HARBOR_BLOCKADE_BANNER_URL = `attachment://${HARBOR_BLOCKADE_BANNER_NAME}`;
 
 export function battlefieldAsset(terrain: string): { name: string; path: string } {
   const names: Record<string, string> = {

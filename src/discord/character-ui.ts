@@ -1,8 +1,8 @@
 import { EmbedBuilder, type AutocompleteInteraction, type ChatInputCommandInteraction, type Client } from "discord.js";
 import { CHARACTER_ROLES } from "../domain/catalog.js";
 import {
-  CHARACTER_SPECIALIZATIONS, COMMANDER_DOCTRINES, DIPLOMAT_TASK_LABELS, MERCHANT_TASK_LABELS,
-  type CharacterSpecialization, type CommanderDoctrine, type DiplomatTask, type MerchantTask
+  ADMIRAL_DOCTRINES, ADMIRAL_SPECIALIZATIONS, CHARACTER_SPECIALIZATIONS, COMMANDER_DOCTRINES, DIPLOMAT_TASK_LABELS, MERCHANT_TASK_LABELS,
+  type AdmiralDoctrine, type AdmiralSpecialization, type CharacterSpecialization, type CommanderDoctrine, type DiplomatTask, type MerchantTask
 } from "../domain/characters.js";
 import { ESPIONAGE_TARGETS, type EspionageTarget } from "../domain/espionage.js";
 import { CULTURE_GROUPS, type CultureGroup } from "../domain/cultures.js";
@@ -53,17 +53,23 @@ const MERCHANT_TASK_BY_SUBCOMMAND: Partial<Record<string,MerchantTask>> = {
 };
 
 export function characterAvailableForCommand(
-  character: Pick<CharacterView,"role"|"assignment"|"operation_status"|"character_status"|"doctrine"|"commander_victories"|"specialization"|"specialization_progress"|"is_admiral">,
+  character: Pick<CharacterView,"role"|"assignment"|"operation_status"|"character_status"|"doctrine"|"commander_victories"|"specialization"|"specialization_progress"|"is_admiral"|"admiral_doctrine"|"admiral_specialization"|"admiral_victories">,
   commandName: string,
   subcommand: string
 ): boolean {
   if (character.character_status !== "ACTIVE") return false;
   if (commandName === "komutan") {
-    if (character.role !== "COMMANDER") return false;
+    if (character.role !== "COMMANDER" || character.is_admiral) return false;
     if (subcommand === "doktrin-sec") return character.doctrine === null;
     if (subcommand === "uzmanlik-sec") return character.specialization === null && character.commander_victories >= 3;
     if (subcommand === "amirale-donustur") return !character.is_admiral && character.assignment === "NONE";
     return subcommand !== "baskomutan-sec" || character.assignment === "ARMY";
+  }
+  if (commandName === "amiral") {
+    if (character.role !== "COMMANDER" || !character.is_admiral) return false;
+    if (subcommand === "doktrin-sec") return !character.admiral_doctrine;
+    if (subcommand === "uzmanlik-sec") return !character.admiral_specialization && Number(character.admiral_victories??0)>=3;
+    return true;
   }
   if (commandName === "tuccar") {
     if (character.role !== "MERCHANT") return false;
@@ -122,13 +128,19 @@ function characterLine(character: CharacterView): string {
   if (character.operation_progress !== null && character.operation_goal !== null) {
     details.push("İlerleme " + character.operation_progress + "/" + character.operation_goal);
   }
-  if (character.role === "COMMANDER") {
+  if (character.role === "COMMANDER" && character.is_admiral) {
+    details.push("Deniz zaferi " + Number(character.admiral_victories??0) + "/9");
+    if (character.admiral_doctrine) details.push(ADMIRAL_DOCTRINES[character.admiral_doctrine].label);
+    if (character.admiral_specialization) details.push(
+      ADMIRAL_SPECIALIZATIONS[character.admiral_specialization].label + " Sv" + Number(character.admiral_specialization_level??0)
+    );
+  } else if (character.role === "COMMANDER") {
     details.push("Zafer " + character.commander_victories + "/9");
     if (character.doctrine) details.push(COMMANDER_DOCTRINES[character.doctrine].label);
-  }
-  if (character.specialization) {
+    if (character.specialization) details.push(CHARACTER_SPECIALIZATIONS[character.specialization].label + " Sv" + character.specialization_level);
+  } else if (character.specialization) {
     details.push(CHARACTER_SPECIALIZATIONS[character.specialization].label + " Sv" + character.specialization_level);
-  } else if (character.role !== "COMMANDER" && character.specialization_progress > 0) {
+  } else if (character.specialization_progress > 0) {
     const tracks = Object.entries(character.specialization_tracks??{})
       .filter(([key,value]) => CHARACTER_SPECIALIZATIONS[key as CharacterSpecialization]?.role===character.role && Number(value)>0)
       .map(([key,value]) => CHARACTER_SPECIALIZATIONS[key as CharacterSpecialization].label+" "+value+"/3");
@@ -138,16 +150,55 @@ function characterLine(character: CharacterView): string {
   return roleEmoji + " **" + character.name + "** — " + roleLabel + " (+" + character.skill_bonus + ")\n↳ " + details.join(" • ");
 }
 
-export function charactersEmbed(countryName: string, characters: CharacterView[]): EmbedBuilder {
+function deadCharacterLine(character: CharacterView): string {
+  const role = CHARACTER_ROLES[character.role];
+  const roleLabel = character.role === "COMMANDER" && character.is_admiral ? "Amiral" : role.label;
+  const deathPlace = character.death_settlement_name ?? "Bilinmiyor";
+  return "💀 **" + character.name + "** — " + roleLabel + " (+" + character.skill_bonus + ")\n↳ Öldüğü şehir: **" + deathPlace + "**";
+}
+
+export interface CharacterCapacitySummary {
+  academies: number;
+  characters: number;
+  pending: number;
+  capacity: number;
+}
+
+export function charactersEmbed(
+  countryName: string,
+  characters: CharacterView[],
+  capacity?: CharacterCapacitySummary
+): EmbedBuilder {
+  const livingCharacters = characters.filter((character) => character.character_status !== "DEAD");
   const sections = (Object.keys(CHARACTER_ROLES) as Array<keyof typeof CHARACTER_ROLES>)
     .map((role) => {
-      const rows = characters.filter((character) => character.role === role).map(characterLine);
+      const rows = livingCharacters.filter((character) => character.role === role).map(characterLine);
       return rows.length ? "**" + CHARACTER_ROLES[role].emoji + " " + CHARACTER_ROLES[role].label + "ler**\n" + rows.join("\n\n") : null;
     }).filter((item): item is string => Boolean(item));
+  const deadCharacters = characters
+    .filter((character) => character.character_status === "DEAD")
+    .sort((left,right) => {
+      const dateDifference = new Date(right.died_at ?? 0).getTime() - new Date(left.died_at ?? 0).getTime();
+      return dateDifference || left.name.localeCompare(right.name,"tr");
+    });
+  const description: string[] = [];
+  if (capacity) {
+    description.push(
+      "**🏛️ Akademi Kapasitesi**\n"+
+      "Akademi: **"+capacity.academies+"** • Barındırılabilir karakter: **"+capacity.capacity+"**\n"+
+      "Mevcut karakter: **"+capacity.characters+"/"+capacity.capacity+"**"+
+      (capacity.pending>0 ? " • Eğitimde/bekleyen: **"+capacity.pending+"**" : "")
+    );
+  }
+  if (sections.length) description.push(...sections);
+  else description.push("Akademide etkin veya görevden alınmış karakteriniz bulunmuyor.");
+  if (deadCharacters.length) {
+    description.push("**💀 Ölü Karakterler**\n"+deadCharacters.map(deadCharacterLine).join("\n\n"));
+  }
   return new EmbedBuilder()
     .setColor(0xc59b45)
     .setTitle("🎓 " + countryName + " • Karakterlerim")
-    .setDescription((sections.length ? sections.join("\n\n") : "Akademide yetişmiş karakteriniz bulunmuyor.").slice(0,4000))
+    .setDescription(description.join("\n\n").slice(0,4000))
     .setFooter({ text: "Bu liste yalnızca ülke oyuncularına ve yöneticilere görünür." });
 }
 
@@ -242,7 +293,10 @@ export async function handleCharacterCommand(interaction: ChatInputCommandIntera
   if (interaction.commandName === "karakterlerim") {
     await interaction.deferReply({ ephemeral: true });
     const country = await resolveCountry(interaction);
-    await interaction.editReply({ embeds: [charactersEmbed(country.name,await characterService.list(country.id))] });
+    const [characters,capacity] = await Promise.all([
+      characterService.list(country.id),cityService.academyCapacity(country.id)
+    ]);
+    await interaction.editReply({ embeds: [charactersEmbed(country.name,characters,capacity)] });
     await logCharacterCommand(interaction,country.name,"Karakter listesini görüntüledi.");
     return true;
   }
@@ -304,10 +358,32 @@ export async function handleCharacterCommand(interaction: ChatInputCommandIntera
     );
     return true;
   }
-  if (!["komutan","tuccar","diplomat"].includes(interaction.commandName)) return false;
+  if (!["komutan","amiral","tuccar","diplomat"].includes(interaction.commandName)) return false;
   await interaction.deferReply({ ephemeral: true });
   const country = await resolveCountry(interaction);
   const sub = interaction.options.getSubcommand();
+  if (interaction.commandName === "amiral") {
+    const characterId = interaction.options.getString("amiral",true);
+    const admiral = await characterForLog(country.id,characterId);
+    const admiralText = "⚓ Amiral: **"+(admiral?.name??"Bilinmeyen Amiral")+"** (+"+(admiral?.skill_bonus??0)+") • Devlet: **"+country.name+"**";
+    if (sub === "doktrin-sec") {
+      const doctrine = interaction.options.getString("doktrin",true) as AdmiralDoctrine;
+      await characterService.setAdmiralDoctrine({countryId:country.id,characterId,doctrine});
+      await interaction.editReply("✅ Amiralin kalıcı doktrini **"+ADMIRAL_DOCTRINES[doctrine].label+"** olarak belirlendi.");
+      await logCharacterCommand(interaction,country.name,
+        admiralText+"\n↳ Kalıcı Amiral doktrini: **"+ADMIRAL_DOCTRINES[doctrine].label+"**\n↳ Etki: "+ADMIRAL_DOCTRINES[doctrine].description
+      );
+    } else {
+      const specialization = interaction.options.getString("uzmanlik",true) as AdmiralSpecialization;
+      await characterService.setAdmiralSpecialization({countryId:country.id,characterId,specialization});
+      const level = Math.min(3,Math.floor(Number(admiral?.admiral_victories??0)/3));
+      await interaction.editReply("✅ Amiralin kalıcı uzmanlığı **"+ADMIRAL_SPECIALIZATIONS[specialization].label+"** olarak belirlendi (Sv"+level+").");
+      await logCharacterCommand(interaction,country.name,
+        admiralText+"\n↳ Kalıcı Amiral uzmanlığı: **"+ADMIRAL_SPECIALIZATIONS[specialization].label+"** • Deniz zaferi: **"+Number(admiral?.admiral_victories??0)+"/9** • Sv"+level
+      );
+    }
+    return true;
+  }
   if (interaction.commandName === "komutan") {
     const characterId = interaction.options.getString("komutan",true);
     const commander = await characterForLog(country.id,characterId);
@@ -514,7 +590,7 @@ export async function handleCharacterCommand(interaction: ChatInputCommandIntera
 }
 
 export async function handleCharacterAutocomplete(interaction: AutocompleteInteraction): Promise<boolean> {
-  if (!interaction.guildId || !["komutan","tuccar","diplomat"].includes(interaction.commandName)) return false;
+  if (!interaction.guildId || !["komutan","amiral","tuccar","diplomat"].includes(interaction.commandName)) return false;
   const country = await gameService.countryForUser(interaction.guildId,interaction.user.id);
   if (!country) { await interaction.respond([]); return true; }
   const focused = interaction.options.getFocused(true);
@@ -537,8 +613,8 @@ export async function handleCharacterAutocomplete(interaction: AutocompleteInter
       .slice(0,25).map((key)=>({name:CHARACTER_SPECIALIZATIONS[key].label,value:key})));
     return true;
   }
-  if (["komutan","tuccar","diplomat"].includes(focused.name)) {
-    const role = focused.name === "komutan" ? "COMMANDER" : focused.name === "tuccar" ? "MERCHANT" : "DIPLOMAT";
+  if (["komutan","amiral","tuccar","diplomat"].includes(focused.name)) {
+    const role = ["komutan","amiral"].includes(focused.name) ? "COMMANDER" : focused.name === "tuccar" ? "MERCHANT" : "DIPLOMAT";
     const characters = (await characterService.list(country.id))
       .filter((item) => item.role === role && characterAvailableForCommand(item,interaction.commandName,sub ?? ""));
     await interaction.respond(characters.filter((item) => !query || item.name.toLocaleLowerCase("tr-TR").includes(query)).slice(0,25)

@@ -58,4 +58,15 @@ describe("yakalanmış casus yönetimi", () => {
     expect(sql).not.toContain("spy.assignment='CAPTURED'");
     expect(parameters).toEqual(["spy-1", "guild-1"]);
   });
+
+  it("görev seçimine ölü casusları dahil etmez", async () => {
+    mocks.query.mockResolvedValueOnce({rows:[]});
+
+    await expect(espionageService.availableSpies("country-1")).resolves.toEqual([]);
+
+    const [sql,parameters]=mocks.query.mock.calls[0] as [string,unknown[]];
+    expect(sql).toContain("character_status='ACTIVE'");
+    expect(sql).toContain("assignment='NONE'");
+    expect(parameters).toEqual(["country-1"]);
+  });
 });

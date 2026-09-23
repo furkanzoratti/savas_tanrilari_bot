@@ -17,6 +17,7 @@ describe("kuşatma ordusu başlangıç konumu", () => {
       if (sql.includes("FROM guild_movement_settings")) return { rows: [{ guild_id: "guild", enabled: false, visibility_mode: "INTELLIGENCE", map_revision: 1, rules: {} }], rowCount: 1 };
       if (sql.includes("SELECT id,name,guild_id,country_id FROM armies")) return { rows: [{ id: "army", name: "Kuşatma Ordusu", guild_id: "guild", country_id: "country" }], rowCount: 1 };
       if (sql.includes("FROM fleet_cargo_armies")) return { rows: [], rowCount: 0 };
+      if (sql.includes("FROM land_raids")) return { rows: [], rowCount: 0 };
       if (sql.includes("SELECT battle.terrain,siege_hex.coordinate")) return { rows: [battle], rowCount: 1 };
       if (sql.includes("SELECT 1 FROM army_map_positions WHERE army_id")) return { rows: [], rowCount: alreadyPositioned ? 1 : 0 };
       if (sql.includes("FROM movement_orders") || sql.includes("FROM movement_encounters") || sql.includes("FROM army_muster_orders")) return { rows: [], rowCount: 0 };
@@ -59,6 +60,7 @@ describe("KIYI yerleşkesinde filo konumu", () => {
       if (sql.includes("pg_advisory_xact_lock")) return { rows: [], rowCount: 1 };
       if (sql.includes("FROM guild_movement_settings")) return { rows: [{ guild_id: "guild", enabled: false, visibility_mode: "INTELLIGENCE", map_revision: 1, rules: {} }], rowCount: 1 };
       if (sql.includes("SELECT id,name,guild_id,country_id FROM fleets")) return { rows: [{ id: "fleet", name: "Kıyı Filosu", guild_id: "guild", country_id: "country" }], rowCount: 1 };
+      if (sql.includes("FROM naval_blockades") || sql.includes("FROM naval_raids")) return { rows: [], rowCount: 0 };
       if (sql.includes("SELECT battle.terrain,siege_hex.coordinate")) return { rows: [], rowCount: 0 };
       if (sql.includes("FROM movement_orders") || sql.includes("FROM movement_encounters")) return { rows: [], rowCount: 0 };
       if (sql.includes("FROM map_hexes hex WHERE hex.guild_id")) return { rows: [{ id: "coast-hex", coordinate: "J22", q: 1, r: 2,

@@ -134,6 +134,8 @@ async function assertMutable(client: DbClient, armyId: string): Promise<void> {
       WHERE baa.army_id=$1 AND b.status NOT IN ('FINISHED','CANCELLED') LIMIT 1`, [armyId]
   );
   if (active.rowCount) throw new GameError("Bu ordu etkin bir savaşa bağlıyken kadrosu, komutanı veya kaydı değiştirilemez.");
+  const raid = await client.query("SELECT 1 FROM land_raids WHERE army_id=$1 AND status='WAITING_ROLL' LIMIT 1",[armyId]);
+  if (raid.rowCount) throw new GameError("Bu ordu sonuçlanmayı bekleyen bir yağma formuna bağlıyken değiştirilemez.");
 }
 
 export const armyService = {

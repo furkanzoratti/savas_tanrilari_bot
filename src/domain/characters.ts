@@ -9,6 +9,82 @@ export const COMMANDER_DOCTRINES = {
 } as const;
 export type CommanderDoctrine = keyof typeof COMMANDER_DOCTRINES;
 
+export const ADMIRAL_DOCTRINES = {
+  CLOSED_BATTLE_LINE: { label: "Kapalı Savaş Hattı", description: "Alınan hasar ×0,95; verilen hasar ×0,95." },
+  FLEXIBLE_FLEET: { label: "Esnek Filo", description: "Az çeşitli filolarda çarpışma ve hasar kaybını azaltır." },
+  ORDERLY_WITHDRAWAL: { label: "Düzenli Ayrılma", description: "Geri çekilme kaybı −%20; çarpışma ×0,97." },
+  BOARDING_ORDER: { label: "Bordalama Düzeni", description: "Geri çekilen düşmanın kaybı +%15; ilk tur çarpışma ×0,97." },
+  COMBINED_FLEET: { label: "Birleşik Filo Doktrini", description: "İki gemi türünde çarpışma ×1,03; üç türde ×1,05; tek türde ×0,97." }
+} as const;
+export type AdmiralDoctrine = keyof typeof ADMIRAL_DOCTRINES;
+
+export const ADMIRAL_SPECIALIZATIONS = {
+  SEA_RAIDER: {
+    label: "Deniz Akıncısı",
+    description: "Sv1 yağma +1; Sv2 ganimet +%15 ve yakalanma zarına −1; Sv3 ganimet +%25 ve yağma kaybı −%20."
+  },
+  LINE_ADMIRAL: {
+    label: "Hat Amirali",
+    description: "Sv1 ilk tur çarpışma +%3; Sv2 ilk iki tur +%3; Sv3 ilk iki tur +%5."
+  },
+  FLEET_GUARDIAN: {
+    label: "Filo Muhafızı",
+    description: "Gemi kaybı Sv1 −%3, Sv2 −%5, Sv3 −%7; Sv3 geri çekilme kaybı ayrıca −%10."
+  },
+  BLOCKADE_EXPERT: {
+    label: "Abluka Uzmanı",
+    description: "Deniz ticareti kaybı Sv1 %15, Sv2 %30, Sv3 %60; Sv3 kuşatma açlığını tek seferlik 1 tur kısaltır."
+  }
+} as const;
+export type AdmiralSpecialization = keyof typeof ADMIRAL_SPECIALIZATIONS;
+
+export function admiralBattleRollMultipliers(input:{
+  doctrine:AdmiralDoctrine|null;
+  specialization:AdmiralSpecialization|null;
+  specializationLevel:number;
+  shipTypeCount:number;
+  round:number;
+}):{clash:number;damage:number}{
+  let clash=1;
+  let damage=1;
+  if(input.doctrine==="CLOSED_BATTLE_LINE")damage*=0.95;
+  if(input.doctrine==="FLEXIBLE_FLEET"){
+    const flexible=input.shipTypeCount<=1?1.03:input.shipTypeCount===2?1.02:1;
+    clash*=flexible;
+    damage*=flexible;
+  }
+  if(input.doctrine==="ORDERLY_WITHDRAWAL")clash*=0.97;
+  if(input.doctrine==="BOARDING_ORDER"&&input.round===1)clash*=0.97;
+  if(input.doctrine==="COMBINED_FLEET")clash*=input.shipTypeCount>=3?1.05:input.shipTypeCount===2?1.03:0.97;
+  if(input.specialization==="LINE_ADMIRAL"){
+    const eligibleRounds=input.specializationLevel>=2?2:1;
+    if(input.round<=eligibleRounds)clash*=input.specializationLevel>=3?1.05:1.03;
+  }
+  return {clash,damage};
+}
+
+export function admiralIncomingDamageMultiplier(
+  doctrine:AdmiralDoctrine|null,specialization:AdmiralSpecialization|null,specializationLevel:number
+):number{
+  let multiplier=doctrine==="CLOSED_BATTLE_LINE"?0.95:1;
+  if(specialization==="FLEET_GUARDIAN"){
+    multiplier*=specializationLevel>=3?0.93:specializationLevel>=2?0.95:0.97;
+  }
+  return multiplier;
+}
+
+export function admiralRetreatLossMultiplier(input:{
+  doctrine:AdmiralDoctrine|null;specialization:AdmiralSpecialization|null;specializationLevel:number;
+}):number{
+  let multiplier=input.doctrine==="ORDERLY_WITHDRAWAL"?0.80:1;
+  if(input.specialization==="FLEET_GUARDIAN"&&input.specializationLevel>=3)multiplier*=0.90;
+  return multiplier;
+}
+
+export function admiralEnemyRetreatLossMultiplier(doctrine:AdmiralDoctrine|null):number{
+  return doctrine==="BOARDING_ORDER"?1.15:1;
+}
+
 export const CHARACTER_SPECIALIZATIONS = {
   FIELD_TACTICIAN: { role: "COMMANDER", label: "Meydan Taktisyeni" },
   SIEGE_EXPERT: { role: "COMMANDER", label: "Kuşatma Uzmanı" },

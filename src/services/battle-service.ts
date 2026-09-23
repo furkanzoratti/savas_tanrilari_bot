@@ -14,7 +14,11 @@ import { settlementResourceAccess } from "./resource-service.js";
 import { scheduleMandatoryGarrisonReplenishment } from "./garrison-service.js";
 import { GameError } from "./game-service.js";
 import { formableModifiers, type FormableCountryKey } from "../domain/formable-countries.js";
-import { specializationLevel, type CharacterSpecialization, type CommanderDoctrine } from "../domain/characters.js";
+import {
+  admiralBattleRollMultipliers,admiralEnemyRetreatLossMultiplier,admiralIncomingDamageMultiplier,
+  admiralRetreatLossMultiplier,specializationLevel,
+  type AdmiralDoctrine,type AdmiralSpecialization,type CharacterSpecialization,type CommanderDoctrine
+} from "../domain/characters.js";
 import { deductPopulationForCasualties } from "./population-loss.js";
 
 export type BattleStatus = "DRAFT" | "WAITING_FIRST_ROLL" | "WAITING_SECOND_ROLL" | "READY_TO_RESOLVE" | "FINISHED" | "CANCELLED";
@@ -424,9 +428,13 @@ function defaultArmySiegeTarget(asset: SiegeAssetType): SiegeTarget {
 interface BattleCommanderProfile {
   id: string;
   skill_bonus: number;
+  is_admiral: boolean;
   doctrine: CommanderDoctrine | null;
   specialization: CharacterSpecialization | null;
   specialization_level: number;
+  admiral_doctrine: AdmiralDoctrine | null;
+  admiral_specialization: AdmiralSpecialization | null;
+  admiral_specialization_level: number;
 }
 
 async function battleCommander(
@@ -442,8 +450,9 @@ async function battleCommander(
        SELECT assignment.battle_id,assignment.side_key,fleet.commander_character_id AS commander_id
          FROM battle_fleet_assignments assignment JOIN fleets fleet ON fleet.id=assignment.fleet_id
      )
-     SELECT commander.id,commander.skill_bonus,commander.doctrine,commander.specialization,
-            commander.specialization_level
+     SELECT commander.id,commander.skill_bonus,commander.is_admiral,
+            commander.doctrine,commander.specialization,commander.specialization_level,
+            commander.admiral_doctrine,commander.admiral_specialization,commander.admiral_specialization_level
        FROM assigned assignment JOIN country_characters commander ON commander.id=assignment.commander_id
        LEFT JOIN battle_sides side_record ON side_record.battle_id=assignment.battle_id AND side_record.side_key=assignment.side_key
       WHERE assignment.battle_id=$1 AND assignment.side_key=$2 AND commander.character_status='ACTIVE'
@@ -463,7 +472,12 @@ async function recordCommanderVictory(
   if (!winner) return;
   const fought = await client.query("SELECT 1 FROM battle_rounds WHERE battle_id=$1 LIMIT 1", [battleId]);
   if (!fought.rowCount) return;
-  const commanders = (await client.query<{ id: string; name: string; country_name: string }>(
+  const battleMeta=(await client.query<{terrain:BattleTerrain;guild_id:string}>(
+    "SELECT terrain,guild_id FROM battles WHERE id=$1",[battleId]
+  )).rows[0];
+  if(!battleMeta)return;
+  const naval=battleMeta.terrain==="NAVAL";
+  const commanders = (await client.query<{ id: string; name: string; country_name: string; is_admiral:boolean }>(
     `WITH assigned AS (
        SELECT assignment.battle_id,assignment.side_key,army.commander_character_id AS commander_id
          FROM battle_army_assignments assignment JOIN armies army ON army.id=assignment.army_id
@@ -471,12 +485,13 @@ async function recordCommanderVictory(
        SELECT assignment.battle_id,assignment.side_key,fleet.commander_character_id AS commander_id
          FROM battle_fleet_assignments assignment JOIN fleets fleet ON fleet.id=assignment.fleet_id
      )
-     SELECT DISTINCT commander.id,commander.name,country.name AS country_name
+     SELECT DISTINCT commander.id,commander.name,country.name AS country_name,commander.is_admiral
        FROM assigned assignment JOIN country_characters commander ON commander.id=assignment.commander_id
        JOIN countries country ON country.id=commander.country_id
       WHERE assignment.battle_id=$1 AND assignment.side_key=$2
-        AND commander.role='COMMANDER' AND commander.character_status='ACTIVE'`,
-    [battleId,winner]
+        AND commander.role='COMMANDER' AND commander.character_status='ACTIVE'
+        AND commander.is_admiral=$3`,
+    [battleId,winner,naval]
   )).rows;
   for (const commander of commanders) {
     const inserted = await client.query(
@@ -485,8 +500,16 @@ async function recordCommanderVictory(
       [commander.id,battleId,turn]
     );
     if (!inserted.rowCount) continue;
-    const updated = (await client.query<{commander_victories:number;specialization_level:number}>(
-      `UPDATE country_characters
+    const updated = naval
+      ? (await client.query<{admiral_victories:number;admiral_specialization_level:number}>(
+        `UPDATE country_characters
+            SET admiral_victories=LEAST(9,admiral_victories+1),
+                admiral_specialization_level=CASE WHEN admiral_specialization IS NULL THEN admiral_specialization_level
+                  WHEN admiral_victories+1>=9 THEN 3 WHEN admiral_victories+1>=6 THEN 2
+                  WHEN admiral_victories+1>=3 THEN 1 ELSE 0 END
+          WHERE id=$1 RETURNING admiral_victories,admiral_specialization_level`,[commander.id])).rows[0]!
+      : (await client.query<{commander_victories:number;specialization_level:number}>(
+        `UPDATE country_characters
           SET commander_victories=LEAST(9,commander_victories+1),
               specialization_progress=CASE WHEN specialization IS NULL THEN specialization_progress
                                            ELSE LEAST(9,commander_victories+1) END,
@@ -494,18 +517,20 @@ async function recordCommanderVictory(
                                         WHEN commander_victories+1>=9 THEN 3
                                         WHEN commander_victories+1>=6 THEN 2
                                         WHEN commander_victories+1>=3 THEN 1 ELSE 0 END
-        WHERE id=$1 RETURNING commander_victories,specialization_level`,
-      [commander.id]
-    )).rows[0]!;
-    const guildId = (await client.query<{guild_id:string}>("SELECT guild_id FROM battles WHERE id=$1",[battleId])).rows[0]?.guild_id;
-    if (guildId) await client.query(
+        WHERE id=$1 RETURNING commander_victories,specialization_level`,[commander.id])).rows[0]!;
+    const victoryCount="admiral_victories" in updated?updated.admiral_victories:updated.commander_victories;
+    const progressionLevel="admiral_specialization_level" in updated
+      ?updated.admiral_specialization_level:updated.specialization_level;
+    if (battleMeta.guild_id) await client.query(
       `INSERT INTO character_turn_log_batches(guild_id,game_turn,entries,source,title,dedupe_key)
-       VALUES($1,$2,$3::jsonb,'COMMANDER_RESULT','Komutan Savaş Sonucu',$4)
+       VALUES($1,$2,$3::jsonb,'COMMANDER_RESULT',$4,$5)
        ON CONFLICT(guild_id,dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING`,
-      [guildId,turn,JSON.stringify([
-        "⚔️ **"+commander.name+"** • **"+commander.country_name+"**\n↳ Savaş zaferi kaydedildi • Toplam **"+updated.commander_victories+"/9**"+
-        (Number(updated.specialization_level)>0?" • Uzmanlık Sv"+updated.specialization_level:"")
-      ]),"COMMANDER_VICTORY:"+battleId+":"+commander.id]
+      [battleMeta.guild_id,turn,JSON.stringify([naval
+        ? "⚓ **"+commander.name+"** • **"+commander.country_name+"**\n↳ Deniz zaferi kaydedildi • Toplam **"+victoryCount+"/9**"+
+          (Number(progressionLevel)>0?" • Amiral uzmanlığı Sv"+progressionLevel:"")
+        : "⚔️ **"+commander.name+"** • **"+commander.country_name+"**\n↳ Savaş zaferi kaydedildi • Toplam **"+victoryCount+"/9**"+
+          (Number(progressionLevel)>0?" • Uzmanlık Sv"+progressionLevel:"")
+      ]),naval?"Amiral Deniz Savaşı Sonucu":"Komutan Savaş Sonucu","COMMANDER_VICTORY:"+battleId+":"+commander.id]
     );
   }
 }
@@ -949,6 +974,8 @@ export const battleService = {
       const gateHp = input.terrain === "SIEGE" ? 1_000 : null;
       const siegePhase: SiegePhase | null = input.terrain === "SIEGE" ? "BOMBARDMENT" : null;
       let starvationCapacity: number | null = null;
+      let starvationRemaining: number | null = null;
+      let activeBlockadeId: string | null = null;
       let currentTurn: number | null = null;
       if (defenderSettlementId) {
         const structures = (await client.query<{ building_type: string; level: number }>(
@@ -962,10 +989,24 @@ export const battleService = {
         const defenderFormable = (await client.query<{ active_formable_key: FormableCountryKey | null }>("SELECT c.active_formable_key FROM settlements s JOIN countries c ON c.id=s.country_id WHERE s.id=$1", [defenderSettlementId])).rows[0]?.active_formable_key;
         const bonus = Math.min(8, (farmLevel >= 3 ? 3 : farmLevel >= 2 ? 1 : 0) + (aqueductLevel >= 2 ? 1 : 0) + (reinforced ? 1 : 0) + (formableModifiers(defenderFormable).starvationBonus ?? 0));
         starvationCapacity = BASE_SIEGE_STARVATION_TURNS + bonus;
+        starvationRemaining = starvationCapacity;
         currentTurn = (await client.query<{ current_turn: number }>("SELECT current_turn FROM guilds WHERE discord_id=$1", [input.guildId])).rows[0]?.current_turn ?? 0;
+        const blockade = (await client.query<{ id:string }>(
+          `SELECT id FROM naval_blockades
+            WHERE guild_id=$1 AND target_settlement_id=$2 AND status='ACTIVE'
+              AND admiral_specialization_level>=3 AND starvation_adjusted=FALSE
+            FOR UPDATE`,[input.guildId,defenderSettlementId]
+        )).rows[0];
+        if(blockade){
+          activeBlockadeId=blockade.id;
+          starvationRemaining=Math.max(0,starvationCapacity-1);
+        }
       }
       await client.query(`INSERT INTO battles(id,guild_id,channel_id,terrain,narrative,status,round_number,first_side,created_by,wall_max_hp,wall_current_hp,gate_max_hp,gate_current_hp,siege_phase,defender_settlement_id,starvation_capacity,starvation_remaining,last_starvation_turn)
-        VALUES($1,$2,$3,$4,$5,'DRAFT',1,$6,$7,$8,$8,$9,$9,$10,$11,$12,$12,$13)`, [id, input.guildId, input.channelId, input.terrain, input.narrative, firstSide, input.actorId, wallHp, gateHp, siegePhase, defenderSettlementId, starvationCapacity, currentTurn]);
+        VALUES($1,$2,$3,$4,$5,'DRAFT',1,$6,$7,$8,$8,$9,$9,$10,$11,$12,$13,$14)`, [id, input.guildId, input.channelId, input.terrain, input.narrative, firstSide, input.actorId, wallHp, gateHp, siegePhase, defenderSettlementId, starvationCapacity, starvationRemaining, currentTurn]);
+      if(activeBlockadeId){
+        await client.query("UPDATE naval_blockades SET siege_battle_id=$1,starvation_adjusted=TRUE WHERE id=$2",[id,activeBlockadeId]);
+      }
       await client.query("INSERT INTO battle_sides(battle_id,side_key,country_id,controller,composition,initial_composition,seal) VALUES($1,'A',$2,$3,'{}'::jsonb,'{}'::jsonb,$4),($1,'B',$5,$6,'{}'::jsonb,'{}'::jsonb,$4)", [id, a.id, input.controllerA, sealFor({}), b.id, input.controllerB]);
       await client.query("INSERT INTO battle_side_participants(battle_id,side_key,country_id,is_primary) VALUES($1,'A',$2,TRUE),($1,'B',$3,TRUE)", [id, a.id, b.id]);
       if (defenderSettlementId) {
@@ -1095,6 +1136,8 @@ export const battleService = {
         [input.armyId, input.guildId, battle.id, input.side]
       )).rows[0];
       if (!army) throw new GameError("Ordu bulunamadı veya seçilen savaş tarafındaki bir devlete ait değil.");
+      if(input.action==="ADD"&&(await client.query("SELECT 1 FROM land_raids WHERE army_id=$1 AND status='WAITING_ROLL' LIMIT 1",[army.id])).rowCount)
+        throw new GameError("Yağma zarı bekleyen ordu savaş taslağına eklenemez.");
       if (input.action === "REMOVE") {
         const fromEncounter=await client.query(
           `SELECT 1 FROM movement_encounters encounter
@@ -1226,6 +1269,10 @@ export const battleService = {
         await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'battle.fleet.remove','battle',$3,$4::jsonb)", [input.guildId,input.actorId,battle.id,JSON.stringify({ side:input.side,fleetId:fleet.id,fleetName:fleet.name })]);
         return { view,fleetName:fleet.name,countryName:fleet.country_name,total:0 };
       }
+      if((await client.query("SELECT 1 FROM naval_blockades WHERE fleet_id=$1 AND status='ACTIVE' LIMIT 1",[fleet.id])).rowCount)
+        throw new GameError("Etkin abluka filosu savaşa eklenmeden önce abluka kaldırılmalıdır.");
+      if((await client.query("SELECT 1 FROM naval_raids WHERE fleet_id=$1 AND status='WAITING_ROLL' LIMIT 1",[fleet.id])).rowCount)
+        throw new GameError("Bu filonun deniz yağması zarı sonuçlanmadan filo savaşa eklenemez.");
       const inOtherBattle = await client.query(
         `SELECT 1 FROM battle_fleet_assignments bfa JOIN battles b ON b.id=bfa.battle_id
           WHERE bfa.fleet_id=$1 AND b.id<>$2 AND b.status NOT IN ('FINISHED','CANCELLED') LIMIT 1`, [fleet.id,battle.id]
@@ -1793,9 +1840,11 @@ export const battleService = {
         if (roll.antiCavalryDamage !== undefined) roll.antiCavalryDamage = Math.ceil(roll.antiCavalryDamage * 1.10);
         if (roll.counter) roll.counter = { ...roll.counter, antiCavalryDamage: roll.antiCavalryDamage ?? 0 };
       }
-      if (!doctrineDisabled && commander?.doctrine === "OFFENSIVE") roll.clash = Math.ceil(roll.clash*1.05);
-      if (!doctrineDisabled && commander?.doctrine === "DEFENSIVE") roll.damage = Math.floor(roll.damage*0.95);
-      if (!doctrineDisabled && commander?.doctrine === "FLEXIBLE" && compositionEnabled && roll.composition) {
+      const landCommander = view.battle.terrain === "NAVAL" || commander?.is_admiral ? null : commander;
+      const admiral = view.battle.terrain === "NAVAL" && commander?.is_admiral ? commander : null;
+      if (!doctrineDisabled && landCommander?.doctrine === "OFFENSIVE") roll.clash = Math.ceil(roll.clash*1.05);
+      if (!doctrineDisabled && landCommander?.doctrine === "DEFENSIVE") roll.damage = Math.floor(roll.damage*0.95);
+      if (!doctrineDisabled && landCommander?.doctrine === "FLEXIBLE" && compositionEnabled && roll.composition) {
         const clashTarget = roll.composition.clashMultiplier <= 0.85 ? 0.90
           : roll.composition.clashMultiplier < 1 ? 1 : roll.composition.clashMultiplier;
         const damageTarget = roll.composition.damageMultiplier <= 0.90 ? 0.95
@@ -1808,18 +1857,30 @@ export const battleService = {
         }
         roll.composition = { ...roll.composition, clashMultiplier: clashTarget, damageMultiplier: damageTarget };
       }
-      if (!doctrineDisabled && commander?.doctrine === "ORDERLY_RETREAT") roll.clash = Math.floor(roll.clash*0.97);
-      if (commander?.specialization === "FIELD_TACTICIAN") {
-        const eligibleRounds = commander.specialization_level >= 2 ? 2 : 1;
+      if (!doctrineDisabled && landCommander?.doctrine === "ORDERLY_RETREAT") roll.clash = Math.floor(roll.clash*0.97);
+      if (landCommander?.specialization === "FIELD_TACTICIAN") {
+        const eligibleRounds = landCommander.specialization_level >= 2 ? 2 : 1;
         if (active.round_number <= eligibleRounds) {
-          roll.clash = Math.ceil(roll.clash*(commander.specialization_level >= 3 ? 1.05 : 1.03));
+          roll.clash = Math.ceil(roll.clash*(landCommander.specialization_level >= 3 ? 1.05 : 1.03));
         }
       }
+      if(admiral){
+        const shipTypeCount=(Object.keys(NAVAL_UNIT_STATS) as NavalUnitType[])
+          .filter((ship)=>(target.composition[ship]??0)>0).length;
+        const multipliers=admiralBattleRollMultipliers({
+          doctrine:doctrineDisabled?null:admiral.admiral_doctrine,
+          specialization:admiral.admiral_specialization,
+          specializationLevel:admiral.admiral_specialization_level,
+          shipTypeCount,round:active.round_number
+        });
+        roll.clash=multipliers.clash<1?Math.floor(roll.clash*multipliers.clash):Math.ceil(roll.clash*multipliers.clash);
+        roll.damage=multipliers.damage<1?Math.floor(roll.damage*multipliers.damage):Math.ceil(roll.damage*multipliers.damage);
+      }
       if (view.battle.terrain === "SIEGE" && side === "A") {
-        let siegeMultiplier = !doctrineDisabled && commander?.doctrine === "SIEGE_PREPARATION" ? 1.05 : 1;
-        if (commander?.specialization === "SIEGE_EXPERT") {
-          siegeMultiplier *= commander.specialization_level >= 2 ? 1.10 : 1.05;
-          if (active.round_number <= (commander.specialization_level >= 3 ? 2 : 1) && commander.specialization_level >= 2) {
+        let siegeMultiplier = !doctrineDisabled && landCommander?.doctrine === "SIEGE_PREPARATION" ? 1.05 : 1;
+        if (landCommander?.specialization === "SIEGE_EXPERT") {
+          siegeMultiplier *= landCommander.specialization_level >= 2 ? 1.10 : 1.05;
+          if (active.round_number <= (landCommander.specialization_level >= 3 ? 2 : 1) && landCommander.specialization_level >= 2) {
             roll.clash = Math.ceil(roll.clash*1.03);
           }
         }
@@ -1861,9 +1922,16 @@ export const battleService = {
       const defenderEffectiveClash = Math.ceil(rollB.clash_total * defense.defenderClash);
       let defenderEffectiveDamage = Math.ceil(rollB.damage_total * defense.defenderDamage);
       let attackerEffectiveDamage = rollA.damage_total;
-      const commanderA = naval ? null : await battleCommander(client,active.id,"A");
-      const commanderB = naval ? null : await battleCommander(client,active.id,"B");
+      const commanderA = await battleCommander(client,active.id,"A");
+      const commanderB = await battleCommander(client,active.id,"B");
       const incomingMultiplier = (commander: BattleCommanderProfile | null): number => {
+        if(naval){
+          if(!commander?.is_admiral)return 1;
+          return admiralIncomingDamageMultiplier(
+            commander.admiral_doctrine,commander.admiral_specialization,commander.admiral_specialization_level
+          );
+        }
+        if(commander?.is_admiral)return 1;
         let multiplier = commander?.doctrine === "DEFENSIVE" ? 0.95 : 1;
         if (commander?.doctrine === "OFFENSIVE") multiplier *= 1.05;
         if (commander?.specialization === "GUARDIAN") {
@@ -2004,8 +2072,19 @@ export const battleService = {
       if (!side) throw new GameError("Bu savaşın taraflarından birine bağlı değilsin.");
       let calculated = retreatLoss(view, side);
       const commander = await battleCommander(client,active.id,side);
-      if (commander?.doctrine === "ORDERLY_RETREAT") calculated = Math.floor(calculated*0.80);
-      if (commander?.specialization === "QUARTERMASTER") {
+      if(view.battle.terrain==="NAVAL"){
+        if(commander?.is_admiral){
+          calculated=Math.floor(calculated*admiralRetreatLossMultiplier({
+            doctrine:commander.admiral_doctrine,specialization:commander.admiral_specialization,
+            specializationLevel:commander.admiral_specialization_level
+          }));
+        }
+        const winnerAdmiral=await battleCommander(client,active.id,side==="A"?"B":"A");
+        if(winnerAdmiral?.is_admiral){
+          calculated=Math.ceil(calculated*admiralEnemyRetreatLossMultiplier(winnerAdmiral.admiral_doctrine));
+        }
+      }else if(!commander?.is_admiral&&commander?.doctrine === "ORDERLY_RETREAT") calculated = Math.floor(calculated*0.80);
+      if (view.battle.terrain!=="NAVAL"&&!commander?.is_admiral&&commander?.specialization === "QUARTERMASTER") {
         const multiplier = commander.specialization_level >= 3 ? 0.75 : commander.specialization_level >= 2 ? 0.80 : 0.90;
         calculated = Math.floor(calculated*multiplier);
       }

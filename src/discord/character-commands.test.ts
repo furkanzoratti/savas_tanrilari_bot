@@ -37,6 +37,23 @@ describe("Akademi karakter komutları", () => {
     expect(characterAvailableForCommand({...commander,assignment:"ARMY"},"komutan","amirale-donustur")).toBe(false);
   });
 
+  it("Amiral için ayrı doktrin ve 3 deniz zaferinde açılan uzmanlık sunar",()=>{
+    const command=commandBuilders.find((item)=>item.name==="amiral");
+    expect(command?.options?.map((item)=>item.name)).toEqual(["doktrin-sec","uzmanlik-sec"]);
+    expect(command?.options?.find((item)=>item.name==="doktrin-sec")?.options?.find((item)=>item.name==="doktrin")?.choices)
+      .toHaveLength(5);
+    expect(command?.options?.find((item)=>item.name==="uzmanlik-sec")?.options?.find((item)=>item.name==="uzmanlik")?.choices)
+      .toHaveLength(4);
+    const admiral={
+      ...availableCharacter,role:"COMMANDER" as const,is_admiral:true,
+      admiral_doctrine:null,admiral_specialization:null,admiral_victories:2
+    };
+    expect(characterAvailableForCommand(admiral,"amiral","doktrin-sec")).toBe(true);
+    expect(characterAvailableForCommand(admiral,"amiral","uzmanlik-sec")).toBe(false);
+    expect(characterAvailableForCommand({...admiral,admiral_victories:3},"amiral","uzmanlik-sec")).toBe(true);
+    expect(characterAvailableForCommand(admiral,"komutan","doktrin-sec")).toBe(false);
+  });
+
   it("aynı turda yeniden görevlendirilebilen Diplomat ve Tüccarı doğru filtreler", () => {
     expect(characterAvailableForCommand(availableCharacter,"diplomat","vassallastir")).toBe(true);
     expect(characterAvailableForCommand(availableCharacter,"diplomat","asimilasyon")).toBe(true);
@@ -107,5 +124,57 @@ describe("Akademi karakter komutları", () => {
 
     expect(embed.description).toContain("Yabancı Ticari İmtiyaz");
     expect(embed.description).not.toContain("Şehir karşı casusluğu");
+  });
+
+  it("panelin üstünde Akademi kapasitesini, altında ölüm şehrini gösterir", () => {
+    const base = {
+      id:"00000000-0000-4000-8000-000000000011",country_id:"00000000-0000-4000-8000-000000000012",
+      assignment:"NONE",assignment_ready_turn:null,doctrine:null,commander_victories:0,specialization:null,
+      specialization_progress:0,specialization_level:0,is_admiral:false,unavailable_until_turn:null,
+      trained_settlement_name:null,assigned_settlement_name:null,assigned_country_name:null,
+      assigned_army_name:null,assigned_fleet_name:null,operation_type:null,operation_status:null,
+      operation_progress:null,operation_goal:null,target_country_name:null,target_settlement_name:null
+    } as const;
+    const embed = charactersEmbed("Roma", [
+      {...base,name:"Marcus",role:"COMMANDER",skill_bonus:1,character_status:"ACTIVE"},
+      {...base,id:"00000000-0000-4000-8000-000000000013",name:"Cassia",role:"SPY",skill_bonus:2,
+        character_status:"DEAD",died_at:"2026-09-22T12:00:00Z",death_settlement_name:"İskenderiye"},
+      {...base,id:"00000000-0000-4000-8000-000000000014",name:"Livia",role:"DIPLOMAT",skill_bonus:1,
+        character_status:"DEAD",died_at:"2026-09-21T12:00:00Z",death_settlement_name:"Roma"},
+      {...base,id:"00000000-0000-4000-8000-000000000015",name:"Titus",role:"MERCHANT",skill_bonus:0,
+        character_status:"DEAD",died_at:"2026-09-20T12:00:00Z",death_settlement_name:"Kartaca"},
+      {...base,id:"00000000-0000-4000-8000-000000000016",name:"Aulus",role:"COMMANDER",skill_bonus:3,
+        character_status:"DEAD",is_admiral:true,died_at:"2026-09-19T12:00:00Z",death_settlement_name:"Rodos"}
+    ],{academies:2,characters:1,pending:1,capacity:10}).toJSON();
+
+    expect(embed.description).toContain("Akademi: **2**");
+    expect(embed.description).toContain("Barındırılabilir karakter: **10**");
+    expect(embed.description).toContain("Mevcut karakter: **1/10**");
+    expect(embed.description).toContain("💀 Ölü Karakterler");
+    expect(embed.description).toContain("Öldüğü şehir: **İskenderiye**");
+    expect(embed.description).toContain("**Livia** — Diplomat (+1)");
+    expect(embed.description).toContain("Öldüğü şehir: **Roma**");
+    expect(embed.description).toContain("**Titus** — Tüccar (+0)");
+    expect(embed.description).toContain("Öldüğü şehir: **Kartaca**");
+    expect(embed.description).toContain("**Aulus** — Amiral (+3)");
+    expect(embed.description).toContain("Öldüğü şehir: **Rodos**");
+  });
+
+  it("Amiralin deniz zaferi, doktrini ve uzmanlık seviyesini gösterir",()=>{
+    const embed=charactersEmbed("Rodos",[{
+      id:"00000000-0000-4000-8000-000000000021",country_id:"00000000-0000-4000-8000-000000000022",
+      name:"Theodoros",role:"COMMANDER",skill_bonus:2,assignment:"FLEET",assignment_ready_turn:null,
+      doctrine:"OFFENSIVE",commander_victories:7,specialization:"FIELD_TACTICIAN",specialization_progress:7,
+      specialization_level:2,character_status:"ACTIVE",is_admiral:true,admiral_doctrine:"COMBINED_FLEET",
+      admiral_specialization:"SEA_RAIDER",admiral_victories:6,admiral_specialization_level:2,
+      unavailable_until_turn:null,trained_settlement_name:"Rodos",assigned_settlement_name:null,
+      assigned_country_name:null,assigned_army_name:null,assigned_fleet_name:"Ege Filosu",operation_type:null,
+      operation_status:null,operation_progress:null,operation_goal:null,target_country_name:null,target_settlement_name:null
+    }]).toJSON();
+    expect(embed.description).toContain("Deniz zaferi 6/9");
+    expect(embed.description).toContain("Birleşik Filo Doktrini");
+    expect(embed.description).toContain("Deniz Akıncısı Sv2");
+    expect(embed.description).not.toContain("Saldırı Doktrini");
+    expect(embed.description).not.toContain("Meydan Taktisyeni");
   });
 });

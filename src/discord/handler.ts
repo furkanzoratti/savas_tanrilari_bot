@@ -49,6 +49,8 @@ import { publishGreatPowerRanking } from "./great-power-ui.js";
 import { BRAND_BANNER_PATH, BRAND_BANNER_NAME, TEMPLE_BANNER_PATH, TEMPLE_BANNER_NAME, TURN_BANNER_PATH, TURN_BANNER_NAME } from "./assets.js";
 import { turnAnnouncement } from "./turn-announcements.js";
 import { handleBattleButton, handleBattleCommand, refreshActiveBattleCards } from "./battle-ui.js";
+import { handleNavalOperationsAutocomplete,handleNavalOperationsButton,handleNavalOperationsCommand } from "./naval-operations-ui.js";
+import { handleLandRaidsAutocomplete,handleLandRaidsButton,handleLandRaidsCommand } from "./land-raids-ui.js";
 import { handleArmyCommand } from "./army-ui.js";
 import { handleFleetCommand } from "./fleet-ui.js";
 import { handleMovementButton, handleMovementCommand, handleMovementModal, handleMovementSelect } from "./movement-ui.js";
@@ -1140,6 +1142,8 @@ async function handleGreatPowerCommand(interaction: ChatInputCommandInteraction)
 }
 async function handleCommand(interaction: ChatInputCommandInteraction): Promise<void> {
   if (await handleGreatGamesCommand(interaction)) return;
+  if (await handleNavalOperationsCommand(interaction)) return;
+  if (await handleLandRaidsCommand(interaction)) return;
   if (interaction.commandName === "olay-yoneticisi") {
     requireGameMaster(interaction);
     if (!interaction.guild) throw new GameError("Sunucu bulunamadı.");
@@ -1564,6 +1568,8 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
 
 async function handleButton(interaction: ButtonInteraction): Promise<void> {
   if (await handleMovementButton(interaction)) return;
+  if (await handleNavalOperationsButton(interaction)) return;
+  if (await handleLandRaidsButton(interaction)) return;
   if (await handleGreatGamesButton(interaction)) return;
   if (await handleWarDeclarationButton(interaction)) return;
   if (await handleDiplomacyButton(interaction)) return;
@@ -1624,6 +1630,8 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
 }
 
 async function handleAutocomplete(interaction: AutocompleteInteraction): Promise<void> {
+  if (await handleNavalOperationsAutocomplete(interaction)) return;
+  if (await handleLandRaidsAutocomplete(interaction)) return;
   if (await handleCharacterAutocomplete(interaction)) return;
   if (await handleEspionageAutocomplete(interaction)) return;
   if (await handleCityAutocomplete(interaction)) return;

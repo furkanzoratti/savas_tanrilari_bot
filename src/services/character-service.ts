@@ -1,10 +1,10 @@
 import { randomInt } from "node:crypto";
 import { pool, withTransaction, type DbClient } from "../db/pool.js";
 import {
-  CHARACTER_SPECIALIZATIONS, COMMANDER_DOCTRINES, DIPLOMAT_TASK_LABELS, DIPLOMAT_VASSALIZATION_GOAL, MERCHANT_TASK_LABELS, culturePopulationResistance,
+  ADMIRAL_DOCTRINES, ADMIRAL_SPECIALIZATIONS, CHARACTER_SPECIALIZATIONS, COMMANDER_DOCTRINES, DIPLOMAT_TASK_LABELS, DIPLOMAT_VASSALIZATION_GOAL, MERCHANT_TASK_LABELS, culturePopulationResistance,
   cultureProgressDelta, diplomaticPowerBonus, integrationProgressDelta,
   merchantBaseDiscount, specializationLevel, vassalizationProgressDelta,
-  type CharacterSpecialization, type CommanderDoctrine, type DiplomatTask, type MerchantTask
+  type AdmiralDoctrine, type AdmiralSpecialization, type CharacterSpecialization, type CommanderDoctrine, type DiplomatTask, type MerchantTask
 } from "../domain/characters.js";
 import type { CharacterRole } from "../domain/types.js";
 import { caravanseraiForeignConcessionBonus } from "../domain/catalog.js";
@@ -29,6 +29,10 @@ export interface CharacterView {
   specialization_tracks?: Record<string, number>;
   character_status: "ACTIVE" | "DEAD" | "DISMISSED";
   is_admiral: boolean;
+  admiral_doctrine?: AdmiralDoctrine | null;
+  admiral_specialization?: AdmiralSpecialization | null;
+  admiral_victories?: number;
+  admiral_specialization_level?: number;
   unavailable_until_turn: number | null;
   trained_settlement_name: string | null;
   assigned_settlement_name: string | null;
@@ -41,6 +45,8 @@ export interface CharacterView {
   operation_goal: number | null;
   target_country_name: string | null;
   target_settlement_name: string | null;
+  died_at?: Date | string | null;
+  death_settlement_name?: string | null;
 }
 
 interface GuildState {
@@ -236,6 +242,9 @@ export const characterService = {
               character.commander_victories,character.specialization,character.specialization_progress,
               character.specialization_level,character.specialization_choice_credit,
               character.character_status,character.is_admiral,character.unavailable_until_turn,
+              character.admiral_doctrine,character.admiral_specialization,
+              character.admiral_victories,character.admiral_specialization_level,
+              character.died_at,death_settlement.name AS death_settlement_name,
               COALESCE(specialization_tracks.tracks,'{}'::jsonb) AS specialization_tracks,
               trained.name AS trained_settlement_name,assigned.name AS assigned_settlement_name,
               assigned_country.name AS assigned_country_name,army.name AS assigned_army_name,fleet.name AS assigned_fleet_name,
@@ -247,6 +256,7 @@ export const characterService = {
          FROM country_characters character
          LEFT JOIN settlements trained ON trained.id=character.trained_settlement_id
          LEFT JOIN settlements assigned ON assigned.id=character.assigned_settlement_id
+         LEFT JOIN settlements death_settlement ON death_settlement.id=character.death_settlement_id
          LEFT JOIN countries assigned_country ON assigned_country.id=assigned.country_id
          LEFT JOIN armies army ON army.commander_character_id=character.id
          LEFT JOIN fleets fleet ON fleet.commander_character_id=character.id
@@ -285,9 +295,11 @@ export const characterService = {
     await withTransaction(async (client) => {
       const character = await activeCharacter(client, input.countryId, input.characterId, "COMMANDER");
       if (!(input.doctrine in COMMANDER_DOCTRINES)) throw new GameError("Geçersiz Komutan doktrini.");
-      const current = (await client.query<{ doctrine: string | null }>(
-        "SELECT doctrine FROM country_characters WHERE id=$1", [character.id]
-      )).rows[0]?.doctrine;
+      const state = (await client.query<{ doctrine: string | null; is_admiral:boolean }>(
+        "SELECT doctrine,is_admiral FROM country_characters WHERE id=$1", [character.id]
+      )).rows[0]!;
+      if (state.is_admiral) throw new GameError("Amiraller kara Komutanı doktrini seçemez; /amiral doktrin-sec kullanın.");
+      const current=state.doctrine;
       if (current) throw new GameError("Bu Komutanın kalıcı doktrini daha önce seçilmiş; değiştirilemez.");
       await client.query("UPDATE country_characters SET doctrine=$1 WHERE id=$2", [input.doctrine, character.id]);
     });
@@ -297,14 +309,45 @@ export const characterService = {
     await withTransaction(async (client) => {
       const character = await activeCharacter(client, input.countryId, input.characterId, "COMMANDER");
       if (CHARACTER_SPECIALIZATIONS[input.specialization]?.role !== "COMMANDER") throw new GameError("Geçersiz Komutan uzmanlığı.");
-      const state = (await client.query<{ commander_victories: number; specialization: string | null }>(
-        "SELECT commander_victories,specialization FROM country_characters WHERE id=$1", [character.id]
+      const state = (await client.query<{ commander_victories: number; specialization: string | null; is_admiral:boolean }>(
+        "SELECT commander_victories,specialization,is_admiral FROM country_characters WHERE id=$1", [character.id]
       )).rows[0]!;
+      if (state.is_admiral) throw new GameError("Amiraller kara Komutanı uzmanlığı seçemez; /amiral uzmanlik-sec kullanın.");
       if (state.specialization) throw new GameError("Bu Komutanın kalıcı uzmanlığı daha önce seçilmiş; değiştirilemez.");
       if (Number(state.commander_victories) < 3) throw new GameError("Uzmanlık için en az 3 geçerli savaş zaferi gerekir.");
       await client.query(
         "UPDATE country_characters SET specialization=$1,specialization_progress=commander_victories,specialization_level=$2 WHERE id=$3",
         [input.specialization, specializationLevel(Number(state.commander_victories)), character.id]
+      );
+    });
+  },
+
+  async setAdmiralDoctrine(input: { countryId:string; characterId:string; doctrine:AdmiralDoctrine }):Promise<void>{
+    await withTransaction(async(client)=>{
+      const character=await activeCharacter(client,input.countryId,input.characterId,"COMMANDER");
+      if(!(input.doctrine in ADMIRAL_DOCTRINES))throw new GameError("Geçersiz Amiral doktrini.");
+      const state=(await client.query<{is_admiral:boolean;admiral_doctrine:AdmiralDoctrine|null}>(
+        "SELECT is_admiral,admiral_doctrine FROM country_characters WHERE id=$1 FOR UPDATE",[character.id]
+      )).rows[0]!;
+      if(!state.is_admiral)throw new GameError("Seçilen karakter kalıcı olarak Amirale dönüştürülmemiş.");
+      if(state.admiral_doctrine)throw new GameError("Bu Amiralin kalıcı doktrini daha önce seçilmiş; değiştirilemez.");
+      await client.query("UPDATE country_characters SET admiral_doctrine=$1 WHERE id=$2",[input.doctrine,character.id]);
+    });
+  },
+
+  async setAdmiralSpecialization(input:{countryId:string;characterId:string;specialization:AdmiralSpecialization}):Promise<void>{
+    await withTransaction(async(client)=>{
+      const character=await activeCharacter(client,input.countryId,input.characterId,"COMMANDER");
+      if(!(input.specialization in ADMIRAL_SPECIALIZATIONS))throw new GameError("Geçersiz Amiral uzmanlığı.");
+      const state=(await client.query<{
+        is_admiral:boolean;admiral_victories:number;admiral_specialization:AdmiralSpecialization|null;
+      }>("SELECT is_admiral,admiral_victories,admiral_specialization FROM country_characters WHERE id=$1 FOR UPDATE",[character.id])).rows[0]!;
+      if(!state.is_admiral)throw new GameError("Seçilen karakter kalıcı olarak Amirale dönüştürülmemiş.");
+      if(state.admiral_specialization)throw new GameError("Bu Amiralin kalıcı uzmanlığı daha önce seçilmiş; değiştirilemez.");
+      if(Number(state.admiral_victories)<3)throw new GameError("Amiral uzmanlığı için en az 3 deniz savaşı zaferi gerekir.");
+      await client.query(
+        "UPDATE country_characters SET admiral_specialization=$1,admiral_specialization_level=$2 WHERE id=$3",
+        [input.specialization,specializationLevel(Number(state.admiral_victories)),character.id]
       );
     });
   },

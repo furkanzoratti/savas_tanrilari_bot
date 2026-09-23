@@ -96,6 +96,10 @@ async function assertMutable(
       WHERE bfa.fleet_id=$1 AND b.status NOT IN ('FINISHED','CANCELLED') LIMIT 1`, [fleetId]
   );
   if (active.rowCount) throw new GameError("Bu filo etkin bir savaşa bağlıyken gemileri, komutanı veya kaydı değiştirilemez.");
+  const blockade = await client.query("SELECT 1 FROM naval_blockades WHERE fleet_id=$1 AND status='ACTIVE' LIMIT 1",[fleetId]);
+  if(blockade.rowCount)throw new GameError("Bu filo etkin bir abluka yürütürken gemileri, Amirali veya kaydı değiştirilemez; önce ablukayı kaldırın.");
+  const raid = await client.query("SELECT 1 FROM naval_raids WHERE fleet_id=$1 AND status='WAITING_ROLL' LIMIT 1",[fleetId]);
+  if(raid.rowCount)throw new GameError("Bu filonun bekleyen deniz yağması sonuçlanmadan gemileri, Amirali veya kaydı değiştirilemez.");
   const movementEnabled = Boolean((await client.query<{ enabled: boolean }>(
     `SELECT COALESCE(settings.enabled,FALSE) AS enabled
        FROM fleets fleet
