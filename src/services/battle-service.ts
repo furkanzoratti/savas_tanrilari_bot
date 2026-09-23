@@ -595,6 +595,7 @@ async function applyLossesToDocuments(client: DbClient, battleId: string, guildI
       let stateRequested = sourceAllocation.state;
       let stateApplied = 0;
       let populationApplied = 0;
+      let detachedPopulationAccounted = 0;
       if (!naval && forceType === "militia" && side.side_key === "B" && battle.defender_settlement_id && side.temporary_militia > 0) {
         const temporaryLoss = Math.min(stateRequested, side.temporary_militia);
         if (temporaryLoss > 0) {
@@ -734,8 +735,10 @@ async function applyLossesToDocuments(client: DbClient, battleId: string, guildI
             ? allocateLossBySource(Math.min(share.loss, armyTotal), armyTotal, armySources).mercenaries
             : [];
           for (const armyShare of armyShares) {
-            const allocations = (await client.query<{ settlement_id: string; quantity: number }>(
-              "SELECT settlement_id,quantity FROM army_units WHERE army_id=$1 AND unit_type=$2 ORDER BY settlement_id FOR UPDATE",
+            const allocations = (await client.query<{ settlement_id: string; quantity: number; origin_country_id: string }>(
+              `SELECT au.settlement_id,au.quantity,origin.country_id AS origin_country_id
+                 FROM army_units au JOIN settlements origin ON origin.id=au.settlement_id
+                WHERE au.army_id=$1 AND au.unit_type=$2 ORDER BY au.settlement_id FOR UPDATE OF au`,
               [armyShare.contractId, forceType]
             )).rows;
             const allocationTotal = allocations.reduce((sum, row) => sum + Number(row.quantity), 0);
@@ -746,6 +749,19 @@ async function applyLossesToDocuments(client: DbClient, battleId: string, guildI
             for (const sourceShare of sourceShares) {
               const allocation = allocations.find((row) => row.settlement_id === sourceShare.contractId);
               if (!allocation) continue;
+              if (allocation.origin_country_id !== participant.country_id) {
+                const sourceApplied=Math.min(Number(allocation.quantity),sourceShare.loss);
+                if (!sourceApplied) continue;
+                const nextAllocation=Number(allocation.quantity)-sourceApplied;
+                if(nextAllocation<=0)await client.query("DELETE FROM army_units WHERE army_id=$1 AND settlement_id=$2 AND unit_type=$3",[armyShare.contractId,allocation.settlement_id,forceType]);
+                else await client.query("UPDATE army_units SET quantity=$1 WHERE army_id=$2 AND settlement_id=$3 AND unit_type=$4",[nextAllocation,armyShare.contractId,allocation.settlement_id,forceType]);
+                await client.query("UPDATE armies SET updated_at=NOW() WHERE id=$1",[armyShare.contractId]);
+                // Bu askerlerin nüfusu şehir fethedildiği anda köken yerleşkeden çıkarıldı.
+                // Savaş kaybı burada yalnız ordu kaydını azaltır; ikinci kez nüfus düşülmez.
+                detachedPopulationAccounted+=sourceApplied;
+                stateApplied+=sourceApplied;
+                continue;
+              }
               const stackRows=(await client.query<{id:string;quantity:number}>(
                 `SELECT id,quantity FROM unit_stacks
                   WHERE settlement_id=$1 AND unit_type=$2 AND force_type='ARMY'
@@ -863,7 +879,7 @@ async function applyLossesToDocuments(client: DbClient, battleId: string, guildI
       const applied = mercenaryApplied + stateApplied;
       const expectedPopulationLoss=naval
         ? shipCrewRequirement(forceType as keyof typeof import("../domain/catalog.js").SHIPS,stateApplied)
-        : stateApplied;
+        : Math.max(0,stateApplied-detachedPopulationAccounted);
       const populationShortfall = Math.max(0, expectedPopulationLoss - populationApplied);
       const shortfall = Math.max(0, calculated - applied);
       await client.query(

@@ -237,7 +237,7 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
           inline: true
         },
         { name: "💰 Gelir Kalemleri", value: spacedSection(incomes), inline: true },
-        { name: "🧾 Yerleşke Giderleri", value: spacedSection(`Bina: ${gold(settlement.buildingUpkeep)}\nOrdu: ${gold(settlement.unitUpkeep)}\nDonanma: ${gold(settlement.shipUpkeep)}\n**Toplam: ${gold(settlement.totalSettlementUpkeep)}**`), inline: true },
+        { name: "🧾 Yerleşke Giderleri", value: spacedSection(`Bina: ${gold(settlement.buildingUpkeep)}\nOrdu: ${gold(settlement.unitUpkeep)}${settlement.displacedArmyUpkeep > 0 ? `\n↳ Kayıp kökenli saha ordusu bakımı: ${gold(settlement.displacedArmyUpkeep)}` : ""}\nDonanma: ${gold(settlement.shipUpkeep)}\n**Toplam: ${gold(settlement.totalSettlementUpkeep)}**`), inline: true },
         { name: "🌐 Etkin Kaynaklar ve Etkileri", value: spacedSection(resourceDetails || "Etkin hammadde etkisi bulunmuyor.") },
         { name: "🏗️ Binalar ve İnşaatlar", value: spacedSection(buildings) }
       );

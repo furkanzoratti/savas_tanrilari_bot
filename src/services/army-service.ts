@@ -3,6 +3,7 @@ import { pool, withTransaction } from "../db/pool.js";
 import { SIEGE_ASSETS } from "../domain/catalog.js";
 import { BATTLE_UNIT_STATS, assessArmyComposition, type ArmyCompositionAssessment, type BattleComposition, type BattleUnitType, type SiegeAssetType, type SiegeComposition } from "../domain/battle.js";
 import { GameError } from "./game-service.js";
+import { depositArmyStock } from "./unit-inventory-service.js";
 
 export type MobileSiegeAssetType = Exclude<SiegeAssetType, "wall_ballista">;
 
@@ -312,19 +313,29 @@ export const armyService = {
       if (!Number.isInteger(input.quantity) || input.quantity < 1) throw new GameError("Çıkarılacak asker miktarı pozitif tam sayı olmalıdır.");
       const army = await resolveArmy(client, input.countryId, input.army, true);
       await assertMutable(client, army.id);
-      const row = (await client.query<{ settlement_id: string; quantity: number }>(
-        `SELECT au.settlement_id,au.quantity FROM army_units au JOIN settlements s ON s.id=au.settlement_id
+      const row = (await client.query<{ settlement_id: string; quantity: number; origin_country_id: string }>(
+        `SELECT au.settlement_id,au.quantity,s.country_id AS origin_country_id FROM army_units au JOIN settlements s ON s.id=au.settlement_id
           WHERE au.army_id=$1 AND au.unit_type=$2 AND (s.id::text=$3 OR lower(s.name)=lower($3))
           FOR UPDATE OF au`,
         [army.id, input.unitType, input.settlement.trim()]
       )).rows[0];
       if (!row) throw new GameError("Bu orduda seçilen yerleşkeye ait böyle bir birlik bulunmuyor.");
       if (input.quantity > Number(row.quantity)) throw new GameError(`Orduda bu kaynak için yalnızca ${row.quantity} asker var.`);
+      let restoredSettlementId: string | null = null;
+      if (row.origin_country_id !== input.countryId) {
+        const destination = (await client.query<{ id: string }>(
+          "SELECT id FROM settlements WHERE country_id=$1 ORDER BY population DESC,id LIMIT 1 FOR UPDATE",
+          [input.countryId]
+        )).rows[0];
+        if (!destination) throw new GameError("Bu devletin askerin dönebileceği bir yerleşkesi kalmadı.");
+        await depositArmyStock(client, destination.id, input.unitType, input.quantity);
+        restoredSettlementId = destination.id;
+      }
       const next = Number(row.quantity) - input.quantity;
       if (next === 0) await client.query("DELETE FROM army_units WHERE army_id=$1 AND settlement_id=$2 AND unit_type=$3", [army.id, row.settlement_id, input.unitType]);
       else await client.query("UPDATE army_units SET quantity=$1 WHERE army_id=$2 AND settlement_id=$3 AND unit_type=$4", [next, army.id, row.settlement_id, input.unitType]);
       await client.query("UPDATE armies SET updated_at=NOW() WHERE id=$1", [army.id]);
-      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'army.units.remove','army',$3,$4::jsonb)", [input.guildId,input.actorId,army.id,JSON.stringify({settlementId:row.settlement_id,unitType:input.unitType,quantity:input.quantity})]);
+      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'army.units.remove','army',$3,$4::jsonb)", [input.guildId,input.actorId,army.id,JSON.stringify({settlementId:row.settlement_id,unitType:input.unitType,quantity:input.quantity,restoredSettlementId})]);
       return loadArmy(client,army.id,input.countryId);
     });
   },
@@ -440,9 +451,22 @@ export const armyService = {
           LIMIT 1`,
         [army.id,input.guildId]
       )).rowCount) throw new GameError("Bu orduya askerler yoldayken ordu dağıtılamaz.");
+      const destination = (await client.query<{ id: string }>(
+        "SELECT id FROM settlements WHERE country_id=$1 ORDER BY population DESC,id LIMIT 1 FOR UPDATE",
+        [input.countryId]
+      )).rows[0];
+      const displaced = (await client.query<{ unit_type: BattleUnitType; quantity: number }>(
+        `SELECT au.unit_type,SUM(au.quantity)::integer AS quantity
+           FROM army_units au JOIN settlements origin ON origin.id=au.settlement_id
+          WHERE au.army_id=$1 AND origin.country_id<>$2
+          GROUP BY au.unit_type`,
+        [army.id,input.countryId]
+      )).rows;
+      if (displaced.length && !destination) throw new GameError("Bu devletin dağıtılan askerlerin dönebileceği bir yerleşkesi kalmadı.");
+      for (const unit of displaced) await depositArmyStock(client,destination!.id,unit.unit_type,Number(unit.quantity));
       if (army.commander_character_id) await client.query("UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL WHERE id=$1", [army.commander_character_id]);
       await client.query("DELETE FROM armies WHERE id=$1", [army.id]);
-      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'army.disband','army',$3,$4::jsonb)", [input.guildId,input.actorId,army.id,JSON.stringify({name:army.name,releasedPersonnel:army.total})]);
+      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'army.disband','army',$3,$4::jsonb)", [input.guildId,input.actorId,army.id,JSON.stringify({name:army.name,releasedPersonnel:army.total,restoredDisplacedPersonnel:displaced.reduce((sum,row)=>sum+Number(row.quantity),0),restoredSettlementId:destination?.id??null})]);
       return army.name;
     });
   },

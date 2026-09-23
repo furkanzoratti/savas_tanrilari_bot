@@ -22,6 +22,7 @@ import type { FleetView } from "./fleet-service.js";
 import { resolveMovementStage, type MovementStageSummary } from "./movement-turn-service.js";
 import { syncObserverPosts } from "./movement-observer-service.js";
 import { awardCharacterSpecializationProgress } from "./character-specialization-progress.js";
+import { conquestArmyPopulationDeparture, loadDisplacedArmySupport, supportedPersonnel } from "./displaced-army-support.js";
 
 export class GameError extends Error {}
 
@@ -217,6 +218,8 @@ export interface CountryDocument {
     totalSettlementUpkeep: number;
     populationGain: number;
     militaryUsed: number;
+    displacedArmyPersonnel: number;
+    displacedArmyUpkeep: number;
     militaryLimit: number;
     trainingCapacity: number;
     trainingUsed: number;
@@ -406,6 +409,7 @@ async function settlementTransferMaintenanceReserve(
   const units = (await client.query<{ unit_type: keyof typeof UNITS; quantity: number; status: UnitStatus }>(
     "SELECT unit_type,quantity,status FROM unit_stacks WHERE settlement_id=$1", [settlement.id]
   )).rows;
+  const displacedUnits = (await loadDisplacedArmySupport(client,country.id)).get(settlement.id) ?? [];
   const ships = (await client.query<{ ship_type: keyof typeof SHIPS; quantity: number; status: ShipStatus }>(
     "SELECT ship_type,quantity,status FROM naval_units WHERE settlement_id=$1", [settlement.id]
   )).rows;
@@ -413,7 +417,7 @@ async function settlementTransferMaintenanceReserve(
     "SELECT COALESCE(SUM(turn_upkeep),0)::bigint AS total FROM mercenary_contracts WHERE settlement_id=$1 AND status IN ('ACTIVE','UNPAID')",
     [settlement.id]
   )).rows[0]?.total ?? 0;
-  const unitUpkeep = units.reduce((sum, unit) => sum + calculateUnitUpkeep(
+  const unitUpkeep = [...units,...displacedUnits.map((unit)=>({...unit,status:"FIELD_FRIENDLY" as UnitStatus}))].reduce((sum, unit) => sum + calculateUnitUpkeep(
     unit.unit_type, unit.quantity, unit.status, country.mobilization, effectiveResources, country.manpower_penalty_active
   ), 0);
   const shipUpkeep = applyFormableShipUpkeepDiscount(ships.reduce((sum, ship) => sum + calculateShipUpkeep(
@@ -530,6 +534,14 @@ async function countryManpower(client: DbClient, countryId: string): Promise<{ p
        FROM unit_stacks u JOIN settlements s ON s.id = u.settlement_id WHERE s.country_id = $1`,
     [countryId]
   );
+  const displacedResult = await client.query<{ total: number }>(
+    `SELECT COALESCE(SUM(au.quantity),0)::bigint AS total
+       FROM army_units au
+       JOIN armies army ON army.id=au.army_id
+       JOIN settlements origin ON origin.id=au.settlement_id
+      WHERE army.country_id=$1 AND origin.country_id<>army.country_id`,
+    [countryId]
+  );
   const pendingResult = await client.query<{ total: number }>(
     "SELECT COALESCE(SUM(remaining_quantity), 0)::bigint AS total FROM recruitment_orders WHERE country_id = $1 AND status = 'TRAINING'",
     [countryId]
@@ -551,7 +563,7 @@ async function countryManpower(client: DbClient, countryId: string): Promise<{ p
     .reduce((sum, row) => sum + (SHIPS[row.ship_type]?.manpower ?? 0) * row.quantity, 0);
   return {
     population: populationResult.rows[0]?.total ?? 0,
-    used:(unitResult.rows[0]?.total??0)+(pendingResult.rows[0]?.total??0)+
+    used:(unitResult.rows[0]?.total??0)+(displacedResult.rows[0]?.total??0)+(pendingResult.rows[0]?.total??0)+
       (pendingGarrison.rows[0]?.total??0)+shipManpower
   };
 }
@@ -1352,7 +1364,7 @@ export const gameService = {
     });
   },
 
-  async transferSettlement(input: { guildId: string; actorId: string; sourceCountryId: string; targetCountryId: string; settlementId: string; conqueredTurn?: number | null }): Promise<{ settlementName: string; sourceName: string; targetName: string; conqueredTurn: number; cancelledRecruitmentOrders: number; endedTrades: number; enslavedGarrison: number; removedArmyPersonnel: number; removedShips: number; removedSiegeAssets: number; destroyedMercenaryContracts: number; newGarrisonPersonnel: number; newGarrisonCost: number; newGarrisonCompletionTurn: number | null }> {
+  async transferSettlement(input: { guildId: string; actorId: string; sourceCountryId: string; targetCountryId: string; settlementId: string; conqueredTurn?: number | null }): Promise<{ settlementName: string; sourceName: string; targetName: string; conqueredTurn: number; cancelledRecruitmentOrders: number; endedTrades: number; enslavedGarrison: number; removedArmyPersonnel: number; preservedArmyPersonnel: number; evacuatedArmyPopulation: number; removedShips: number; removedSiegeAssets: number; destroyedMercenaryContracts: number; newGarrisonPersonnel: number; newGarrisonCost: number; newGarrisonCompletionTurn: number | null }> {
     return withTransaction(async (client) => {
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`turn:${input.guildId}`]);
       if (input.sourceCountryId === input.targetCountryId) throw new GameError("Kaynak ve hedef ülke aynı olamaz.");
@@ -1366,6 +1378,16 @@ export const gameService = {
       if (!settlement) throw new GameError("Yerleşke kaynak ülkeye bağlı değil veya bulunamadı.");
       const duplicate = await client.query("SELECT 1 FROM settlements WHERE country_id=$1 AND lower(name)=lower($2) AND id<>$3", [target.id, settlement.name, settlement.id]);
       if (duplicate.rowCount) throw new GameError("Hedef ülkede aynı ada sahip bir yerleşke bulunuyor.");
+      const remainingSourceSettlements = Number((await client.query<{ total: number }>(
+        "SELECT COUNT(*)::integer AS total FROM settlements WHERE country_id=$1 AND id<>$2",
+        [source.id,settlement.id]
+      )).rows[0]?.total ?? 0);
+      const assignedFromSettlement = Number((await client.query<{ total: number }>(
+        `SELECT COALESCE(SUM(au.quantity),0)::bigint AS total
+           FROM army_units au JOIN armies army ON army.id=au.army_id
+          WHERE army.country_id=$1 AND au.settlement_id=$2`,
+        [source.id,settlement.id]
+      )).rows[0]?.total ?? 0);
       const activeOrders = await client.query<{ id: string }>("SELECT id FROM recruitment_orders WHERE settlement_id=$1 AND status='TRAINING' FOR UPDATE", [settlement.id]);
       if (activeOrders.rows.length) {
         const orderIds = activeOrders.rows.map((row) => row.id);
@@ -1406,14 +1428,24 @@ export const gameService = {
       const remainingGarrison = remainingGarrisonRows.reduce((sum, row) => sum + Number(row.quantity), 0);
       const enslavedExistingGarrison = Math.min(Number(settlement.population), remainingGarrison);
       const enslavedGarrison = enslavedExistingGarrison + cancelledGarrisonTrainees;
+      if (remainingSourceSettlements === 0) {
+        await client.query("DELETE FROM army_units WHERE army_id IN (SELECT id FROM armies WHERE country_id=$1)",[source.id]);
+        await client.query("DELETE FROM army_siege_assets WHERE army_id IN (SELECT id FROM armies WHERE country_id=$1)",[source.id]);
+        await client.query("DELETE FROM fleet_ships WHERE fleet_id IN (SELECT id FROM fleets WHERE country_id=$1)",[source.id]);
+      }
       await client.query("DELETE FROM army_siege_assets WHERE settlement_id=$1", [settlement.id]);
       await client.query("DELETE FROM fleet_ships WHERE settlement_id=$1", [settlement.id]);
       const removedStacks = (await client.query<{ quantity: number; force_type: "ARMY" | "GARRISON" }>(
         "DELETE FROM unit_stacks WHERE settlement_id=$1 RETURNING quantity,force_type", [settlement.id]
       )).rows;
-      const removedArmyPersonnel = removedStacks
+      const removedArmyStock = removedStacks
         .filter((row) => row.force_type === "ARMY")
         .reduce((sum, row) => sum + Number(row.quantity), 0);
+      const preservedArmyPersonnel = remainingSourceSettlements > 0 ? assignedFromSettlement : 0;
+      const removedArmyPersonnel = Math.max(0,removedArmyStock-preservedArmyPersonnel);
+      const evacuatedArmyPopulation = conquestArmyPopulationDeparture(
+        settlement.population,enslavedExistingGarrison,preservedArmyPersonnel
+      );
       const removedShips = (await client.query<{ quantity: number }>(
         "DELETE FROM naval_units WHERE settlement_id=$1 RETURNING quantity", [settlement.id]
       )).rows.reduce((sum, row) => sum + Number(row.quantity), 0);
@@ -1431,22 +1463,22 @@ export const gameService = {
         await client.query("UPDATE mercenary_contracts SET status='DESTROYED',updated_at=NOW() WHERE id=ANY($1::uuid[])", [contractIds]);
       }
       await client.query(
-        "UPDATE settlements SET country_id=$1,is_conquered=TRUE,conquered_turn=$2,garrison_level=0,population=GREATEST(0,population-$3),slave_population=slave_population+$4 WHERE id=$5",
-        [target.id, conqueredTurn, enslavedExistingGarrison, enslavedGarrison, settlement.id]
+        "UPDATE settlements SET country_id=$1,is_conquered=TRUE,conquered_turn=$2,garrison_level=0,population=GREATEST(0,population-$3-$4),slave_population=slave_population+$5 WHERE id=$6",
+        [target.id, conqueredTurn, enslavedExistingGarrison, evacuatedArmyPopulation, enslavedGarrison, settlement.id]
       );
       const newGarrison = await scheduleMandatoryGarrisonReplenishment(client, { settlementId: settlement.id, currentTurn: guild.current_turn, reason: "CONQUEST" });
       await syncCountryTreasury(client, source.id);
       await syncCountryTreasury(client, target.id);
       await audit(client, input.guildId, input.actorId, "SETTLEMENT_TRANSFER", "settlement", settlement.id, {
         fromCountryId: source.id, toCountryId: target.id, cancelledRecruitmentOrders: activeOrders.rows.length, cancelledNavalOrders: cancelledNaval.rowCount ?? 0, cancelledSiegeOrders: cancelledSiege.rowCount ?? 0, endedTrades: trades.rowCount ?? 0, conqueredTurn,
-        enslavedGarrison, removedArmyPersonnel, removedShips, removedSiegeAssets, destroyedMercenaryContracts: mercenaryContracts.length,
+        enslavedGarrison, removedArmyPersonnel, preservedArmyPersonnel, evacuatedArmyPopulation, remainingSourceSettlements, removedShips, removedSiegeAssets, destroyedMercenaryContracts: mercenaryContracts.length,
         newGarrisonPersonnel: newGarrison?.personnel ?? 0, newGarrisonCost: newGarrison?.cost ?? 0, newGarrisonCompletionTurn: newGarrison?.completionTurn ?? null
       });
       return {
         settlementName: settlement.name, sourceName: source.name, targetName: target.name,
         cancelledRecruitmentOrders: activeOrders.rows.length, endedTrades: trades.rowCount ?? 0, enslavedGarrison,
         conqueredTurn,
-        removedArmyPersonnel, removedShips, removedSiegeAssets, destroyedMercenaryContracts: mercenaryContracts.length,
+        removedArmyPersonnel, preservedArmyPersonnel, evacuatedArmyPopulation, removedShips, removedSiegeAssets, destroyedMercenaryContracts: mercenaryContracts.length,
         newGarrisonPersonnel: newGarrison?.personnel ?? 0, newGarrisonCost: newGarrison?.cost ?? 0,
         newGarrisonCompletionTurn: newGarrison?.completionTurn ?? null
       };
@@ -1633,6 +1665,7 @@ export const gameService = {
       const mercenaries = await loadMercenaryContracts(client, countryId);
       const tradeBonuses = await activeTradeBonuses(client, countryId);
       const resourceStates = await settlementResourceStates(client, countryId);
+      const displacedSupport = await loadDisplacedArmySupport(client,countryId);
       const manpower = await countryManpower(client, countryId);
       const marshalPartial = await hasActiveMarshalPartialMobilization(client, countryId, country.mobilization);
 
@@ -1683,11 +1716,16 @@ export const gameService = {
           marshalPartial
         }), settlement.ruin_stage, country.active_formable_key);
         const settlementUnits = units.filter((unit) => unit.settlement_id === settlement.id);
+        const displacedUnits = displacedSupport.get(settlement.id) ?? [];
+        const displacedArmyPersonnel = supportedPersonnel(displacedUnits);
         const settlementShips = ships.filter((ship) => ship.settlement_id === settlement.id);
         const settlementMercenaries = mercenaries.filter((contract) => contract.settlement_id === settlement.id);
         const activeSettlementMercenaries = settlementMercenaries.filter((contract) => contract.status === "ACTIVE" || contract.status === "UNPAID");
-        const unitUpkeep = settlementUnits
+        const localUnitUpkeep = settlementUnits
           .reduce((sum, unit) => sum + calculateUnitUpkeep(unit.unit_type, unit.quantity, unit.status, country.mobilization, effectiveResources, country.manpower_penalty_active), 0);
+        const displacedArmyUpkeep = displacedUnits
+          .reduce((sum, unit) => sum + calculateUnitUpkeep(unit.unit_type, unit.quantity, "FIELD_FRIENDLY", country.mobilization, effectiveResources, country.manpower_penalty_active), 0);
+        const unitUpkeep = localUnitUpkeep + displacedArmyUpkeep;
         const shipUpkeep = applyFormableShipUpkeepDiscount(
           settlementShips.reduce((sum, ship) => sum + calculateShipUpkeep(ship.ship_type, ship.quantity, ship.status, country.mobilization, country.manpower_penalty_active), 0),
           country.active_formable_key
@@ -1717,6 +1755,8 @@ export const gameService = {
           totalSettlementUpkeep,
           populationGain,
           militaryUsed: settlementMilitaryUsed,
+          displacedArmyPersonnel,
+          displacedArmyUpkeep,
           militaryLimit: settlement.is_conquered ? 0 : settlementMobilizationLimit(settlement.population, country.mobilization, marshalPartial),
           trainingCapacity,
           trainingUsed,
@@ -2814,6 +2854,7 @@ export const gameService = {
           const settlements = (await client.query<SettlementRow>("SELECT * FROM settlements WHERE country_id=$1 FOR UPDATE", [country.id])).rows;
           const tradeBonuses = await activeTradeBonuses(client, country.id);
           const resourceAccess = await settlementResourceAccess(client, country.id);
+          const displacedSupport = await loadDisplacedArmySupport(client,country.id);
           let incomeBreakdown: IncomeBreakdown = { building: 0, tax: 0, landTrade: 0, seaTrade: 0 };
           let upkeep = 0;
           for (const settlement of settlements) {
@@ -2876,9 +2917,13 @@ export const gameService = {
               deductionToAllocate-=deducted;
             }
             const settlementUnits = (await client.query<{ unit_type: keyof typeof UNITS; quantity: number; status: UnitStatus }>("SELECT unit_type,quantity,status FROM unit_stacks WHERE settlement_id=$1", [settlement.id])).rows;
+            const displacedUnits = displacedSupport.get(settlement.id) ?? [];
             const settlementShips = (await client.query<{ ship_type: keyof typeof SHIPS; quantity: number; status: ShipStatus }>("SELECT ship_type,quantity,status FROM naval_units WHERE settlement_id=$1", [settlement.id])).rows;
-            const unitUpkeep = settlementUnits
+            const localUnitUpkeep = settlementUnits
               .reduce((sum, unit) => sum + calculateUnitUpkeep(unit.unit_type, unit.quantity, unit.status, country.mobilization, effectiveResources, country.manpower_penalty_active), 0);
+            const displacedArmyUpkeep = displacedUnits
+              .reduce((sum, unit) => sum + calculateUnitUpkeep(unit.unit_type, unit.quantity, "FIELD_FRIENDLY", country.mobilization, effectiveResources, country.manpower_penalty_active), 0);
+            const unitUpkeep = localUnitUpkeep + displacedArmyUpkeep;
             const shipUpkeep = applyFormableShipUpkeepDiscount(
                 settlementShips.reduce((sum, ship) => sum + calculateShipUpkeep(ship.ship_type, ship.quantity, ship.status, country.mobilization, country.manpower_penalty_active), 0),
                 country.active_formable_key
@@ -2921,7 +2966,7 @@ export const gameService = {
                 Number(settlement.local_treasury)+settlementNet,JSON.stringify({
                   buildingIncome:adjustedSettlementIncome.building,taxIncome:adjustedSettlementIncome.tax,
                   landTradeIncome:adjustedSettlementIncome.landTrade,seaTradeIncome:adjustedSettlementIncome.seaTrade,
-                  buildingUpkeep:economy.buildingUpkeep,unitUpkeep,shipUpkeep,
+                  buildingUpkeep:economy.buildingUpkeep,unitUpkeep,displacedArmyUpkeep,shipUpkeep,
                   penaltyDeduction,mobilizationDeduction,blockadeDeduction,blockadePercent,
                   raidIncomeDeduction,raidIncomeDeductionPending:Math.max(0,pendingRaidDeduction-raidIncomeDeduction),populationGain:popGain,effects
                 })]
