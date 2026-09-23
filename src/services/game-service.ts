@@ -1575,6 +1575,10 @@ export const gameService = {
       const musteringUnits = (await client.query<{ settlement_id:string; unit_type:keyof typeof UNITS; quantity:number }>(
         `SELECT source_settlement_id AS settlement_id,unit_type,SUM(quantity)::integer AS quantity FROM army_muster_orders
           WHERE country_id=$1 AND status IN ('SUBMITTED','IN_PROGRESS','BLOCKED','WAITING_ARMY')
+            AND EXISTS (
+              SELECT 1 FROM guild_movement_settings settings
+               WHERE settings.guild_id=army_muster_orders.guild_id AND settings.enabled=TRUE
+            )
           GROUP BY source_settlement_id,unit_type ORDER BY source_settlement_id,unit_type`,[countryId]
       )).rows.map((unit)=>({...unit,quantity:Number(unit.quantity)}));
       const ships = settlementIds.length ? (await client.query<{ settlement_id: string; ship_type: keyof typeof SHIPS; quantity: number; status: ShipStatus }>("SELECT * FROM naval_units WHERE settlement_id = ANY($1::uuid[]) ORDER BY ship_type", [settlementIds])).rows : [];

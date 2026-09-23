@@ -113,7 +113,17 @@ async function targetSettlement(client: DbClient, guildId: string, countryId: st
   return { ...row, local_treasury: Number(row.local_treasury),last_acquisition_income:Number(row.last_acquisition_income) };
 }
 
+async function movementSystemEnabled(client: Pick<DbClient,"query">,guildId:string):Promise<boolean>{
+  return Boolean((await client.query<{enabled:boolean}>(
+    "SELECT COALESCE(enabled,FALSE) AS enabled FROM guild_movement_settings WHERE guild_id=$1",
+    [guildId]
+  )).rows[0]?.enabled);
+}
+
 async function assertFleetAtTarget(client: DbClient, guildId: string, fleetId: string, settlementId: string): Promise<void> {
+  // Hareket sistemi kapalıyken eski R56 konumları yalnızca arşiv verisidir.
+  // Yönetici tarafından seçilen filo/hedef çifti esas alınır.
+  if(!await movementSystemEnabled(client,guildId))return;
   const row = (await client.query<{ fleet_coordinate: string; settlement_coordinate: string; distance: number }>(
     `SELECT fleet_hex.coordinate AS fleet_coordinate,settlement_hex.coordinate AS settlement_coordinate,
             ((ABS(fleet_hex.q-settlement_hex.q)+ABS(fleet_hex.r-settlement_hex.r)+
@@ -131,16 +141,18 @@ async function assertFleetAtTarget(client: DbClient, guildId: string, fleetId: s
   }
 }
 
-async function assertFleetAvailable(client: DbClient, fleetId: string): Promise<void> {
+async function assertFleetAvailable(client: DbClient, guildId:string, fleetId: string): Promise<void> {
   const battle = await client.query(
     `SELECT 1 FROM battle_fleet_assignments assignment JOIN battles battle ON battle.id=assignment.battle_id
       WHERE assignment.fleet_id=$1 AND battle.status NOT IN ('FINISHED','CANCELLED') LIMIT 1`, [fleetId]
   );
   if (battle.rowCount) throw new GameError("Bu filo etkin bir savaşa bağlı.");
-  const movement = await client.query(
-    "SELECT 1 FROM movement_orders WHERE fleet_id=$1 AND status IN ('SUBMITTED','IN_PROGRESS','BLOCKED') LIMIT 1", [fleetId]
-  );
-  if (movement.rowCount) throw new GameError("Bu filonun sonuçlanmamış bir hareket emri var.");
+  if(await movementSystemEnabled(client,guildId)){
+    const movement = await client.query(
+      "SELECT 1 FROM movement_orders WHERE fleet_id=$1 AND status IN ('SUBMITTED','IN_PROGRESS','BLOCKED') LIMIT 1", [fleetId]
+    );
+    if (movement.rowCount) throw new GameError("Bu filonun sonuçlanmamış bir hareket emri var.");
+  }
   const blockade = await client.query("SELECT 1 FROM naval_blockades WHERE fleet_id=$1 AND status='ACTIVE' LIMIT 1", [fleetId]);
   if (blockade.rowCount) throw new GameError("Bu filo hâlihazırda etkin bir abluka yürütüyor.");
   const raid = await client.query("SELECT 1 FROM naval_raids WHERE fleet_id=$1 AND status='WAITING_ROLL' LIMIT 1", [fleetId]);
@@ -204,7 +216,7 @@ export const navalOperationsService = {
       if (input.blockaderCountryId === input.targetCountryId) throw new GameError("Bir devlet kendi yerleşkesini abluka altına alamaz.");
       const fleet = await operationFleet(client, input.guildId, input.blockaderCountryId, input.fleetId, true);
       await targetSettlement(client, input.guildId, input.targetCountryId, input.targetSettlementId, true);
-      await assertFleetAvailable(client, fleet.id);
+      await assertFleetAvailable(client,input.guildId,fleet.id);
       await assertFleetAtTarget(client, input.guildId, fleet.id, input.targetSettlementId);
       if ((await client.query("SELECT 1 FROM naval_blockades WHERE target_settlement_id=$1 AND status='ACTIVE'", [input.targetSettlementId])).rowCount) {
         throw new GameError("Bu yerleşke zaten etkin bir deniz ablukası altında.");
@@ -265,7 +277,7 @@ export const navalOperationsService = {
       if (input.raiderCountryId === input.targetCountryId) throw new GameError("Bir devlet kendi yerleşkesini yağmalayamaz.");
       const fleet = await operationFleet(client,input.guildId,input.raiderCountryId,input.fleetId,true);
       await targetSettlement(client,input.guildId,input.targetCountryId,input.targetSettlementId,true);
-      await assertFleetAvailable(client,fleet.id);
+      await assertFleetAvailable(client,input.guildId,fleet.id);
       await assertFleetAtTarget(client,input.guildId,fleet.id,input.targetSettlementId);
       const turn = await currentTurn(client,input.guildId);
       const detectionRoll = randomInt(1,21);

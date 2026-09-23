@@ -174,6 +174,10 @@ export const armyService = {
              FROM army_muster_orders muster JOIN settlements s ON s.id=muster.source_settlement_id
             WHERE s.country_id=$1 AND (s.id::text=$2 OR lower(s.name)=lower($2))
               AND muster.status IN ('SUBMITTED','IN_PROGRESS','BLOCKED','WAITING_ARMY')
+              AND EXISTS (
+                SELECT 1 FROM guild_movement_settings settings
+                 WHERE settings.guild_id=muster.guild_id AND settings.enabled=TRUE
+              )
             GROUP BY muster.unit_type
          ) in_transit ON in_transit.unit_type=stock.unit_type
         ORDER BY stock.unit_type`,
@@ -283,8 +287,12 @@ export const armyService = {
       const inTransit = Number((await client.query<{ quantity: number }>(
         `SELECT COALESCE(SUM(quantity),0)::integer AS quantity FROM army_muster_orders
           WHERE source_settlement_id=$1 AND unit_type=$2
-            AND status IN ('SUBMITTED','IN_PROGRESS','BLOCKED','WAITING_ARMY')`,
-        [settlement.id,input.unitType]
+            AND status IN ('SUBMITTED','IN_PROGRESS','BLOCKED','WAITING_ARMY')
+            AND EXISTS (
+              SELECT 1 FROM guild_movement_settings settings
+               WHERE settings.guild_id=$3 AND settings.enabled=TRUE
+            )`,
+        [settlement.id,input.unitType,input.guildId]
       )).rows[0]?.quantity ?? 0);
       const available = Math.max(0, stock - allocated - inTransit);
       if (input.quantity > available) throw new GameError(`Bu yerleşkede başka ordulara ayrılmamış yalnızca ${available} ${BATTLE_UNIT_STATS[input.unitType].label} var.`);
@@ -422,8 +430,15 @@ export const armyService = {
       const army = await resolveArmy(client, input.countryId, input.army, true);
       await assertMutable(client, army.id);
       if ((await client.query(
-        "SELECT 1 FROM army_muster_orders WHERE army_id=$1 AND status IN ('SUBMITTED','IN_PROGRESS','BLOCKED','WAITING_ARMY') LIMIT 1",
-        [army.id]
+        `SELECT 1 FROM army_muster_orders muster
+          WHERE muster.army_id=$1
+            AND muster.status IN ('SUBMITTED','IN_PROGRESS','BLOCKED','WAITING_ARMY')
+            AND EXISTS (
+              SELECT 1 FROM guild_movement_settings settings
+               WHERE settings.guild_id=$2 AND settings.enabled=TRUE
+            )
+          LIMIT 1`,
+        [army.id,input.guildId]
       )).rowCount) throw new GameError("Bu orduya askerler yoldayken ordu dağıtılamaz.");
       if (army.commander_character_id) await client.query("UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL WHERE id=$1", [army.commander_character_id]);
       await client.query("DELETE FROM armies WHERE id=$1", [army.id]);

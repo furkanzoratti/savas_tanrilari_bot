@@ -393,14 +393,20 @@ export const movementService = {
            LEFT JOIN fleet_cargo_armies cargo ON cargo.army_id=army.id AND COALESCE(movement_settings.enabled,FALSE)=TRUE
            LEFT JOIN fleet_map_positions fleet_position ON fleet_position.fleet_id=cargo.fleet_id
            LEFT JOIN map_hexes fleet_hex ON fleet_hex.id=fleet_position.hex_id
-           LEFT JOIN movement_orders orders ON orders.army_id=army.id AND orders.status IN ('SUBMITTED','IN_PROGRESS','BLOCKED')
+           LEFT JOIN movement_orders orders ON orders.army_id=army.id
+             AND COALESCE(movement_settings.enabled,FALSE)=TRUE
+             AND orders.status IN ('SUBMITTED','IN_PROGRESS','BLOCKED')
           WHERE army.guild_id=$1 AND army.country_id=$2
          UNION ALL
          SELECT 'FLEET'::text AS formation_kind,fleet.id AS formation_id,fleet.name AS formation_name,
                 hex.coordinate,orders.status AS active_order_status
-           FROM fleets fleet LEFT JOIN fleet_map_positions position ON position.fleet_id=fleet.id
+           FROM fleets fleet
+           LEFT JOIN guild_movement_settings movement_settings ON movement_settings.guild_id=fleet.guild_id
+           LEFT JOIN fleet_map_positions position ON position.fleet_id=fleet.id
            LEFT JOIN map_hexes hex ON hex.id=position.hex_id
-           LEFT JOIN movement_orders orders ON orders.fleet_id=fleet.id AND orders.status IN ('SUBMITTED','IN_PROGRESS','BLOCKED')
+           LEFT JOIN movement_orders orders ON orders.fleet_id=fleet.id
+             AND COALESCE(movement_settings.enabled,FALSE)=TRUE
+             AND orders.status IN ('SUBMITTED','IN_PROGRESS','BLOCKED')
           WHERE fleet.guild_id=$1 AND fleet.country_id=$2
           ORDER BY formation_kind,formation_name`,
         [guildId, countryId]
@@ -542,7 +548,7 @@ export const movementService = {
         throw new GameError("Hareket açıkken konum düzeltmesi için en az 5 karakterlik yönetici gerekçesi gerekir.");
       const unit = await formation(client, input.formationKind, input.formationId, input.countryId, true);
       if (unit.guild_id !== input.guildId) throw new GameError("Birlik bu sunucuya ait değil.");
-      if (input.formationKind === "ARMY" && (await client.query("SELECT 1 FROM fleet_cargo_armies WHERE army_id=$1", [unit.id])).rowCount) {
+      if (settings.enabled && input.formationKind === "ARMY" && (await client.query("SELECT 1 FROM fleet_cargo_armies WHERE army_id=$1", [unit.id])).rowCount) {
         throw new GameError("Gemide taşınan ordu elle kara Hex'ine konumlandırılamaz; önce karaya çıkarılmalıdır.");
       }
       if(input.formationKind==="ARMY"&&(await client.query("SELECT 1 FROM land_raids WHERE army_id=$1 AND status='WAITING_ROLL' LIMIT 1",[unit.id])).rowCount)
