@@ -1,0 +1,145 @@
+{
+  "source": {
+    "path": "C:/Users/Frank/Desktop/toprak.png",
+    "sha256": "AB050D93128E40BD24F59D1B9B765917F9F0FBA7875381ED03A070503A6DD2E6",
+    "width": 4064,
+    "height": 3328
+  },
+  "output": {
+    "width": 5376,
+    "height": 3328,
+    "borderThicknessPx": 9
+  },
+  "countries": 9,
+  "regions": 13,
+  "settlements": [
+    {
+      "name": "Takşila",
+      "country": "Maurya İmparatorluğu",
+      "pixel": [
+        4320.9,
+        1587.5
+      ],
+      "hex": "AZ17"
+    },
+    {
+      "name": "Pataliputra",
+      "country": "Maurya İmparatorluğu",
+      "pixel": [
+        4911.3,
+        2092.2
+      ],
+      "hex": "BH22"
+    },
+    {
+      "name": "Ujjayini",
+      "country": "Maurya İmparatorluğu",
+      "pixel": [
+        4462,
+        2242.8
+      ],
+      "hex": "BB24"
+    },
+    {
+      "name": "Tosali",
+      "country": "Kalinga",
+      "pixel": [
+        4982.9,
+        2393.4
+      ],
+      "hex": "BH25"
+    },
+    {
+      "name": "Dantapura",
+      "country": "Kalinga",
+      "pixel": [
+        4876.8,
+        2566.3
+      ],
+      "hex": "BG27"
+    },
+    {
+      "name": "Pratişthana",
+      "country": "Satavahanalar",
+      "pixel": [
+        4407.8,
+        2452.2
+      ],
+      "hex": "BA26"
+    },
+    {
+      "name": "Amaravati",
+      "country": "Satavahanalar",
+      "pixel": [
+        4706.9,
+        2672
+      ],
+      "hex": "BE29"
+    },
+    {
+      "name": "Rohitaka",
+      "country": "Yaudheya",
+      "pixel": [
+        4500.4,
+        1888.2
+      ],
+      "hex": "BB20"
+    },
+    {
+      "name": "Srughna",
+      "country": "Kuninda",
+      "pixel": [
+        4535,
+        1813.8
+      ],
+      "hex": "BC20"
+    },
+    {
+      "name": "Pragjyotişa",
+      "country": "Kamarupa",
+      "pixel": [
+        5228.6,
+        2056.8
+      ],
+      "hex": "BK22"
+    },
+    {
+      "name": "Uraiyur",
+      "country": "Çola",
+      "pixel": [
+        4633.7,
+        2983
+      ],
+      "hex": "BD31"
+    },
+    {
+      "name": "Madurai",
+      "country": "Pandya",
+      "pixel": [
+        4619.4,
+        3102.3
+      ],
+      "hex": "BD32"
+    },
+    {
+      "name": "Muziris",
+      "country": "Çera",
+      "pixel": [
+        4420.2,
+        3071.5
+      ],
+      "hex": "BB31"
+    }
+  ],
+  "gateway": {
+    "x": [
+      3865,
+      4095
+    ],
+    "y": [
+      1608,
+      2248
+    ],
+    "note": "Mevcut doğu ülkelerine bindirilmiş, tuval ek yeri görünmeyen kara bağlantısı"
+  }
+}

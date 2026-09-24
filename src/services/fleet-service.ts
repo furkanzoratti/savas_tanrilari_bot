@@ -29,6 +29,12 @@ export interface FleetView {
   transportCapacity: number;
   transportMultiplier: number;
   active_battle_id: string | null;
+  damagedShips?: Array<{
+    settlement_id:string; settlement_name:string; ship_type:NavalUnitType; quantity:number;
+    current_hp:number; max_hp:number; disabled:number;
+  }>;
+  damagedTotal?: number;
+  disabledTotal?: number;
 }
 
 interface FleetBaseRow {
@@ -61,6 +67,19 @@ async function loadFleet(client: DbClient, fleetId: string, countryId?: string):
   const composition: Partial<Record<NavalUnitType, number>> = {};
   for (const ship of ships) composition[ship.ship_type] = (composition[ship.ship_type] ?? 0) + ship.quantity;
   const transportMultiplier = formableModifiers(fleet.active_formable_key).shipTransportMultiplier ?? 1;
+  const damagedShips = (await client.query<{
+    settlement_id:string;settlement_name:string;ship_type:NavalUnitType;quantity:number;
+    current_hp:number;max_hp:number;disabled:number;
+  }>(`SELECT damage.settlement_id,settlement.name AS settlement_name,damage.ship_type,
+            COUNT(*)::integer AS quantity,damage.current_hp,damage.max_hp,
+            COUNT(*) FILTER(WHERE damage.status='DISABLED')::integer AS disabled
+       FROM naval_ship_damage damage JOIN settlements settlement ON settlement.id=damage.settlement_id
+      WHERE damage.fleet_id=$1 AND damage.status IN ('DAMAGED','DISABLED')
+      GROUP BY damage.settlement_id,settlement.name,damage.ship_type,damage.current_hp,damage.max_hp
+      ORDER BY settlement.name,damage.ship_type,damage.current_hp DESC`,[fleet.id])).rows.map((row)=>({
+        ...row,quantity:Number(row.quantity),current_hp:Number(row.current_hp),
+        max_hp:Number(row.max_hp),disabled:Number(row.disabled)
+      }));
   return {
     ...fleet,
     commander_skill_bonus: Number(fleet.commander_skill_bonus),
@@ -73,7 +92,10 @@ async function loadFleet(client: DbClient, fleetId: string, countryId?: string):
     ),
     transportCapacity: fleetTransportCapacity(composition, transportMultiplier),
     transportMultiplier,
-    active_battle_id: fleet.active_battle_id
+    active_battle_id: fleet.active_battle_id,
+    damagedShips,
+    damagedTotal:damagedShips.reduce((sum,row)=>sum+row.quantity,0),
+    disabledTotal:damagedShips.reduce((sum,row)=>sum+row.disabled,0)
   };
 }
 
@@ -153,10 +175,15 @@ export const fleetService = {
             GROUP BY n.ship_type
          ) stock
          LEFT JOIN (
-           SELECT fs.ship_type,COALESCE(SUM(fs.quantity),0)::integer AS quantity
-             FROM fleet_ships fs JOIN settlements s ON s.id=fs.settlement_id
+           SELECT reserved.ship_type,COALESCE(SUM(reserved.quantity),0)::integer AS quantity
+             FROM (
+               SELECT fs.settlement_id,fs.ship_type,fs.quantity FROM fleet_ships fs
+               UNION ALL
+               SELECT damage.settlement_id,damage.ship_type,1 AS quantity FROM naval_ship_damage damage
+                WHERE damage.status IN ('REPAIRING','READY')
+             ) reserved JOIN settlements s ON s.id=reserved.settlement_id
             WHERE s.country_id=$1 AND (s.id::text=$2 OR lower(s.name)=lower($2))
-            GROUP BY fs.ship_type
+            GROUP BY reserved.ship_type
          ) allocated ON allocated.ship_type=stock.ship_type
         ORDER BY stock.ship_type`, [countryId, settlementValue.trim()]
     )).rows;
@@ -219,7 +246,11 @@ export const fleetService = {
         [settlement.id,input.shipType]
       )).rows[0]?.quantity ?? 0);
       const allocated = Number((await client.query<{ quantity: number }>(
-        "SELECT COALESCE(SUM(quantity),0)::integer AS quantity FROM fleet_ships WHERE settlement_id=$1 AND ship_type=$2",
+        `SELECT (
+          COALESCE((SELECT SUM(quantity) FROM fleet_ships WHERE settlement_id=$1 AND ship_type=$2),0)
+          +COALESCE((SELECT COUNT(*) FROM naval_ship_damage WHERE settlement_id=$1 AND ship_type=$2
+            AND status IN ('REPAIRING','READY')),0)
+        )::integer AS quantity`,
         [settlement.id,input.shipType]
       )).rows[0]?.quantity ?? 0);
       const available = Math.max(0,stock-allocated);
@@ -240,6 +271,11 @@ export const fleetService = {
       if (!Number.isInteger(input.quantity) || input.quantity < 1) throw new GameError("Çıkarılacak gemi miktarı pozitif tam sayı olmalıdır.");
       const fleet = await resolveFleet(client,input.countryId,input.fleet,true);
       await assertMutable(client,fleet.id);
+      const damagedCount=Number((await client.query<{quantity:number}>(`SELECT COUNT(*)::integer AS quantity
+        FROM naval_ship_damage damage JOIN settlements settlement ON settlement.id=damage.settlement_id
+        WHERE damage.fleet_id=$1 AND damage.ship_type=$2
+          AND (settlement.id::text=$3 OR lower(settlement.name)=lower($3))
+          AND damage.status IN ('DAMAGED','DISABLED')`,[fleet.id,input.shipType,input.settlement.trim()])).rows[0]?.quantity??0);
       const row = (await client.query<{ settlement_id: string; quantity: number }>(
         `SELECT fs.settlement_id,fs.quantity FROM fleet_ships fs JOIN settlements s ON s.id=fs.settlement_id
           WHERE fs.fleet_id=$1 AND fs.ship_type=$2 AND (s.id::text=$3 OR lower(s.name)=lower($3)) FOR UPDATE OF fs`,
@@ -247,6 +283,10 @@ export const fleetService = {
       )).rows[0];
       if (!row) throw new GameError("Bu filoda seçilen limana ait böyle bir gemi bulunmuyor.");
       if (input.quantity > Number(row.quantity)) throw new GameError(`Filoda bu kaynak için yalnızca ${row.quantity} gemi var.`);
+      const healthyCount=Number(row.quantity)-damagedCount;
+      if(input.quantity>healthyCount)throw new GameError(
+        `Bu kaynaktaki gemilerin ${damagedCount} tanesi hasarlı. Önce /filo tamir ile tamire gönderin; şu an en fazla ${healthyCount} sağlam geminin tahsisi kaldırılabilir.`
+      );
       const next = Number(row.quantity)-input.quantity;
       if (!next) await client.query("DELETE FROM fleet_ships WHERE fleet_id=$1 AND settlement_id=$2 AND ship_type=$3", [fleet.id,row.settlement_id,input.shipType]);
       else await client.query("UPDATE fleet_ships SET quantity=$1 WHERE fleet_id=$2 AND settlement_id=$3 AND ship_type=$4", [next,fleet.id,row.settlement_id,input.shipType]);
@@ -297,6 +337,8 @@ export const fleetService = {
     return withTransaction(async (client) => {
       const fleet = await resolveFleet(client,input.countryId,input.fleet,true);
       await assertMutable(client,fleet.id);
+      if((await client.query("SELECT 1 FROM naval_ship_damage WHERE fleet_id=$1 AND status IN ('DAMAGED','DISABLED') LIMIT 1",[fleet.id])).rowCount)
+        throw new GameError("Hasarlı gemileri bulunan filo dağıtılamaz; önce /filo tamir ile gemileri tamire gönderin.");
       if (fleet.commander_character_id) await client.query("UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL WHERE id=$1", [fleet.commander_character_id]);
       await client.query("DELETE FROM fleets WHERE id=$1", [fleet.id]);
       await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'fleet.disband','fleet',$3,$4::jsonb)", [input.guildId,input.actorId,fleet.id,JSON.stringify({ name:fleet.name,releasedShips:fleet.totalShips })]);

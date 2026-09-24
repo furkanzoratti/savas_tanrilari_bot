@@ -17,6 +17,7 @@ import { admiralProgressionMigration } from "./admiral-progression-migration.js"
 import { navalOperationsMigration } from "./naval-operations-migration.js";
 import { navalRaidIncomeMigration } from "./naval-raid-income-migration.js";
 import { landRaidsMigration } from "./land-raids-migration.js";
+import { navalHullRepairMigration } from "./naval-hull-repair-migration.js";
 
 export const migrations = [
   {
@@ -2251,5 +2252,6 @@ export const migrations = [
   admiralProgressionMigration,
   navalOperationsMigration,
   navalRaidIncomeMigration,
-  landRaidsMigration
+  landRaidsMigration,
+  navalHullRepairMigration
 ] as const;

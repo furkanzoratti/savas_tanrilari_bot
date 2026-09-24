@@ -15,6 +15,7 @@ export interface TurnAnnouncementInput {
   completedBuildingDetails?: Array<{ settlementName: string; buildingName: string; level: number }>;
   recruitmentArrivalDetails?: Array<{ settlementName: string; unitName: string; quantity: number }>;
   completedShipDetails?: Array<{ settlementName: string; shipName: string; quantity: number }>;
+  completedRepairDetails?: Array<{ countryName:string;repairFleetName:string;settlementName:string;ships:number }>;
   completedSiegeDetails?: Array<{ settlementName: string; assetName: string; quantity: number }>;
   garrisonReplenishmentStartedDetails?: Array<{ settlementName: string; personnel: number; cost: number; completionTurn: number; reason: string }>;
   garrisonReplenishmentCompletedDetails?: Array<{ settlementName: string; personnel: number }>;
@@ -70,6 +71,12 @@ export function turnAnnouncement(input: TurnAnnouncementInput): EmbedBuilder {
   if (input.completedShipDetails?.length) embed.addFields({
     name: "🚢 Tamamlanan Gemiler",
     value: fieldValue(input.completedShipDetails.map((item) => `• **${item.settlementName}** — ${item.quantity.toLocaleString("tr-TR")} ${item.shipName}`))
+  });
+  if(input.completedRepairDetails?.length)embed.addFields({
+    name:"🛠️ Tamiri Tamamlanan Filolar",
+    value:fieldValue(input.completedRepairDetails.map((item)=>
+      `• **${item.countryName} / ${item.repairFleetName}** — ${item.ships.toLocaleString("tr-TR")} gemi • ${item.settlementName}\n  /filo tamirden-ekle ile normal filoya aktarılabilir.`
+    ))
   });
   if (input.completedSiegeDetails?.length) embed.addFields({
     name: "🛠️ Tamamlanan Kuşatma Aletleri",

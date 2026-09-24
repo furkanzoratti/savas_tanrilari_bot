@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "countries": [
+    { "key": "maurya", "name": "Maurya İmparatorluğu", "scale": "MEDIUM", "color": "#D5A72C" },
+    { "key": "kalinga", "name": "Kalinga", "scale": "MEDIUM_SMALL", "color": "#D7653E" },
+    { "key": "satavahana", "name": "Satavahanalar", "scale": "MEDIUM_SMALL", "color": "#7E62B8" },
+    { "key": "yaudheya", "name": "Yaudheya", "scale": "SMALL", "color": "#C84C6B" },
+    { "key": "kuninda", "name": "Kuninda", "scale": "SMALL", "color": "#69A96B" },
+    { "key": "kamarupa", "name": "Kamarupa", "scale": "SMALL", "color": "#38AFC0" },
+    { "key": "chola", "name": "Çola", "scale": "SMALL", "color": "#E67A4F" },
+    { "key": "pandya", "name": "Pandya", "scale": "SMALL", "color": "#9B52B5" },
+    { "key": "chera", "name": "Çera", "scale": "SMALL", "color": "#329B83" }
+  ],
+  "regions": [
+    { "key": "india_maurya_takshashila", "country": "maurya", "settlement": "Takşila", "lon": 72.84, "lat": 33.75, "terrain": "Düz Ova", "resource": "horse" },
+    { "key": "india_maurya_pataliputra", "country": "maurya", "settlement": "Pataliputra", "lon": 85.14, "lat": 25.61, "terrain": "Düz Ova", "resource": "grain" },
+    { "key": "india_maurya_ujjayini", "country": "maurya", "settlement": "Ujjayini", "lon": 75.78, "lat": 23.18, "terrain": "Düz Ova", "resource": "iron" },
+    { "key": "india_kalinga_tosali", "country": "kalinga", "settlement": "Tosali", "lon": 85.84, "lat": 20.30, "terrain": "Ormanlık", "resource": "lumber" },
+    { "key": "india_kalinga_dantapura", "country": "kalinga", "settlement": "Dantapura", "lon": 84.88, "lat": 18.85, "terrain": "Ormanlık", "resource": "spice" },
+    { "key": "india_satavahana_pratishthana", "country": "satavahana", "settlement": "Pratişthana", "lon": 75.38, "lat": 19.48, "terrain": "Düz Ova", "resource": "leather" },
+    { "key": "india_satavahana_amaravati", "country": "satavahana", "settlement": "Amaravati", "lon": 80.36, "lat": 16.58, "terrain": "Düz Ova", "resource": "spice" },
+    { "key": "india_yaudheya_rohitaka", "country": "yaudheya", "settlement": "Rohitaka", "lon": 76.58, "lat": 28.90, "terrain": "Düz Ova", "resource": "iron" },
+    { "key": "india_kuninda_srughna", "country": "kuninda", "settlement": "Srughna", "lon": 77.30, "lat": 30.10, "terrain": "Dağlık", "resource": "lumber" },
+    { "key": "india_kamarupa_pragjyotisha", "country": "kamarupa", "settlement": "Pragjyotişa", "lon": 91.75, "lat": 26.18, "terrain": "Ormanlık", "resource": "silk" },
+    { "key": "india_chola_urayur", "country": "chola", "settlement": "Uraiyur", "lon": 78.69, "lat": 10.79, "terrain": "Düz Ova", "resource": "spice" },
+    { "key": "india_pandya_madurai", "country": "pandya", "settlement": "Madurai", "lon": 78.12, "lat": 9.93, "terrain": "Düz Ova", "resource": "purple_dye" },
+    { "key": "india_chera_muziris", "country": "chera", "settlement": "Muziris", "lon": 76.20, "lat": 10.17, "terrain": "Ormanlık", "resource": "spice" }
+  ]
+}

@@ -6,12 +6,13 @@ import { SETTLEMENT_EVENT_TYPES, type SettlementEventType } from "../domain/even
 import { gold, number } from "../domain/format.js";
 import { RESOURCES } from "../domain/resources.js";
 import { SPECIAL_UNITS } from "../domain/special-units.js";
-import { FORMABLE_COUNTRIES, formableModifiers } from "../domain/formable-countries.js";
+import { FORMABLE_COUNTRIES, formableEffectLines, formableModifiers, formableTier } from "../domain/formable-countries.js";
 import { TRADE_ROUTE_LABELS } from "../domain/trade.js";
 import type { CountryDocument } from "../services/game-service.js";
 import { TEMPLE_BANNER_URL } from "./assets.js";
 import { renderArmyEmbed } from "./army-embed.js";
 import { renderFleetEmbed } from "./fleet-embed.js";
+import { renderRepairFleetEmbed } from "./repair-fleet-embed.js";
 
 const ruinLabels = ["Normal", "Harap • sonraki Alım Turu %0", "Toparlanıyor • sonraki Alım Turu %50"];
 const phaseLabels: Record<string, string> = { OPEN: "Hareketler Açık", CLOSED: "Hareketler Kapalı", RESOLVING: "Olaylar Çözülüyor" };
@@ -131,7 +132,7 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
       { name: "👥 Özgür Nüfus", value: spacedSection(`**${number(document.freePopulation)}**`), inline: true },
       { name: "⚔️ Askerî Kapasite", value: spacedSection(`Mevcut: **${number(document.militaryUsed)}**\nSınır: ${number(document.militaryLimit)}\nKalan: ${number(remainingCapacity)}${document.manpowerPenaltyActive ? "\n⚠️ Sınır aşımı: bakım +%25" : document.militaryUsed > document.militaryLimit ? "\n⏳ Sınır aşımı: düzeltme süresi" : ""}`), inline: true },
       { name: "🛡️ Özel Birlik Erişimi", value: spacedSection((document.specialUnitUnlocks ?? []).length ? (document.specialUnitUnlocks ?? []).map((unitType) => `• **${SPECIAL_UNITS[unitType].name}**`).join("\n") : "Özel birlik erişimi bulunmuyor.") },
-      ...(formable ? [{ name: `${formable.emoji} Kurulabilir Ülke Bonusları`, value: spacedSection(formable.buffs.map((buff) => `• ${buff}`).join("\n")) }] : []),
+      ...(formable && document.country.active_formable_key ? [{ name: `${formable.emoji} Kurulabilir Ülke • Tier ${formableTier(document.country.active_formable_key)}`, value: spacedSection(formableEffectLines(document.country.active_formable_key).map((buff) => `• ${buff}`).join("\n")) }] : []),
       {
         name: "📥 Gelir Dağılımı",
         value: spacedSection([
@@ -321,6 +322,7 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
 
   const armyEmbeds = (document.armies ?? []).map(renderArmyEmbed);
   const fleetEmbeds = (document.fleets ?? []).map(renderFleetEmbed);
+  const repairFleetEmbeds=(document.repairFleets??[]).map(renderRepairFleetEmbed);
 
-  return [summary, ...settlementEmbeds, ...armyEmbeds, ...fleetEmbeds];
+  return [summary, ...settlementEmbeds, ...armyEmbeds, ...fleetEmbeds,...repairFleetEmbeds];
 }

@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { DbClient } from "../db/pool.js";
 import { pool, withTransaction } from "../db/pool.js";
 import {
-  BASE_SIEGE_STARVATION_TURNS, BATTLE_TERRAINS, BATTLE_UNIT_STATS, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, SIEGE_ATTACKER_DISMOUNT_MAP, activeSiegeAssaultAssets, assaultUnitTotal, baseRetreatRate, battleEnds, commanderClashBonus, compositionTotal, hasAssaultForce, orderState, resolveRound, restoreSiegeAttackerCasualtyTypes, siegeAssaultAccess, siegeAssaultComposition, siegeAttackerDismountedComposition, siegeDefenderCaptured, siegeDefenderComposition, siegeDefenseModifiers, siegeLineBreaks, siegeOrderState, siegePressureAfterRound,
+  BASE_SIEGE_STARVATION_TURNS, BATTLE_TERRAINS, BATTLE_UNIT_STATS, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, SIEGE_ATTACKER_DISMOUNT_MAP, activeSiegeAssaultAssets, assaultUnitTotal, baseRetreatRate, battleEnds, commanderClashBonus, compositionTotal, hasAssaultForce, orderState, resolveRound, restoreSiegeAttackerCasualtyTypes, roundDamageFactors, siegeAssaultAccess, siegeAssaultComposition, siegeAttackerDismountedComposition, siegeDefenderCaptured, siegeDefenderComposition, siegeDefenseModifiers, siegeLineBreaks, siegeOrderState, siegePressureAfterRound,
   rollBattlePool, rollNavalPool, rollSiegeSupport,
   type BattleComposition, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain,
   type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeComposition, type SiegeDismountUnitType, type SiegeTarget, type SiegeTargets
@@ -20,6 +20,7 @@ import {
   type AdmiralDoctrine,type AdmiralSpecialization,type CharacterSpecialization,type CommanderDoctrine
 } from "../domain/characters.js";
 import { deductPopulationForCasualties } from "./population-loss.js";
+import { applyBattleHullDamage,applyBattleRetreatLoss,battleHullComposition,initializeBattleShipHulls,persistBattleHullDamage } from "./naval-battle-hull-service.js";
 
 export type BattleStatus = "DRAFT" | "WAITING_FIRST_ROLL" | "WAITING_SECOND_ROLL" | "READY_TO_RESOLVE" | "FINISHED" | "CANCELLED";
 
@@ -76,6 +77,7 @@ export interface BattleSideRow {
   country_ids: string[]; country_names: string[]; participants: BattleParticipantRow[];
   initial_total: number; current_total: number; total_losses: number; pressure: number;
   composition: BattleComposition; initial_composition: BattleComposition; support_assets: SiegeComposition; support_enhanced: SiegeComposition; support_targets: SiegeTargets; temporary_militia: number; seal: string;
+  active_ship_total?:number;disabled_ship_total?:number;
 }
 
 export interface BattleRow {
@@ -113,6 +115,7 @@ export interface BattleRoundResult {
   pressureTier: string; pressureWinner: BattleSideKey | null; reserveReliefA: number; reserveReliefB: number;
   defenderRawClash: number; defenderEffectiveClash: number; defenderRawDamage: number; defenderEffectiveDamage: number;
   defenderClashMultiplier: number; defenderDamageMultiplier: number;
+  disabledA:number;disabledB:number;
 }
 
 export interface BattleSourceSettlement {
@@ -125,6 +128,27 @@ export interface BattleArmyChoice {
 
 export interface BattleFleetChoice {
   id: string; name: string; country_id: string; country_name: string; total: number; assigned: boolean;
+}
+
+export interface PlayerBattleShipHull {
+  id: string;
+  sideKey: BattleSideKey;
+  countryId: string;
+  countryName: string;
+  fleetId: string | null;
+  fleetName: string | null;
+  settlementName: string | null;
+  shipType: NavalUnitType;
+  maxHp: number;
+  currentHp: number;
+  disabledRound: number | null;
+  sunkRound: number | null;
+}
+
+export interface PlayerBattleFleetStatus {
+  battleId: string;
+  roundNumber: number;
+  ships: PlayerBattleShipHull[];
 }
 
 const sealFor = (composition: Record<string, number | undefined>): string => createHash("sha256")
@@ -341,6 +365,18 @@ async function loadView(client: DbClient, battleId: string, lock = false): Promi
     row.country_ids = sideParticipants.map((participant) => participant.country_id);
     row.country_names = sideParticipants.map((participant) => participant.country_name);
     row.country_name = row.country_names.join(" + ") || row.country_name;
+  }
+  if(battle.terrain==="NAVAL"){
+    const hullSummary=(await client.query<{side_key:BattleSideKey;active:number;disabled:number}>(
+      `SELECT side_key,
+              COUNT(*) FILTER(WHERE sunk_round IS NULL AND disabled_round IS NULL AND current_hp>0)::integer AS active,
+              COUNT(*) FILTER(WHERE sunk_round IS NULL AND disabled_round IS NOT NULL AND current_hp>0)::integer AS disabled
+         FROM battle_ship_hulls WHERE battle_id=$1 GROUP BY side_key`,[battleId])).rows;
+    for(const row of rows){
+      const summary=hullSummary.find((item)=>item.side_key===row.side_key);
+      row.active_ship_total=Number(summary?.active??row.current_total);
+      row.disabled_ship_total=Number(summary?.disabled??0);
+    }
   }
   const rolls = (await client.query<BattleRollRow>(
     "SELECT side_key,roller_user_id,clash_total,damage_total,is_proxy,manual,wall_damage,gate_damage,detail FROM battle_rolls WHERE battle_id=$1 AND round_number=$2 ORDER BY created_at",
@@ -923,6 +959,63 @@ export const battleService = {
     return battle ? loadView(pool as unknown as DbClient, battle.id) : null;
   },
 
+  async playerFleetStatus(input: { guildId: string; battleId: string; actorId: string }): Promise<PlayerBattleFleetStatus> {
+    return withTransaction(async (client) => {
+      const battle = (await client.query<Pick<BattleRow, "id" | "terrain" | "status" | "round_number">>(
+        "SELECT id,terrain,status,round_number FROM battles WHERE id=$1 AND guild_id=$2 FOR UPDATE",
+        [input.battleId, input.guildId]
+      )).rows[0];
+      if (!battle) throw new GameError("Savaş bulunamadı.");
+      if (battle.terrain !== "NAVAL") throw new GameError("Filo durumu yalnızca deniz savaşlarında görüntülenebilir.");
+      if (["DRAFT", "CANCELLED"].includes(battle.status)) throw new GameError("Bu savaşta görüntülenebilecek etkin bir filo kaydı yok.");
+
+      const countries = (await client.query<{ id: string; name: string }>(
+        `SELECT DISTINCT c.id,c.name
+           FROM country_members cm
+           JOIN countries c ON c.id=cm.country_id
+           JOIN battle_side_participants participant ON participant.country_id=c.id
+          WHERE participant.battle_id=$1 AND cm.discord_user_id=$2
+          ORDER BY c.name`,
+        [battle.id, input.actorId]
+      )).rows;
+      if (!countries.length) throw new GameError("Bu savaşın tarafı değilsiniz; filo can durumunu görüntüleyemezsiniz.");
+
+      await initializeBattleShipHulls(client, battle.id);
+      const countryNames = new Map(countries.map((country) => [country.id, country.name]));
+      const ships = (await client.query<{
+        id: string; side_key: BattleSideKey; country_id: string; fleet_id: string | null;
+        fleet_name: string | null; settlement_name: string | null; ship_type: NavalUnitType;
+        max_hp: number; current_hp: number; disabled_round: number | null; sunk_round: number | null;
+      }>(
+        `SELECT hull.id,hull.side_key,hull.country_id,hull.fleet_id,fleet.name AS fleet_name,
+                settlement.name AS settlement_name,hull.ship_type,hull.max_hp,hull.current_hp,
+                hull.disabled_round,hull.sunk_round
+           FROM battle_ship_hulls hull
+           LEFT JOIN fleets fleet ON fleet.id=hull.fleet_id
+           LEFT JOIN settlements settlement ON settlement.id=hull.settlement_id
+          WHERE hull.battle_id=$1 AND hull.country_id=ANY($2::uuid[])
+          ORDER BY hull.country_id,fleet.name NULLS LAST,hull.fleet_id NULLS LAST,
+                   hull.ship_type,hull.current_hp,hull.id`,
+        [battle.id, countries.map((country) => country.id)]
+      )).rows.map((row) => ({
+        id: row.id,
+        sideKey: row.side_key,
+        countryId: row.country_id,
+        countryName: countryNames.get(row.country_id) ?? "Bilinmeyen ülke",
+        fleetId: row.fleet_id,
+        fleetName: row.fleet_name,
+        settlementName: row.settlement_name,
+        shipType: row.ship_type,
+        maxHp: Number(row.max_hp),
+        currentHp: Number(row.current_hp),
+        disabledRound: row.disabled_round === null ? null : Number(row.disabled_round),
+        sunkRound: row.sunk_round === null ? null : Number(row.sunk_round)
+      }));
+      if (!ships.length) throw new GameError("Bu savaşta ülkenize ait bir filo veya gemi kaydı bulunmuyor.");
+      return { battleId: battle.id, roundNumber: Number(battle.round_number), ships };
+    });
+  },
+
   async casualtyReport(guildId: string, channelId: string): Promise<{ view: BattleView; rows: CasualtyApplication[] }> {
     const battle = await latestInChannel(pool as unknown as DbClient, guildId, channelId);
     if (!battle) throw new GameError("Bu kanalda savaş kaydı bulunamadı.");
@@ -1306,6 +1399,9 @@ export const battleService = {
                       AND (n.disabled_until_turn IS NULL OR n.disabled_until_turn<=g.current_turn)),0)
                   - COALESCE((SELECT SUM(other.quantity) FROM fleet_ships other
                     WHERE other.settlement_id=fs.settlement_id AND other.ship_type=fs.ship_type AND other.fleet_id<>fs.fleet_id),0)
+                  - COALESCE((SELECT COUNT(*) FROM naval_ship_damage damage
+                    WHERE damage.fleet_id=fs.fleet_id AND damage.settlement_id=fs.settlement_id
+                      AND damage.ship_type=fs.ship_type AND damage.status='DISABLED'),0)
                 )::integer AS ready_available
            FROM fleet_ships fs JOIN fleets f ON f.id=fs.fleet_id JOIN settlements s ON s.id=fs.settlement_id
            JOIN guilds g ON g.discord_id=f.guild_id WHERE fs.fleet_id=$1`, [fleet.id]
@@ -1708,6 +1804,7 @@ export const battleService = {
       }
       await client.query("UPDATE battle_sides SET initial_composition=composition WHERE battle_id=$1", [battle.id]);
       await client.query("UPDATE battle_side_participants SET initial_composition=composition WHERE battle_id=$1", [battle.id]);
+      if(battle.terrain==="NAVAL")await initializeBattleShipHulls(client,battle.id);
       if (battle.terrain === "SIEGE") {
         const revealColumn = siegePhaseRevealColumn(battle.siege_phase === "ASSAULT" ? "ASSAULT" : "BOMBARDMENT");
         await client.query(`UPDATE battles SET status='WAITING_FIRST_ROLL',${revealColumn}=TRUE,updated_at=NOW() WHERE id=$1`, [battle.id]);
@@ -1787,7 +1884,9 @@ export const battleService = {
       const compositionEnabled = activationTurn !== null && activationTurn !== undefined && (view.battle.game_turn ?? 0) >= activationTurn;
       let roll;
       if (view.battle.terrain === "NAVAL") {
-        roll = rollNavalPool(target.composition, frontage);
+        const activeShips=await battleHullComposition(client,active.id,side,"ACTIVE");
+        if(!compositionTotal(activeShips))throw new GameError("Bu tarafta savaşabilecek durumda gemi kalmadı.");
+        roll = rollNavalPool(activeShips, frontage);
       } else if (view.battle.terrain === "SIEGE") {
         const activeAssets = side === "A" ? activeSiegeAssaultAssets(target.support_assets, terrain.frontageA) : target.support_assets;
         const support = rollSiegeSupport(activeAssets, target.support_targets, undefined, target.support_enhanced ?? {});
@@ -1977,7 +2076,7 @@ export const battleService = {
       const attackerCasualtyComposition = restrictedSiege && effectiveAttackerCasualtyComposition
         ? restoreSiegeAttackerCasualtyTypes(view.sides.A.composition, effectiveAttackerCasualtyComposition, attackerDismounted)
         : effectiveAttackerCasualtyComposition;
-      const resolution = resolveRound(view.sides.A.composition, view.sides.B.composition,
+      let resolution = resolveRound(view.sides.A.composition, view.sides.B.composition,
         { clash: rollA.clash_total, damage: attackerEffectiveDamage, antiCavalryDamage: attackerAntiCavalryDamage, detail: {} },
         { clash: defenderEffectiveClash, damage: defenderEffectiveDamage, antiCavalryDamage: defenderAntiCavalryDamage, detail: {} },
         {
@@ -1988,6 +2087,21 @@ export const battleService = {
             ...(restrictedSiege ? { casualtyDurabilityOverridesA: dismountedDurabilityOverrides(attackerDismounted) } : {})
           } : {})
         });
+      let disabledA=0,disabledB=0;
+      let activeCompositionA=resolution.remainingA,activeCompositionB=resolution.remainingB;
+      if(naval){
+        const factors=roundDamageFactors(rollA.clash_total,defenderEffectiveClash);
+        const hullA=await applyBattleHullDamage(client,{
+          battleId:active.id,side:"A",rawDamage:Math.floor(defenderEffectiveDamage*factors.factorB),round:active.round_number
+        });
+        const hullB=await applyBattleHullDamage(client,{
+          battleId:active.id,side:"B",rawDamage:Math.floor(attackerEffectiveDamage*factors.factorA),round:active.round_number
+        });
+        disabledA=hullA.newlyDisabled;disabledB=hullB.newlyDisabled;
+        activeCompositionA=hullA.active;activeCompositionB=hullB.active;
+        resolution={...resolution,remainingA:hullA.surviving,remainingB:hullB.surviving,
+          lossA:hullA.newlySunk,lossB:hullB.newlySunk};
+      }
       let attackerPressureDelta = resolution.pressureDeltaA;
       let defenderPressureDelta = resolution.pressureDeltaB;
       if (attackerPressureDelta > 0 && commanderA?.specialization === "GUARDIAN"
@@ -2009,7 +2123,9 @@ export const battleService = {
           await client.query("UPDATE battles SET defender_pantheon_pressure_used=TRUE WHERE id=$1", [active.id]);
         }
       }
-      const totalA = compositionTotal(resolution.remainingA), totalB = compositionTotal(resolution.remainingB);
+      const survivingTotalA=compositionTotal(resolution.remainingA),survivingTotalB=compositionTotal(resolution.remainingB);
+      const totalA = naval?compositionTotal(activeCompositionA):survivingTotalA;
+      const totalB = naval?compositionTotal(activeCompositionB):survivingTotalB;
       const siegePressureA = siege
         ? siegePressureAfterRound(view.sides.A.pressure, attackerPressureDelta, totalA, BATTLE_TERRAINS.SIEGE.frontageA)
         : null;
@@ -2039,8 +2155,8 @@ export const battleService = {
       const ended = siege ? attackerBroken || defenderCaptured : attackerBroken || battleEnds(pressureB, view.sides.B.initial_total, totalB);
       let winner: BattleSideKey | null = null;
       if (ended) winner = siege ? defenderCaptured && !attackerBroken ? "A" : attackerBroken && !defenderCaptured ? "B" : null : orderA === "BROKEN" && orderB !== "BROKEN" ? "B" : orderB === "BROKEN" && orderA !== "BROKEN" ? "A" : totalA === totalB ? null : totalA > totalB ? "A" : "B";
-      await client.query("UPDATE battle_sides SET composition=$1::jsonb,current_total=$2,total_losses=initial_total-$2,pressure=$3,seal=$4 WHERE battle_id=$5 AND side_key='A'", [JSON.stringify(resolution.remainingA), totalA, pressureA, sealFor({ ...resolution.remainingA, ...view.sides.A.support_assets }), active.id]);
-      await client.query("UPDATE battle_sides SET composition=$1::jsonb,current_total=$2,total_losses=initial_total-$2,pressure=$3,seal=$4 WHERE battle_id=$5 AND side_key='B'", [JSON.stringify(resolution.remainingB), totalB, pressureB, sealFor({ ...resolution.remainingB, ...view.sides.B.support_assets }), active.id]);
+      await client.query("UPDATE battle_sides SET composition=$1::jsonb,current_total=$2,total_losses=initial_total-$2,pressure=$3,seal=$4 WHERE battle_id=$5 AND side_key='A'", [JSON.stringify(resolution.remainingA), survivingTotalA, pressureA, sealFor({ ...resolution.remainingA, ...view.sides.A.support_assets }), active.id]);
+      await client.query("UPDATE battle_sides SET composition=$1::jsonb,current_total=$2,total_losses=initial_total-$2,pressure=$3,seal=$4 WHERE battle_id=$5 AND side_key='B'", [JSON.stringify(resolution.remainingB), survivingTotalB, pressureB, sealFor({ ...resolution.remainingB, ...view.sides.B.support_assets }), active.id]);
       await client.query(`INSERT INTO battle_rounds(battle_id,round_number,tier,winner_side,loss_a,loss_b,pressure_a,pressure_b,order_a,order_b,wall_damage,gate_damage)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, [active.id, active.round_number, resolution.tier, resolution.winner, resolution.lossA, resolution.lossB, pressureA, pressureB, orderA, orderB, wallDamage, gateDamage]);
       const nextFirst: BattleSideKey = active.first_side === "A" ? "B" : "A";
@@ -2062,6 +2178,7 @@ export const battleService = {
         await recordCommanderVictory(client,active.id,winner,currentTurn);
       }
       const report = ended ? await applyLossesToDocuments(client, active.id, input.guildId, input.actorId) : [];
+      if(ended&&naval)await persistBattleHullDamage(client,active.id);
       return {
         view: await loadView(client, active.id), report,
         round: {
@@ -2071,6 +2188,7 @@ export const battleService = {
           reserveReliefA: siegePressureA?.reserveRelief ?? 0, reserveReliefB: siegePressureB?.reserveRelief ?? 0,
           defenderRawClash: rollB.clash_total, defenderEffectiveClash, defenderRawDamage: rollB.damage_total,
           defenderEffectiveDamage, defenderClashMultiplier: defense.defenderClash, defenderDamageMultiplier: defense.defenderDamage
+          ,disabledA,disabledB
         }
       };
     });
@@ -2104,17 +2222,30 @@ export const battleService = {
         const multiplier = commander.specialization_level >= 3 ? 0.75 : commander.specialization_level >= 2 ? 0.80 : 0.90;
         calculated = Math.floor(calculated*multiplier);
       }
-      const applied = applyProportionalLoss(view.sides[side].composition, calculated);
-      const total = compositionTotal(applied.remaining);
-      await client.query("UPDATE battle_sides SET composition=$1::jsonb,current_total=$2,total_losses=initial_total-$2,seal=$3 WHERE battle_id=$4 AND side_key=$5", [JSON.stringify(applied.remaining), total, sealFor({ ...applied.remaining, ...view.sides[side].support_assets }), active.id, side]);
+      let remaining:BattleComposition;
+      let appliedLoss=0;
+      let disabledRetreatShips=0;
+      if(view.battle.terrain==="NAVAL"){
+        const navalApplied=await applyBattleRetreatLoss(client,{battleId:active.id,side,quantity:calculated,round:active.round_number});
+        remaining=navalApplied.surviving;
+        appliedLoss=navalApplied.sunk;
+        disabledRetreatShips=navalApplied.disabled;
+      }else{
+        const landApplied=applyProportionalLoss(view.sides[side].composition,calculated);
+        remaining=landApplied.remaining;
+        appliedLoss=landApplied.applied;
+      }
+      const total = compositionTotal(remaining);
+      await client.query("UPDATE battle_sides SET composition=$1::jsonb,current_total=$2,total_losses=initial_total-$2,seal=$3 WHERE battle_id=$4 AND side_key=$5", [JSON.stringify(remaining), total, sealFor({ ...remaining, ...view.sides[side].support_assets }), active.id, side]);
       const winner: BattleSideKey = side === "A" ? "B" : "A";
-      const finishReason = `${view.sides[side].country_name} geri çekildi.${applied.applied ? ` Takip sırasında ${applied.applied} kayıp verdi.` : " İlk turda temas kesildiği için ek kayıp yaşanmadı."}`;
+      const finishReason = `${view.sides[side].country_name} geri çekildi.${appliedLoss ? ` Takip sırasında ${appliedLoss} kayıp verdi.` : disabledRetreatShips ? ` Takip sırasında ${disabledRetreatShips} gemi iş göremez hâle geldi.` : " İlk turda temas kesildiği için ek kayıp yaşanmadı."}`;
       await client.query("UPDATE battles SET status='FINISHED',winner_side=$1,finish_reason=$2,updated_at=NOW() WHERE id=$3", [winner, finishReason, active.id]);
       await settleLinkedEncounter(client,active.id,false);
       const currentTurn = Number((await client.query<{ current_turn: number }>("SELECT current_turn FROM guilds WHERE discord_id=$1", [input.guildId])).rows[0]?.current_turn ?? 0);
       await recordCommanderVictory(client,active.id,winner,currentTurn);
       const report = await applyLossesToDocuments(client, active.id, input.guildId, input.actorId);
-      return { view: await loadView(client, active.id), side, retreatLoss: applied.applied, report };
+      if(view.battle.terrain==="NAVAL")await persistBattleHullDamage(client,active.id);
+      return { view: await loadView(client, active.id), side, retreatLoss: appliedLoss, report };
     });
   },
 
@@ -2127,6 +2258,7 @@ export const battleService = {
       const currentTurn = Number((await client.query<{ current_turn: number }>("SELECT current_turn FROM guilds WHERE discord_id=$1", [input.guildId])).rows[0]?.current_turn ?? 0);
       await recordCommanderVictory(client,active.id,input.winner,currentTurn);
       const report = await applyLossesToDocuments(client, active.id, input.guildId, input.actorId);
+      if(active.terrain==="NAVAL")await persistBattleHullDamage(client,active.id);
       return { view: await loadView(client, active.id), report };
     });
   },

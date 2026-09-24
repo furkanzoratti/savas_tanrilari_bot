@@ -1,0 +1,131 @@
+{
+  "sourceSha256": "AB050D93128E40BD24F59D1B9B765917F9F0FBA7875381ED03A070503A6DD2E6",
+  "dimensions": [
+    5376,
+    3328
+  ],
+  "rasterLineAntialiasing": false,
+  "borderWidthPx": 9,
+  "vectorSource": "Natural Earth coastline + local affine calibration",
+  "countries": 9,
+  "regions": 13,
+  "settlements": [
+    {
+      "name": "Takşila",
+      "country": "Maurya İmparatorluğu",
+      "pixel": [
+        4138.2,
+        2057.9
+      ],
+      "hex": "AX22"
+    },
+    {
+      "name": "Pataliputra",
+      "country": "Maurya İmparatorluğu",
+      "pixel": [
+        4681.3,
+        2403.1
+      ],
+      "hex": "BE26"
+    },
+    {
+      "name": "Ujjayini",
+      "country": "Maurya İmparatorluğu",
+      "pixel": [
+        4250.4,
+        2542
+      ],
+      "hex": "AZ27"
+    },
+    {
+      "name": "Tosali",
+      "country": "Kalinga",
+      "pixel": [
+        4702.3,
+        2648.4
+      ],
+      "hex": "BE28"
+    },
+    {
+      "name": "Dantapura",
+      "country": "Kalinga",
+      "pixel": [
+        4655.6,
+        2718.6
+      ],
+      "hex": "BC29"
+    },
+    {
+      "name": "Pratişthana",
+      "country": "Satavahanalar",
+      "pixel": [
+        4224.6,
+        2715.4
+      ],
+      "hex": "AY29"
+    },
+    {
+      "name": "Amaravati",
+      "country": "Satavahanalar",
+      "pixel": [
+        4445.3,
+        2836.7
+      ],
+      "hex": "BB30"
+    },
+    {
+      "name": "Rohitaka",
+      "country": "Yaudheya",
+      "pixel": [
+        4298.5,
+        2273.5
+      ],
+      "hex": "AZ24"
+    },
+    {
+      "name": "Srughna",
+      "country": "Kuninda",
+      "pixel": [
+        4333.7,
+        2215.6
+      ],
+      "hex": "BA24"
+    },
+    {
+      "name": "Pragjyotişa",
+      "country": "Kamarupa",
+      "pixel": [
+        4983.2,
+        2358.3
+      ],
+      "hex": "BH25"
+    },
+    {
+      "name": "Uraiyur",
+      "country": "Çola",
+      "pixel": [
+        4357.5,
+        3111
+      ],
+      "hex": "BA33"
+    },
+    {
+      "name": "Madurai",
+      "country": "Pandya",
+      "pixel": [
+        4329.8,
+        3152.6
+      ],
+      "hex": "AZ33"
+    },
+    {
+      "name": "Muziris",
+      "country": "Çera",
+      "pixel": [
+        4242.9,
+        3146.7
+      ],
+      "hex": "AY32"
+    }
+  ]
+}

@@ -18,7 +18,7 @@ import { TRADE_ROUTE_LABELS, type TradeRoute } from "../domain/trade.js";
 import { MERCENARY_COMPANIES, type MercenaryCompanyKey } from "../domain/mercenaries.js";
 import { NPC_AUTO_PURCHASE_DOCTRINES, type NpcAutoPurchaseDoctrine } from "../domain/npc-auto-purchase.js";
 import { SPECIAL_UNITS, isSpecialUnitType, type SpecialUnitType } from "../domain/special-units.js";
-import { FORMABLE_COUNTRIES, formableModifiers } from "../domain/formable-countries.js";
+import { FORMABLE_COUNTRIES, FORMABLE_TIER_LABELS, formableModifiers, formableTier, type FormableTier } from "../domain/formable-countries.js";
 import { ESPIONAGE_TARGETS } from "../domain/espionage.js";
 import { RESOURCES, shipCostMultiplier, type ResourceType } from "../domain/resources.js";
 import { buildingPurchaseTerms, unitPurchaseCost, gameService, GameError } from "../services/game-service.js";
@@ -26,6 +26,7 @@ import { battleService } from "../services/battle-service.js";
 import { armyService, type MobileSiegeAssetType } from "../services/army-service.js";
 import { armyMusterService } from "../services/army-muster-service.js";
 import { fleetService } from "../services/fleet-service.js";
+import { navalRepairService } from "../services/naval-repair-service.js";
 import { cityService } from "../services/city-service.js";
 import { commandLogService } from "../services/command-log-service.js";
 import { greatPowerService } from "../services/great-power-service.js";
@@ -384,6 +385,7 @@ async function handleTurn(interaction: ChatInputCommandInteraction): Promise<voi
       completedBuildingDetails: result.completedBuildingDetails,
       recruitmentArrivalDetails: result.recruitmentArrivalDetails,
       completedShipDetails: result.completedShipDetails,
+      completedRepairDetails:result.completedRepairDetails,
       completedSiegeDetails: result.completedSiegeDetails,
       garrisonUpgradeDetails: result.garrisonUpgradeDetails,
       garrisonReplenishmentStartedDetails: result.garrisonReplenishmentStartedDetails,
@@ -891,6 +893,7 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
       completedBuildingDetails: result.completedBuildingDetails,
       recruitmentArrivalDetails: result.recruitmentArrivalDetails,
       completedShipDetails: result.completedShipDetails,
+      completedRepairDetails:result.completedRepairDetails,
       completedSiegeDetails: result.completedSiegeDetails,
       garrisonUpgradeDetails: result.garrisonUpgradeDetails,
       garrisonReplenishmentStartedDetails: result.garrisonReplenishmentStartedDetails,
@@ -1258,7 +1261,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     requireGameMaster(interaction);
     if (!interaction.guildId || !interaction.guild) throw new GameError("Sunucu bulunamadı.");
     await interaction.deferReply({ ephemeral: true });
-    const result = await gameService.formCountry({ guildId: interaction.guildId, actorId: interaction.user.id, currentCountryName: interaction.options.getString("mevcut-ulke", true), formableKeyInput: interaction.options.getString("formlanan-ulke", true) });
+    const result = await gameService.formCountry({ guildId: interaction.guildId, actorId: interaction.user.id, currentCountryName: interaction.options.getString("mevcut-ulke", true), tier: interaction.options.getInteger("tier", true) as FormableTier, formableKeyInput: interaction.options.getString("formlanan-ulke", true) });
     const country = await gameService.countryByName(interaction.guildId, result.formedName);
     let roleText = "Bağlı devlet rolü bulunmadığı için yalnız belge adı güncellendi.";
     if (country) {
@@ -1269,7 +1272,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
         roleText = `Devlet ve belge güncellendi; Discord rolü güncellenemedi: ${error instanceof Error ? error.message : "bilinmeyen hata"}`;
       }
     }
-    await interaction.editReply(`✅ **${result.previousName}**, **${result.formedName}** olarak formlandı.\n${roleText}\n\n✨ **Etkin ülke bonusları**\n${result.buffs.map((buff) => `• ${buff}`).join("\n")}`);
+    await interaction.editReply(`✅ **${result.previousName}**, **${result.formedName}** olarak **${FORMABLE_TIER_LABELS[result.tier]}** seviyesinde formlandı.\n${roleText}${result.foundingRewards.length ? `\n\n🎁 **Kuruluş ödülleri**\n${result.foundingRewards.map((reward) => `• ${reward}`).join("\n")}` : ""}\n\n✨ **Etkin ülke bonusları**\n${result.buffs.map((buff) => `• ${buff}`).join("\n")}`);
   } else if (interaction.commandName === "belge") {
     await interaction.deferReply({ ephemeral: true });
     const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
@@ -1817,6 +1820,12 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
     const country = await gameService.countryForUser(interaction.guildId,interaction.user.id);
     if (!country) { await interaction.respond([]); return; }
     const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
+    if(focused.name==="tamir-filosu"){
+      const repairs=await navalRepairService.listCountry(country.id);
+      await interaction.respond(repairs.filter((repair)=>!query||repair.name.toLocaleLowerCase("tr-TR").includes(query)).slice(0,25)
+        .map((repair)=>({name:`${repair.name} • ${repair.totalShips} gemi • ${repair.status==="READY"?"Hazır":`Tur ${repair.completion_turn}`}`.slice(0,100),value:repair.id})));
+      return;
+    }
     if (focused.name === "filo") {
       const fleets = await fleetService.listCountry(country.id);
       await interaction.respond(fleets.filter((fleet) => !query || fleet.name.toLocaleLowerCase("tr-TR").includes(query)).slice(0,25)
@@ -1968,11 +1977,14 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
   }
   if (interaction.commandName === "ulke-formla" && focused.name === "formlanan-ulke") {
     if (!interaction.guildId || !isGameMaster(interaction)) { await interaction.respond([]); return; }
+    const tier = interaction.options.getInteger("tier");
+    if (tier !== 1 && tier !== 2 && tier !== 3) { await interaction.respond([]); return; }
     const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
     await interaction.respond(Object.entries(FORMABLE_COUNTRIES)
+      .filter(([key]) => formableTier(key as keyof typeof FORMABLE_COUNTRIES) === tier)
       .filter(([key, country]) => !query || key.toLocaleLowerCase("tr-TR").includes(query) || country.name.toLocaleLowerCase("tr-TR").includes(query))
       .slice(0, 25)
-      .map(([value, country]) => ({ name: `${country.emoji} ${country.name}`, value })));
+      .map(([value, country]) => ({ name: `${country.emoji} ${country.name} • Tier ${tier}`, value })));
     return;
   }
   if (interaction.commandName === "savas-sonlandir" && focused.name === "kazanan") {

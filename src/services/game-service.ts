@@ -13,16 +13,18 @@ import { countryResourceAccess, settlementResourceAccess, settlementResourceStat
 import { MERCENARY_COMPANIES, MERCENARY_CONTRACT_LIMITS, importedMercenarySchedule, mercenaryContractSchedule, mercenaryPriceTerms, mercenaryTerminationUpkeep, type MercenaryCompanyKey, type MercenaryPriceTerms } from "../domain/mercenaries.js";
 import { cancelActiveGarrisonReplenishment, completeDueGarrisonReplenishments, scheduleAllMissingGarrisons, scheduleMandatoryGarrisonReplenishment, type GarrisonReplenishmentReason } from "./garrison-service.js";
 import { isSpecialUnitType, type SpecialUnitType } from "../domain/special-units.js";
-import { applyFormableShipUpkeepDiscount, FORMABLE_COUNTRIES, formableBuildingDiscount, formableModifiers, formableUnitDiscount, isFormableCountryKey, missingFormableTerritories, type FormableCountryKey } from "../domain/formable-countries.js";
+import { applyFormableShipUpkeepDiscount, FORMABLE_COUNTRIES, formableBuildingDiscount, formableEffectLines, formableModifiers, formableTier, formableUnitDiscount, isFormableCountryKey, missingFormableTerritories, type FormableCountryDefinition, type FormableCountryKey, type FormableTier } from "../domain/formable-countries.js";
 import { assessArmyComposition, type BattleComposition, type BattleUnitType } from "../domain/battle.js";
 import { calculateTreasuryTransferQuota } from "../domain/treasury-transfer.js";
 import { assimilationCompletionTurn } from "../domain/assimilation.js";
 import type { ArmyView } from "./army-service.js";
 import type { FleetView } from "./fleet-service.js";
+import { completeDueFleetRepairs,loadCountryRepairFleets,type RepairFleetView } from "./naval-repair-service.js";
 import { resolveMovementStage, type MovementStageSummary } from "./movement-turn-service.js";
 import { syncObserverPosts } from "./movement-observer-service.js";
 import { awardCharacterSpecializationProgress } from "./character-specialization-progress.js";
 import { conquestArmyPopulationDeparture, loadDisplacedArmySupport, supportedPersonnel } from "./displaced-army-support.js";
+import { grantFormableFoundingReward } from "./formable-country-reward-service.js";
 
 export class GameError extends Error {}
 
@@ -193,6 +195,7 @@ export interface CountryDocument {
   armies: ArmyView[];
   musteringUnits: Array<{ settlement_id: string; unit_type: keyof typeof UNITS; quantity: number }>;
   fleets: FleetView[];
+  repairFleets: RepairFleetView[];
   allies: Array<{ id: string; name: string }>;
   pacts: Array<{ id: string; name: string; purpose: string; founder_name: string }>;
   mercenaries: MercenaryContractDocument[];
@@ -263,6 +266,7 @@ export interface TurnAdvanceResult {
   completedBuildingDetails: Array<{ settlementName: string; buildingName: string; level: number }>;
   recruitmentArrivalDetails: Array<{ settlementName: string; unitName: string; quantity: number }>;
   completedShipDetails: Array<{ settlementName: string; shipName: string; quantity: number }>;
+  completedRepairDetails: Array<{ countryName:string;repairFleetName:string;settlementName:string;ships:number }>;
   completedSiegeDetails: Array<{ settlementName: string; assetName: string; quantity: number }>;
   garrisonUpgradeDetails: string[];
   activatedPolicyDetails: Array<{ settlementName: string; policyName: string }>;
@@ -717,17 +721,27 @@ export const gameService = {
     });
   },
 
-  async formCountry(input: { guildId: string; actorId: string; currentCountryName: string; formableKeyInput: string }): Promise<{ countryId: string; previousName: string; formedName: string; formableKey: FormableCountryKey; discordRoleId: string | null; buffs: readonly string[] }> {
+  async formCountry(input: { guildId: string; actorId: string; currentCountryName: string; tier: FormableTier; formableKeyInput: string }): Promise<{ countryId: string; previousName: string; formedName: string; formableKey: FormableCountryKey; tier: FormableTier; discordRoleId: string | null; buffs: readonly string[]; foundingRewards: string[] }> {
     if (!isFormableCountryKey(input.formableKeyInput)) throw new GameError("Geçersiz kurulabilir ülke seçimi.");
     const formableKey: FormableCountryKey = input.formableKeyInput;
+    const targetTier = formableTier(formableKey);
+    if (input.tier !== targetTier) throw new GameError(`Seçilen devlet Tier ${targetTier} listesindedir. Önce doğru Tier seviyesini seçin.`);
     return withTransaction(async (client) => {
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`formation:${input.guildId}`]);
       const guild = await getGuild(client, input.guildId);
       if (!isAcquisitionTurn(guild.current_turn, guild.acquisition_interval)) throw new GameError("Ülke yalnızca Alım Turunun başında kurulabilir.");
       const country = (await client.query<CountryRow>("SELECT * FROM countries WHERE guild_id=$1 AND status='ACTIVE' AND lower(name)=lower($2) FOR UPDATE", [input.guildId, input.currentCountryName])).rows[0];
       if (!country) throw new GameError("Mevcut ülke bulunamadı.");
-      const definition = FORMABLE_COUNTRIES[formableKey];
+      const definition: FormableCountryDefinition = FORMABLE_COUNTRIES[formableKey];
       if (country.active_formable_key === formableKey) throw new GameError(`Bu devlet zaten ${definition.name} kimliğini kullanıyor.`);
+      const currentTier = country.active_formable_key ? formableTier(country.active_formable_key) : 0;
+      if (targetTier < currentTier) throw new GameError(`Tier ${currentTier} kimliğinden Tier ${targetTier} kimliğine geri dönülemez.`);
+      if (targetTier > currentTier + 1) throw new GameError(`Tier ${targetTier} kurulmadan önce Tier ${targetTier - 1} bir devlet kimliği kurulmalıdır.`);
+      const requiredActiveFormables = definition.requiredActiveFormables ?? (definition.requiredActiveFormable ? [definition.requiredActiveFormable] : []);
+      if (requiredActiveFormables.length && (!country.active_formable_key || !requiredActiveFormables.includes(country.active_formable_key))) {
+        const requiredNames = requiredActiveFormables.map((key) => FORMABLE_COUNTRIES[key as FormableCountryKey]?.name ?? key);
+        throw new GameError(`${definition.name} kurulmadan önce aktif kimlik şu Tier ${Math.max(1, targetTier - 1)} devletlerinden biri olmalıdır: **${requiredNames.join(", ")}**.`);
+      }
       const previousFormation = await client.query("SELECT 1 FROM country_formations WHERE country_id=$1 AND formable_key=$2", [country.id, formableKey]);
       if (previousFormation.rowCount) throw new GameError("Bir devlet daha önce terk ettiği kurulabilir ülke kimliğine geri dönemez.");
       const nameConflict = await client.query("SELECT 1 FROM countries WHERE guild_id=$1 AND id<>$2 AND lower(name)=lower($3)", [input.guildId, country.id, definition.name]);
@@ -745,10 +759,11 @@ export const gameService = {
       }
       await client.query("UPDATE countries SET name=$1,active_formable_key=$2 WHERE id=$3", [definition.name, formableKey, country.id]);
       await syncCountryMercenaryUpkeep(client,{...country,name:definition.name,active_formable_key:formableKey});
+      const foundingRewards = await grantFormableFoundingReward(client,country.id,formableKey);
       await client.query(`INSERT INTO country_formations(country_id,guild_id,previous_name,formable_key,formed_name,formed_turn,formed_by)
         VALUES($1,$2,$3,$4,$5,$6,$7)`, [country.id, input.guildId, country.name, formableKey, definition.name, guild.current_turn, input.actorId]);
-      await audit(client, input.guildId, input.actorId, "COUNTRY_FORMED", "country", country.id, { previousName: country.name, formedName: definition.name, formableKey: formableKey, turn: guild.current_turn });
-      return { countryId: country.id, previousName: country.name, formedName: definition.name, formableKey: formableKey, discordRoleId: country.discord_role_id, buffs: definition.buffs };
+      await audit(client, input.guildId, input.actorId, "COUNTRY_FORMED", "country", country.id, { previousName: country.name, formedName: definition.name, formableKey: formableKey, turn: guild.current_turn, foundingRewards });
+      return { countryId: country.id, previousName: country.name, formedName: definition.name, formableKey: formableKey, tier: targetTier, discordRoleId: country.discord_role_id, buffs: formableEffectLines(formableKey), foundingRewards };
     });
   },
   async setCountryDiscordRole(guildId: string, actorId: string, countryId: string, roleId: string | null): Promise<void> {
@@ -1589,20 +1604,37 @@ export const gameService = {
       }>(`SELECT fs.fleet_id,fs.settlement_id,s.name AS settlement_name,fs.ship_type,fs.quantity
              FROM fleet_ships fs JOIN settlements s ON s.id=fs.settlement_id
             WHERE fs.fleet_id=ANY($1::uuid[]) ORDER BY s.name,fs.ship_type`, [fleetRows.map((fleet) => fleet.id)])).rows;
+      const fleetDamageRows=fleetRows.length?(await client.query<{
+        fleet_id:string;settlement_id:string;settlement_name:string;ship_type:keyof typeof SHIPS;
+        quantity:number;current_hp:number;max_hp:number;disabled:number;
+      }>(`SELECT damage.fleet_id,damage.settlement_id,settlement.name AS settlement_name,damage.ship_type,
+              COUNT(*)::integer AS quantity,damage.current_hp,damage.max_hp,
+              COUNT(*) FILTER(WHERE damage.status='DISABLED')::integer AS disabled
+           FROM naval_ship_damage damage JOIN settlements settlement ON settlement.id=damage.settlement_id
+          WHERE damage.fleet_id=ANY($1::uuid[]) AND damage.status IN ('DAMAGED','DISABLED')
+          GROUP BY damage.fleet_id,damage.settlement_id,settlement.name,damage.ship_type,damage.current_hp,damage.max_hp
+          ORDER BY settlement.name,damage.ship_type,damage.current_hp DESC`,[fleetRows.map((fleet)=>fleet.id)])).rows:[];
       const transportMultiplier = formableModifiers(country.active_formable_key).shipTransportMultiplier ?? 1;
       const fleets:FleetView[] = fleetRows.map((fleet) => {
         const fleetShips = fleetShipRows.filter((ship) => ship.fleet_id === fleet.id)
           .map(({ fleet_id:_fleetId,...ship }) => ({ ...ship,quantity:Number(ship.quantity) }));
         const composition:Partial<Record<keyof typeof SHIPS,number>> = {};
         for (const ship of fleetShips) composition[ship.ship_type] = (composition[ship.ship_type] ?? 0)+ship.quantity;
+        const damagedShips=fleetDamageRows.filter((ship)=>ship.fleet_id===fleet.id).map(({fleet_id:_fleetId,...ship})=>({
+          ...ship,quantity:Number(ship.quantity),current_hp:Number(ship.current_hp),
+          max_hp:Number(ship.max_hp),disabled:Number(ship.disabled)
+        }));
         return {
           ...fleet,commander_skill_bonus:Number(fleet.commander_skill_bonus),created_turn:Number(fleet.created_turn),
           ships:fleetShips,composition,
           totalShips:Object.values(composition).reduce<number>((sum,quantity) => sum+Number(quantity ?? 0),0),
           crew:(Object.entries(composition) as Array<[keyof typeof SHIPS,number|undefined]>).reduce((sum,[shipType,quantity]) => sum+shipCrewRequirement(shipType,Number(quantity ?? 0)),0),
-          transportCapacity:fleetTransportCapacity(composition,transportMultiplier),transportMultiplier
+          transportCapacity:fleetTransportCapacity(composition,transportMultiplier),transportMultiplier,
+          damagedShips,damagedTotal:damagedShips.reduce((sum,ship)=>sum+ship.quantity,0),
+          disabledTotal:damagedShips.reduce((sum,ship)=>sum+ship.disabled,0)
         };
       });
+      const repairFleets=await loadCountryRepairFleets(client,countryId);
       const units = settlementIds.length ? (await client.query<{ settlement_id: string; unit_type: keyof typeof UNITS; quantity: number; status: UnitStatus; force_type: ForceType }>("SELECT * FROM unit_stacks WHERE settlement_id = ANY($1::uuid[]) ORDER BY force_type,unit_type", [settlementIds])).rows : [];
       const musteringUnits = (await client.query<{ settlement_id:string; unit_type:keyof typeof UNITS; quantity:number }>(
         `SELECT source_settlement_id AS settlement_id,unit_type,SUM(quantity)::integer AS quantity FROM army_muster_orders
@@ -1797,6 +1829,7 @@ export const gameService = {
         armies,
         musteringUnits,
         fleets,
+        repairFleets,
         allies,
         pacts,
         mercenaries,
@@ -2790,6 +2823,7 @@ export const gameService = {
         await client.query(`INSERT INTO naval_units(settlement_id,ship_type,quantity,status) VALUES($1,$2,$3,'RESERVE') ON CONFLICT(settlement_id,ship_type,status) DO UPDATE SET quantity=naval_units.quantity+EXCLUDED.quantity`, [order.settlement_id, order.ship_type, order.quantity]);
         await client.query("UPDATE naval_orders SET status='COMPLETED' WHERE id=$1", [order.id]);
       }
+      const completedRepairDetails=await completeDueFleetRepairs(client,guildId,newTurn);
 
       const dueSiege = await client.query<{ id: string; country_id: string; settlement_id: string; settlement_name: string; asset_type: keyof typeof SIEGE_ASSETS; quantity: number; engineering_enhanced: boolean }>(
         `SELECT so.id,so.country_id,so.settlement_id,s.name AS settlement_name,so.asset_type,so.quantity,so.engineering_enhanced
@@ -3046,6 +3080,7 @@ export const gameService = {
         completedBuildingDetails,
         recruitmentArrivalDetails,
         completedShipDetails,
+        completedRepairDetails,
         completedSiegeDetails,
         garrisonUpgradeDetails,
         activatedPolicyDetails,

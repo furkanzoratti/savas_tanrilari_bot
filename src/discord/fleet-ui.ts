@@ -1,10 +1,12 @@
 import type { ChatInputCommandInteraction } from "discord.js";
 import type { NavalUnitType } from "../domain/battle.js";
 import { fleetService } from "../services/fleet-service.js";
+import { navalRepairService } from "../services/naval-repair-service.js";
 import { GameError } from "../services/game-service.js";
 import { resolveCountry } from "./auth.js";
 import { queueCharacterLog } from "./character-ui.js";
 import { renderFleetEmbed } from "./fleet-embed.js";
+import { renderRepairFleetEmbed } from "./repair-fleet-embed.js";
 
 async function logCommanderAssignment(interaction:ChatInputCommandInteraction,countryName:string,entry:string):Promise<void>{
   await queueCharacterLog({client:interaction.client,guildId:interaction.guildId!,interactionId:interaction.id,
@@ -31,6 +33,36 @@ export async function handleFleetCommand(interaction: ChatInputCommandInteractio
     const fleets = selected ? [await fleetService.get(country.id,selected)] : await fleetService.listCountry(country.id);
     if (!fleets.length) throw new GameError("Devletinizde kurulmuş bir filo bulunmuyor.");
     await interaction.editReply({ embeds:fleets.slice(0,10).map(renderFleetEmbed) });
+    return;
+  }
+  if(sub==="tamir-bilgi"){
+    const selected=interaction.options.getString("tamir-filosu");
+    const repairs=await navalRepairService.listCountry(country.id);
+    const visible=selected?repairs.filter((repair)=>repair.id===selected):repairs;
+    if(!visible.length)throw new GameError("Devletinizde etkin bir tamir filosu bulunmuyor.");
+    await interaction.editReply({embeds:visible.slice(0,10).map(renderRepairFleetEmbed)});
+    return;
+  }
+  if(sub==="tamir"){
+    const repair=await navalRepairService.sendFleetToRepair({
+      guildId:interaction.guildId,countryId:country.id,actorId:interaction.user.id,
+      fleetId:interaction.options.getString("filo",true),
+      repairSettlementId:interaction.options.getString("yerleske",true)
+    });
+    await interaction.editReply({content:"✅ Hasarlı gemiler filodan çıkarıldı ve tamir filosuna alındı.",embeds:[renderRepairFleetEmbed(repair)]});
+    return;
+  }
+  if(sub==="tamirden-ekle"){
+    const result=await navalRepairService.transferReadyFleet({
+      guildId:interaction.guildId,countryId:country.id,actorId:interaction.user.id,
+      repairGroupId:interaction.options.getString("tamir-filosu",true),
+      targetFleetId:interaction.options.getString("filo",true)
+    });
+    const target=await fleetService.get(country.id,result.targetFleetId);
+    await interaction.editReply({
+      content:`✅ Tamiri biten **${result.transferred} geminin tamamı** **${result.targetFleetName}** filosuna eklendi.`,
+      embeds:[renderFleetEmbed(target)]
+    });
     return;
   }
   const fleetValue = interaction.options.getString("filo",true);

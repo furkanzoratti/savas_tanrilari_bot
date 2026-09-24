@@ -1,0 +1,130 @@
+{
+  "mapVersion": "amrp-r56-india-v3",
+  "canvas": {
+    "width": 5376,
+    "height": 3456
+  },
+  "grid": {
+    "radius": 56,
+    "columns": 64,
+    "rows": 36,
+    "totalHexes": 2304
+  },
+  "preservedLegacyHexes": 1764,
+  "typeCounts": {
+    "LAND": 839,
+    "SEA": 518,
+    "IMPASSABLE": 947
+  },
+  "countries": {
+    "Maurya İmparatorluğu": 3,
+    "Kalinga": 2,
+    "Satavahanalar": 2,
+    "Yaudheya": 1,
+    "Kuninda": 1,
+    "Kamarupa": 1,
+    "Çola": 1,
+    "Pandya": 1,
+    "Çera": 1
+  },
+  "newCountries": 9,
+  "newRegions": 13,
+  "bindings": [
+    {
+      "settlement": "Takşila",
+      "country": "Maurya İmparatorluğu",
+      "regionKey": "india_maurya_takshashila",
+      "hexCode": "AX22",
+      "distance": 34.291
+    },
+    {
+      "settlement": "Pataliputra",
+      "country": "Maurya İmparatorluğu",
+      "regionKey": "india_maurya_pataliputra",
+      "hexCode": "BE26",
+      "distance": 42.309
+    },
+    {
+      "settlement": "Ujjayini",
+      "country": "Maurya İmparatorluğu",
+      "regionKey": "india_maurya_ujjayini",
+      "hexCode": "AY28",
+      "distance": 50.468
+    },
+    {
+      "settlement": "Tosali",
+      "country": "Kalinga",
+      "regionKey": "india_kalinga_tosali",
+      "hexCode": "BE29",
+      "distance": 30.016
+    },
+    {
+      "settlement": "Dantapura",
+      "country": "Kalinga",
+      "regionKey": "india_kalinga_dantapura",
+      "hexCode": "BD30",
+      "distance": 49.192
+    },
+    {
+      "settlement": "Pratişthana",
+      "country": "Satavahanalar",
+      "regionKey": "india_satavahana_pratishthana",
+      "hexCode": "AY30",
+      "distance": 26.912
+    },
+    {
+      "settlement": "Amaravati",
+      "country": "Satavahanalar",
+      "regionKey": "india_satavahana_amaravati",
+      "hexCode": "BB31",
+      "distance": 9.324
+    },
+    {
+      "settlement": "Rohitaka",
+      "country": "Yaudheya",
+      "regionKey": "india_yaudheya_rohitaka",
+      "hexCode": "AZ24",
+      "distance": 33.723
+    },
+    {
+      "settlement": "Srughna",
+      "country": "Kuninda",
+      "regionKey": "india_kuninda_srughna",
+      "hexCode": "BA24",
+      "distance": 36.267
+    },
+    {
+      "settlement": "Pragjyotişa",
+      "country": "Kamarupa",
+      "regionKey": "india_kamarupa_pragjyotisha",
+      "hexCode": "BH25",
+      "distance": 42.089
+    },
+    {
+      "settlement": "Uraiyur",
+      "country": "Çola",
+      "regionKey": "india_chola_urayur",
+      "hexCode": "BA35",
+      "distance": 17.629
+    },
+    {
+      "settlement": "Madurai",
+      "country": "Pandya",
+      "regionKey": "india_pandya_madurai",
+      "hexCode": "AZ35",
+      "distance": 47.941
+    },
+    {
+      "settlement": "Muziris",
+      "country": "Çera",
+      "regionKey": "india_chera_muziris",
+      "hexCode": "AY35",
+      "distance": 50.909
+    }
+  ],
+  "outputs": {
+    "normalMap": "output/amrp-toprak-india-v3.png",
+    "hexMap": "output/NEWHEXMAP-INDIA-v3.png",
+    "data": "output/hex-map-r56-india-v3.json"
+  }
+}

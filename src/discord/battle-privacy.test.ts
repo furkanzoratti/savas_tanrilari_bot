@@ -5,8 +5,8 @@ vi.hoisted(() => {
   process.env.DISCORD_CLIENT_ID = "test-client";
   process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
 });
-import { battleEmbed, battleRollEmbed } from "./battle-ui.js";
-import type { BattleView } from "../services/battle-service.js";
+import { battleEmbed, battleRollEmbed, playerFleetStatusEmbeds } from "./battle-ui.js";
+import type { BattleView, PlayerBattleFleetStatus } from "../services/battle-service.js";
 
 function siegeView(): BattleView {
   return {
@@ -107,5 +107,31 @@ describe("kuşatma bilgi gizliliği", () => {
     expect(json).toContain("Roma: **Tekdüze Ordu**");
     expect(json).toContain("Savunucu: **Tekdüze Ordu**");
     expect(json).not.toContain("0,85");
+  });
+});
+
+describe("özel filo can durumu", () => {
+  it("her gemiyi ayrı HP ve savaşabilirlik durumuyla gösterir", () => {
+    const status: PlayerBattleFleetStatus = {
+      battleId: "battle",
+      roundNumber: 3,
+      ships: [
+        { id: "ship-1", sideKey: "A", countryId: "rome", countryName: "Roma", fleetId: "fleet", fleetName: "Akdeniz Filosu", settlementName: "Roma", shipType: "kerkouros", maxHp: 40, currentHp: 40, disabledRound: null, sunkRound: null },
+        { id: "ship-2", sideKey: "A", countryId: "rome", countryName: "Roma", fleetId: "fleet", fleetName: "Akdeniz Filosu", settlementName: "Roma", shipType: "kerkouros", maxHp: 40, currentHp: 18, disabledRound: null, sunkRound: null },
+        { id: "ship-3", sideKey: "A", countryId: "rome", countryName: "Roma", fleetId: "fleet", fleetName: "Akdeniz Filosu", settlementName: "Neapolis", shipType: "trireme", maxHp: 75, currentHp: 20, disabledRound: 2, sunkRound: null },
+        { id: "ship-4", sideKey: "A", countryId: "rome", countryName: "Roma", fleetId: "fleet", fleetName: "Akdeniz Filosu", settlementName: "Neapolis", shipType: "quinquereme", maxHp: 120, currentHp: 0, disabledRound: 2, sunkRound: 3 }
+      ]
+    };
+    const json = JSON.stringify(playerFleetStatusEmbeds(status).map((embed) => embed.toJSON()));
+    expect(json).toContain("Akdeniz Filosu");
+    expect(json).toContain("Kerkouros #1");
+    expect(json).toContain("Kerkouros #2");
+    expect(json).toContain("40/40 HP");
+    expect(json).toContain("18/40 HP");
+    expect(json).toContain("Savaşabilir");
+    expect(json).toContain("Hasarlı");
+    expect(json).toContain("İş göremez");
+    expect(json).toContain("Battı");
+    expect(json).toContain("yalnızca size görünür");
   });
 });

@@ -27,6 +27,7 @@ function fleetClient(options: { cargo?: boolean; movementEnabled?: boolean; movi
         rows: [{ settlement_id: "port-1", settlement_name: "Camulodunon", ship_type: "trireme", quantity: allocation }],
         rowCount: 1
       };
+      if(sql.includes("FROM naval_ship_damage damage JOIN settlements settlement"))return {rows:[],rowCount:0};
       if (sql.includes("FROM battle_fleet_assignments")) return { rows: [], rowCount: 0 };
       if (sql.includes("FROM naval_blockades") || sql.includes("FROM naval_raids")) return { rows: [], rowCount: 0 };
       if (sql.includes("COALESCE(settings.enabled,FALSE)")) return {
@@ -37,6 +38,7 @@ function fleetClient(options: { cargo?: boolean; movementEnabled?: boolean; movi
       if (sql.includes("SELECT 1 FROM fleet_cargo_armies")) return { rows: options.cargo ? [{}] : [], rowCount: options.cargo ? 1 : 0 };
       if (sql.includes("SELECT id,name FROM settlements")) return { rows: [{ id: "port-1", name: "Camulodunon" }], rowCount: 1 };
       if (sql.includes("FROM naval_units")) return { rows: [{ quantity: 3 }], rowCount: 1 };
+      if(sql.includes("SELECT (")&&sql.includes("naval_ship_damage"))return {rows:[{quantity:allocation}],rowCount:1};
       if (sql.includes("SELECT COALESCE(SUM(quantity),0)::integer AS quantity FROM fleet_ships")) return { rows: [{ quantity: allocation }], rowCount: 1 };
       if (sql.includes("INSERT INTO fleet_ships")) { allocation += 1; return { rows: [], rowCount: 1 }; }
       if (sql.includes("UPDATE fleets SET updated_at") || sql.includes("INSERT INTO audit_logs")) return { rows: [], rowCount: 1 };

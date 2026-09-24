@@ -43,7 +43,8 @@ describe("ticaret ve rol raporu komutları", () => {
   it("kalıcı filo yönetimini ve deniz savaşına filo eklemeyi kaydeder",() => {
     const fleet = commandBuilders.find((item) => item.name === "filo");
     expect(fleet?.options?.map((option) => option.name)).toEqual([
-      "olustur","gemi-ekle","gemi-cikar","komutan-ata","komutan-kaldir","bilgi","dagit"
+      "olustur","gemi-ekle","gemi-cikar","komutan-ata","komutan-kaldir","bilgi",
+      "tamir","tamirden-ekle","tamir-bilgi","dagit"
     ]);
     const battle = commandBuilders.find((item) => item.name === "savas");
     const assignment = battle?.options?.find((option) => option.name === "filo-ekle");

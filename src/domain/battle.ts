@@ -63,9 +63,9 @@ export const BATTLE_UNIT_STATS: Record<BattleUnitType, {
 export const NAVAL_UNIT_STATS: Record<NavalUnitType, {
   label: string; clashDice: number; clashSides: number; damageDice: number; damageSides: number; durability: 1 | 2 | 3;
 }> = {
-  kerkouros: { label: "Kerkouros", clashDice: 1, clashSides: 6, damageDice: 1, damageSides: 6, durability: 1 },
-  trireme: { label: "Trireme", clashDice: 2, clashSides: 8, damageDice: 2, damageSides: 8, durability: 2 },
-  quinquereme: { label: "Quinquereme", clashDice: 3, clashSides: 10, damageDice: 3, damageSides: 10, durability: 3 }
+  kerkouros: { label: "Kerkouros", clashDice: 1, clashSides: 6, damageDice: 1, damageSides: 12, durability: 1 },
+  trireme: { label: "Trireme", clashDice: 2, clashSides: 8, damageDice: 2, damageSides: 12, durability: 2 },
+  quinquereme: { label: "Quinquereme", clashDice: 3, clashSides: 10, damageDice: 3, damageSides: 12, durability: 3 }
 };
 
 export const SIEGE_ASSET_BATTLE_STATS: Record<SiegeAssetType, { label: string }> = {
@@ -543,6 +543,18 @@ const multipliers = {
   CLEAR: { winner: 1.15, loser: 0.50 }, CRUSHING: { winner: 1.30, loser: 0.30 }
 } as const;
 
+export function roundDamageFactors(clashA:number,clashB:number):{
+  tier:RoundResolution["tier"];winner:BattleSideKey|null;factorA:number;factorB:number;
+}{
+  const outcome=advantageTier(clashA,clashB);
+  const multi=multipliers[outcome.tier];
+  return {
+    ...outcome,
+    factorA:outcome.winner==="A"?multi.winner:outcome.winner==="B"?multi.loser:multi.winner,
+    factorB:outcome.winner==="B"?multi.winner:outcome.winner==="A"?multi.loser:multi.winner
+  };
+}
+
 type CasualtyDurabilityOverrides = Partial<Record<BattleForceType, 1 | 2 | 3>>;
 
 function applyLoss(
@@ -632,9 +644,9 @@ export function resolveRound(
   const pressureOutcome = options.pressureClashA === undefined || options.pressureClashB === undefined
     ? outcome
     : advantageTier(options.pressureClashA, options.pressureClashB);
-  const multi = multipliers[outcome.tier];
-  const factorA = (outcome.winner === "A" ? multi.winner : outcome.winner === "B" ? multi.loser : multi.winner) * (options.damageFactorA ?? 1);
-  const factorB = (outcome.winner === "B" ? multi.winner : outcome.winner === "A" ? multi.loser : multi.winner) * (options.damageFactorB ?? 1);
+  const roundFactors=roundDamageFactors(rollA.clash,rollB.clash);
+  const factorA = roundFactors.factorA * (options.damageFactorA ?? 1);
+  const factorB = roundFactors.factorB * (options.damageFactorB ?? 1);
   const scale = mode === "NAVAL" ? 0.012 : 20;
   const againstB = applyDamageWithCounter(
     compositionB, options.casualtyCompositionB, rollA.damage * scale * factorA,

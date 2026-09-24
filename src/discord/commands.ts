@@ -344,6 +344,11 @@ export const commandBuilders = [
   new SlashCommandBuilder()
     .setName("ulke-formla").setDescription("Yalnızca yönetici: devleti kurulabilir ülkeye dönüştürür ve bonuslarını açar")
     .addStringOption((option) => option.setName("mevcut-ulke").setDescription("Formlanacak mevcut devletin tam adı").setRequired(true))
+    .addIntegerOption((option) => option.setName("tier").setDescription("Kurulacak devletin seviyesi").setRequired(true).addChoices(
+      { name: "Tier 1 • Bölgesel devlet", value: 1 },
+      { name: "Tier 2 • Büyük devlet", value: 2 },
+      { name: "Tier 3 • Üst devlet (henüz hazırlanmadı)", value: 3 }
+    ))
     .addStringOption((option) => option.setName("formlanan-ulke").setDescription("Kurulacak ülkeyi yazmaya başlayarak seçin").setRequired(true).setAutocomplete(true)),
   new SlashCommandBuilder()
     .setName("ozel-birlik-yetkisi").setDescription("Yalnızca yönetici: ülkelere özel birlik erişimi verir veya kaldırır")
@@ -709,6 +714,14 @@ export const commandBuilders = [
       .addStringOption((o) => o.setName("filo").setDescription("Amirali kaldırılacak filo").setRequired(true).setAutocomplete(true)))
     .addSubcommand((sub) => sub.setName("bilgi").setDescription("Bir filonun veya bütün filoların güncel durumunu gösterir")
       .addStringOption((o) => o.setName("filo").setDescription("Boş bırakılırsa bütün filolar").setAutocomplete(true)))
+    .addSubcommand((sub) => sub.setName("tamir").setDescription("Filodaki bütün hasarlı gemileri bir Tersanede tamire alır")
+      .addStringOption((o) => o.setName("filo").setDescription("Hasarlı gemilerin çıkarılacağı filo").setRequired(true).setAutocomplete(true))
+      .addStringOption((o) => o.setName("yerleske").setDescription("Tamirin yapılacağı kıyı yerleşkesi ve Tersane").setRequired(true).setAutocomplete(true)))
+    .addSubcommand((sub) => sub.setName("tamirden-ekle").setDescription("Tamamlanan tamir filosundaki bütün gemileri normal filoya ekler")
+      .addStringOption((o) => o.setName("tamir-filosu").setDescription("Tamamlanmış tamir filosu").setRequired(true).setAutocomplete(true))
+      .addStringOption((o) => o.setName("filo").setDescription("Bütün gemilerin ekleneceği normal filo").setRequired(true).setAutocomplete(true)))
+    .addSubcommand((sub) => sub.setName("tamir-bilgi").setDescription("Tamirdeki ve tamamlanan tamir filolarını gösterir")
+      .addStringOption((o) => o.setName("tamir-filosu").setDescription("Boş bırakılırsa bütün etkin tamir filoları").setAutocomplete(true)))
     .addSubcommand((sub) => sub.setName("dagit").setDescription("Filo kaydını dağıtır; gemiler limanlarda kalır")
       .addStringOption((o) => o.setName("filo").setDescription("Dağıtılacak filo").setRequired(true).setAutocomplete(true))
       .addStringOption((o) => o.setName("onay").setDescription("Onaylamak için DAGIT yazın").setRequired(true))),

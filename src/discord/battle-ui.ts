@@ -1,7 +1,7 @@
 import { ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, type ButtonInteraction, type ChatInputCommandInteraction, type Client } from "discord.js";
 import { BATTLE_TERRAINS, BATTLE_UNIT_STATS, LADDER_GROUP_ASSAULT_CAPACITY, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, SIEGE_ASSET_BATTLE_STATS, SIEGE_ASSAULT_FRONTAGE, SIEGE_ATTACKER_DISMOUNT_MAP, SIEGE_TOWER_ASSAULT_CAPACITY, assessArmyComposition, orderState, remainingBombardments, siegeAssaultAccess, siegeAttackerDismountedComposition, siegeDefenderComposition, siegeDefenseModifiers, siegeOrderState, type ArmyCompositionContext, type BattleComposition, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain, type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeDismountUnitType, type SiegeTarget } from "../domain/battle.js";
 import { number } from "../domain/format.js";
-import { battleService, type BattleRoundResult, type BattleView, type SiegePhase } from "../services/battle-service.js";
+import { battleService, type BattleRoundResult, type BattleView, type PlayerBattleFleetStatus, type SiegePhase } from "../services/battle-service.js";
 import { gameService, GameError } from "../services/game-service.js";
 import { armyService } from "../services/army-service.js";
 import { fleetService } from "../services/fleet-service.js";
@@ -53,7 +53,10 @@ export function battleEmbed(view: BattleView, roundResult?: BattleRoundResult): 
       : orderState(side.pressure, side.initial_total, side.current_total);
     const control = side.controller === "GM" ? "Oyun Yöneticisi (NPC)" : "Ülke Oyuncuları";
     if (view.battle.terrain === "SIEGE" && key === "B") return `**Toplam Asker:** Gizli\n**Otomatik Garnizon:** Dahil\n**Toplam Kayıp:** ${number(side.total_losses)}\n**Baskı:** ${number(side.pressure)} puan\n**Düzen:** ${orderLabels[order]}\n**Zar Yetkisi:** ${control}`;
-    return `**Başlangıç:** ${number(side.initial_total)}\n**Mevcut:** ${number(side.current_total)}\n**Toplam Kayıp:** ${number(side.total_losses)}\n**Baskı:** ${number(side.pressure)} puan\n**Düzen:** ${orderLabels[order]}\n**Zar Yetkisi:** ${control}`;
+    const navalState=view.battle.terrain==="NAVAL"
+      ? `\n**Savaşabilir:** ${number(side.active_ship_total??side.current_total)}\n**İş göremez:** ${number(side.disabled_ship_total??0)}`
+      :"";
+    return `**Başlangıç:** ${number(side.initial_total)}\n**Mevcut:** ${number(side.current_total)}${navalState}\n**Toplam Kayıp:** ${number(side.total_losses)}\n**Baskı:** ${number(side.pressure)} puan\n**Düzen:** ${orderLabels[order]}\n**Zar Yetkisi:** ${control}`;
   };
   const frontage = view.battle.terrain === "NAVAL"
     ? `Filo kapasitesi: ${view.sides.A.country_name} ${number(terrain.frontageA)} • ${view.sides.B.country_name} ${number(terrain.frontageB)} gemi`
@@ -97,7 +100,10 @@ ${accessNote}` }
   if (roundResult) {
     const winner = roundResult.winner ? view.sides[roundResult.winner].country_name : "Yok";
     const pressureWinner = roundResult.pressureWinner ? view.sides[roundResult.pressureWinner].country_name : "Yok";
-    embed.addFields({ name: `⚔️ Tur Sonucu — ${tierLabels[roundResult.tier] ?? roundResult.tier}`, value: `Kayıp hesabındaki üstün taraf: **${winner}**\nBaskı üstünlüğü: **${pressureWinner}** (${tierLabels[roundResult.pressureTier] ?? roundResult.pressureTier})\n${view.sides.A.country_name}: **-${number(roundResult.lossA)}** • Baskı **${number(roundResult.pressureA)}/8** • ${orderLabels[roundResult.orderA]}\n${view.sides.B.country_name}: **-${number(roundResult.lossB)}** • Baskı **${number(roundResult.pressureB)}/8** • ${orderLabels[roundResult.orderB]}${roundResult.wallDamage ? `\nSurlara verilen hasar: **${number(roundResult.wallDamage)}**` : ""}${roundResult.gateDamage ? `\nKapıya verilen hasar: **${number(roundResult.gateDamage)}**` : ""}` });
+    const navalDamage=view.battle.terrain==="NAVAL"
+      ? `\n${view.sides.A.country_name}: **${number(roundResult.disabledA)} yeni iş göremez**\n${view.sides.B.country_name}: **${number(roundResult.disabledB)} yeni iş göremez**`
+      :"";
+    embed.addFields({ name: `⚔️ Tur Sonucu — ${tierLabels[roundResult.tier] ?? roundResult.tier}`, value: `Kayıp hesabındaki üstün taraf: **${winner}**\nBaskı üstünlüğü: **${pressureWinner}** (${tierLabels[roundResult.pressureTier] ?? roundResult.pressureTier})\n${view.sides.A.country_name}: **-${number(roundResult.lossA)}** • Baskı **${number(roundResult.pressureA)}/8** • ${orderLabels[roundResult.orderA]}\n${view.sides.B.country_name}: **-${number(roundResult.lossB)}** • Baskı **${number(roundResult.pressureB)}/8** • ${orderLabels[roundResult.orderB]}${navalDamage}${roundResult.wallDamage ? `\nSurlara verilen hasar: **${number(roundResult.wallDamage)}**` : ""}${roundResult.gateDamage ? `\nKapıya verilen hasar: **${number(roundResult.gateDamage)}**` : ""}` });
     if (view.battle.terrain !== "NAVAL") embed.addFields({
       name: "🧩 Kayıplar Sonrası Kompozisyon",
       value: `${view.sides.A.country_name}: **${currentCompositionLabel(view,"A")}**\n${view.sides.B.country_name}: **${currentCompositionLabel(view,"B")}**`
@@ -114,9 +120,15 @@ ${accessNote}` }
 }
 
 function components(view: BattleView) {
-  if (view.battle.status === "FINISHED") return [new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(`battle_armies|${view.battle.id}`).setLabel(view.battle.terrain === "NAVAL" ? "Filolarımın Son Durumunu Gör" : "Ordularımın Son Durumunu Gör").setEmoji(view.battle.terrain === "NAVAL" ? "⚓" : "⚔️").setStyle(ButtonStyle.Secondary)
-  )];
+  if (view.battle.status === "FINISHED") {
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(`battle_armies|${view.battle.id}`).setLabel(view.battle.terrain === "NAVAL" ? "Filolarımın Son Durumunu Gör" : "Ordularımın Son Durumunu Gör").setEmoji(view.battle.terrain === "NAVAL" ? "⚓" : "⚔️").setStyle(ButtonStyle.Secondary)
+    );
+    if (view.battle.terrain === "NAVAL") row.addComponents(
+      new ButtonBuilder().setCustomId(`battle_fleet_status|${view.battle.id}`).setLabel("Filo Durumu").setEmoji("❤️‍🩹").setStyle(ButtonStyle.Secondary)
+    );
+    return [row];
+  }
   if (["CANCELLED", "DRAFT"].includes(view.battle.status)) return [];
   const expected = expectedSide(view);
   if (view.battle.terrain === "SIEGE" && view.battle.siege_phase === "BOMBARDMENT") return [new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -124,10 +136,67 @@ function components(view: BattleView) {
     new ButtonBuilder().setCustomId(`battle_retreat|${view.battle.id}`).setLabel("Geri Çekil").setEmoji("🏳️").setStyle(ButtonStyle.Danger)
   )];
   const label = expected ? `${view.sides[expected].country_name} Savaş Zarlarını At` : "Tur Çözümü Bekleniyor";
-  return [new ActionRowBuilder<ButtonBuilder>().addComponents(
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(`battle_roll|${view.battle.id}`).setLabel(label).setEmoji("🎲").setStyle(ButtonStyle.Primary).setDisabled(!expected),
     new ButtonBuilder().setCustomId(`battle_retreat|${view.battle.id}`).setLabel("Geri Çekil").setEmoji("🏳️").setStyle(ButtonStyle.Danger).setDisabled(!expected)
-  )];
+  );
+  if (view.battle.terrain === "NAVAL") row.addComponents(
+    new ButtonBuilder().setCustomId(`battle_fleet_status|${view.battle.id}`).setLabel("Filo Durumu").setEmoji("❤️‍🩹").setStyle(ButtonStyle.Secondary)
+  );
+  return [row];
+}
+
+function chunkLines(lines: string[], maxLength = 3600): string[] {
+  const chunks: string[] = [];
+  let current = "";
+  for (const line of lines) {
+    const candidate = current ? `${current}\n${line}` : line;
+    if (candidate.length > maxLength && current) {
+      chunks.push(current);
+      current = line;
+    } else current = candidate;
+  }
+  if (current) chunks.push(current);
+  return chunks;
+}
+
+export function playerFleetStatusEmbeds(status: PlayerBattleFleetStatus): EmbedBuilder[] {
+  const groups = new Map<string, PlayerBattleFleetStatus["ships"]>();
+  for (const ship of status.ships) {
+    const key = `${ship.countryId}|${ship.fleetId ?? "manual"}`;
+    const group = groups.get(key) ?? [];
+    group.push(ship);
+    groups.set(key, group);
+  }
+  const embeds: EmbedBuilder[] = [];
+  for (const ships of groups.values()) {
+    const first = ships[0]!;
+    const counters = new Map<string, number>();
+    const lines = ships.map((ship) => {
+      const index = (counters.get(ship.shipType) ?? 0) + 1;
+      counters.set(ship.shipType, index);
+      const label = NAVAL_UNIT_STATS[ship.shipType]?.label ?? ship.shipType;
+      const state = ship.sunkRound !== null || ship.currentHp <= 0
+        ? `⚫ Battı${ship.sunkRound === null ? "" : ` (Tur ${ship.sunkRound})`}`
+        : ship.disabledRound !== null
+          ? `🔴 İş göremez${ship.disabledRound === null ? "" : ` (Tur ${ship.disabledRound})`}`
+          : ship.currentHp < ship.maxHp
+            ? "🟡 Hasarlı"
+            : "🟢 Savaşabilir";
+      const origin = ship.settlementName ? ` • ${ship.settlementName}` : "";
+      return `**${label} #${index}** — ${number(ship.currentHp)}/${number(ship.maxHp)} HP • ${state}${origin}`;
+    });
+    const chunks = chunkLines(lines);
+    chunks.forEach((description, index) => embeds.push(
+      new EmbedBuilder()
+        .setColor(0x2f7ea8)
+        .setTitle(`⚓ ${first.fleetName ?? "Manuel Donanma"}${chunks.length > 1 ? ` (${index + 1}/${chunks.length})` : ""}`)
+        .setDescription(description)
+        .addFields({ name: "Ülke", value: first.countryName, inline: true }, { name: "Savaş Turu", value: number(status.roundNumber), inline: true })
+        .setFooter({ text: "Bu filo can dökümü yalnızca size görünür." })
+    ));
+  }
+  return embeds;
 }
 export async function refreshActiveBattleCards(client: Client, guildId: string): Promise<{ updated: number; failed: number }> {
   let updated = 0;
@@ -154,7 +223,16 @@ export async function refreshActiveBattleCards(client: Client, guildId: string):
 }
 function publicPayload(view: BattleView, result?: Parameters<typeof battleEmbed>[1]) {
   const asset = battlefieldAsset(view.battle.terrain);
-  return { embeds: [battleEmbed(view, result)], components: view.rolls.length ? [] : components(view), files: [new AttachmentBuilder(asset.path, { name: asset.name })] };
+  const visibleComponents = view.battle.status === "FINISHED"
+    ? components(view)
+    : view.rolls.length
+      ? view.battle.terrain === "NAVAL"
+        ? [new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder().setCustomId(`battle_fleet_status|${view.battle.id}`).setLabel("Filo Durumu").setEmoji("❤️‍🩹").setStyle(ButtonStyle.Secondary)
+          )]
+        : []
+      : components(view);
+  return { embeds: [battleEmbed(view, result)], components: visibleComponents, files: [new AttachmentBuilder(asset.path, { name: asset.name })] };
 }
 
 export function battleRollEmbed(view: BattleView, side: BattleSideKey): EmbedBuilder {
@@ -451,7 +529,15 @@ export async function handleBattleButton(interaction: ButtonInteraction): Promis
   if (!interaction.guildId || !interaction.channelId) throw new GameError("Sunucu veya kanal bulunamadı.");
   const battleId = interaction.customId.split("|")[1];
   if (!battleId) throw new GameError("Savaş düğmesi bozuk.");
-  if (interaction.customId.startsWith("battle_armies|")) {
+  if (interaction.customId.startsWith("battle_fleet_status|")) {
+    await interaction.deferReply({ ephemeral: true });
+    const status = await battleService.playerFleetStatus({ guildId: interaction.guildId, battleId, actorId: interaction.user.id });
+    const embeds = playerFleetStatusEmbeds(status);
+    await interaction.editReply({ content: "⚓ Savaştaki kendi filolarınızın gemi can durumu:", embeds: embeds.slice(0, 10) });
+    for (let index = 10; index < embeds.length; index += 10) {
+      await interaction.followUp({ embeds: embeds.slice(index, index + 10), ephemeral: true });
+    }
+  } else if (interaction.customId.startsWith("battle_armies|")) {
     await interaction.deferReply({ ephemeral: true });
     const country = await gameService.countryForUser(interaction.guildId, interaction.user.id);
     if (!country) throw new GameError("Discord hesabına atanmış bir ülke bulunamadı.");

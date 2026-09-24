@@ -2,14 +2,27 @@ import { describe, expect, it } from "vitest";
 import { commandBuilders } from "../discord/commands.js";
 import { migrations } from "../db/migrations.js";
 import { calculateCategorizedIncome } from "./income.js";
-import { applyFormableShipUpkeepDiscount, FORMABLE_COUNTRIES, formableBuildingDiscount, formableUnitDiscount, missingFormableTerritories } from "./formable-countries.js";
+import { applyFormableShipUpkeepDiscount, FORMABLE_COUNTRIES, formableBuildingDiscount, formableKeysForTier, formableTier, formableUnitDiscount, missingFormableTerritories } from "./formable-countries.js";
 import { unitCostMultiplier } from "./resources.js";
 
 describe("kurulabilir ülkeler", () => {
   it("bütün kurulabilir kimlikleri ve yönetici komutunu sunar", () => {
-    expect(Object.keys(FORMABLE_COUNTRIES).length).toBeGreaterThanOrEqual(35);
+    expect(formableKeysForTier(1)).toHaveLength(39);
+    expect(formableKeysForTier(2)).toHaveLength(16);
+    expect(formableKeysForTier(3)).toHaveLength(0);
     const command = commandBuilders.find((item) => item.name === "ulke-formla");
+    expect(command?.options?.find((option) => option.name === "tier")?.required).toBe(true);
     expect(command?.options?.find((option) => option.name === "formlanan-ulke")?.autocomplete).toBe(true);
+  });
+
+  it("bütün Tier 2 devletleri iki büyük, bir orta ve bir hafif etki taşır", () => {
+    for (const key of formableKeysForTier(2)) {
+      const definition = FORMABLE_COUNTRIES[key];
+      expect(definition.buffs, key).toHaveLength(4);
+      expect(definition.effectScales, key).toEqual(["MAJOR", "MAJOR", "MEDIUM", "MINOR"]);
+      expect(definition.requiredActiveFormables, key).toBeTruthy();
+      expect(formableTier(key)).toBe(2);
+    }
   });
 
   it("At hammaddesini ve ülke süvari indirimini Atlı Okçuya birlikte uygular", () => {
@@ -47,22 +60,38 @@ describe("kurulabilir ülkeler", () => {
       formableKey: "BRITANNIA"
     });
     expect(income.gross.seaTrade).toBe(900);
+    expect(FORMABLE_COUNTRIES.BRITANNIA.requiredTerritories.map((territory) => territory.label)).toEqual([
+      "Camulodunon","Eborakon","Eildon","Iska","Moridunon"
+    ]);
+    expect(missingFormableTerritories("BRITANNIA",["Camulodunon","Eborakon","Eildon","Iska","Moridunon"])).toEqual([]);
+    expect(missingFormableTerritories("BRITANNIA",["Camulodunon","Eblana"])).toEqual(["Eborakon","Eildon","Iska","Moridunon"]);
   });
 
-  it("Kartaca'nın liman ve paralı asker etkilerini uygular, otomatik gemi kapasitesi vermez", () => {
+  it("Büyük Kartaca'nın liman ve paralı asker etkilerini uygular, kuruluş gemilerini ayrı ödül olarak verir", () => {
     const definition = FORMABLE_COUNTRIES.CARTHAGE;
     expect(definition.name).toBe("Büyük Kartaca");
-    expect(definition.buffs).toHaveLength(2);
+    expect(definition.buffs).toHaveLength(3);
     expect(definition.modifiers).toMatchObject({
       buildingIncomePercent:{ port:0.20 },mercenaryHireDiscount:0.10,mercenaryUpkeepDiscount:0.10
     });
     expect(definition.modifiers.shipyardPointBonus).toBeUndefined();
+    expect(definition.foundingReward.shipsPerActiveShipyard).toEqual({shipType:"kerkouros",quantity:2});
     const income = calculateCategorizedIncome({
       settlementIncome:0,taxIncome:0,landTradeIncome:0,seaTradeIncome:0,
       manualFlatIncome:0,manualIncomePercent:0,ruinStage:0,
       buildings:[{ buildingType:"port",level:1 }],formableKey:"CARTHAGE"
     });
     expect(income.gross.seaTrade).toBe(900);
+  });
+
+  it("Pön İmparatorluğu Büyük Kartaca bölgesinin dengeli Tier 2 devamıdır", () => {
+    const definition = FORMABLE_COUNTRIES.PUNIC_EMPIRE;
+    expect(definition.name).toBe("Pön İmparatorluğu");
+    expect(definition.requiredActiveFormables).toEqual(["CARTHAGE", "MAURETANIA", "LIBYA"]);
+    expect(definition.modifiers).toMatchObject({
+      shipDiscount:0.20,shipUpkeepDiscount:0.20,mercenaryHireDiscount:0.20,
+      mercenaryUpkeepDiscount:0.20,buildingIncomePercent:{port:0.25},shipTransportMultiplier:1.15
+    });
   });
 
   it("Akdeniz Ligi hedef topraklarını ve deniz-ticaret bonuslarını uygular", () => {
@@ -87,14 +116,17 @@ describe("kurulabilir ülkeler", () => {
     expect(income.gross.seaTrade).toBe(1_100);
   });
 
-  it("Büyük Britanya Britanya mirasını ve üç üst devlet bonusunu birlikte taşır", () => {
+  it("Büyük Britanya yalnızca kendi dört Tier 2 etkisini taşır ve Tier 1 ile birikmez", () => {
     const definition = FORMABLE_COUNTRIES.GREAT_BRITAIN;
-    expect(definition.buffs).toHaveLength(6);
+    expect(definition.buffs).toHaveLength(4);
     expect(definition.modifiers).toMatchObject({
       shipDiscount: 0.30, shipUpkeepDiscount: 0.30, archerSlingerDiscount: 0.10,
       buildingIncomePercent: { port: 0.20 }, shipTransportMultiplier: 1.20,
-      navalClashBonus: 1, britonLongbowDamageBonusPerThousand: 1, stabilityRiskReduction: 10
+      britonLongbowDamageBonusPerThousand: 1, stabilityRiskReduction: 10
     });
+    expect(definition.modifiers.navalClashBonus).toBeUndefined();
+    expect(definition.requiredActiveFormables).toEqual(["BRITANNIA"]);
+    expect(missingFormableTerritories("GREAT_BRITAIN",["Camulodunon","Eborakon","Eildon","Iska","Moridunon","Eblana"])).toEqual([]);
     expect(formableUnitDiscount("GREAT_BRITAIN", "briton_longbow")).toBe(0.10);
     expect(applyFormableShipUpkeepDiscount(150, "GREAT_BRITAIN")).toBe(105);
   });
