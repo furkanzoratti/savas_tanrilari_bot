@@ -304,15 +304,17 @@ export async function handleCharacterCommand(interaction: ChatInputCommandIntera
     requireGameMaster(interaction);
     await interaction.deferReply({ ephemeral: true });
     const sub=interaction.options.getSubcommand();
-    if(sub==="casus-ekle"){
+    if(sub==="karakter-ekle"||sub==="casus-ekle"){
       const country=await gameService.countryByName(interaction.guildId,interaction.options.getString("ulke",true));
       if(!country)throw new GameError("Ülke bulunamadı.");
-      const character=await characterService.createManualSpy({
+      const role=(sub==="karakter-ekle"?interaction.options.getString("rol",true):"SPY") as keyof typeof CHARACTER_ROLES;
+      const character=await characterService.createManualCharacter({
         guildId:interaction.guildId,countryId:country.id,actorId:interaction.user.id,
-        name:interaction.options.getString("ad",true),skillBonus:interaction.options.getInteger("bonus",true)
+        name:interaction.options.getString("ad",true),role,skillBonus:interaction.options.getInteger("bonus",true)
       });
-      await interaction.editReply(`✅ **${country.name}** devletine **${character.name} (+${character.skillBonus})** casusu eklendi.`);
-      await logCharacterCommand(interaction,country.name,`Yönetici tarafından **${character.name} (+${character.skillBonus})** casusu eklendi.`);
+      const roleLabel=CHARACTER_ROLES[character.role].label;
+      await interaction.editReply(`✅ **${country.name}** devletine **${character.name} (+${character.skillBonus})** adlı ${roleLabel} eklendi.`);
+      await logCharacterCommand(interaction,country.name,`Yönetici tarafından **${character.name} (+${character.skillBonus})** adlı ${roleLabel} eklendi.`);
       return true;
     }
     const operation = interaction.options.getString("islem",true);

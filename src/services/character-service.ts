@@ -7,7 +7,7 @@ import {
   type AdmiralDoctrine, type AdmiralSpecialization, type CharacterSpecialization, type CommanderDoctrine, type DiplomatTask, type MerchantTask
 } from "../domain/characters.js";
 import type { CharacterRole } from "../domain/types.js";
-import { caravanseraiForeignConcessionBonus } from "../domain/catalog.js";
+import { CHARACTER_ROLES, caravanseraiForeignConcessionBonus } from "../domain/catalog.js";
 import { greatPowerService } from "./great-power-service.js";
 import { GameError } from "./game-service.js";
 import { awardCharacterSpecializationProgress, chooseCharacterSpecialization } from "./character-specialization-progress.js";
@@ -209,16 +209,17 @@ async function countryCuriaBonus(client: DbClient, countryId: string): Promise<n
 }
 
 export const characterService = {
-  async createManualSpy(input:{guildId:string;countryId:string;actorId:string;name:string;skillBonus:number}):Promise<{id:string;name:string;skillBonus:number}>{
+  async createManualCharacter(input:{guildId:string;countryId:string;actorId:string;name:string;role:CharacterRole;skillBonus:number}):Promise<{id:string;name:string;role:CharacterRole;skillBonus:number}>{
     return withTransaction(async(client)=>{
       const country=(await client.query<{id:string}>(
         "SELECT id FROM countries WHERE id=$1 AND guild_id=$2 AND status='ACTIVE' FOR UPDATE",
         [input.countryId,input.guildId])).rows[0];
       if(!country)throw new GameError("Aktif devlet bulunamadı.");
       const name=input.name.trim().replace(/\s+/g," ");
-      if(name.length<2||name.length>60)throw new GameError("Casus adı 2 ile 60 karakter arasında olmalıdır.");
+      if(name.length<2||name.length>60)throw new GameError("Karakter adı 2 ile 60 karakter arasında olmalıdır.");
+      if(!(input.role in CHARACTER_ROLES))throw new GameError("Geçersiz karakter rolü seçildi.");
       if(!Number.isInteger(input.skillBonus)||input.skillBonus<0||input.skillBonus>5)
-        throw new GameError("Casus bonusu 0 ile 5 arasında bir tam sayı olmalıdır.");
+        throw new GameError("Karakter bonusu 0 ile 5 arasında bir tam sayı olmalıdır.");
       const duplicate=await client.query(
         "SELECT 1 FROM country_characters WHERE country_id=$1 AND lower(name)=lower($2)",[input.countryId,name]);
       if(duplicate.rowCount)throw new GameError("Bu devlette aynı isimli bir karakter zaten bulunuyor.");
@@ -226,13 +227,13 @@ export const characterService = {
         "SELECT current_turn FROM guilds WHERE discord_id=$1",[input.guildId])).rows[0]?.current_turn??0);
       const created=(await client.query<{id:string}>(
         `INSERT INTO country_characters(country_id,name,role,skill_bonus,trained_turn,trained_by)
-         VALUES($1,$2,'SPY',$3,$4,$5) RETURNING id`,
-        [input.countryId,name,input.skillBonus,turn,input.actorId])).rows[0]!;
+         VALUES($1,$2,$3,$4,$5,$6) RETURNING id`,
+        [input.countryId,name,input.role,input.skillBonus,turn,input.actorId])).rows[0]!;
       await client.query(
         `INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details)
-         VALUES($1,$2,'CHARACTER_MANUAL_SPY_CREATE','character',$3,$4::jsonb)`,
-        [input.guildId,input.actorId,created.id,JSON.stringify({countryId:input.countryId,name,skillBonus:input.skillBonus,turn})]);
-      return {id:created.id,name,skillBonus:input.skillBonus};
+         VALUES($1,$2,'CHARACTER_MANUAL_CREATE','character',$3,$4::jsonb)`,
+        [input.guildId,input.actorId,created.id,JSON.stringify({countryId:input.countryId,name,role:input.role,skillBonus:input.skillBonus,turn})]);
+      return {id:created.id,name,role:input.role,skillBonus:input.skillBonus};
     });
   },
   async list(countryId: string): Promise<CharacterView[]> {

@@ -283,11 +283,12 @@ export const commandBuilders = [
     .addSubcommand((sub) => sub.setName("gorev-bitir").setDescription("Etkin Diplomat görevini sona erdirir")
       .addStringOption((o) => o.setName("diplomat").setDescription("Görevi bitecek Diplomat").setRequired(true).setAutocomplete(true))),
   new SlashCommandBuilder()
-    .setName("karakter-yonetim").setDescription("Yalnızca yönetici: Akademi, karakter görevi ve casus sonuç kanalını ayarlar")
-    .addSubcommand((sub) => sub.setName("casus-ekle").setDescription("Bir devlete manuel casus karakter ekler")
-      .addStringOption((o) => o.setName("ulke").setDescription("Casusun ekleneceği devlet").setRequired(true))
-      .addStringOption((o) => o.setName("ad").setDescription("Casusun adı").setRequired(true).setMinLength(2).setMaxLength(60))
-      .addIntegerOption((o) => o.setName("bonus").setDescription("Casusun yetenek bonusu").setRequired(true).setMinValue(0).setMaxValue(5)))
+    .setName("karakter-yonetim").setDescription("Yalnızca yönetici: karakterleri ve karakter sonuç kanalını yönetir")
+    .addSubcommand((sub) => sub.setName("karakter-ekle").setDescription("Bir devlete istenen rolde manuel karakter ekler")
+      .addStringOption((o) => o.setName("ulke").setDescription("Karakterin ekleneceği devlet").setRequired(true))
+      .addStringOption((o) => o.setName("rol").setDescription("Karakter rolü").setRequired(true).addChoices(...CHARACTER_ROLE_CHOICES))
+      .addStringOption((o) => o.setName("ad").setDescription("Karakterin adı").setRequired(true).setMinLength(2).setMaxLength(60))
+      .addIntegerOption((o) => o.setName("bonus").setDescription("Karakterin yetenek bonusu").setRequired(true).setMinValue(0).setMaxValue(5)))
     .addSubcommand((sub) => sub.setName("log-kanali").setDescription("Bütün karakter etkinliklerinin yönetici log kanalını ayarlar")
       .addStringOption((o) => o.setName("islem").setDescription("İşlem").setRequired(true)
         .addChoices(
