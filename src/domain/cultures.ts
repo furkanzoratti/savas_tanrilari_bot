@@ -25,7 +25,15 @@ export const CULTURE_GROUPS = {
   SARMATIAN: { label: "Sarmat" },
   SCYTHIAN: { label: "İskit" },
   WEST_IRANIAN: { label: "Batı İranik" },
-  EAST_IRANIAN: { label: "Doğu İranik" }
+  EAST_IRANIAN: { label: "Doğu İranik" },
+  GANDHARAN: { label: "Gandharalı" },
+  MADHYADESHI: { label: "Orta Hint" },
+  MAGADHAN: { label: "Doğu Hint–Magadha" },
+  KALINGAN: { label: "Kalingalı" },
+  MAHARASHTRI: { label: "Maharashtri–Dekan" },
+  ANDHRA: { label: "Andhra" },
+  TAMIL: { label: "Tamil" },
+  SOUTHEAST_ASIAN: { label: "Güneydoğu Asyalı" }
 } as const;
 
 export type CultureGroup = keyof typeof CULTURE_GROUPS;

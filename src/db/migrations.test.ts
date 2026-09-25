@@ -286,3 +286,15 @@ describe("seksen dokuzuncu migration", () => {
     expect(migration?.sql).not.toContain("thracian_peltast");
   });
 });
+
+describe("doksanıncı migration", () => {
+  const migration = migrations.find((item) => item.version === 90);
+
+  it("Hint ve Güneydoğu Asya kültürlerini yerleşke ve ülke kültürlerine ekler", () => {
+    expect(migration?.name).toBe("indian_culture_groups");
+    expect(migration?.sql).toContain("settlements_culture_group_check");
+    expect(migration?.sql).toContain("countries_primary_culture_group_check");
+    expect(migration?.sql).toContain("'GANDHARAN'");
+    expect(migration?.sql).toContain("'SOUTHEAST_ASIAN'");
+  });
+});
