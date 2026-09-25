@@ -2976,7 +2976,7 @@ export const gameService = {
               await client.query(
                 `UPDATE naval_raids
                     SET income_deduction_remaining=income_deduction_remaining-$1,
-                        income_deduction_applied_turn=CASE WHEN income_deduction_remaining-$1=0 THEN $2 ELSE NULL END
+                        income_deduction_applied_turn=CASE WHEN income_deduction_remaining-$1=0 THEN $2::integer ELSE NULL END
                   WHERE id=$3`,[applied,newTurn,penalty.id]
               );
               remainingRaidDeduction-=applied;
