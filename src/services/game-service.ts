@@ -951,12 +951,9 @@ export const gameService = {
   },
   async createSettlement(input: {
     guildId: string; actorId: string; countryId: string; name: string; population: number;
-    slaves: number; totalIncome: number;
+    slaves: number; landTradeIncome: number;
     resourceType: ResourceType; cultureGroup: CultureGroup; isCoastal?: boolean;
   }): Promise<SettlementRow> {
-    const taxIncome = populationTaxIncome(input.population);
-    if (input.totalIncome < taxIncome) throw new GameError(`Başlangıç geliri, nüfustan doğan ${taxIncome.toLocaleString("tr-TR")} Altın halk vergisinden düşük olamaz.`);
-    const landTradeIncome = input.totalIncome - taxIncome;
     return withTransaction(async (client) => {
       const country = await getCountry(client, input.countryId);
       if (country.guild_id !== input.guildId) throw new GameError("Ülke bu sunucuya ait değil.");
@@ -966,7 +963,7 @@ export const gameService = {
         `INSERT INTO settlements(
           country_id,name,population,slave_population,base_income,tax_income,land_trade_income,sea_trade_income,base_land_trade_income,base_population_growth,resource_type,culture_group,local_treasury,is_coastal
         ) VALUES ($1,$2,$3,$4,0,0,0,0,$5,0,$6,$7,$8,$9) RETURNING *`,
-        [input.countryId, input.name.trim(), input.population, input.slaves, landTradeIncome, input.resourceType, input.cultureGroup, startingLocalTreasury, input.isCoastal ?? false]
+        [input.countryId, input.name.trim(), input.population, input.slaves, input.landTradeIncome, input.resourceType, input.cultureGroup, startingLocalTreasury, input.isCoastal ?? false]
       );
       const settlement = result.rows[0]!;
       await ensureStandardGarrison(client, settlement.id, settlement.population, settlement.garrison_level, true);

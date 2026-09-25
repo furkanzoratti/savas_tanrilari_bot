@@ -844,7 +844,7 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
       guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id,
       name: interaction.options.getString("ad", true), population: interaction.options.getInteger("nufus", true),
       slaves: interaction.options.getInteger("kole", true),
-      totalIncome: interaction.options.getInteger("gelir", true),
+      landTradeIncome: interaction.options.getInteger("kara-ticareti", true),
       resourceType: interaction.options.getString("hammadde", true) as ResourceType,
       cultureGroup,
       isCoastal: interaction.options.getBoolean("kiyi") ?? false

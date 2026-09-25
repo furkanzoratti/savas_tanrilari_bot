@@ -14,12 +14,12 @@ describe("ticaret ve rol raporu komutları", () => {
     expect(commandBuilders.some((command) => command.name === "hos-geldin")).toBe(true);
   });
 
-  it("yerleşke oluştururken tek başlangıç geliri ister ve dağılımı otomasyona bırakır", () => {
+  it("yerleşke oluştururken yalnız kara ticaretini ister ve nüfus vergisini otomasyona bırakır", () => {
     const admin = commandBuilders.find((command) => command.name === "yonetim");
     const settlement = admin?.options?.find((option) => option.name === "yerleske-ekle");
     const names = settlement?.options?.map((option) => option.name) ?? [];
-    expect(names).toContain("gelir");
-    expect(names).not.toEqual(expect.arrayContaining(["vergi-geliri", "kara-ticareti", "deniz-ticareti"]));
+    expect(names).toContain("kara-ticareti");
+    expect(names).not.toEqual(expect.arrayContaining(["gelir", "vergi-geliri", "deniz-ticareti"]));
     expect(admin?.options?.some((option) => option.name === "yerleske-hazinesi")).toBe(true);
   });
 
