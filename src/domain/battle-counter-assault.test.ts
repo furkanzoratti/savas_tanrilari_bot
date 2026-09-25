@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   assaultUnitTotal,
   hasAssaultForce,
+  egyptianWarChariotPressureBonus,
   resolveRound,
   rollBattlePool,
   spearCavalryCounter
@@ -53,6 +54,24 @@ describe("Mızraklı–Süvari karşılaşması", () => {
     expect(counter.coverage).toBe(1);
   });
 
+  it("yeni mızraklıları tam, yeni hareketli birlikleri tam ağırlıkla karşılar", () => {
+    const counter = spearCavalryCounter(
+      { triarii_veteran: 1_000, silver_shield: 1_000, machimoi_phalangitai: 1_000 },
+      { mauryan_war_elephant: 1_000, desert_raider: 1_000, egyptian_war_chariot: 1_000 }
+    );
+    expect(counter.effectiveSpears).toBe(3_000);
+    expect(counter.effectiveEnemyCavalry).toBe(3_000);
+    expect(counter.mobileCoverage).toBe(1);
+  });
+
+  it("Mısır savaş arabası baskısını yalnız ilk tur açık arazide ve yetersiz mızrak karşısında verir", () => {
+    const base = { round: 1, terrain: "OPEN_PLAIN" as const, pressureWinner: "A" as const, side: "A" as const, engagedChariots: 1_000 };
+    expect(egyptianWarChariotPressureBonus({ ...base, enemyMobileCoverage: 0.49 })).toBe(1);
+    expect(egyptianWarChariotPressureBonus({ ...base, enemyMobileCoverage: 0.50 })).toBe(0);
+    expect(egyptianWarChariotPressureBonus({ ...base, terrain: "FOREST", enemyMobileCoverage: 0 })).toBe(0);
+    expect(egyptianWarChariotPressureBonus({ ...base, round: 2, enemyMobileCoverage: 0 })).toBe(0);
+  });
+
   it("kompozisyon pasifken de gerçek mızrak zarının eşleşen kısmına bonus ekler", () => {
     const withoutCavalry = rollBattlePool({ spear: 5_000 }, 5_000, (max) => max - 1, "FIELD", undefined, false);
     const withCavalry = rollBattlePool({ spear: 5_000 }, 5_000, (max) => max - 1, "FIELD", {
@@ -91,11 +110,17 @@ describe("Hücum Birliği", () => {
       iberian_caetrati: 100,
       germanic_shock_warrior: 100,
       anatolian_thureophoroi: 100,
+      triarii_veteran: 100,
+      punic_veteran: 100,
+      gaesatae: 100,
+      peltast: 100,
+      silver_shield: 100,
+      machimoi_phalangitai: 100,
       archer: 5_000,
       heavy_cavalry: 5_000
     };
 
-    expect(assaultUnitTotal(composition)).toBe(1_000);
+    expect(assaultUnitTotal(composition)).toBe(1_600);
     expect(hasAssaultForce(composition)).toBe(true);
   });
 

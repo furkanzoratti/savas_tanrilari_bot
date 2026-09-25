@@ -275,3 +275,14 @@ describe("elli sekizinci migration", () => {
     expect(migration?.sql).toContain("anatolian_thureophoroi");
   });
 });
+
+describe("seksen dokuzuncu migration", () => {
+  const migration = migrations.find((item) => item.version === 89);
+
+  it("yeni antik özel birlikleri ülke izinlerine ekler", () => {
+    expect(migration?.name).toBe("expanded_ancient_special_units");
+    expect(migration?.sql).toContain("triarii_veteran");
+    expect(migration?.sql).toContain("egyptian_war_chariot");
+    expect(migration?.sql).not.toContain("thracian_peltast");
+  });
+});

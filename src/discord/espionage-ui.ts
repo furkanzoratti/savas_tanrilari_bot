@@ -254,7 +254,7 @@ export async function handleEspionageAutocomplete(interaction: AutocompleteInter
     const filtered = sub === "gorev-baslat" ? spies.filter((spy) => spy.assignment === "NONE")
       : sub === "savunma-ata" ? spies.filter((spy) => spy.assignment === "NONE" || isSpyDefenseAssignment(spy.assignment))
       : sub === "savunma-kaldir" ? spies.filter((spy) => isSpyDefenseAssignment(spy.assignment))
-      : sub === "uzmanlik-sec" ? spies.filter((spy) => !spy.specialization && spy.specialization_progress>=3)
+      : sub === "uzmanlik-sec" ? spies.filter((spy) => spy.assignment === "NONE" && !spy.specialization && spy.specialization_progress>=3)
       : spies.filter((spy) => spy.assignment === "NONE" || spy.assignment.startsWith("COUNTERINTELLIGENCE"));
     await interaction.respond(filtered.filter((spy) => !query || spy.name.toLocaleLowerCase("tr-TR").includes(query)).slice(0,25).map((spy) => ({ name: `${spy.name} (+${spy.skill_bonus}) • ${assignmentLabels[spy.assignment] ?? spy.assignment}`.slice(0,100), value: spy.id })));
     return true;

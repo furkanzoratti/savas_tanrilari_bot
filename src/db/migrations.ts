@@ -18,6 +18,7 @@ import { navalOperationsMigration } from "./naval-operations-migration.js";
 import { navalRaidIncomeMigration } from "./naval-raid-income-migration.js";
 import { landRaidsMigration } from "./land-raids-migration.js";
 import { navalHullRepairMigration } from "./naval-hull-repair-migration.js";
+import { expandedAncientSpecialUnitsMigration } from "./expanded-ancient-special-units-migration.js";
 
 export const migrations = [
   {
@@ -2253,5 +2254,6 @@ export const migrations = [
   navalOperationsMigration,
   navalRaidIncomeMigration,
   landRaidsMigration,
-  navalHullRepairMigration
+  navalHullRepairMigration,
+  expandedAncientSpecialUnitsMigration
 ] as const;

@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { DbClient } from "../db/pool.js";
 import { pool, withTransaction } from "../db/pool.js";
 import {
-  BASE_SIEGE_STARVATION_TURNS, BATTLE_TERRAINS, BATTLE_UNIT_STATS, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, SIEGE_ATTACKER_DISMOUNT_MAP, activeSiegeAssaultAssets, assaultUnitTotal, baseRetreatRate, battleEnds, commanderClashBonus, compositionTotal, hasAssaultForce, orderState, resolveRound, restoreSiegeAttackerCasualtyTypes, roundDamageFactors, siegeAssaultAccess, siegeAssaultComposition, siegeAttackerDismountedComposition, siegeDefenderCaptured, siegeDefenderComposition, siegeDefenseModifiers, siegeLineBreaks, siegeOrderState, siegePressureAfterRound,
+  BASE_SIEGE_STARVATION_TURNS, BATTLE_TERRAINS, BATTLE_UNIT_STATS, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, SIEGE_ATTACKER_DISMOUNT_MAP, activeSiegeAssaultAssets, assaultUnitTotal, baseRetreatRate, battleEnds, commanderClashBonus, compositionTotal, egyptianWarChariotPressureBonus, hasAssaultForce, orderState, resolveRound, restoreSiegeAttackerCasualtyTypes, roundDamageFactors, siegeAssaultAccess, siegeAssaultComposition, siegeAttackerDismountedComposition, siegeDefenderCaptured, siegeDefenderComposition, siegeDefenseModifiers, siegeLineBreaks, siegeOrderState, siegePressureAfterRound,
   rollBattlePool, rollNavalPool, rollSiegeSupport,
   type BattleComposition, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain,
   type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeComposition, type SiegeDismountUnitType, type SiegeTarget, type SiegeTargets
@@ -96,9 +96,10 @@ export interface BattleRollRow {
   side_key: BattleSideKey; roller_user_id: string; clash_total: number; damage_total: number;
   is_proxy: boolean; manual: boolean; wall_damage: number; gate_damage: number;
   detail: {
-    __spear_cavalry?: { antiCavalryDamage?: number; clashBonus?: number; matched?: number };
+    __spear_cavalry?: { antiCavalryDamage?: number; clashBonus?: number; matched?: number; mobileCoverage?: number };
     __commander?: { clash?: number };
     __dismounted?: BattleComposition;
+    egyptian_war_chariot?: { engaged?: number; clash?: number; damage?: number };
   } | null;
 }
 
@@ -116,6 +117,7 @@ export interface BattleRoundResult {
   defenderRawClash: number; defenderEffectiveClash: number; defenderRawDamage: number; defenderEffectiveDamage: number;
   defenderClashMultiplier: number; defenderDamageMultiplier: number;
   disabledA:number;disabledB:number;
+  chariotPressureBonusA:number;chariotPressureBonusB:number;
 }
 
 export interface BattleSourceSettlement {
@@ -2104,6 +2106,18 @@ export const battleService = {
       }
       let attackerPressureDelta = resolution.pressureDeltaA;
       let defenderPressureDelta = resolution.pressureDeltaB;
+      const chariotPressureBonusA = egyptianWarChariotPressureBonus({
+        round: active.round_number, terrain: view.battle.terrain, pressureWinner: resolution.pressureWinner, side: "A",
+        engagedChariots: Number(rollA.detail?.egyptian_war_chariot?.engaged ?? 0),
+        enemyMobileCoverage: Number(rollB.detail?.__spear_cavalry?.mobileCoverage ?? 0)
+      });
+      const chariotPressureBonusB = egyptianWarChariotPressureBonus({
+        round: active.round_number, terrain: view.battle.terrain, pressureWinner: resolution.pressureWinner, side: "B",
+        engagedChariots: Number(rollB.detail?.egyptian_war_chariot?.engaged ?? 0),
+        enemyMobileCoverage: Number(rollA.detail?.__spear_cavalry?.mobileCoverage ?? 0)
+      });
+      defenderPressureDelta += chariotPressureBonusA;
+      attackerPressureDelta += chariotPressureBonusB;
       if (attackerPressureDelta > 0 && commanderA?.specialization === "GUARDIAN"
         && commanderA.specialization_level >= 3 && !view.battle.guardian_pressure_ignored_a) {
         attackerPressureDelta = 0;
@@ -2188,7 +2202,7 @@ export const battleService = {
           reserveReliefA: siegePressureA?.reserveRelief ?? 0, reserveReliefB: siegePressureB?.reserveRelief ?? 0,
           defenderRawClash: rollB.clash_total, defenderEffectiveClash, defenderRawDamage: rollB.damage_total,
           defenderEffectiveDamage, defenderClashMultiplier: defense.defenderClash, defenderDamageMultiplier: defense.defenderDamage
-          ,disabledA,disabledB
+          ,disabledA,disabledB,chariotPressureBonusA,chariotPressureBonusB
         }
       };
     });

@@ -123,7 +123,8 @@ function characterLine(character: CharacterView): string {
     : assignmentLabels[character.assignment] ?? "Tanımsız görev";
   const details: string[] = [character.character_status === "DEAD" ? "Öldü" : character.character_status === "DISMISSED" ? "Kalıcı görevden alındı" : task];
   const place = characterLocation(character);
-  if (place) details.push(place);
+  if (character.assignment === "CAPTURED") details.push("Tutsak olduğu şehir: **"+(character.assigned_settlement_name??"Bilinmiyor")+"**"+(character.assigned_country_name?" ("+character.assigned_country_name+")":""));
+  else if (place) details.push(place);
   if (character.assignment_ready_turn !== null) details.push("Tur " + character.assignment_ready_turn);
   if (character.operation_progress !== null && character.operation_goal !== null) {
     details.push("İlerleme " + character.operation_progress + "/" + character.operation_goal);

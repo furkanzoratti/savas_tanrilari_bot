@@ -16,4 +16,11 @@ describe("asker alım modalı kimlikleri", () => {
     expect(decodeUnitTypeFromCustomId("heavy_infantry")).toBe("heavy_infantry");
     expect(decodeUnitTypeFromCustomId("bilinmeyen_birim")).toBeNull();
   });
+
+  it("yeni uzun özel birlik anahtarlarını kısa modal kimliklerine dönüştürür", () => {
+    expect(encodeUnitTypeForCustomId("machimoi_phalangitai")).toBe("mp");
+    expect(decodeUnitTypeFromCustomId("mp")).toBe("machimoi_phalangitai");
+    expect(encodeUnitTypeForCustomId("egyptian_war_chariot")).toBe("ewc");
+    expect(decodeUnitTypeFromCustomId("ewc")).toBe("egyptian_war_chariot");
+  });
 });

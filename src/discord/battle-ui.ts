@@ -103,7 +103,12 @@ ${accessNote}` }
     const navalDamage=view.battle.terrain==="NAVAL"
       ? `\n${view.sides.A.country_name}: **${number(roundResult.disabledA)} yeni iş göremez**\n${view.sides.B.country_name}: **${number(roundResult.disabledB)} yeni iş göremez**`
       :"";
-    embed.addFields({ name: `⚔️ Tur Sonucu — ${tierLabels[roundResult.tier] ?? roundResult.tier}`, value: `Kayıp hesabındaki üstün taraf: **${winner}**\nBaskı üstünlüğü: **${pressureWinner}** (${tierLabels[roundResult.pressureTier] ?? roundResult.pressureTier})\n${view.sides.A.country_name}: **-${number(roundResult.lossA)}** • Baskı **${number(roundResult.pressureA)}/8** • ${orderLabels[roundResult.orderA]}\n${view.sides.B.country_name}: **-${number(roundResult.lossB)}** • Baskı **${number(roundResult.pressureB)}/8** • ${orderLabels[roundResult.orderB]}${navalDamage}${roundResult.wallDamage ? `\nSurlara verilen hasar: **${number(roundResult.wallDamage)}**` : ""}${roundResult.gateDamage ? `\nKapıya verilen hasar: **${number(roundResult.gateDamage)}**` : ""}` });
+    const chariotPressure = roundResult.chariotPressureBonusA > 0
+      ? `\n🐎 **${view.sides.A.country_name}** Chariot birlikleri düşman düzenine +${roundResult.chariotPressureBonusA} baskı uyguladı.`
+      : roundResult.chariotPressureBonusB > 0
+        ? `\n🐎 **${view.sides.B.country_name}** Chariot birlikleri düşman düzenine +${roundResult.chariotPressureBonusB} baskı uyguladı.`
+        : "";
+    embed.addFields({ name: `⚔️ Tur Sonucu — ${tierLabels[roundResult.tier] ?? roundResult.tier}`, value: `Kayıp hesabındaki üstün taraf: **${winner}**\nBaskı üstünlüğü: **${pressureWinner}** (${tierLabels[roundResult.pressureTier] ?? roundResult.pressureTier})\n${view.sides.A.country_name}: **-${number(roundResult.lossA)}** • Baskı **${number(roundResult.pressureA)}/8** • ${orderLabels[roundResult.orderA]}\n${view.sides.B.country_name}: **-${number(roundResult.lossB)}** • Baskı **${number(roundResult.pressureB)}/8** • ${orderLabels[roundResult.orderB]}${chariotPressure}${navalDamage}${roundResult.wallDamage ? `\nSurlara verilen hasar: **${number(roundResult.wallDamage)}**` : ""}${roundResult.gateDamage ? `\nKapıya verilen hasar: **${number(roundResult.gateDamage)}**` : ""}` });
     if (view.battle.terrain !== "NAVAL") embed.addFields({
       name: "🧩 Kayıplar Sonrası Kompozisyon",
       value: `${view.sides.A.country_name}: **${currentCompositionLabel(view,"A")}**\n${view.sides.B.country_name}: **${currentCompositionLabel(view,"B")}**`

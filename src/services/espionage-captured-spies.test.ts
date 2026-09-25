@@ -67,6 +67,8 @@ describe("yakalanmış casus yönetimi", () => {
     const [sql,parameters]=mocks.query.mock.calls[0] as [string,unknown[]];
     expect(sql).toContain("character_status='ACTIVE'");
     expect(sql).toContain("assignment='NONE'");
+    expect(sql).toContain("NOT EXISTS");
+    expect(sql).toContain("operation.return_turn+2>state.current_turn");
     expect(parameters).toEqual(["country-1"]);
   });
 });

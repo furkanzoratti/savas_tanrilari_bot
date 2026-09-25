@@ -49,7 +49,7 @@ export const BATTLE_UNIT_STATS: Record<BattleUnitType, {
   light_cavalry: { label: "Hafif Süvari", clashDice: 2, clashSides: 6, damageDice: 1, damageSides: 8, durability: 2 },
   heavy_cavalry: { label: "Ağır Süvari", clashDice: 2, clashSides: 10, damageDice: 2, damageSides: 10, durability: 3 },
   legionary: { label: "Lejyoner", clashDice: 2, clashSides: 10, damageDice: 2, damageSides: 8, durability: 3 },
-  hoplite: { label: "Hoplit", clashDice: 2, clashSides: 8, damageDice: 1, damageSides: 10, durability: 3 },
+  hoplite: { label: "Hoplit", clashDice: 2, clashSides: 8, damageDice: 1, damageSides: 12, durability: 3 },
   horse_archer: { label: "Atlı Okçu", clashDice: 2, clashSides: 8, damageDice: 2, damageSides: 8, durability: 2 },
   camel_cavalry: { label: "Deve Süvarisi", clashDice: 2, clashSides: 8, damageDice: 1, damageSides: 10, durability: 2 },
   briton_longbow: { label: "Briton Uzun Yaycıları", clashDice: 1, clashSides: 12, damageDice: 2, damageSides: 12, durability: 1 },
@@ -57,7 +57,16 @@ export const BATTLE_UNIT_STATS: Record<BattleUnitType, {
   carthaginian_war_elephant: { label: "Kartaca Savaş Filleri", clashDice: 3, clashSides: 10, damageDice: 2, damageSides: 10, durability: 3 },
   iberian_caetrati: { label: "İber Caetratileri", clashDice: 2, clashSides: 6, damageDice: 2, damageSides: 8, durability: 1 },
   germanic_shock_warrior: { label: "Cermen Şok Savaşçıları", clashDice: 2, clashSides: 10, damageDice: 2, damageSides: 8, durability: 1 },
-  anatolian_thureophoroi: { label: "Anadolu Kalkanlıları (Thureophoroi)", clashDice: 2, clashSides: 6, damageDice: 1, damageSides: 10, durability: 2 }
+  anatolian_thureophoroi: { label: "Anadolu Kalkanlıları (Thureophoroi)", clashDice: 2, clashSides: 6, damageDice: 1, damageSides: 10, durability: 2 },
+  triarii_veteran: { label: "Triarii Gazileri", clashDice: 2, clashSides: 6, damageDice: 1, damageSides: 8, durability: 2 },
+  punic_veteran: { label: "Pön Gazileri", clashDice: 3, clashSides: 6, damageDice: 2, damageSides: 8, durability: 3 },
+  gaesatae: { label: "Gaesatae", clashDice: 2, clashSides: 10, damageDice: 2, damageSides: 8, durability: 2 },
+  peltast: { label: "Peltastlar", clashDice: 1, clashSides: 8, damageDice: 1, damageSides: 8, durability: 1 },
+  silver_shield: { label: "Gümüş Kalkanlılar", clashDice: 2, clashSides: 8, damageDice: 1, damageSides: 10, durability: 3 },
+  machimoi_phalangitai: { label: "Machimoi Phalangitai", clashDice: 2, clashSides: 8, damageDice: 1, damageSides: 10, durability: 3 },
+  mauryan_war_elephant: { label: "Maurya Savaş Filleri", clashDice: 3, clashSides: 12, damageDice: 2, damageSides: 12, durability: 3 },
+  desert_raider: { label: "Çöl Akıncıları", clashDice: 2, clashSides: 8, damageDice: 2, damageSides: 8, durability: 2 },
+  egyptian_war_chariot: { label: "Chariot", clashDice: 2, clashSides: 12, damageDice: 2, damageSides: 12, durability: 2 }
 };
 
 export const NAVAL_UNIT_STATS: Record<NavalUnitType, {
@@ -86,6 +95,7 @@ export interface SpearCavalryCounterAssessment {
   effectiveEnemyCavalry: number;
   matched: number;
   coverage: number;
+  mobileCoverage: number;
   clashBonus: number;
   antiCavalryDamage: number;
 }
@@ -127,11 +137,13 @@ export const compositionTotal = (composition: BattleComposition): number => Obje
 
 export const ASSAULT_UNIT_TYPES = [
   "light_infantry", "militia", "spear", "heavy_infantry", "legionary", "hoplite",
-  "persian_immortal", "iberian_caetrati", "germanic_shock_warrior", "anatolian_thureophoroi"
+  "persian_immortal", "iberian_caetrati", "germanic_shock_warrior", "anatolian_thureophoroi",
+  "triarii_veteran", "punic_veteran", "gaesatae", "peltast", "silver_shield", "machimoi_phalangitai"
 ] as const satisfies readonly BattleUnitType[];
 
 export const CAVALRY_UNIT_TYPES = [
-  "light_cavalry", "heavy_cavalry", "horse_archer", "camel_cavalry", "carthaginian_war_elephant"
+  "light_cavalry", "heavy_cavalry", "horse_archer", "camel_cavalry", "carthaginian_war_elephant",
+  "mauryan_war_elephant", "desert_raider", "egyptian_war_chariot"
 ] as const satisfies readonly BattleUnitType[];
 
 export function assaultUnitTotal(composition: BattleComposition): number {
@@ -230,9 +242,12 @@ const COMPOSITION_TIERS: Record<ArmyCompositionTier, Pick<ArmyCompositionAssessm
 
 const roleWeights: Record<BattleUnitType, Partial<Record<keyof ArmyCompositionAssessment["roleShares"], number>>> = {
   light_infantry: { line: 1 }, militia: { line: 1 }, heavy_infantry: { line: 1 }, legionary: { line: 1 }, persian_immortal: { line: 1 },
-  spear: { spear: 1 }, hoplite: { line: 0.5, spear: 0.5 },
+  punic_veteran: { line: 1 }, gaesatae: { line: 1 }, peltast: { line: 0.8, ranged: 0.2 },
+  spear: { spear: 1 }, hoplite: { line: 0.5, spear: 0.5 }, triarii_veteran: { spear: 1 },
+  silver_shield: { spear: 1 }, machimoi_phalangitai: { spear: 1 },
   slinger: { ranged: 1 }, archer: { ranged: 1 }, briton_longbow: { ranged: 1 },
   light_cavalry: { mobile: 1 }, heavy_cavalry: { mobile: 1 }, camel_cavalry: { mobile: 1 }, carthaginian_war_elephant: { mobile: 1 },
+  mauryan_war_elephant: { mobile: 1 }, desert_raider: { mobile: 1 }, egyptian_war_chariot: { ranged: 0.5, mobile: 0.5 },
   horse_archer: { ranged: 0.5, mobile: 0.5 },
   iberian_caetrati: { line: 1 }, germanic_shock_warrior: { line: 1 },
   anatolian_thureophoroi: { line: 0.70, spear: 0.30 }
@@ -241,7 +256,10 @@ const roleWeights: Record<BattleUnitType, Partial<Record<keyof ArmyCompositionAs
 const spearCounterWeights: Partial<Record<BattleUnitType, number>> = {
   spear: 1,
   hoplite: 0.5,
-  anatolian_thureophoroi: 0.3
+  anatolian_thureophoroi: 0.3,
+  triarii_veteran: 1,
+  silver_shield: 1,
+  machimoi_phalangitai: 1
 };
 
 const cavalryCounterWeights: Partial<Record<BattleUnitType, number>> = {
@@ -249,7 +267,10 @@ const cavalryCounterWeights: Partial<Record<BattleUnitType, number>> = {
   heavy_cavalry: 1,
   horse_archer: 0.5,
   camel_cavalry: 1,
-  carthaginian_war_elephant: 1
+  carthaginian_war_elephant: 1,
+  mauryan_war_elephant: 1,
+  desert_raider: 1,
+  egyptian_war_chariot: 1
 };
 
 function weightedCounterTotal(
@@ -267,8 +288,9 @@ export function spearCavalryCounter(
   const effectiveEnemyCavalry = weightedCounterTotal(engagedEnemy, cavalryCounterWeights);
   const matched = Math.min(effectiveSpears, effectiveEnemyCavalry);
   const coverage = effectiveSpears > 0 ? matched / effectiveSpears : 0;
+  const mobileCoverage = effectiveEnemyCavalry > 0 ? matched / effectiveEnemyCavalry : 0;
   if (matched <= 0) {
-    return { effectiveSpears, effectiveEnemyCavalry, matched: 0, coverage: 0, clashBonus: 0, antiCavalryDamage: 0 };
+    return { effectiveSpears, effectiveEnemyCavalry, matched: 0, coverage: 0, mobileCoverage: 0, clashBonus: 0, antiCavalryDamage: 0 };
   }
   const spearShare = effectiveSpears > 0 ? matched / effectiveSpears : 0;
   const matchedClash = Object.entries(spearCounterWeights).reduce((sum, [key, weight]) => sum + (engagedSpears[key as BattleUnitType] ?? 0) * (weight ?? 0) * spearShare, 0);
@@ -278,6 +300,7 @@ export function spearCavalryCounter(
     effectiveEnemyCavalry,
     matched,
     coverage,
+    mobileCoverage,
     clashBonus: Math.round(matchedClash / 1_000 * 0.30),
     antiCavalryDamage: Math.round(matchedDamage / 1_000 * 0.15)
   };
@@ -456,8 +479,10 @@ export function rollBattlePool(
     : undefined;
   const counter = baseCounter && baseCounter.matched > 0 ? {
     ...baseCounter,
-    clashBonus: Math.round(((detail.spear?.clash ?? 0) + (detail.hoplite?.clash ?? 0) * 0.5) * baseCounter.coverage * 0.30 * appliedComposition.clashMultiplier),
-    antiCavalryDamage: Math.round(((detail.spear?.damage ?? 0) + (detail.hoplite?.damage ?? 0) * 0.5) * baseCounter.coverage * 0.15 * appliedComposition.damageMultiplier)
+    clashBonus: Math.round(Object.entries(spearCounterWeights).reduce((sum, [key, weight]) =>
+      sum + Number(detail[key]?.clash ?? 0) * Number(weight ?? 0), 0) * baseCounter.coverage * 0.30 * appliedComposition.clashMultiplier),
+    antiCavalryDamage: Math.round(Object.entries(spearCounterWeights).reduce((sum, [key, weight]) =>
+      sum + Number(detail[key]?.damage ?? 0) * Number(weight ?? 0), 0) * baseCounter.coverage * 0.15 * appliedComposition.damageMultiplier)
   } : undefined;
   const baseDamage = Math.ceil(damage * appliedComposition.damageMultiplier);
   return {
@@ -553,6 +578,19 @@ export function roundDamageFactors(clashA:number,clashB:number):{
     factorA:outcome.winner==="A"?multi.winner:outcome.winner==="B"?multi.loser:multi.winner,
     factorB:outcome.winner==="B"?multi.winner:outcome.winner==="A"?multi.loser:multi.winner
   };
+}
+
+export function egyptianWarChariotPressureBonus(input: {
+  round: number;
+  terrain: BattleTerrain;
+  pressureWinner: BattleSideKey | null;
+  side: BattleSideKey;
+  engagedChariots: number;
+  enemyMobileCoverage: number;
+}): number {
+  if (input.round !== 1 || !["OPEN_PLAIN", "DESERT"].includes(input.terrain)) return 0;
+  if (input.pressureWinner !== input.side || input.engagedChariots <= 0) return 0;
+  return input.enemyMobileCoverage < 0.50 ? 1 : 0;
 }
 
 type CasualtyDurabilityOverrides = Partial<Record<BattleForceType, 1 | 2 | 3>>;

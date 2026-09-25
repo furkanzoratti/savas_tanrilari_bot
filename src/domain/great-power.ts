@@ -23,7 +23,16 @@ export const UNIT_POWER: Record<keyof typeof UNITS, number> = {
   carthaginian_war_elephant: 4.40,
   iberian_caetrati: 2.10,
   germanic_shock_warrior: 2.80,
-  anatolian_thureophoroi: 2.20
+  anatolian_thureophoroi: 2.20,
+  triarii_veteran: 2.10,
+  punic_veteran: 2.80,
+  gaesatae: 2.80,
+  peltast: 1.60,
+  silver_shield: 2.50,
+  machimoi_phalangitai: 2.50,
+  mauryan_war_elephant: 5.00,
+  desert_raider: 3.00,
+  egyptian_war_chariot: 3.10
 };
 
 export const SHIP_POWER: Record<keyof typeof SHIPS, number> = {

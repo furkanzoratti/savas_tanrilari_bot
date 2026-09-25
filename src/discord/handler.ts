@@ -1497,7 +1497,7 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
 
   // Modal açan seçimler Discord'a doğrudan cevap vermelidir. Yetki ve güncel
   // durum modal gönderildiğinde yeniden doğrulanır.
-  if (kind === "uc" && settlementIdFromId) {
+  if (kind && /^uc\d*$/.test(kind) && settlementIdFromId) {
     const unitType = interaction.values[0]!;
     const modal = new ModalBuilder().setCustomId(`um|${countryId}|${settlementIdFromId}|${encodeUnitTypeForCustomId(unitType as keyof typeof UNITS)}`).setTitle("Asker Alımı");
     modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("quantity").setLabel("Asker sayısı — 100'ün katı").setPlaceholder("Örn. 500").setStyle(TextInputStyle.Short).setRequired(true)));
@@ -1559,7 +1559,21 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
     const settlement = document.settlements.find((item) => item.id === settlementId);
     if (!settlement) throw new GameError("Yerleşke bulunamadı.");
     const availableUnits = unitChoices.filter(([key]) => !isSpecialUnitType(key) || (document.specialUnitUnlocks ?? []).includes(key));
-    await interaction.editReply({ content: `Alınacak birim türünü seç:\n🎖️ Ordu Limiti: **${number(settlement.militaryUsed)}/${number(settlement.militaryLimit)}**\n🏋️ Bu Alım Turu Eğitim Kapasitesi: **${number(settlement.trainingUsed)}/${number(settlement.trainingCapacity)}** • Kalan: **${number(settlement.trainingRemaining)}**`, components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder().setCustomId(`uc|${countryId}|${settlementId}`).setPlaceholder("Birim seç").addOptions(availableUnits.map(([key, unit]) => ({ label: unit.name, description: `${gold(unitPurchaseCost(key as keyof typeof UNITS, 1_000, settlement.effectiveResources, settlement.policies.filter((policy) => policy.status === "ACTIVE").map((policy) => policy.policy_key), document.country.active_formable_key))} / 1.000${isSpecialUnitType(key) ? " • Özel Birlik" : ""}`, value: key }))))] });
+    const menuCount = Math.ceil(availableUnits.length / 25);
+    const unitMenus = Array.from({ length: menuCount }, (_, index) => {
+      const chunk = availableUnits.slice(index * 25, index * 25 + 25);
+      return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(`${index === 0 ? "uc" : `uc${index + 1}`}|${countryId}|${settlementId}`)
+          .setPlaceholder(menuCount > 1 ? `Birim seç • ${index + 1}/${menuCount}` : "Birim seç")
+          .addOptions(chunk.map(([key, unit]) => ({
+            label: unit.name,
+            description: `${gold(unitPurchaseCost(key as keyof typeof UNITS, 1_000, settlement.effectiveResources, settlement.policies.filter((policy) => policy.status === "ACTIVE").map((policy) => policy.policy_key), document.country.active_formable_key))} / 1.000${isSpecialUnitType(key) ? " • Özel Birlik" : ""}`,
+            value: key
+          })))
+      );
+    });
+    await interaction.editReply({ content: `Alınacak birim türünü seç:\n🎖️ Ordu Limiti: **${number(settlement.militaryUsed)}/${number(settlement.militaryLimit)}**\n🏋️ Bu Alım Turu Eğitim Kapasitesi: **${number(settlement.trainingUsed)}/${number(settlement.trainingCapacity)}** • Kalan: **${number(settlement.trainingRemaining)}**`, components: unitMenus });
   } else if (kind === "ss") {
     const settlementId = interaction.values[0]!;
     const document = await gameService.document(countryId);
@@ -1639,6 +1653,22 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
   if (await handleEspionageAutocomplete(interaction)) return;
   if (await handleCityAutocomplete(interaction)) return;
   const focused = interaction.options.getFocused(true);
+  if (interaction.commandName === "savas" && interaction.options.getSubcommand(false) === "birlik-ayarla" && focused.name === "birim") {
+    const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
+    await interaction.respond(Object.entries(BATTLE_UNIT_STATS)
+      .filter(([, unit]) => !query || unit.label.toLocaleLowerCase("tr-TR").includes(query))
+      .slice(0, 25)
+      .map(([value, unit]) => ({ name: unit.label.slice(0, 100), value })));
+    return;
+  }
+  if (interaction.commandName === "asker-terhis" && focused.name === "birim") {
+    const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
+    await interaction.respond(Object.entries(UNITS)
+      .filter(([, unit]) => !query || unit.name.toLocaleLowerCase("tr-TR").includes(query))
+      .slice(0, 25)
+      .map(([value, unit]) => ({ name: unit.name.slice(0, 100), value })));
+    return;
+  }
   if(interaction.commandName==="bina-yik"){
     if(!interaction.guildId){await interaction.respond([]);return;}
     const requested=isGameMaster(interaction)?interaction.options.getString("ulke"):null;

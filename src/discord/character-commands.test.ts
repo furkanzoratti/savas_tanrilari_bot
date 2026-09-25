@@ -179,4 +179,18 @@ describe("Akademi karakter komutları", () => {
     expect(embed.description).not.toContain("Saldırı Doktrini");
     expect(embed.description).not.toContain("Meydan Taktisyeni");
   });
+
+  it("tutsak casusun tutulduğu şehri açıkça gösterir",()=>{
+    const embed=charactersEmbed("Arvernler",[{
+      id:"00000000-0000-4000-8000-000000000031",country_id:"00000000-0000-4000-8000-000000000032",
+      name:"Pessinus",role:"SPY",skill_bonus:0,assignment:"CAPTURED",assignment_ready_turn:null,
+      doctrine:null,commander_victories:0,specialization:null,specialization_progress:0,specialization_level:0,
+      character_status:"ACTIVE",is_admiral:false,unavailable_until_turn:null,trained_settlement_name:null,
+      assigned_settlement_name:"Roma",assigned_country_name:"Roma",assigned_army_name:null,assigned_fleet_name:null,
+      operation_type:null,operation_status:null,operation_progress:null,operation_goal:null,
+      target_country_name:null,target_settlement_name:null
+    }]).toJSON();
+    expect(embed.description).toContain("Esir");
+    expect(embed.description).toContain("Tutsak olduğu şehir: **Roma** (Roma)");
+  });
 });

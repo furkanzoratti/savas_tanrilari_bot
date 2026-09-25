@@ -158,6 +158,18 @@ export function randomEspionageCandidate<T>(validTarget:boolean,candidates:reado
   return candidates[randomInt(0,candidates.length)]??null;
 }
 
+async function isActivelyCaptured(client: Pick<DbClient,"query">, characterId: string, guildId: string): Promise<boolean> {
+  return Boolean((await client.query(
+    `SELECT 1 FROM espionage_operations operation
+       JOIN guilds state ON state.discord_id=operation.guild_id
+      WHERE operation.spy_character_id=$1 AND operation.guild_id=$2
+        AND operation.status='RESOLVED' AND operation.captured=TRUE
+        AND operation.executed_at IS NULL AND operation.return_turn+2>state.current_turn
+      LIMIT 1`,
+    [characterId,guildId]
+  )).rowCount);
+}
+
 export async function resolveDueEspionageOperations(guildId: string, turn: number): Promise<EspionageResolutionResult> {
   return withTransaction(async (client) => {
     await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`espionage:${guildId}:${turn}`]);
@@ -326,6 +338,7 @@ export const espionageService = {
       if (!settlement) throw new GameError("Hedef şehir seçilen ülkeye ait değil.");
       const spy = (await client.query<{ id: string; assignment: string }>("SELECT id,assignment FROM country_characters WHERE id=$1 AND country_id=$2 AND role='SPY' AND character_status='ACTIVE' FOR UPDATE", [input.spyCharacterId, input.attackerCountryId])).rows[0];
       if (!spy) throw new GameError("Seçilen karakter bu devlete ait bir casus değil.");
+      if (await isActivelyCaptured(client,input.spyCharacterId,input.guildId)) throw new GameError("Bu casus tutsak olduğu için kullanılamaz.");
       if (spy.assignment !== "NONE") throw new GameError("Bu casus şu anda başka bir görevde.");
       if (!(input.targetType in ESPIONAGE_TARGETS)) throw new GameError("Geçersiz sabotaj hedefi.");
       if (["DISCREDIT","KIDNAP","ASSASSINATE"].includes(input.targetType) && !input.targetCharacterId) throw new GameError("Bu görev için hedef karakter seçmelisiniz.");
@@ -352,15 +365,39 @@ export const espionageService = {
   },
 
   async availableSpies(countryId: string): Promise<Array<{ id: string; name: string; skill_bonus: number }>> {
-    return (await pool.query<{ id: string; name: string; skill_bonus: number }>("SELECT id,name,skill_bonus FROM country_characters WHERE country_id=$1 AND role='SPY' AND character_status='ACTIVE' AND assignment='NONE' ORDER BY name", [countryId])).rows;
+    return (await pool.query<{ id: string; name: string; skill_bonus: number }>(
+      `SELECT spy.id,spy.name,spy.skill_bonus FROM country_characters spy
+        WHERE spy.country_id=$1 AND spy.role='SPY' AND spy.character_status='ACTIVE' AND spy.assignment='NONE'
+          AND NOT EXISTS (
+            SELECT 1 FROM espionage_operations operation
+            JOIN guilds state ON state.discord_id=operation.guild_id
+            WHERE operation.spy_character_id=spy.id AND operation.status='RESOLVED'
+              AND operation.captured=TRUE AND operation.executed_at IS NULL
+              AND operation.return_turn+2>state.current_turn
+          )
+        ORDER BY spy.name`, [countryId])).rows;
   },
 
   async spies(countryId: string): Promise<Array<{ id: string; name: string; skill_bonus: number; assignment: string; settlement_name: string | null; country_name: string | null; specialization: CharacterSpecialization | null; specialization_progress: number }>> {
     return (await pool.query(
-      `SELECT spy.id,spy.name,spy.skill_bonus,spy.assignment,spy.specialization,spy.specialization_progress,
-              settlement.name AS settlement_name,target.name AS country_name
+      `SELECT spy.id,spy.name,spy.skill_bonus,
+              CASE WHEN captivity.target_settlement_id IS NOT NULL THEN 'CAPTURED' ELSE spy.assignment END AS assignment,
+              spy.specialization,spy.specialization_progress,
+              COALESCE(captive_settlement.name,settlement.name) AS settlement_name,
+              COALESCE(captive_country.name,target.name) AS country_name
          FROM country_characters spy LEFT JOIN settlements settlement ON settlement.id=spy.assigned_settlement_id
          LEFT JOIN countries target ON target.id=settlement.country_id
+         LEFT JOIN LATERAL (
+           SELECT operation.target_country_id,operation.target_settlement_id
+             FROM espionage_operations operation
+             JOIN guilds state ON state.discord_id=operation.guild_id
+            WHERE operation.spy_character_id=spy.id AND operation.status='RESOLVED'
+              AND operation.captured=TRUE AND operation.executed_at IS NULL
+              AND operation.return_turn+2>state.current_turn
+            ORDER BY operation.resolved_at DESC NULLS LAST,operation.created_at DESC LIMIT 1
+         ) captivity ON TRUE
+         LEFT JOIN settlements captive_settlement ON captive_settlement.id=captivity.target_settlement_id
+         LEFT JOIN countries captive_country ON captive_country.id=captivity.target_country_id
         WHERE spy.country_id=$1 AND spy.role='SPY' AND spy.character_status='ACTIVE' ORDER BY spy.name`, [countryId]
     )).rows as Array<{ id: string; name: string; skill_bonus: number; assignment: string; settlement_name: string | null; country_name: string | null; specialization: CharacterSpecialization | null; specialization_progress: number }>;
   },
@@ -413,6 +450,7 @@ export const espionageService = {
       const state = await guild(client,input.guildId);
       const spy = (await client.query<{ assignment: string }>("SELECT assignment FROM country_characters WHERE id=$1 AND country_id=$2 AND role='SPY' AND character_status='ACTIVE' FOR UPDATE", [input.spyCharacterId,input.countryId])).rows[0];
       if (!spy) throw new GameError("Casus bulunamadı.");
+      if (await isActivelyCaptured(client,input.spyCharacterId,input.guildId)) throw new GameError("Bu casus tutsak olduğu için kullanılamaz.");
       if (spy.assignment !== "NONE" && !isSpyDefenseAssignment(spy.assignment)) throw new GameError("Bu casus başka bir görevde.");
       if (input.scope === "SETTLEMENT") {
         const valid = await client.query("SELECT 1 FROM settlements WHERE id=$1 AND country_id=$2", [input.settlementId,input.countryId]);
@@ -438,6 +476,7 @@ export const espionageService = {
         [input.spyCharacterId,input.countryId]
       )).rows[0];
       if (!spy) throw new GameError("Casus bulunamadı.");
+      if (await isActivelyCaptured(client,input.spyCharacterId,input.guildId)) throw new GameError("Bu casus tutsak olduğu için kullanılamaz.");
       if (spy.assignment === "NONE") return false;
       if (!isSpyDefenseAssignment(spy.assignment)) throw new GameError("Bu casus karşı casuslukta değil; devam eden farklı görevi bu komutla iptal edilemez.");
       await client.query(

@@ -46,6 +46,14 @@ describe("ordu kompozisyonu ve güncel birlik dengesi", () => {
     expect(result.roleShares.mobile).toBe(0);
   });
 
+  it("Peltastları yüzde 80 hat ve yüzde 20 menzilli sayar", () => {
+    const result = assessArmyComposition({ peltast: 10_000 });
+    expect(result.roleShares.line).toBeCloseTo(0.80);
+    expect(result.roleShares.ranged).toBeCloseTo(0.20);
+    expect(result.roleShares.spear).toBe(0);
+    expect(result.roleShares.mobile).toBe(0);
+  });
+
   it("dengeli ve mükemmel karma orduları ayrı kademelendirir", () => {
     const balanced = assessArmyComposition({ light_infantry: 6_000, spear: 1_000, archer: 1_000, light_cavalry: 2_000 });
     expect(balanced.tier).toBe("BALANCED");

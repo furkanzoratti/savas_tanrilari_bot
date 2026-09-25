@@ -10,7 +10,16 @@ const UNIT_TYPE_ALIASES = {
   carthaginian_war_elephant: "cwe",
   iberian_caetrati: "ic",
   germanic_shock_warrior: "gsw",
-  anatolian_thureophoroi: "ath"
+  anatolian_thureophoroi: "ath",
+  triarii_veteran: "tv",
+  punic_veteran: "pv",
+  gaesatae: "gs",
+  peltast: "pl",
+  silver_shield: "ss",
+  machimoi_phalangitai: "mp",
+  mauryan_war_elephant: "mwe",
+  desert_raider: "dr",
+  egyptian_war_chariot: "ewc"
 } as const;
 
 const UNIT_TYPE_BY_ALIAS = Object.fromEntries(

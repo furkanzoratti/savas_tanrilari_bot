@@ -61,6 +61,7 @@ interface BasicCharacter {
   role: CharacterRole;
   skill_bonus: number;
   assignment: string;
+  captured: boolean;
   specialization: CharacterSpecialization | null;
   specialization_progress: number;
 }
@@ -122,10 +123,22 @@ async function activeCharacter(
 ): Promise<BasicCharacter> {
   assertUuid(characterId,"Karakter");
   const row = (await client.query<BasicCharacter>(
-    "SELECT id,name,role,skill_bonus,assignment,specialization,specialization_progress FROM country_characters WHERE id=$1 AND country_id=$2 AND role=$3 AND character_status='ACTIVE' FOR UPDATE",
+    `SELECT character.id,character.name,character.role,character.skill_bonus,character.assignment,
+            character.specialization,character.specialization_progress,
+            EXISTS (
+              SELECT 1 FROM espionage_operations operation
+              JOIN guilds state ON state.discord_id=operation.guild_id
+              WHERE operation.spy_character_id=character.id AND operation.status='RESOLVED'
+                AND operation.captured=TRUE AND operation.executed_at IS NULL
+                AND operation.return_turn+2>state.current_turn
+            ) AS captured
+       FROM country_characters character
+      WHERE character.id=$1 AND character.country_id=$2 AND character.role=$3
+        AND character.character_status='ACTIVE' FOR UPDATE OF character`,
     [characterId, countryId, role]
   )).rows[0];
   if (!row) throw new GameError("Seçilen karakter bu devlete ait ve etkin değil.");
+  if (row.assignment === "CAPTURED" || row.captured) throw new GameError("Bu karakter tutsak olduğu için kullanılamaz.");
   return row;
 }
 
@@ -239,7 +252,8 @@ export const characterService = {
   async list(countryId: string): Promise<CharacterView[]> {
     return (await pool.query<CharacterView>(
       `SELECT character.id,character.country_id,character.name,character.role,character.skill_bonus,
-              character.assignment,character.assignment_ready_turn,character.doctrine,
+              CASE WHEN captivity.target_settlement_id IS NOT NULL THEN 'CAPTURED' ELSE character.assignment END AS assignment,
+              character.assignment_ready_turn,character.doctrine,
               character.commander_victories,character.specialization,character.specialization_progress,
               character.specialization_level,character.specialization_choice_credit,
               character.character_status,character.is_admiral,character.unavailable_until_turn,
@@ -247,8 +261,10 @@ export const characterService = {
               character.admiral_victories,character.admiral_specialization_level,
               character.died_at,death_settlement.name AS death_settlement_name,
               COALESCE(specialization_tracks.tracks,'{}'::jsonb) AS specialization_tracks,
-              trained.name AS trained_settlement_name,assigned.name AS assigned_settlement_name,
-              assigned_country.name AS assigned_country_name,army.name AS assigned_army_name,fleet.name AS assigned_fleet_name,
+              trained.name AS trained_settlement_name,
+              COALESCE(captive_settlement.name,assigned.name) AS assigned_settlement_name,
+              COALESCE(captive_country.name,assigned_country.name) AS assigned_country_name,
+              army.name AS assigned_army_name,fleet.name AS assigned_fleet_name,
               COALESCE(merchant.task_type,diplomat.task_type,espionage.target_type) AS operation_type,
               COALESCE(merchant.status,diplomat.status,espionage.status) AS operation_status,
               diplomat.progress AS operation_progress,diplomat.goal AS operation_goal,
@@ -261,6 +277,17 @@ export const characterService = {
          LEFT JOIN countries assigned_country ON assigned_country.id=assigned.country_id
          LEFT JOIN armies army ON army.commander_character_id=character.id
          LEFT JOIN fleets fleet ON fleet.commander_character_id=character.id
+         LEFT JOIN LATERAL (
+           SELECT operation.target_country_id,operation.target_settlement_id
+             FROM espionage_operations operation
+             JOIN guilds state ON state.discord_id=operation.guild_id
+            WHERE operation.spy_character_id=character.id AND operation.status='RESOLVED'
+              AND operation.captured=TRUE AND operation.executed_at IS NULL
+              AND operation.return_turn+2>state.current_turn
+            ORDER BY operation.resolved_at DESC NULLS LAST,operation.created_at DESC LIMIT 1
+         ) captivity ON TRUE
+         LEFT JOIN settlements captive_settlement ON captive_settlement.id=captivity.target_settlement_id
+         LEFT JOIN countries captive_country ON captive_country.id=captivity.target_country_id
          LEFT JOIN LATERAL (
            SELECT * FROM merchant_operations m WHERE m.merchant_character_id=character.id
              AND m.status IN ('PENDING_ACCEPTANCE','TRAVELING','ACTIVE','CONTROLLED')
@@ -1046,7 +1073,7 @@ export async function processCharacterTurn(
         await progressSpecialization(client,{
           id:operation.merchant_character_id,name:operation.merchant_name,role:"MERCHANT",
           skill_bonus:Number(operation.skill_bonus),assignment:"",specialization:operation.specialization,
-          specialization_progress:Number(operation.specialization_progress)
+          specialization_progress:Number(operation.specialization_progress),captured:false
         },merchantSpecialization(operation.task_type));
         logs.push(
           "🪙 **"+operation.merchant_name+"** • **"+MERCHANT_TASK_LABELS[operation.task_type]+"**\n"+
@@ -1087,7 +1114,7 @@ export async function processCharacterTurn(
       const character: BasicCharacter = {
         id:operation.diplomat_character_id,name:operation.name,role:"DIPLOMAT",
         skill_bonus:Number(operation.skill_bonus),assignment:"",specialization:operation.specialization,
-        specialization_progress:Number(operation.specialization_progress)
+        specialization_progress:Number(operation.specialization_progress),captured:false
       };
       if (operation.task_type === "RECONCILIATION") {
         const column = operation.target_event_type === "REBELLION" ? "rebellion_active"
