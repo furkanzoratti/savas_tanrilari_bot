@@ -20,6 +20,18 @@ describe("hammadde etkileri", () => {
     expect(shipCostMultiplier(["TIMBER"])).toBe(0.9);
   });
 
+  it("yeni özel birlikleri kendi hammadde sınıflarına bağlar", () => {
+    for (const unit of ["triarii_veteran", "punic_veteran", "gaesatae", "silver_shield", "machimoi_phalangitai"]) {
+      expect(unitCostMultiplier(unit, ["IRON"]), unit).toBe(0.9);
+    }
+    expect(unitCostMultiplier("peltast", ["LEATHER"])).toBe(0.9);
+    for (const unit of ["mauryan_war_elephant", "desert_raider", "egyptian_war_chariot"]) {
+      expect(unitCostMultiplier(unit, ["HORSES"]), unit).toBe(0.9);
+    }
+    expect(unitCostMultiplier("peltast", ["IRON"])).toBe(1);
+    expect(unitCostMultiplier("triarii_veteran", ["LEATHER"])).toBe(1);
+  });
+
   it("Şarap, Cam ve İpek etkilerini yeni ekonomi binalarına uygular", () => {
     const inns = calculateCategorizedIncome({
       settlementIncome: 0, taxIncome: 0, landTradeIncome: 0, seaTradeIncome: 0,

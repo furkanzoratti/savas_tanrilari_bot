@@ -31,6 +31,17 @@ describe("kurulabilir ülkeler", () => {
     expect(FORMABLE_COUNTRIES.SARMATIA.modifiers.observerManpower).toBe(100);
   });
 
+  it("yeni özel birliklere kurulabilir ülke sınıf indirimlerini uygular", () => {
+    for (const unit of ["triarii_veteran", "punic_veteran", "gaesatae", "peltast", "silver_shield", "machimoi_phalangitai"]) {
+      expect(formableUnitDiscount("GALLIC_CONFEDERATION", unit), unit).toBe(0.10);
+    }
+    for (const unit of ["mauryan_war_elephant", "desert_raider", "egyptian_war_chariot"]) {
+      expect(formableUnitDiscount("SARMATIA", unit), unit).toBe(0.10);
+    }
+    expect(formableUnitDiscount("ITALY", "peltast")).toBe(0.05);
+    expect(formableUnitDiscount("ITALY", "egyptian_war_chariot")).toBe(0.05);
+  });
+
   it("ülkeye özgü bina ve gelir bonuslarını hesaplar", () => {
     expect(formableBuildingDiscount("IBERIA", "engineering")).toBe(0.10);
     const hellas = calculateCategorizedIncome({

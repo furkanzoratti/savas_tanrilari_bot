@@ -1,10 +1,10 @@
 export const RESOURCES = {
   GRAIN: { label: "Tahıl", effects: ["Nüfus artış hızı +%10", "Ordu bakım maliyeti -%10"] },
-  IRON: { label: "Demir", effects: ["Mızraklı, Ağır Piyade ve Ağır Süvari yetiştirme maliyeti -%10", "Koçbaşı, Katapult ve Balista üretim maliyeti -%10"] },
+  IRON: { label: "Demir", effects: ["Mızraklı, ağır sınıf birlikler ve aynı sınıftaki özel birliklerin yetiştirme maliyeti -%10", "Koçbaşı, Katapult ve Balista üretim maliyeti -%10"] },
   TIMBER: { label: "Kereste", effects: ["Bina inşa maliyeti -%10", "Gemi üretim maliyeti -%10"] },
   MARBLE: { label: "Mermer", effects: ["Curia, Panteon, Agora, Akademi, Hanlar ve Hamamlar, Gümrükhane ile Sayım ve Vergi Dairesi inşa maliyeti -%10", "Bu binaların inşa süresi -1 Tur"] },
-  HORSES: { label: "At", effects: ["Hafif Süvari, Ağır Süvari ve Atlı Okçu yetiştirme maliyeti -%10", "Ordu hareket hızı +%25"] },
-  LEATHER: { label: "Deri", effects: ["Hafif Piyade, Okçu ve Sapancı yetiştirme maliyeti -%10", "Mantlet, Koçbaşı ve Kuşatma Kulesi maliyeti -%10"] },
+  HORSES: { label: "At", effects: ["Süvari, savaş arabası ve hareketli sınıftaki özel birliklerin yetiştirme maliyeti -%10", "Ordu hareket hızı +%25"] },
+  LEATHER: { label: "Deri", effects: ["Hafif Piyade, Okçu, Sapancı ve aynı sınıftaki özel birliklerin yetiştirme maliyeti -%10", "Mantlet, Koçbaşı ve Kuşatma Kulesi maliyeti -%10"] },
   WINE: { label: "Şarap", effects: ["Huzursuzluk ihtimali -%10; asimilasyon süresi -1 Tur", "Hanlar ve Hamamların sabit geliri bina seviyesi başına %5 artar"] },
   OLIVE: { label: "Zeytin", effects: ["Şifacı Evi nüfus getirisi +%20", "Salgın hastalık ihtimali -%10"] },
   GLASS: { label: "Cam", effects: ["Şifacı Evi, Su Kemeri ve Hanlar ve Hamamlar ayrı ayrı +100 Altın gelir sağlar", "Bu üç binanın inşa maliyeti -%10"] },
@@ -61,9 +61,15 @@ export function buildingDurationReduction(buildingType: string, resources: reado
 
 export function unitCostMultiplier(unitType: string, resources: readonly ResourceType[]): number {
   let discounts = 0;
-  if (has(resources, "IRON") && ["spear", "heavy_infantry", "heavy_cavalry"].includes(unitType)) discounts++;
-  if (has(resources, "HORSES") && ["light_cavalry", "heavy_cavalry", "horse_archer"].includes(unitType)) discounts++;
-  if (has(resources, "LEATHER") && ["light_infantry", "archer", "slinger"].includes(unitType)) discounts++;
+  if (has(resources, "IRON") && [
+    "spear", "heavy_infantry", "heavy_cavalry",
+    "triarii_veteran", "punic_veteran", "gaesatae", "silver_shield", "machimoi_phalangitai"
+  ].includes(unitType)) discounts++;
+  if (has(resources, "HORSES") && [
+    "light_cavalry", "heavy_cavalry", "horse_archer",
+    "mauryan_war_elephant", "desert_raider", "egyptian_war_chariot"
+  ].includes(unitType)) discounts++;
+  if (has(resources, "LEATHER") && ["light_infantry", "archer", "slinger", "peltast"].includes(unitType)) discounts++;
   if (has(resources, "LEAD") && unitType === "slinger") discounts++;
   return cappedDiscount(discounts);
 }
