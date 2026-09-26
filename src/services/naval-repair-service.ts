@@ -6,6 +6,7 @@ import { repairDurationTurns } from "../domain/naval-hulls.js";
 import { GameError } from "./game-service.js";
 
 export type RepairFleetStatus = "REPAIRING"|"READY"|"TRANSFERRED";
+export type RepairScope = "DISABLED_ONLY"|"ALL_DAMAGED";
 
 export interface RepairFleetShipView {
   settlement_id:string;
@@ -129,7 +130,7 @@ export const navalRepairService={
   },
 
   async sendFleetToRepair(input:{
-    guildId:string;countryId:string;actorId:string;fleetId:string;repairSettlementId:string;
+    guildId:string;countryId:string;actorId:string;fleetId:string;repairSettlementId:string;scope:RepairScope;
   }):Promise<RepairFleetView>{
     return withTransaction(async(client)=>{
       const fleet=(await client.query<{id:string;name:string;country_id:string}>(
@@ -144,12 +145,16 @@ export const navalRepairService={
             AND building.building_type='shipyard' AND building.status='ACTIVE' AND building.level>0
           FOR UPDATE OF settlement,building`,[input.repairSettlementId,input.countryId])).rows[0];
       if(!dock)throw new GameError("Tamir için bu devlete ait, kıyıdaki aktif bir Tersane seçilmelidir.");
+      if(!["DISABLED_ONLY","ALL_DAMAGED"].includes(input.scope))throw new GameError("Geçersiz tamir kapsamı.");
       const damaged=(await client.query<{
         id:string;settlement_id:string;ship_type:NavalUnitType;max_hp:number;current_hp:number;
       }>(`SELECT id,settlement_id,ship_type,max_hp,current_hp FROM naval_ship_damage
-          WHERE fleet_id=$1 AND status IN ('DAMAGED','DISABLED') ORDER BY settlement_id,ship_type,id FOR UPDATE`,
-        [fleet.id])).rows;
-      if(!damaged.length)throw new GameError("Bu filoda tamir gerektiren hasarlı veya iş göremez gemi bulunmuyor.");
+          WHERE fleet_id=$1 AND (($2::text='DISABLED_ONLY' AND status='DISABLED')
+            OR ($2::text='ALL_DAMAGED' AND status IN ('DAMAGED','DISABLED')))
+          ORDER BY settlement_id,ship_type,id FOR UPDATE`,[fleet.id,input.scope])).rows;
+      if(!damaged.length)throw new GameError(input.scope==="DISABLED_ONLY"
+        ?"Bu filoda tamire gönderilebilecek iş göremez gemi bulunmuyor."
+        :"Bu filoda tamir gerektiren hasarlı veya iş göremez gemi bulunmuyor.");
       const missingHp=damaged.reduce((sum,row)=>sum+Number(row.max_hp)-Number(row.current_hp),0);
       const currentTurn=Number((await client.query<{current_turn:number}>(
         "SELECT current_turn FROM guilds WHERE discord_id=$1",[input.guildId])).rows[0]?.current_turn??0);
@@ -185,9 +190,59 @@ export const navalRepairService={
       await client.query(`INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details)
         VALUES($1,$2,'fleet.repair.start','fleet_repair_group',$3,$4::jsonb)`,[
           input.guildId,input.actorId,group.id,JSON.stringify({sourceFleetId:fleet.id,repairSettlementId:dock.id,
-            ships:damaged.length,missingHp,completionTurn})
+            scope:input.scope,ships:damaged.length,missingHp,completionTurn})
         ]);
       return loadRepairFleet(client,group.id,input.countryId);
+    });
+  },
+
+  async withdrawOperationalShips(input:{
+    guildId:string;countryId:string;actorId:string;repairGroupId:string;targetFleetId:string;
+  }):Promise<{targetFleetId:string;targetFleetName:string;transferred:number}>{
+    return withTransaction(async(client)=>{
+      const repair=(await client.query<{id:string;status:RepairFleetStatus}>(
+        "SELECT id,status FROM fleet_repair_groups WHERE id=$1 AND country_id=$2 AND guild_id=$3 FOR UPDATE",
+        [input.repairGroupId,input.countryId,input.guildId])).rows[0];
+      if(!repair)throw new GameError("Tamir filosu bulunamadı veya bu devlete ait değil.");
+      if(repair.status!=="REPAIRING")throw new GameError(repair.status==="READY"
+        ?"Bu tamir tamamlandı; gemileri /filo tamirden-ekle ile filoya aktarın."
+        :"Bu tamir filosundaki gemiler daha önce normal filoya aktarıldı.");
+      const target=(await client.query<{id:string;name:string}>(
+        "SELECT id,name FROM fleets WHERE id=$1 AND country_id=$2 AND guild_id=$3 FOR UPDATE",
+        [input.targetFleetId,input.countryId,input.guildId])).rows[0];
+      if(!target)throw new GameError("Hedef filo bulunamadı veya bu devlete ait değil.");
+      await assertFleetCanChange(client,target.id);
+      const ships=(await client.query<{id:string;settlement_id:string;ship_type:NavalUnitType}>(
+        `SELECT id,settlement_id,ship_type FROM naval_ship_damage
+          WHERE repair_group_id=$1 AND status='REPAIRING'
+            AND current_hp>CASE ship_type WHEN 'kerkouros' THEN 10 WHEN 'trireme' THEN 20 ELSE 30 END
+          ORDER BY settlement_id,ship_type,id FOR UPDATE`,[repair.id])).rows;
+      if(!ships.length)throw new GameError("Bu tamir filosunda geri alınabilecek, iş görebilir durumda gemi bulunmuyor.");
+      const grouped=new Map<string,{settlementId:string;shipType:NavalUnitType;quantity:number}>();
+      for(const ship of ships){
+        const key=`${ship.settlement_id}:${ship.ship_type}`;
+        const item=grouped.get(key)??{settlementId:ship.settlement_id,shipType:ship.ship_type,quantity:0};
+        item.quantity+=1;grouped.set(key,item);
+      }
+      for(const item of grouped.values())await client.query(`INSERT INTO fleet_ships(fleet_id,settlement_id,ship_type,quantity)
+        VALUES($1,$2,$3,$4) ON CONFLICT(fleet_id,settlement_id,ship_type)
+        DO UPDATE SET quantity=fleet_ships.quantity+EXCLUDED.quantity`,[
+          target.id,item.settlementId,item.shipType,item.quantity
+        ]);
+      await client.query(`UPDATE naval_ship_damage SET fleet_id=$1,repair_group_id=NULL,status='DAMAGED',updated_at=NOW()
+        WHERE id=ANY($2::uuid[])`,[target.id,ships.map((ship)=>ship.id)]);
+      const remaining=Number((await client.query<{quantity:number}>(
+        "SELECT COUNT(*)::integer AS quantity FROM naval_ship_damage WHERE repair_group_id=$1",[repair.id]
+      )).rows[0]?.quantity??0);
+      if(remaining===0)await client.query(
+        "UPDATE fleet_repair_groups SET status='TRANSFERRED',transferred_at=NOW() WHERE id=$1",[repair.id]
+      );
+      await client.query("UPDATE fleets SET updated_at=NOW() WHERE id=$1",[target.id]);
+      await client.query(`INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details)
+        VALUES($1,$2,'fleet.repair.withdraw_operational','fleet_repair_group',$3,$4::jsonb)`,[
+          input.guildId,input.actorId,repair.id,JSON.stringify({targetFleetId:target.id,ships:ships.length,remaining})
+        ]);
+      return {targetFleetId:target.id,targetFleetName:target.name,transferred:ships.length};
     });
   },
 

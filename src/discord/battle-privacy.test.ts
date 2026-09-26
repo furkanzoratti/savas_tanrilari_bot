@@ -134,4 +134,17 @@ describe("özel filo can durumu", () => {
     expect(json).toContain("Battı");
     expect(json).toContain("yalnızca size görünür");
   });
+
+  it("yönetici görünümünde iki tarafı birlikte ve yöneticiye özel ibareyle gösterir",()=>{
+    const status:PlayerBattleFleetStatus={battleId:"battle",roundNumber:4,ships:[
+      {id:"a1",sideKey:"A",countryId:"rome",countryName:"Roma",fleetId:"fa",fleetName:"Classis",settlementName:"Roma",shipType:"trireme",maxHp:75,currentHp:60,disabledRound:null,sunkRound:null},
+      {id:"b1",sideKey:"B",countryId:"carthage",countryName:"Kartaca",fleetId:"fb",fleetName:"Pön Filosu",settlementName:"Kartaca",shipType:"quinquereme",maxHp:120,currentHp:30,disabledRound:3,sunkRound:null}
+    ]};
+    const json=JSON.stringify(playerFleetStatusEmbeds(status,"GM").map((embed)=>embed.toJSON()));
+    expect(json).toContain("Roma");
+    expect(json).toContain("Kartaca");
+    expect(json).toContain("Classis");
+    expect(json).toContain("Pön Filosu");
+    expect(json).toContain("yalnızca oyun yöneticisine görünür");
+  });
 });

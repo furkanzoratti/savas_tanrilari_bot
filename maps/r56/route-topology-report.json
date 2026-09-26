@@ -1,12 +1,12 @@
 {
-  "mapVersion": "amrp-r56-v2",
+  "mapVersion": "r56-india-v6",
   "landComponents": [
     {
       "component": 1,
-      "hexes": 738,
+      "hexes": 863,
       "bounds": {
         "minX": 84,
-        "maxX": 4032,
+        "maxX": 5292,
         "minY": 242.487,
         "maxY": 3297.825
       },
@@ -126,6 +126,40 @@
         "Maracanda",
         "Eucratideia",
         "Kapisene",
+        "Kausambi",
+        "Bharakaccha",
+        "Taxila",
+        "Puşkalavati",
+        "Sagala",
+        "Mathura",
+        "Madurai",
+        "Korkai",
+        "Kanchipuram",
+        "Suparka",
+        "Sravasti",
+        "Hastinapura",
+        "Kalsi",
+        "Ayodhya",
+        "Varanasi",
+        "Tamaralipti",
+        "Champa",
+        "Pundra",
+        "Vanga",
+        "Samata",
+        "Andhra",
+        "Pathein",
+        "Anga",
+        "Vaishali",
+        "Uraiyar",
+        "Rajagriha",
+        "Mithila",
+        "Badrinath",
+        "Tosali",
+        "Kalinganagara",
+        "Vidisha",
+        "Mahishmati",
+        "Pratisthana",
+        "Ujjain",
         "Baktra",
         "Phrada",
         "Artacoana",
@@ -240,6 +274,24 @@
     },
     {
       "component": 5,
+      "hexes": 2,
+      "bounds": {
+        "minX": 5292,
+        "maxX": 5292,
+        "minY": 3152.332,
+        "maxY": 3249.327
+      },
+      "codes": [
+        "BL33",
+        "BL34"
+      ],
+      "settlements": [
+        "Tamlaka",
+        "Malaya"
+      ]
+    },
+    {
+      "component": 6,
       "hexes": 1,
       "bounds": {
         "minX": 1092,
@@ -270,10 +322,10 @@
     },
     {
       "component": 2,
-      "hexes": 97,
+      "hexes": 106,
       "bounds": {
         "minX": 2436,
-        "maxX": 4032,
+        "maxX": 4368,
         "minY": 2473.369,
         "maxY": 3297.825
       },
@@ -294,6 +346,18 @@
     },
     {
       "component": 4,
+      "hexes": 64,
+      "bounds": {
+        "minX": 4452,
+        "maxX": 5292,
+        "minY": 2521.866,
+        "maxY": 3297.825
+      },
+      "codes": [],
+      "settlements": []
+    },
+    {
+      "component": 5,
       "hexes": 20,
       "bounds": {
         "minX": 1344,
@@ -305,7 +369,7 @@
       "settlements": []
     },
     {
-      "component": 5,
+      "component": 6,
       "hexes": 20,
       "bounds": {
         "minX": 2184,
@@ -317,7 +381,7 @@
       "settlements": []
     },
     {
-      "component": 6,
+      "component": 7,
       "hexes": 17,
       "bounds": {
         "minX": 3108,
@@ -329,7 +393,19 @@
       "settlements": []
     },
     {
-      "component": 7,
+      "component": 8,
+      "hexes": 7,
+      "bounds": {
+        "minX": 4116,
+        "maxX": 4452,
+        "minY": 1794.405,
+        "maxY": 2036.892
+      },
+      "codes": [],
+      "settlements": []
+    },
+    {
+      "component": 9,
       "hexes": 5,
       "bounds": {
         "minX": 1344,
@@ -347,7 +423,23 @@
       "settlements": []
     },
     {
-      "component": 8,
+      "component": 10,
+      "hexes": 3,
+      "bounds": {
+        "minX": 4704,
+        "maxX": 4872,
+        "minY": 1891.399,
+        "maxY": 1939.897
+      },
+      "codes": [
+        "BE21",
+        "BF20",
+        "BG21"
+      ],
+      "settlements": []
+    },
+    {
+      "component": 11,
       "hexes": 1,
       "bounds": {
         "minX": 420,
@@ -361,7 +453,7 @@
       "settlements": []
     },
     {
-      "component": 9,
+      "component": 12,
       "hexes": 1,
       "bounds": {
         "minX": 1932,
@@ -375,7 +467,7 @@
       "settlements": []
     },
     {
-      "component": 10,
+      "component": 13,
       "hexes": 1,
       "bounds": {
         "minX": 2436,

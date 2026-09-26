@@ -1018,6 +1018,41 @@ export const battleService = {
     });
   },
 
+  async adminFleetStatus(input:{guildId:string;battleId:string}):Promise<PlayerBattleFleetStatus>{
+    return withTransaction(async(client)=>{
+      const battle=(await client.query<Pick<BattleRow,"id"|"terrain"|"status"|"round_number">>(
+        "SELECT id,terrain,status,round_number FROM battles WHERE id=$1 AND guild_id=$2 FOR UPDATE",
+        [input.battleId,input.guildId]
+      )).rows[0];
+      if(!battle)throw new GameError("Savaş bulunamadı.");
+      if(battle.terrain!=="NAVAL")throw new GameError("Filo durumu yalnızca deniz savaşlarında görüntülenebilir.");
+      if(["DRAFT","CANCELLED"].includes(battle.status))throw new GameError("Bu savaşta görüntülenebilecek etkin bir filo kaydı yok.");
+      await initializeBattleShipHulls(client,battle.id);
+      const ships=(await client.query<{
+        id:string;side_key:BattleSideKey;country_id:string;country_name:string;fleet_id:string|null;
+        fleet_name:string|null;settlement_name:string|null;ship_type:NavalUnitType;
+        max_hp:number;current_hp:number;disabled_round:number|null;sunk_round:number|null;
+      }>(`SELECT hull.id,hull.side_key,hull.country_id,country.name AS country_name,
+                hull.fleet_id,fleet.name AS fleet_name,settlement.name AS settlement_name,
+                hull.ship_type,hull.max_hp,hull.current_hp,hull.disabled_round,hull.sunk_round
+           FROM battle_ship_hulls hull
+           JOIN countries country ON country.id=hull.country_id
+           LEFT JOIN fleets fleet ON fleet.id=hull.fleet_id
+           LEFT JOIN settlements settlement ON settlement.id=hull.settlement_id
+          WHERE hull.battle_id=$1
+          ORDER BY hull.side_key,hull.country_id,fleet.name NULLS LAST,hull.fleet_id NULLS LAST,
+                   hull.ship_type,hull.current_hp,hull.id`,[battle.id])).rows.map((row)=>({
+        id:row.id,sideKey:row.side_key,countryId:row.country_id,countryName:row.country_name,
+        fleetId:row.fleet_id,fleetName:row.fleet_name,settlementName:row.settlement_name,
+        shipType:row.ship_type,maxHp:Number(row.max_hp),currentHp:Number(row.current_hp),
+        disabledRound:row.disabled_round===null?null:Number(row.disabled_round),
+        sunkRound:row.sunk_round===null?null:Number(row.sunk_round)
+      }));
+      if(!ships.length)throw new GameError("Bu savaşta görüntülenebilecek gemi kaydı bulunmuyor.");
+      return {battleId:battle.id,roundNumber:Number(battle.round_number),ships};
+    });
+  },
+
   async casualtyReport(guildId: string, channelId: string): Promise<{ view: BattleView; rows: CasualtyApplication[] }> {
     const battle = await latestInChannel(pool as unknown as DbClient, guildId, channelId);
     if (!battle) throw new GameError("Bu kanalda savaş kaydı bulunamadı.");
@@ -1888,7 +1923,7 @@ export const battleService = {
       if (view.battle.terrain === "NAVAL") {
         const activeShips=await battleHullComposition(client,active.id,side,"ACTIVE");
         if(!compositionTotal(activeShips))throw new GameError("Bu tarafta savaşabilecek durumda gemi kalmadı.");
-        roll = rollNavalPool(activeShips, frontage);
+        roll = rollNavalPool(activeShips);
       } else if (view.battle.terrain === "SIEGE") {
         const activeAssets = side === "A" ? activeSiegeAssaultAssets(target.support_assets, terrain.frontageA) : target.support_assets;
         const support = rollSiegeSupport(activeAssets, target.support_targets, undefined, target.support_enhanced ?? {});

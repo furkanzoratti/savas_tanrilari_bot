@@ -10,7 +10,7 @@ export const BATTLE_TERRAINS = {
   MOUNTAIN_PASS: { label: "Dağ Geçidi", frontageA: 6_000, frontageB: 6_000, preset: "mountain-pass.png" },
   RIVER_CROSSING: { label: "Nehir Geçişi", frontageA: 10_000, frontageB: 20_000, preset: "river-crossing.png" },
   SIEGE: { label: "Kuşatma", frontageA: 15_000, frontageB: 18_000, preset: "siege.png" },
-  NAVAL: { label: "Deniz Savaşı", frontageA: 30, frontageB: 30, preset: "naval.png" }
+  NAVAL: { label: "Deniz Savaşı", frontageA: Number.MAX_SAFE_INTEGER, frontageB: Number.MAX_SAFE_INTEGER, preset: "naval.png" }
 } as const;
 
 export type BattleTerrain = keyof typeof BATTLE_TERRAINS;
@@ -494,14 +494,12 @@ export function rollBattlePool(
   };
 }
 
-export function rollNavalPool(composition: BattleComposition, frontage: number, randomInt = (max: number) => Math.floor(Math.random() * max)): BattleRoll {
-  const total = compositionTotal(composition);
-  const scale = total > frontage ? frontage / total : 1;
+export function rollNavalPool(composition: BattleComposition, randomInt = (max: number) => Math.floor(Math.random() * max)): BattleRoll {
   const detail: BattleRoll["detail"] = {};
   let clash = 0;
   let damage = 0;
   for (const key of navalKeys) {
-    const quantity = Math.floor((composition[key] ?? 0) * scale);
+    const quantity = Math.max(0,Math.floor(composition[key] ?? 0));
     if (!quantity) continue;
     const stats = NAVAL_UNIT_STATS[key];
     const unitClash = rollPool(quantity, stats.clashDice, stats.clashSides, randomInt, 1);

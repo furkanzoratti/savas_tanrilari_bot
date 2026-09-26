@@ -72,7 +72,7 @@ describe("savaş motoru", () => {
   });
 
   it("deniz savaşında her gemiyi ayrı bir zar birimi olarak işler", () => {
-    const roll = rollNavalPool({ kerkouros: 2, trireme: 1, quinquereme: 1 }, 30, () => 0);
+    const roll = rollNavalPool({ kerkouros: 2, trireme: 1, quinquereme: 1 }, () => 0);
     expect(roll.clash).toBe(7);
     expect(roll.damage).toBe(7);
     const result = resolveRound(
@@ -81,6 +81,14 @@ describe("savaş motoru", () => {
     );
     expect(result.lossB).toBeGreaterThanOrEqual(result.lossA);
     expect(result.lossB).toBeLessThanOrEqual(10);
+  });
+
+  it("deniz savaşında 30 gemi sınırı olmadan bütün savaşabilir gemileri zar havuzuna alır",()=>{
+    const roll=rollNavalPool({kerkouros:40,trireme:20,quinquereme:10},()=>0);
+    expect(roll.detail.kerkouros?.engaged).toBe(40);
+    expect(roll.detail.trireme?.engaged).toBe(20);
+    expect(roll.detail.quinquereme?.engaged).toBe(10);
+    expect(Object.values(roll.detail).reduce((sum,item)=>sum+Number(item.engaged??0),0)).toBe(70);
   });
 
   it("kuşatma aletleri sur hasarı ve savaş desteği üretir", () => {

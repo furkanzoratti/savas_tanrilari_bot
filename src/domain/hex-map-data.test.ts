@@ -15,7 +15,7 @@ describe("üretim R56 haritası", () => {
   });
   it("gönderilen gridin bütün Hex ve yerleşke bağlantılarını doğrular", () => {
     expect(validateR56Map(map)).toEqual({
-      land: 749, sea: 400, void: 651, settlements: 173,
+      land: 876, sea: 483, void: 945, settlements: 209,
       ambiguousRegions: ["J23", "N06", "T25", "X15", "AD13"]
     });
   });
@@ -27,15 +27,25 @@ describe("üretim R56 haritası", () => {
       countryId: `country-${index}`
     }));
     const prepared = prepareR56Map(map, records, aliases);
-    expect(prepared.hexes).toHaveLength(1800);
-    expect(prepared.settlementPositions).toHaveLength(173);
-    expect(prepared.hexes.filter((hex) => hex.domain === "LAND" && hex.ownerCountryId !== null)).toHaveLength(749);
+    expect(prepared.hexes).toHaveLength(2304);
+    expect(prepared.settlementPositions).toHaveLength(209);
+    expect(prepared.hexes.filter((hex) => hex.domain === "LAND" && hex.ownerCountryId !== null)).toHaveLength(876);
     expect(prepared.hexes.filter((hex) => hex.domain !== "LAND" && hex.ownerCountryId !== null)).toHaveLength(0);
     expect(prepared.hexes.find((hex) => hex.coordinate === map.settlements.Carthago.hexCode)?.ownerCountryId)
       .toBe(records[Object.keys(map.settlements).indexOf("Carthago")]?.countryId);
     expect(prepared.hexes.some((hex) => hex.terrain === "STEPPE")).toBe(true);
   });
 
+  it("Himalaya Dağları üzerinde geçilebilir Hex veya hareket komşuluğu üretmez", () => {
+    const himalayaCodes = [
+      "BA20", "BA21", "BB20", "BC20", "BC21", "BD20", "BD21", "BE20", "BF21",
+      "BG22", "BH21", "BI22", "BJ21", "BJ22", "BK22", "BK23", "BL22", "BL23"
+    ];
+    for (const code of himalayaCodes) {
+      const hex = map.hexes.find((candidate) => candidate.code === code);
+      expect(hex).toMatchObject({ type: "IMPASSABLE", playable: false, moveCost: null, neighbors: [] });
+    }
+  });
   it("eksik canlı yerleşke veya kopuk komşuluğu sessizce kabul etmez", () => {
     const records = Object.keys(map.settlements).slice(1).map((name, index) => ({
       id: `settlement-${index}`, name, countryId: `country-${index}`

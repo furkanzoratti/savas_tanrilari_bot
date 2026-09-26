@@ -44,8 +44,12 @@ describe("ticaret ve rol raporu komutları", () => {
     const fleet = commandBuilders.find((item) => item.name === "filo");
     expect(fleet?.options?.map((option) => option.name)).toEqual([
       "olustur","gemi-ekle","gemi-cikar","komutan-ata","komutan-kaldir","bilgi",
-      "tamir","tamirden-ekle","tamir-bilgi","dagit"
+      "tamir","tamirden-cikar","tamirden-ekle","tamir-bilgi","dagit"
     ]);
+    const repair = fleet?.options?.find((option) => option.name === "tamir");
+    expect(repair?.options?.map((option) => option.name)).toEqual(["filo","yerleske","kapsam"]);
+    expect(repair?.options?.find((option) => option.name === "kapsam")?.choices?.map((choice) => choice.value))
+      .toEqual(["DISABLED_ONLY","ALL_DAMAGED"]);
     const battle = commandBuilders.find((item) => item.name === "savas");
     const assignment = battle?.options?.find((option) => option.name === "filo-ekle");
     expect(assignment?.options?.map((option) => option.name)).toEqual(["ulke","islem","filo"]);

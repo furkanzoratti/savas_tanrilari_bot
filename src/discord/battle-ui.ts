@@ -59,7 +59,7 @@ export function battleEmbed(view: BattleView, roundResult?: BattleRoundResult): 
     return `**Başlangıç:** ${number(side.initial_total)}\n**Mevcut:** ${number(side.current_total)}${navalState}\n**Toplam Kayıp:** ${number(side.total_losses)}\n**Baskı:** ${number(side.pressure)} puan\n**Düzen:** ${orderLabels[order]}\n**Zar Yetkisi:** ${control}`;
   };
   const frontage = view.battle.terrain === "NAVAL"
-    ? `Filo kapasitesi: ${view.sides.A.country_name} ${number(terrain.frontageA)} • ${view.sides.B.country_name} ${number(terrain.frontageB)} gemi`
+    ? "Cephe sınırı yok: iki tarafın bütün savaşabilir gemileri çatışmaya katılır."
     : terrain.frontageA === terrain.frontageB
       ? `Cephe kapasitesi: ${number(terrain.frontageA)} asker`
       : `Cephe kapasitesi: ${view.sides.A.country_name} ${number(terrain.frontageA)} • ${view.sides.B.country_name} ${number(terrain.frontageB)} asker`;
@@ -130,7 +130,8 @@ function components(view: BattleView) {
       new ButtonBuilder().setCustomId(`battle_armies|${view.battle.id}`).setLabel(view.battle.terrain === "NAVAL" ? "Filolarımın Son Durumunu Gör" : "Ordularımın Son Durumunu Gör").setEmoji(view.battle.terrain === "NAVAL" ? "⚓" : "⚔️").setStyle(ButtonStyle.Secondary)
     );
     if (view.battle.terrain === "NAVAL") row.addComponents(
-      new ButtonBuilder().setCustomId(`battle_fleet_status|${view.battle.id}`).setLabel("Filo Durumu").setEmoji("❤️‍🩹").setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder().setCustomId(`battle_fleet_status|${view.battle.id}`).setLabel("Filo Durumu").setEmoji("❤️‍🩹").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`battle_fleet_status_gm|${view.battle.id}`).setLabel("Yönetici: İki Taraf").setEmoji("🔐").setStyle(ButtonStyle.Secondary)
     );
     return [row];
   }
@@ -146,7 +147,8 @@ function components(view: BattleView) {
     new ButtonBuilder().setCustomId(`battle_retreat|${view.battle.id}`).setLabel("Geri Çekil").setEmoji("🏳️").setStyle(ButtonStyle.Danger).setDisabled(!expected)
   );
   if (view.battle.terrain === "NAVAL") row.addComponents(
-    new ButtonBuilder().setCustomId(`battle_fleet_status|${view.battle.id}`).setLabel("Filo Durumu").setEmoji("❤️‍🩹").setStyle(ButtonStyle.Secondary)
+    new ButtonBuilder().setCustomId(`battle_fleet_status|${view.battle.id}`).setLabel("Filo Durumu").setEmoji("❤️‍🩹").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`battle_fleet_status_gm|${view.battle.id}`).setLabel("Yönetici: İki Taraf").setEmoji("🔐").setStyle(ButtonStyle.Secondary)
   );
   return [row];
 }
@@ -165,7 +167,7 @@ function chunkLines(lines: string[], maxLength = 3600): string[] {
   return chunks;
 }
 
-export function playerFleetStatusEmbeds(status: PlayerBattleFleetStatus): EmbedBuilder[] {
+export function playerFleetStatusEmbeds(status: PlayerBattleFleetStatus,audience:"PLAYER"|"GM"="PLAYER"): EmbedBuilder[] {
   const groups = new Map<string, PlayerBattleFleetStatus["ships"]>();
   for (const ship of status.ships) {
     const key = `${ship.countryId}|${ship.fleetId ?? "manual"}`;
@@ -198,7 +200,9 @@ export function playerFleetStatusEmbeds(status: PlayerBattleFleetStatus): EmbedB
         .setTitle(`⚓ ${first.fleetName ?? "Manuel Donanma"}${chunks.length > 1 ? ` (${index + 1}/${chunks.length})` : ""}`)
         .setDescription(description)
         .addFields({ name: "Ülke", value: first.countryName, inline: true }, { name: "Savaş Turu", value: number(status.roundNumber), inline: true })
-        .setFooter({ text: "Bu filo can dökümü yalnızca size görünür." })
+        .setFooter({ text: audience==="GM"
+          ? "Bu iki taraflı gemi can dökümü yalnızca oyun yöneticisine görünür."
+          : "Bu filo can dökümü yalnızca size görünür." })
     ));
   }
   return embeds;
@@ -233,7 +237,8 @@ function publicPayload(view: BattleView, result?: Parameters<typeof battleEmbed>
     : view.rolls.length
       ? view.battle.terrain === "NAVAL"
         ? [new ActionRowBuilder<ButtonBuilder>().addComponents(
-            new ButtonBuilder().setCustomId(`battle_fleet_status|${view.battle.id}`).setLabel("Filo Durumu").setEmoji("❤️‍🩹").setStyle(ButtonStyle.Secondary)
+            new ButtonBuilder().setCustomId(`battle_fleet_status|${view.battle.id}`).setLabel("Filo Durumu").setEmoji("❤️‍🩹").setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId(`battle_fleet_status_gm|${view.battle.id}`).setLabel("Yönetici: İki Taraf").setEmoji("🔐").setStyle(ButtonStyle.Secondary)
           )]
         : []
       : components(view);
@@ -534,7 +539,16 @@ export async function handleBattleButton(interaction: ButtonInteraction): Promis
   if (!interaction.guildId || !interaction.channelId) throw new GameError("Sunucu veya kanal bulunamadı.");
   const battleId = interaction.customId.split("|")[1];
   if (!battleId) throw new GameError("Savaş düğmesi bozuk.");
-  if (interaction.customId.startsWith("battle_fleet_status|")) {
+  if (interaction.customId.startsWith("battle_fleet_status_gm|")) {
+    await interaction.deferReply({ ephemeral: true });
+    if(!isGameMaster(interaction))throw new GameError("İki tarafın gemi durumunu yalnızca oyun yöneticileri görebilir.");
+    const status=await battleService.adminFleetStatus({guildId:interaction.guildId,battleId});
+    const embeds=playerFleetStatusEmbeds(status,"GM");
+    await interaction.editReply({content:"🔐 Deniz savaşındaki iki tarafın bütün gemi can durumları:",embeds:embeds.slice(0,10)});
+    for(let index=10;index<embeds.length;index+=10){
+      await interaction.followUp({embeds:embeds.slice(index,index+10),ephemeral:true});
+    }
+  } else if (interaction.customId.startsWith("battle_fleet_status|")) {
     await interaction.deferReply({ ephemeral: true });
     const status = await battleService.playerFleetStatus({ guildId: interaction.guildId, battleId, actorId: interaction.user.id });
     const embeds = playerFleetStatusEmbeds(status);

@@ -714,9 +714,17 @@ export const commandBuilders = [
       .addStringOption((o) => o.setName("filo").setDescription("Amirali kaldırılacak filo").setRequired(true).setAutocomplete(true)))
     .addSubcommand((sub) => sub.setName("bilgi").setDescription("Bir filonun veya bütün filoların güncel durumunu gösterir")
       .addStringOption((o) => o.setName("filo").setDescription("Boş bırakılırsa bütün filolar").setAutocomplete(true)))
-    .addSubcommand((sub) => sub.setName("tamir").setDescription("Filodaki bütün hasarlı gemileri bir Tersanede tamire alır")
+    .addSubcommand((sub) => sub.setName("tamir").setDescription("Filodaki seçilen kapsamdaki hasarlı gemileri bir Tersanede tamire alır")
       .addStringOption((o) => o.setName("filo").setDescription("Hasarlı gemilerin çıkarılacağı filo").setRequired(true).setAutocomplete(true))
-      .addStringOption((o) => o.setName("yerleske").setDescription("Tamirin yapılacağı kıyı yerleşkesi ve Tersane").setRequired(true).setAutocomplete(true)))
+      .addStringOption((o) => o.setName("yerleske").setDescription("Tamirin yapılacağı kıyı yerleşkesi ve Tersane").setRequired(true).setAutocomplete(true))
+      .addStringOption((o) => o.setName("kapsam").setDescription("Tamire ayrılacak gemiler").setRequired(true)
+        .addChoices(
+          { name:"Yalnız iş göremez gemiler",value:"DISABLED_ONLY" },
+          { name:"Bütün hasarlı ve iş göremez gemiler",value:"ALL_DAMAGED" }
+        )))
+    .addSubcommand((sub) => sub.setName("tamirden-cikar").setDescription("İş göremez olmayan gemileri devam eden tamirden çıkarıp filoya aktarır")
+      .addStringOption((o) => o.setName("tamir-filosu").setDescription("Devam eden tamir filosu").setRequired(true).setAutocomplete(true))
+      .addStringOption((o) => o.setName("filo").setDescription("Gemilerin geri aktarılacağı normal filo").setRequired(true).setAutocomplete(true)))
     .addSubcommand((sub) => sub.setName("tamirden-ekle").setDescription("Tamamlanan tamir filosundaki bütün gemileri normal filoya ekler")
       .addStringOption((o) => o.setName("tamir-filosu").setDescription("Tamamlanmış tamir filosu").setRequired(true).setAutocomplete(true))
       .addStringOption((o) => o.setName("filo").setDescription("Bütün gemilerin ekleneceği normal filo").setRequired(true).setAutocomplete(true)))

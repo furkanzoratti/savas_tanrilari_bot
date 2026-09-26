@@ -71,7 +71,7 @@ Garnizonlar normal savaş kadrosuna katılamaz. Kuşatmada yalnız savunulan yer
 
 ## MESAJ 5/20 — 📐 CEPHEYE GİREN ASKER VE ZAR ÜRETİMİ
 
-Her arazi bir **cephe kapasitesi** belirler. Toplam kuvvet kapasiteyi aşmıyorsa herkes; aşıyorsa birlik türleri ordudaki oranları korunarak cepheye girer.
+Her kara arazisi bir **cephe kapasitesi** belirler. Toplam kuvvet kapasiteyi aşmıyorsa herkes; aşıyorsa birlik türleri ordudaki oranları korunarak cepheye girer. Deniz savaşında cephe kapasitesi yoktur; savaşabilir bütün gemiler aynı turda zar üretir.
 
 **Cephe oranı = Cephe kapasitesi ÷ Toplam mevcut kuvvet**
 
@@ -253,9 +253,9 @@ Bu savaş türlerinde bir taraf Dağılmış olduğunda savaş biter. İki taraf
 • Nehir Geçişi: Saldıran 10.000 / Savunan 20.000
 • Pusu: Pusu Kuran 15.000 / Pusuya Düşen 8.000
 • Kuşatma: Saldıran 15.000 / Savunan 18.000
-• Deniz: Taraf başına 30 gemi
+• Deniz: Cephe sınırı yok; savaşabilir bütün gemiler katılır
 
-Cephe kapasitesi tek başına güç bonusu vermez; yalnız zar üretecek kuvveti sınırlar.
+Kara cephe kapasitesi tek başına güç bonusu vermez; yalnız zar üretecek kara kuvvetini sınırlar.
 
 **Pusu:** A tarafı ilk zarı atar. Yalnız ilk savaş turunda A Çarpışması ×1,25 ve A Hasarı ×1,10 olur. Sonraki turlarda bu bonus kalkar; pusu cephesi ve geri çekilme cezası sürer.
 
@@ -352,7 +352,7 @@ Mühendislik Atölyesi Sv3’te geliştirilmiş olarak üretilen kayıtlı Balis
 • Trireme: 1.500 / 150 — 2d8 / 2d8 — Orta — 100 / 500
 • Quinquereme: 3.000 / 300 — 3d10 / 3d10 — Yüksek — 150 / 800
 
-Her gemi bir zar bloğudur. En fazla 30 gemi cepheye girer. Filo 30’u aşarsa türlerin etkin adedi filo oranıyla aşağı yuvarlanır; boş kalan yuvalar tekrar doldurulmaz. İllirya’nın toplam taşıma kapasitesi %10 fazladır.
+Her gemi bir zar bloğudur. Deniz savaşında cephe kapasitesi bulunmaz; savaşabilir durumdaki bütün gemiler aynı değerlendirmede zar üretir. İş göremez ve batmış gemiler zar havuzuna katılmaz. İllirya’nın toplam taşıma kapasitesi %10 fazladır.
 
 **Geri çekilme temel kaybı:** 1. tur %0; 2. tur %5; 3. tur %8; 4. tur %11; 5+ tur %14.
 
@@ -368,7 +368,7 @@ Toplam geri çekilme kaybı mevcut kuvvetin en fazla %25’i olabilir. İlk turd
 
 **Açık bilgiler:** Anlatı, arazi, zar sırası, açık zar sonuçları, üstünlük, tur ve toplam kayıplar, baskı, düzen, meydan/deniz toplam kuvvetleri, kuşatan toplamı, sur/kapı HP ve erzak.
 
-**Gizli bilgiler:** Tam birlik/filo kompozisyonları, kuşatma savunucusunun toplam kuvveti, yedekleri, kuşatma aleti dökümü ve hedefleri. Savunucunun gerçekleşmiş kayıpları açık kalır.
+**Gizli bilgiler:** Tam birlik/filo kompozisyonları, gemilerin tekil HP durumları, kuşatma savunucusunun toplam kuvveti, yedekleri, kuşatma aleti dökümü ve hedefleri. Savunucunun gerçekleşmiş kayıpları açık kalır. Deniz savaşında oyuncu `Filo Durumu` ile yalnız kendi gemilerini; oyun yöneticisi `Yönetici: İki Taraf` ile A ve B tarafındaki bütün gemileri gizli olarak görebilir.
 
 Bot savaş sonu kayıplarını belgelere yalnız bir kez işler:
 • Devlet asker kayıpları bağlı özgür nüfustan da düşer.

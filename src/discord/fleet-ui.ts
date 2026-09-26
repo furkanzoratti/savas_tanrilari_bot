@@ -44,12 +44,27 @@ export async function handleFleetCommand(interaction: ChatInputCommandInteractio
     return;
   }
   if(sub==="tamir"){
+    const scope=interaction.options.getString("kapsam",true) as "DISABLED_ONLY"|"ALL_DAMAGED";
     const repair=await navalRepairService.sendFleetToRepair({
       guildId:interaction.guildId,countryId:country.id,actorId:interaction.user.id,
       fleetId:interaction.options.getString("filo",true),
-      repairSettlementId:interaction.options.getString("yerleske",true)
+      repairSettlementId:interaction.options.getString("yerleske",true),scope
     });
-    await interaction.editReply({content:"✅ Hasarlı gemiler filodan çıkarıldı ve tamir filosuna alındı.",embeds:[renderRepairFleetEmbed(repair)]});
+    const scopeLabel=scope==="DISABLED_ONLY"?"İş göremez gemiler":"Bütün hasarlı ve iş göremez gemiler";
+    await interaction.editReply({content:`✅ ${scopeLabel} filodan çıkarıldı ve tamir filosuna alındı.`,embeds:[renderRepairFleetEmbed(repair)]});
+    return;
+  }
+  if(sub==="tamirden-cikar"){
+    const result=await navalRepairService.withdrawOperationalShips({
+      guildId:interaction.guildId,countryId:country.id,actorId:interaction.user.id,
+      repairGroupId:interaction.options.getString("tamir-filosu",true),
+      targetFleetId:interaction.options.getString("filo",true)
+    });
+    const target=await fleetService.get(country.id,result.targetFleetId);
+    await interaction.editReply({
+      content:`✅ İş göremez olmayan **${result.transferred} gemi** tamirden çıkarılarak **${result.targetFleetName}** filosuna aktarıldı. İş göremez gemiler tamirde bırakıldı.`,
+      embeds:[renderFleetEmbed(target)]
+    });
     return;
   }
   if(sub==="tamirden-ekle"){
