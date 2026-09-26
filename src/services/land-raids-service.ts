@@ -54,21 +54,11 @@ export const landRaidsService={
         FROM armies army WHERE army.guild_id=$1 AND army.country_id=$2 AND army.id=$3 FOR UPDATE OF army`,
         [input.guildId,input.raiderCountryId,input.armyId])).rows[0];
       if(!army||Number(army.strength)<1)throw new GameError("Yağmacı ordu bulunamadı, devlete ait değil veya askeri yok.");
-      const target=input.type==="REGIONAL"
-        ?(await client.query<{id:string;population:number;last_acquisition_income:number}>(`SELECT settlement.id,settlement.population,settlement.last_acquisition_income
-          FROM settlements settlement JOIN countries owner ON owner.id=settlement.country_id
-          WHERE owner.guild_id=$1 AND owner.status='ACTIVE' AND settlement.country_id=$2 AND settlement.id=$3
-          FOR UPDATE OF settlement`,[input.guildId,input.targetCountryId,input.targetSettlementId])).rows[0]
-        :(await client.query<{id:string;population:number;last_acquisition_income:number}>(`SELECT settlement.id,settlement.population,settlement.last_acquisition_income
-          FROM settlements settlement JOIN countries owner ON owner.id=settlement.country_id
-          WHERE owner.guild_id=$1 AND settlement.id=$2 AND settlement.country_id=$3 AND settlement.is_conquered=TRUE AND EXISTS(
-            SELECT 1 FROM audit_logs transfer WHERE transfer.guild_id=$1 AND transfer.action='SETTLEMENT_TRANSFER'
-              AND transfer.entity_type='settlement' AND transfer.entity_id=settlement.id::text
-              AND transfer.details->>'fromCountryId'=$4 AND transfer.details->>'toCountryId'=$3
-          ) FOR UPDATE OF settlement`,[input.guildId,input.targetSettlementId,input.raiderCountryId,input.targetCountryId])).rows[0];
-      if(!target)throw new GameError(input.type==="REGIONAL"
-        ?"Hedef yerleşke bulunamadı veya seçilen hedef devlete ait değil. Bölgesel yağma için şehrin fethedilmiş olması gerekmez."
-        :"Hedef yerleşke bulunamadı. Şehir talanında fethedilmiş şehir, bu savaşta hedef devletten yağmacı devlete geçmiş olmalıdır.");
+      const target=(await client.query<{id:string;population:number;last_acquisition_income:number}>(`SELECT settlement.id,settlement.population,settlement.last_acquisition_income
+        FROM settlements settlement JOIN countries owner ON owner.id=settlement.country_id
+        WHERE owner.guild_id=$1 AND owner.status='ACTIVE' AND settlement.country_id=$2 AND settlement.id=$3
+        FOR UPDATE OF settlement`,[input.guildId,input.targetCountryId,input.targetSettlementId])).rows[0];
+      if(!target)throw new GameError("Hedef yerleşke bulunamadı veya seçilen hedef devlete ait değil.");
       const payout=(await client.query<{id:string}>(`SELECT settlement.id FROM settlements settlement JOIN countries country ON country.id=settlement.country_id
         WHERE country.guild_id=$1 AND country.id=$2 AND settlement.id=$3 FOR UPDATE OF settlement`,[input.guildId,input.raiderCountryId,input.payoutSettlementId])).rows[0];
       if(!payout)throw new GameError("Kazanç yerleşkesi yağmacı devlete ait değil.");
@@ -167,18 +157,10 @@ export const landRaidsService={
       WHERE country.guild_id=$1 AND country.id=$2 ORDER BY settlement.name`,[guildId,countryId])).rows;
   },
   async listRaidTargets(guildId:string,raiderCountryId:string,targetCountryId:string,type:LandRaidType):Promise<Array<{id:string;name:string}>>{
-    if(type==="REGIONAL"){
-      return (await pool.query<{id:string;name:string}>(`SELECT settlement.id,settlement.name FROM settlements settlement
-        JOIN countries owner ON owner.id=settlement.country_id
-        WHERE owner.guild_id=$1 AND owner.status='ACTIVE' AND settlement.country_id=$2
-        ORDER BY settlement.name`,[guildId,targetCountryId])).rows;
-    }
-    return (await pool.query<{id:string;name:string}>(`SELECT DISTINCT settlement.id,settlement.name FROM settlements settlement
+    void raiderCountryId;void type;
+    return (await pool.query<{id:string;name:string}>(`SELECT settlement.id,settlement.name FROM settlements settlement
       JOIN countries owner ON owner.id=settlement.country_id
-      WHERE owner.guild_id=$1 AND settlement.country_id=$2 AND settlement.is_conquered=TRUE AND EXISTS(
-        SELECT 1 FROM audit_logs transfer WHERE transfer.guild_id=$1 AND transfer.action='SETTLEMENT_TRANSFER'
-          AND transfer.entity_type='settlement' AND transfer.entity_id=settlement.id::text
-          AND transfer.details->>'fromCountryId'=$3 AND transfer.details->>'toCountryId'=$2
-      ) ORDER BY settlement.name`,[guildId,raiderCountryId,targetCountryId])).rows;
+      WHERE owner.guild_id=$1 AND owner.status='ACTIVE' AND settlement.country_id=$2
+      ORDER BY settlement.name`,[guildId,targetCountryId])).rows;
   }
 };

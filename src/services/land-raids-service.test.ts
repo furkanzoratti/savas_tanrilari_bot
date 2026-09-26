@@ -38,17 +38,18 @@ describe("regional raid settlement eligibility",()=>{
     expect(params).toEqual(["guild-1","target-country"]);
   });
 
-  it("keeps the conquest-transfer requirement exclusive to city plunder",async()=>{
-    database.poolQuery.mockResolvedValue({rows:[],rowCount:0});
+  it("lists the target country's settlements for city plunder without a conquest record",async()=>{
+    database.poolQuery.mockResolvedValue({rows:[{id:"city-1",name:"Artaxata"}],rowCount:1});
 
-    await landRaidsService.listRaidTargets(
+    await expect(landRaidsService.listRaidTargets(
       "guild-1","raider-country","target-country","CITY"
-    );
+    )).resolves.toEqual([{id:"city-1",name:"Artaxata"}]);
 
     const [sql,params]=database.poolQuery.mock.calls[0] as [string,unknown[]];
-    expect(sql).toContain("settlement.is_conquered=TRUE");
-    expect(sql).toContain("SETTLEMENT_TRANSFER");
-    expect(params).toEqual(["guild-1","raider-country","target-country"]);
+    expect(sql).toContain("settlement.country_id=$2");
+    expect(sql).not.toContain("settlement.is_conquered");
+    expect(sql).not.toContain("SETTLEMENT_TRANSFER");
+    expect(params).toEqual(["guild-1","target-country"]);
   });
 
   it("starts a regional raid without conquest or a formal war",async()=>{
