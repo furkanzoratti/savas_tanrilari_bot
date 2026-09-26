@@ -5,7 +5,7 @@ import { landRaidResult,landRaidRewards,landRaidSizeModifier,type LandRaidTier,t
 import { GameError } from "./game-service.js";
 
 export interface LandRaidView {
-  id:string;guild_id:string;raid_type:LandRaidType;war_id:string;
+  id:string;guild_id:string;raid_type:LandRaidType;war_id:string|null;
   raider_country_id:string;raider_country_name:string;army_id:string;army_name:string;
   target_country_id:string;target_country_name:string;target_settlement_id:string;target_settlement_name:string;
   payout_settlement_id:string;payout_settlement_name:string;status:"WAITING_ROLL"|"RESOLVED"|"CANCELLED";
@@ -76,11 +76,16 @@ export const landRaidsService={
         JOIN state_war_participants own ON own.war_id=war.id AND own.country_id=$2
         JOIN state_war_participants enemy ON enemy.war_id=war.id AND enemy.country_id=$3 AND enemy.side<>own.side
         WHERE war.guild_id=$1 AND war.status='ACTIVE' ORDER BY war.started_turn DESC LIMIT 1`,[input.guildId,input.raiderCountryId,input.targetCountryId])).rows[0];
-      if(!war)throw new GameError("Seçilen devletler arasında etkin ve karşı cepheli resmî savaş bulunamadı.");
+      if(input.type==="CITY"&&!war)throw new GameError("Şehir talanı için seçilen devletler arasında etkin ve karşı cepheli resmî savaş bulunmalıdır.");
       if((await client.query("SELECT 1 FROM land_raids WHERE army_id=$1 AND status='WAITING_ROLL' LIMIT 1",[army.id])).rowCount)
         throw new GameError("Bu ordunun zaten zar bekleyen bir yağma formu var.");
-      if((await client.query("SELECT 1 FROM land_raids WHERE war_id=$1 AND target_settlement_id=$2 AND status IN ('WAITING_ROLL','RESOLVED') LIMIT 1",[war.id,target.id])).rowCount)
-        throw new GameError("Bu yerleşke aynı savaşta daha önce bölgesel yağma veya şehir talanı hedefi olmuş.");
+      const turn=await currentTurn(client,input.guildId);
+      const duplicate=input.type==="REGIONAL"
+        ?await client.query("SELECT 1 FROM land_raids WHERE guild_id=$1 AND raid_type='REGIONAL' AND target_settlement_id=$2 AND game_turn=$3 AND status IN ('WAITING_ROLL','RESOLVED') LIMIT 1",[input.guildId,target.id,turn])
+        :await client.query("SELECT 1 FROM land_raids WHERE war_id=$1 AND raid_type='CITY' AND target_settlement_id=$2 AND status IN ('WAITING_ROLL','RESOLVED') LIMIT 1",[war!.id,target.id]);
+      if(duplicate.rowCount)throw new GameError(input.type==="REGIONAL"
+        ?"Bu yerleşke mevcut oyun turunda zaten bölgesel yağma hedefi olmuş."
+        :"Bu yerleşke aynı savaşta daha önce şehir talanı hedefi olmuş.");
       if((await client.query("SELECT 1 FROM battle_army_assignments assignment JOIN battles battle ON battle.id=assignment.battle_id WHERE assignment.army_id=$1 AND battle.status NOT IN ('FINISHED','CANCELLED') LIMIT 1",[army.id])).rowCount)
         throw new GameError("Bu ordu etkin bir savaşa bağlıyken yağma formu açılamaz.");
       const movementEnabled=Boolean((await client.query<{enabled:boolean}>(
@@ -88,14 +93,13 @@ export const landRaidsService={
       )).rows[0]?.enabled);
       if(movementEnabled&&(await client.query("SELECT 1 FROM movement_orders WHERE army_id=$1 AND status IN ('SUBMITTED','IN_PROGRESS','BLOCKED') LIMIT 1",[army.id])).rowCount)
         throw new GameError("Bu ordunun sonuçlanmamış bir hareket emri var.");
-      const turn=await currentTurn(client,input.guildId);
       const strength=Number(army.strength),population=Number(target.population),income=Math.max(0,Number(target.last_acquisition_income));
       const modifier=landRaidSizeModifier(strength,population,input.type);
       const created=(await client.query<{id:string}>(`INSERT INTO land_raids(guild_id,raid_type,war_id,raider_country_id,army_id,target_country_id,
         target_settlement_id,payout_settlement_id,game_turn,army_strength,target_population_before,income_basis,size_modifier,roll_sides,public_channel_id,created_by)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,
-        [input.guildId,input.type,war.id,input.raiderCountryId,army.id,input.targetCountryId,input.targetSettlementId,input.payoutSettlementId,turn,strength,population,income,modifier,input.type==="REGIONAL"?20:100,input.channelId,input.actorId])).rows[0]!;
-      await audit(client,input.guildId,input.actorId,"land.raid.start",created.id,{type:input.type,armyId:army.id,targetSettlementId:target.id,warId:war.id});
+        [input.guildId,input.type,war?.id??null,input.raiderCountryId,army.id,input.targetCountryId,input.targetSettlementId,input.payoutSettlementId,turn,strength,population,income,modifier,input.type==="REGIONAL"?20:100,input.channelId,input.actorId])).rows[0]!;
+      await audit(client,input.guildId,input.actorId,"land.raid.start",created.id,{type:input.type,armyId:army.id,targetSettlementId:target.id,warId:war?.id??null});
       return loadRaid(client,created.id);
     });
   },

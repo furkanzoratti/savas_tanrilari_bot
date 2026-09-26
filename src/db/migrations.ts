@@ -20,6 +20,7 @@ import { landRaidsMigration } from "./land-raids-migration.js";
 import { navalHullRepairMigration } from "./naval-hull-repair-migration.js";
 import { expandedAncientSpecialUnitsMigration } from "./expanded-ancient-special-units-migration.js";
 import { indianCultureGroupsMigration } from "./indian-culture-groups-migration.js";
+import { regionalRaidsWithoutWarMigration } from "./regional-raids-without-war-migration.js";
 
 export const migrations = [
   {
@@ -2257,5 +2258,6 @@ export const migrations = [
   landRaidsMigration,
   navalHullRepairMigration,
   expandedAncientSpecialUnitsMigration,
-  indianCultureGroupsMigration
+  indianCultureGroupsMigration,
+  regionalRaidsWithoutWarMigration
 ] as const;

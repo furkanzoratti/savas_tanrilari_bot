@@ -51,7 +51,7 @@ describe("regional raid settlement eligibility",()=>{
     expect(params).toEqual(["guild-1","raider-country","target-country"]);
   });
 
-  it("accepts an unconquered enemy settlement when starting a regional raid",async()=>{
+  it("starts a regional raid without conquest or a formal war",async()=>{
     const queries:Array<{sql:string;params?:unknown[]}>=[];
     const client={async query(sql:string,params?:unknown[]){
       queries.push({sql,params});
@@ -60,14 +60,14 @@ describe("regional raid settlement eligibility",()=>{
         rows:[{id:"target-settlement",population:10000,last_acquisition_income:3000}],rowCount:1
       };
       if(sql.includes("SELECT settlement.id FROM settlements"))return {rows:[{id:"payout-settlement"}],rowCount:1};
-      if(sql.includes("SELECT war.id FROM state_wars"))return {rows:[{id:"war-1"}],rowCount:1};
+      if(sql.includes("SELECT war.id FROM state_wars"))return {rows:[],rowCount:0};
       if(sql.includes("SELECT 1 FROM land_raids")||sql.includes("SELECT 1 FROM battle_army_assignments"))return {rows:[],rowCount:0};
       if(sql.includes("FROM guild_movement_settings"))return {rows:[{enabled:false}],rowCount:1};
       if(sql.includes("SELECT current_turn FROM guilds"))return {rows:[{current_turn:24}],rowCount:1};
       if(sql.includes("INSERT INTO land_raids"))return {rows:[{id:"raid-1"}],rowCount:1};
       if(sql.includes("INSERT INTO audit_logs"))return {rows:[],rowCount:1};
       if(sql.includes("FROM land_raids raid JOIN countries"))return {rows:[{
-        id:"raid-1",guild_id:"guild-1",raid_type:"REGIONAL",war_id:"war-1",
+        id:"raid-1",guild_id:"guild-1",raid_type:"REGIONAL",war_id:null,
         raider_country_id:"raider-country",raider_country_name:"Yağmacı",army_id:"army-1",army_name:"Ordu",
         target_country_id:"target-country",target_country_name:"Hedef",target_settlement_id:"target-settlement",
         target_settlement_name:"Sagardiya",payout_settlement_id:"payout-settlement",payout_settlement_name:"Başkent",
@@ -89,5 +89,9 @@ describe("regional raid settlement eligibility",()=>{
     expect(targetQuery?.sql).not.toContain("is_conquered");
     expect(targetQuery?.sql).not.toContain("SETTLEMENT_TRANSFER");
     expect(targetQuery?.params).toEqual(["guild-1","target-country","target-settlement"]);
+    const duplicateQuery=queries.find(({sql})=>sql.includes("raid_type='REGIONAL'")&&sql.includes("game_turn=$3"));
+    expect(duplicateQuery?.params).toEqual(["guild-1","target-settlement",24]);
+    const insert=queries.find(({sql})=>sql.includes("INSERT INTO land_raids"));
+    expect(insert?.params?.[2]).toBeNull();
   });
 });
