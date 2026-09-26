@@ -1249,7 +1249,9 @@ export const battleService = {
 
   async participantByCountry(input: { guildId: string; channelId: string; countryName: string }): Promise<BattleParticipantChoice> {
     const participants = await this.listParticipantCountries(input);
-    const participant = participants.find((row) => row.country_name.toLocaleLowerCase("tr-TR") === input.countryName.trim().toLocaleLowerCase("tr-TR"));
+    const countryValue=input.countryName.trim();
+    const participant = participants.find((row) => row.country_id===countryValue||
+      row.country_name.toLocaleLowerCase("tr-TR")===countryValue.toLocaleLowerCase("tr-TR"));
     if (!participant) throw new GameError("Seçilen ülke bu savaş taslağına katılmıyor.");
     return participant;
   },
@@ -1260,13 +1262,20 @@ export const battleService = {
       [input.guildId, input.channelId]
     )).rows[0];
     if (!battle || battle.terrain === "NAVAL") return [];
+    const countryValue=input.countryName.trim();
+    const participant=(await pool.query<BattleParticipantChoice>(
+      `SELECT bsp.country_id,c.name AS country_name,bsp.side_key,bsp.is_primary
+         FROM battle_side_participants bsp JOIN countries c ON c.id=bsp.country_id
+        WHERE bsp.battle_id=$1 ORDER BY bsp.is_primary DESC,c.name`,[battle.id]
+    )).rows.find((row)=>row.country_id===countryValue||
+      row.country_name.toLocaleLowerCase("tr-TR")===countryValue.toLocaleLowerCase("tr-TR"));
+    if(!participant)return [];
     return (await pool.query<BattleArmyChoice>(
       `SELECT a.id,a.name,a.country_id,c.name AS country_name,COALESCE(SUM(au.quantity),0)::integer AS total,
               EXISTS(SELECT 1 FROM battle_army_assignments own WHERE own.battle_id=$1 AND own.army_id=a.id) AS assigned
-         FROM battle_side_participants bsp JOIN armies a ON a.country_id=bsp.country_id
-         JOIN countries c ON c.id=a.country_id LEFT JOIN army_units au ON au.army_id=a.id
-        WHERE bsp.battle_id=$1 AND lower(c.name)=lower($2)
-        GROUP BY a.id,a.name,a.country_id,c.name ORDER BY c.name,a.name`, [battle.id, input.countryName.trim()]
+         FROM armies a JOIN countries c ON c.id=a.country_id LEFT JOIN army_units au ON au.army_id=a.id
+        WHERE a.guild_id=$2 AND a.country_id=$3
+        GROUP BY a.id,a.name,a.country_id,c.name ORDER BY c.name,a.name`, [battle.id,input.guildId,participant.country_id]
     )).rows.map((row) => ({ ...row, total: Number(row.total) }));
   },
 
