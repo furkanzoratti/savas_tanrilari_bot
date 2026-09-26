@@ -1823,12 +1823,7 @@ export const battleService = {
     return withTransaction(async (client) => {
       const battle = await activeInChannel(client, input.guildId, input.channelId);
       if (!battle || battle.status !== "DRAFT") throw new GameError("Yayımlanabilir savaş taslağı bulunamadı.");
-      const view = await loadView(client, battle.id, true);
-      if (!view.sides.A.initial_total || !view.sides.B.initial_total) throw new GameError("İki taraf için de gizli ordu veya filo bileşimi girilmelidir.");
-      const attackerEffective = siegeAttackerDismountedComposition(view.sides.A.composition, attackerDismountments(view.sides.A));
-      if (battle.terrain === "SIEGE" && battle.siege_phase === "ASSAULT" && !hasAssaultForce(attackerEffective)) {
-        throw new GameError("Kuşatan orduda şehri ele geçirebilecek Hücum Birliği bulunmadan Hücum aşaması yayımlanamaz.");
-      }
+      let view = await loadView(client, battle.id, true);
       if (battle.terrain === "SIEGE" && battle.defender_settlement_id) {
         const prepared = Boolean((await client.query(
           "SELECT 1 FROM settlement_policies WHERE settlement_id=$1 AND policy_key='WAR_PREPARATION' AND status='ACTIVE'", [battle.defender_settlement_id]
@@ -1846,10 +1841,29 @@ export const battleService = {
           const total = compositionTotal(composition);
           const seal = sealFor({ ...composition, ...view.sides.B.support_assets });
           await client.query("UPDATE battle_sides SET composition=$1::jsonb,initial_total=$2,current_total=$2,temporary_militia=$3,seal=$4 WHERE battle_id=$5 AND side_key='B'", [JSON.stringify(composition), total, militia, seal, battle.id]);
+          view=await loadView(client,battle.id,true);
         }
       }
+      if (!view.sides.A.initial_total) throw new GameError(battle.terrain==="NAVAL"
+        ?"Saldıran tarafa en az bir gemi girilmelidir."
+        :"Saldıran tarafa en az bir ordu veya birlik girilmelidir.");
+      if (battle.terrain !== "SIEGE" && !view.sides.B.initial_total)
+        throw new GameError("İki taraf için de gizli ordu veya filo bileşimi girilmelidir.");
       await client.query("UPDATE battle_sides SET initial_composition=composition WHERE battle_id=$1", [battle.id]);
       await client.query("UPDATE battle_side_participants SET initial_composition=composition WHERE battle_id=$1", [battle.id]);
+      if(battle.terrain==="SIEGE"&&!view.sides.B.initial_total){
+        const reason="Savunulan yerleşkede garnizon, ordu veya otomatik milis bulunmadığı için şehir çatışmasız ele geçirildi.";
+        await client.query(`UPDATE battles SET status='FINISHED',winner_side='A',finish_reason=$1,losses_applied_at=NOW(),updated_at=NOW()
+          WHERE id=$2`,[reason,battle.id]);
+        await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'battle.siege.unopposed','battle',$3,$4::jsonb)",[
+          input.guildId,input.actorId,battle.id,JSON.stringify({defenderSettlementId:battle.defender_settlement_id,winnerSide:"A"})
+        ]);
+        return loadView(client,battle.id);
+      }
+      const attackerEffective = siegeAttackerDismountedComposition(view.sides.A.composition, attackerDismountments(view.sides.A));
+      if (battle.terrain === "SIEGE" && battle.siege_phase === "ASSAULT" && !hasAssaultForce(attackerEffective)) {
+        throw new GameError("Kuşatan orduda şehri ele geçirebilecek Hücum Birliği bulunmadan Hücum aşaması yayımlanamaz.");
+      }
       if(battle.terrain==="NAVAL")await initializeBattleShipHulls(client,battle.id);
       if (battle.terrain === "SIEGE") {
         const revealColumn = siegePhaseRevealColumn(battle.siege_phase === "ASSAULT" ? "ASSAULT" : "BOMBARDMENT");
