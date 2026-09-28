@@ -361,6 +361,55 @@ export const adminPanelService = {
     )).rows;
   },
 
+  async characterAssignments() {
+    return (await adminPool.query(
+      `SELECT character.id,character.country_id,character.name,country.name AS country_name,
+              character.role,character.is_admiral,character.assignment,character.assignment_ready_turn,
+              assigned.name AS assigned_settlement_name,assigned_country.name AS assigned_country_name,
+              army.name AS assigned_army_name,fleet.name AS assigned_fleet_name,
+              protected.name AS protected_character_name,
+              COALESCE(merchant.task_type,diplomat.task_type,espionage.target_type) AS operation_type,
+              COALESCE(merchant.status,diplomat.status,espionage.status) AS operation_status,
+              diplomat.progress AS operation_progress,diplomat.goal AS operation_goal,
+              COALESCE(merchant_target_country.name,diplomat_target_country.name,spy_target_country.name) AS target_country_name,
+              COALESCE(merchant_target.name,diplomat_target.name,spy_target.name) AS target_settlement_name
+         FROM country_characters character
+         JOIN countries country ON country.id=character.country_id
+         LEFT JOIN settlements assigned ON assigned.id=character.assigned_settlement_id
+         LEFT JOIN countries assigned_country ON assigned_country.id=assigned.country_id
+         LEFT JOIN armies army ON army.commander_character_id=character.id
+         LEFT JOIN fleets fleet ON fleet.commander_character_id=character.id
+         LEFT JOIN country_characters protected ON protected.id=character.protected_character_id
+         LEFT JOIN LATERAL (
+           SELECT operation.* FROM merchant_operations operation
+            WHERE operation.merchant_character_id=character.id
+              AND operation.status IN ('PENDING_ACCEPTANCE','TRAVELING','ACTIVE','CONTROLLED')
+            ORDER BY operation.created_at DESC LIMIT 1
+         ) merchant ON TRUE
+         LEFT JOIN countries merchant_target_country ON merchant_target_country.id=merchant.target_country_id
+         LEFT JOIN settlements merchant_target ON merchant_target.id=merchant.target_settlement_id
+         LEFT JOIN LATERAL (
+           SELECT operation.* FROM diplomat_operations operation
+            WHERE operation.diplomat_character_id=character.id
+              AND operation.status IN ('TRAVELING','ACTIVE','PAUSED')
+            ORDER BY operation.created_at DESC LIMIT 1
+         ) diplomat ON TRUE
+         LEFT JOIN countries diplomat_target_country ON diplomat_target_country.id=diplomat.target_country_id
+         LEFT JOIN settlements diplomat_target ON diplomat_target.id=diplomat.target_settlement_id
+         LEFT JOIN LATERAL (
+           SELECT operation.* FROM espionage_operations operation
+            WHERE operation.spy_character_id=character.id AND operation.status='TRAVELING'
+            ORDER BY operation.created_at DESC LIMIT 1
+         ) espionage ON TRUE
+         LEFT JOIN countries spy_target_country ON spy_target_country.id=espionage.target_country_id
+         LEFT JOIN settlements spy_target ON spy_target.id=espionage.target_settlement_id
+        WHERE country.guild_id=$1 AND country.status='ACTIVE' AND character.character_status='ACTIVE'
+          AND character.assignment NOT IN ('NONE','CAPTURED')
+        ORDER BY country.name,character.role,character.name`,
+      [adminConfig.guildId]
+    )).rows;
+  },
+
   async battles() {
     return (await adminPool.query(
       `SELECT battle.id,battle.terrain,battle.status,battle.round_number,battle.siege_phase,

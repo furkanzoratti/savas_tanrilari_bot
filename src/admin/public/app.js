@@ -26,6 +26,18 @@ const assignmentLabels = {
   DIPLOMAT_INTEGRATE: "Vassal entegrasyonu"
 };
 const assignmentLabel = (value) => assignmentLabels[value] || String(value || "Görevsiz").replaceAll("_", " ");
+const operationLabels = {
+  LOCAL_TRADE: "Yerel ticaret", FOREIGN_CONCESSION: "Yabancı ticaret imtiyazı", PURCHASE_AGENT: "Satın alma görevlisi",
+  BLACK_MARKET: "Karaborsa faaliyeti", RECONCILIATION: "Halkla uzlaşma", CULTURE_CHANGE: "Kültür değiştirme",
+  VASSALIZE: "Diplomatik vassallaştırma", VASSAL_INTEGRATION: "Vassal entegrasyonu",
+  ECONOMIC: "Ekonomik casusluk", MILITARY: "Askerî casusluk", PUBLIC: "Kamu casusluğu",
+  NAVAL: "Deniz casusluğu", CONSTRUCTION: "İnşaat casusluğu", DISCREDIT: "İtibarsızlaştırma",
+  KIDNAP: "Kaçırma", ASSASSINATE: "Suikast", SUPPLY_COLLAPSE: "İkmal çökertme", DESERTION: "Firar kışkırtma"
+};
+const operationStatusLabels = {
+  PENDING_ACCEPTANCE: "Onay bekliyor", TRAVELING: "İntikal ediyor", ACTIVE: "Aktif",
+  CONTROLLED: "Denetimli", PAUSED: "Beklemede"
+};
 
 async function api(path, options = {}) {
   const headers = { ...(options.body ? { "content-type": "application/json" } : {}), ...(options.headers || {}) };
@@ -126,21 +138,41 @@ async function charactersPage() {
   setActiveRoute("characters"); loading();
   const rows = await api("/api/characters");
   const alive = rows.filter((row) => row.character_status === "ACTIVE").length;
-  page.innerHTML = `<div class="page-head"><div><h1>Karakterler</h1><p>Akademi karakterleri, görevleri ve uzmanlık gelişimleri</p></div><div class="actions"><span class="pill">${number(alive)} aktif</span><span class="pill neutral">${number(rows.length - alive)} ölü/görevden alınmış</span></div></div><section class="card table-wrap"><table><thead><tr><th>Karakter</th><th>Devlet</th><th>Rol</th><th>Seviye / Bonus</th><th>Uzmanlık</th><th>Görev</th><th>Durum</th><th></th></tr></thead><tbody>${rows.map((row) => `<tr data-country-id="${row.country_id}"><td><strong>${escapeHtml(row.name)}</strong><small>${escapeHtml(row.trained_settlement_name || "Köken bilinmiyor")}</small></td><td>${escapeHtml(row.country_name)}</td><td>${row.is_admiral ? "AMİRAL" : escapeHtml(row.role)}</td><td>Sv${number(row.specialization_level)} / +${number(row.skill_bonus)}</td><td>${escapeHtml(row.specialization || row.admiral_specialization || "—")}<small>${escapeHtml(row.doctrine || row.admiral_doctrine || "Doktrin yok")}</small></td><td>${escapeHtml(assignmentLabel(row.assignment))}${row.assigned_settlement_name ? `<small>${escapeHtml(row.assigned_settlement_name)}</small>` : ""}</td><td><span class="pill ${row.character_status === "ACTIVE" ? "" : "neutral"}">${escapeHtml(row.character_status)}</span>${row.death_settlement_name ? `<small>Ölüm: ${escapeHtml(row.death_settlement_name)}</small>` : ""}</td><td>${row.character_status === "ACTIVE" ? `<div class="row-actions"><button class="button compact" data-edit-character="${row.id}">Düzenle</button>${!['NONE','CAPTURED'].includes(row.assignment) ? `<button class="button compact danger" data-cancel-character="${row.id}">Görevi iptal et</button>` : ""}</div>` : ""}</td></tr>`).join("") || '<tr><td colspan="8" class="empty">Karakter bulunmuyor.</td></tr>'}</tbody></table></section>`;
+  page.innerHTML = `<div class="page-head"><div><h1>Karakterler</h1><p>Karakter adları, puanları, uzmanlıkları ve doktrinleri</p></div><div class="actions"><span class="pill">${number(alive)} aktif</span><span class="pill neutral">${number(rows.length - alive)} ölü/görevden alınmış</span></div></div><section class="card table-wrap"><table><thead><tr><th>Karakter</th><th>Devlet</th><th>Rol</th><th>Seviye / Bonus</th><th>Uzmanlık</th><th>Durum</th><th></th></tr></thead><tbody>${rows.map((row) => `<tr data-country-id="${row.country_id}"><td><strong>${escapeHtml(row.name)}</strong><small>${escapeHtml(row.trained_settlement_name || "Köken bilinmiyor")}</small></td><td>${escapeHtml(row.country_name)}</td><td>${row.is_admiral ? "AMİRAL" : escapeHtml(row.role)}</td><td>Sv${number(row.specialization_level)} / +${number(row.skill_bonus)}</td><td>${escapeHtml(row.specialization || row.admiral_specialization || "—")}<small>${escapeHtml(row.doctrine || row.admiral_doctrine || "Doktrin yok")}</small></td><td><span class="pill ${row.character_status === "ACTIVE" ? "" : "neutral"}">${escapeHtml(row.character_status)}</span>${row.death_settlement_name ? `<small>Ölüm: ${escapeHtml(row.death_settlement_name)}</small>` : ""}</td><td>${row.character_status === "ACTIVE" ? `<button class="button compact" data-edit-character="${row.id}">Düzenle</button>` : ""}</td></tr>`).join("") || '<tr><td colspan="7" class="empty">Karakter bulunmuyor.</td></tr>'}</tbody></table></section>`;
   bindCountryRows();
   document.querySelectorAll("[data-edit-character]").forEach((button) => button.addEventListener("click", (event) => {
     event.stopPropagation();
     openCharacterEditor(rows.find((item) => item.id === button.dataset.editCharacter)).catch((error) => toast(error.message, "error"));
   }));
-  document.querySelectorAll("[data-cancel-character]").forEach((button) => button.addEventListener("click", async (event) => {
-    event.stopPropagation();
+}
+
+function assignmentTarget(row) {
+  if (row.assigned_army_name) return `Ordu: ${row.assigned_army_name}`;
+  if (row.assigned_fleet_name) return `Filo: ${row.assigned_fleet_name}`;
+  if (row.protected_character_name) return `Korunan: ${row.protected_character_name}`;
+  if (row.target_settlement_name) return `${row.target_settlement_name}${row.target_country_name ? ` (${row.target_country_name})` : ""}`;
+  if (row.assigned_settlement_name) return `${row.assigned_settlement_name}${row.assigned_country_name ? ` (${row.assigned_country_name})` : ""}`;
+  if (row.target_country_name) return row.target_country_name;
+  return "Ülke geneli";
+}
+
+async function assignmentsPage() {
+  setActiveRoute("assignments"); loading();
+  const rows = await api("/api/character-assignments");
+  page.innerHTML = `<div class="page-head"><div><h1>Karakter Görevleri</h1><p>Tüm aktif karakter görevleri, hedefleri, ilerlemeleri ve iptal işlemleri</p></div><span class="pill">${number(rows.length)} aktif görev</span></div><section class="card table-wrap"><table><thead><tr><th>Karakter</th><th>Devlet</th><th>Rol</th><th>Görev</th><th>Hedef / Konum</th><th>Durum</th><th>İlerleme / Süre</th><th></th></tr></thead><tbody>${rows.map((row) => {
+    const task = operationLabels[row.operation_type] || assignmentLabel(row.assignment);
+    const status = operationStatusLabels[row.operation_status] || (row.assignment_ready_turn ? "Hazırlanıyor" : "Aktif");
+    const progress = row.operation_goal ? `${number(row.operation_progress)} / ${number(row.operation_goal)}` : row.assignment_ready_turn ? `Tur ${number(row.assignment_ready_turn)}` : "—";
+    return `<tr><td><strong>${escapeHtml(row.name)}</strong></td><td>${escapeHtml(row.country_name)}</td><td>${row.is_admiral ? "AMİRAL" : escapeHtml(row.role)}</td><td><strong>${escapeHtml(task)}</strong><small>${escapeHtml(assignmentLabel(row.assignment))}</small></td><td>${escapeHtml(assignmentTarget(row))}</td><td><span class="pill ${row.operation_status === "PAUSED" ? "warning" : "neutral"}">${escapeHtml(status)}</span></td><td>${escapeHtml(progress)}</td><td><button class="button compact danger" data-cancel-character="${row.id}">Görevi iptal et</button></td></tr>`;
+  }).join("") || '<tr><td colspan="8" class="empty">Aktif karakter görevi bulunmuyor.</td></tr>'}</tbody></table></section>`;
+  document.querySelectorAll("[data-cancel-character]").forEach((button) => button.addEventListener("click", async () => {
     const character = rows.find((item) => item.id === button.dataset.cancelCharacter);
-    if (!character || !window.confirm(`${character.name} karakterinin “${assignmentLabel(character.assignment)}” görevini iptal etmek istediğine emin misin?`)) return;
+    if (!character || !window.confirm(`${character.name} karakterinin “${operationLabels[character.operation_type] || assignmentLabel(character.assignment)}” görevini iptal etmek istediğine emin misin?`)) return;
     button.disabled = true;
     try {
       await api(`/api/admin/characters/${character.id}/cancel-assignment`, { method: "POST" });
       toast(`${character.name} karakterinin görevi iptal edildi.`);
-      await charactersPage();
+      await assignmentsPage();
     } catch (error) { toast(error.message, "error"); button.disabled = false; }
   }));
 }
@@ -269,6 +301,7 @@ async function navigate(route) {
     if (route === "settlements") return settlementsPage();
     if (route === "armies") return forcesPage();
     if (route === "characters") return charactersPage();
+    if (route === "assignments") return assignmentsPage();
     if (route === "battles") return battlesPage();
     if (route === "audit") return auditPage();
     return overview();

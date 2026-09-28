@@ -120,6 +120,10 @@ const server = createServer(async (request, response) => {
       if (!requireSession(request, response)) return;
       return json(response, 200, await adminPanelService.characters());
     }
+    if (request.method === "GET" && url.pathname === "/api/character-assignments") {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await adminPanelService.characterAssignments());
+    }
     if (request.method === "GET" && url.pathname === "/api/battles") {
       if (!requireSession(request, response)) return;
       return json(response, 200, await adminPanelService.battles());
