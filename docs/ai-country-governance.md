@@ -18,8 +18,8 @@ Bu paket, oyuncusuz devletler için güvenli karar üretme altyapısını hazır
 1. Genel `AI test modu` açılıp kapatılabilir. Bu düğme yalnız manuel taslak üretimini açar.
 2. Oyuncusuz bir devlet ülke satırından açılıp kapatılabilir; doktrin ve kişilik profili hazırlanabilir.
 3. Modelin göreceği ülkeye özel veri özeti denetlenebilir.
-4. Test modu ve ilgili ülke açıkken, `OPENAI_API_KEY` tanımlıysa manuel bir tur planı taslağı üretilebilir.
-5. Taslak; önerilen hamle, gerekçe, koşul, risk ve savaş yaklaşımıyla birlikte Türkçe bir raporda incelenebilir.
+4. Test modu ve ilgili ülke açıkken, `OPENAI_API_KEY` tanımlıysa manuel bir tam strateji taslağı üretilebilir.
+5. Taslak; kesin bütçe, bina yatırımı, birim türü ve asker adedi, gemi üretimi, ordu/filo hedef Hex'i, sunucuda doğrulanmış rota, savaş harekât safhaları, saldırı/vazgeçme şartları ve aktif savaş kararlarını Türkçe bir raporda gösterir.
 6. GM taslağı yalnız `Manuel uygulamaya uygun` veya `Reddedildi` olarak işaretleyebilir ve inceleme notu ekleyebilir.
 
 `Manuel uygulamaya uygun` kararı bir onay kaydıdır; oyun komutu üretmez, hazineden harcama yapmaz, birlik hareket ettirmez ve hiçbir oyun tablosunu değiştirmez. GM makul bulduğu önerileri mevcut panel veya Discord araçlarıyla kendisi uygular.
@@ -37,6 +37,15 @@ Profildeki “planlamaya hazır” seçimi yürütme yetkisi vermez. Panel her d
 7. Uygun bulunan hamleler istenirse GM tarafından manuel uygulanır.
 
 Bu aşamada zamanlayıcı, otomatik tetikleyici, oyun emrine çevirici ve yürütme API'si yoktur.
+
+## Planlama verisi ve doğrulama
+
+- Model ülkenin gerçek hazine, yerel hazine, gelir, bakım, asker limiti, eğitim kapasitesi, bina slotu, aktif bina ve birlik kayıtlarını görür.
+- Birim fiyatları ve savaş zarları, izinli özel birlikler, bina maliyet/etkileri, gemi ve kuşatma aleti katalogları karar desteğine eklenir.
+- Kamuya açık yerleşke konumları, ülke sınır Hex'leri, resmî savaşlar ve ilgili ülkeye verilmiş istihbarat kullanılır. Düşmanların gizli birlik veya emirleri aktarılmaz.
+- Model hareket için yalnız birlik ve hedef Hex seçer. Rota model tarafından uydurulmaz; sunucu mevcut Hex haritası ve geçiş kurallarıyla rotayı hesaplar. Geçersiz rota planı otomatik reddedilir.
+- Satın alma kalemleri Alım Turu, yerel hazine, eğitim kapasitesi, asker limiti, inşaat kapasitesi ve profil rezerviyle doğrulanır.
+- Doğrulama hatalıysa plan `Reddedildi` durumunda saklanır ve hata nedenleri raporda gösterilir.
 
 ## Railway değişkenleri
 
