@@ -3,7 +3,7 @@ import { z } from "zod";
 import { BATTLE_UNIT_STATS, type BattleUnitType } from "../domain/battle.js";
 import { adminConfig } from "./config.js";
 import { adminPool, withAdminTransaction, type AdminDbClient } from "./db.js";
-import { signValue, verifySignedValue } from "./auth.js";
+import { signValue, verifySignedValue } from "../security/signed-value.js";
 
 const usableUnitTypes = (Object.keys(BATTLE_UNIT_STATS) as BattleUnitType[]).filter((unitType) => unitType !== "militia");
 const usableUnitTypeSet = new Set<string>(usableUnitTypes);

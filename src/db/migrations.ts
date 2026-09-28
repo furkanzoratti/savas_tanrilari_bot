@@ -25,6 +25,7 @@ import { manualKerkourosRestorationMigration } from "./manual-kerkouros-restorat
 import { navalBattleTacticsMigration } from "./naval-battle-tactics-migration.js";
 import { pontusSinopArmyRestorationMigration } from "./pontus-sinop-army-restoration-migration.js";
 import { adminPanelMigration } from "./admin-panel-migration.js";
+import { adminPanelLoginMigration } from "./admin-panel-login-migration.js";
 
 export const migrations = [
   {
@@ -2267,5 +2268,6 @@ export const migrations = [
   manualKerkourosRestorationMigration,
   navalBattleTacticsMigration,
   pontusSinopArmyRestorationMigration,
-  adminPanelMigration
+  adminPanelMigration,
+  adminPanelLoginMigration
 ] as const;

@@ -7,9 +7,8 @@ import { adminConfig } from "./config.js";
 import { adminPool } from "./db.js";
 import {
   assertMutationRequest,
-  beginDiscordLogin,
   clearSession,
-  completeDiscordLogin,
+  completeDiscordLinkLogin,
   sessionFromRequest,
   type AdminSession
 } from "./auth.js";
@@ -27,7 +26,7 @@ function securityHeaders(response: ServerResponse): void {
   response.setHeader("x-frame-options", "DENY");
   response.setHeader("referrer-policy", "no-referrer");
   response.setHeader("permissions-policy", "camera=(), microphone=(), geolocation=()");
-  response.setHeader("content-security-policy", "default-src 'self'; connect-src 'self'; img-src 'self' https://cdn.discordapp.com data:; style-src 'self'; script-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self' https://discord.com");
+  response.setHeader("content-security-policy", "default-src 'self'; connect-src 'self'; img-src 'self' https://cdn.discordapp.com data:; style-src 'self'; script-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
 }
 
 function json(response: ServerResponse, status: number, value: unknown): void {
@@ -86,9 +85,8 @@ const server = createServer(async (request, response) => {
       await adminPool.query("SELECT 1");
       return json(response, 200, { ok: true, service: "gm-panel" });
     }
-    if (request.method === "GET" && url.pathname === "/auth/login") return beginDiscordLogin(response);
-    if (request.method === "GET" && url.pathname === "/auth/callback") {
-      await completeDiscordLogin(request, response, url);
+    if (request.method === "GET" && url.pathname === "/auth/discord") {
+      await completeDiscordLinkLogin(response, url);
       return redirect(response, "/");
     }
     if (request.method === "POST" && url.pathname === "/auth/logout") {

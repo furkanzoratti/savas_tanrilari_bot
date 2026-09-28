@@ -878,6 +878,8 @@ export const commandBuilders = [
     .addStringOption((o) => o.setName("yerleske").setDescription("Milis eklenecek yerleşke").setRequired(true))
     .addIntegerOption((o) => o.setName("miktar").setDescription("Eklenecek Milis miktarı").setMinValue(1).setRequired(true)),
   new SlashCommandBuilder()
+    .setName("operasyon-masasi").setDescription("Yalnızca yönetici: GM Operasyon Masası için tek kullanımlık giriş bağlantısı üretir"),
+  new SlashCommandBuilder()
     .setName("yonetim").setDescription("Oyun yöneticisi komutları")
     .addSubcommand((sub) => sub.setName("ulke-olustur").setDescription("Yeni ülke oluşturur")
       .addStringOption((o) => o.setName("ad").setDescription("Ülke adı").setRequired(true))

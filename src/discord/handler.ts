@@ -27,6 +27,7 @@ import { armyService, type MobileSiegeAssetType } from "../services/army-service
 import { armyMusterService } from "../services/army-muster-service.js";
 import { fleetService } from "../services/fleet-service.js";
 import { navalRepairService } from "../services/naval-repair-service.js";
+import { adminPanelLoginService } from "../services/admin-panel-login-service.js";
 import { cityService } from "../services/city-service.js";
 import { commandLogService } from "../services/command-log-service.js";
 import { greatPowerService } from "../services/great-power-service.js";
@@ -1144,6 +1145,24 @@ async function handleGreatPowerCommand(interaction: ChatInputCommandInteraction)
   await interaction.editReply(`✅ Güncel **${snapshot.rows.length} devletlik Büyük Güçler sıralaması** <#${channelId}> kanalında paylaşıldı.`);
 }
 async function handleCommand(interaction: ChatInputCommandInteraction): Promise<void> {
+  if (interaction.commandName === "operasyon-masasi") {
+    requireGameMaster(interaction);
+    if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
+    await interaction.deferReply({ ephemeral: true });
+    const login = await adminPanelLoginService.issue({
+      guildId: interaction.guildId,
+      userId: interaction.user.id,
+      username: interaction.user.globalName?.trim() || interaction.user.username,
+      avatar: interaction.user.avatar
+    });
+    await interaction.editReply({
+      content: "🛡️ **GM Operasyon Masası** bağlantın hazır. Bu bağlantı **5 dakika** geçerlidir ve yalnızca **bir kez** kullanılabilir.",
+      components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel("Operasyon Masası'nı Aç").setURL(login.url)
+      )]
+    });
+    return;
+  }
   if (await handleGreatGamesCommand(interaction)) return;
   if (await handleNavalOperationsCommand(interaction)) return;
   if (await handleLandRaidsCommand(interaction)) return;

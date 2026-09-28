@@ -7,6 +7,8 @@ const envSchema = z.object({
   DISCORD_GUILD_ID: z.string().min(1).optional(),
   DATABASE_URL: z.string().min(1),
   ADMIN_ROLE_IDS: z.string().default(""),
+  ADMIN_PANEL_BASE_URL: z.string().url().optional(),
+  ADMIN_SESSION_SECRET: z.string().min(32).optional(),
   AUTO_TURN_SCHEDULE: z.enum(["true", "false"]).default("false"),
   TURN_TIMEZONE: z.string().default("Europe/Istanbul"),
   PORT: z.coerce.number().int().positive().default(3000),
