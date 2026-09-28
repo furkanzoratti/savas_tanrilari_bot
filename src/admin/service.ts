@@ -124,6 +124,107 @@ export const adminPanelService = {
     )).rows;
   },
 
+  async settlements() {
+    return (await adminPool.query(
+      `SELECT settlement.id,settlement.country_id,settlement.name,country.name AS country_name,
+              country.status AS country_status,settlement.population,settlement.slave_population,
+              settlement.local_treasury,settlement.resource_type,settlement.culture_group,
+              settlement.ruin_stage,settlement.is_conquered,settlement.is_coastal,
+              settlement.base_land_trade_income,settlement.land_trade_income,
+              settlement.sea_trade_income,settlement.tax_income,
+              (SELECT COALESCE(SUM(quantity),0)::integer FROM unit_stacks
+                WHERE settlement_id=settlement.id AND force_type='ARMY') AS army_stock,
+              (SELECT COALESCE(SUM(quantity),0)::integer FROM naval_units
+                WHERE settlement_id=settlement.id) AS ships,
+              (SELECT COUNT(*)::integer FROM buildings
+                WHERE settlement_id=settlement.id AND level>0 AND status='ACTIVE') AS building_count
+         FROM settlements settlement
+         JOIN countries country ON country.id=settlement.country_id
+        WHERE country.guild_id=$1
+        ORDER BY CASE WHEN country.status='ACTIVE' THEN 0 ELSE 1 END,country.name,settlement.name`,
+      [adminConfig.guildId]
+    )).rows;
+  },
+
+  async forces() {
+    const armies = (await adminPool.query(
+      `SELECT army.id,army.country_id,army.name,country.name AS country_name,
+              character.name AS commander_name,army.created_turn,position.hex_id,
+              COALESCE(SUM(unit.quantity),0)::integer AS total,
+              COUNT(DISTINCT unit.settlement_id)::integer AS origin_count
+         FROM armies army
+         JOIN countries country ON country.id=army.country_id
+         LEFT JOIN country_characters character ON character.id=army.commander_character_id
+         LEFT JOIN army_units unit ON unit.army_id=army.id
+         LEFT JOIN army_map_positions position ON position.army_id=army.id
+        WHERE army.guild_id=$1
+        GROUP BY army.id,country.name,character.name,position.hex_id
+        ORDER BY country.name,army.created_at,army.name`,
+      [adminConfig.guildId]
+    )).rows;
+    const fleets = (await adminPool.query(
+      `SELECT fleet.id,fleet.country_id,fleet.name,country.name AS country_name,
+              character.name AS commander_name,fleet.created_turn,position.hex_id,
+              COALESCE((SELECT SUM(ship.quantity) FROM fleet_ships ship WHERE ship.fleet_id=fleet.id),0)::integer AS ready_ships,
+              COALESCE((SELECT COUNT(*) FROM naval_ship_damage damage WHERE damage.fleet_id=fleet.id),0)::integer AS tracked_ships,
+              COALESCE((SELECT COUNT(*) FROM naval_ship_damage damage
+                         WHERE damage.fleet_id=fleet.id AND damage.status IN ('DAMAGED','DISABLED','REPAIRING')),0)::integer AS damaged_ships
+         FROM fleets fleet
+         JOIN countries country ON country.id=fleet.country_id
+         LEFT JOIN country_characters character ON character.id=fleet.commander_character_id
+         LEFT JOIN fleet_map_positions position ON position.fleet_id=fleet.id
+        WHERE fleet.guild_id=$1
+        ORDER BY country.name,fleet.created_at,fleet.name`,
+      [adminConfig.guildId]
+    )).rows;
+    return { armies, fleets };
+  },
+
+  async characters() {
+    return (await adminPool.query(
+      `SELECT character.id,character.country_id,character.name,country.name AS country_name,
+              character.role,character.skill_bonus,character.assignment,
+              character.specialization,character.specialization_level,character.doctrine,
+              character.admiral_specialization,character.admiral_specialization_level,character.admiral_doctrine,
+              character.character_status,character.is_admiral,character.unavailable_until_turn,
+              trained.name AS trained_settlement_name,assigned.name AS assigned_settlement_name,
+              death_place.name AS death_settlement_name
+         FROM country_characters character
+         JOIN countries country ON country.id=character.country_id
+         LEFT JOIN settlements trained ON trained.id=character.trained_settlement_id
+         LEFT JOIN settlements assigned ON assigned.id=character.assigned_settlement_id
+         LEFT JOIN settlements death_place ON death_place.id=character.death_settlement_id
+        WHERE country.guild_id=$1
+        ORDER BY CASE WHEN character.character_status='ACTIVE' THEN 0 ELSE 1 END,
+                 country.name,character.role,character.name`,
+      [adminConfig.guildId]
+    )).rows;
+  },
+
+  async battles() {
+    return (await adminPool.query(
+      `SELECT battle.id,battle.terrain,battle.status,battle.round_number,battle.siege_phase,
+              battle.narrative,battle.winner_side,battle.finish_reason,battle.created_at,battle.updated_at,
+              battle.wall_current_hp,battle.wall_max_hp,battle.gate_current_hp,battle.gate_max_hp,
+              settlement.name AS defender_settlement_name,
+              country_a.name AS country_a_name,side_a.current_total AS current_a,
+              side_a.initial_total AS initial_a,side_a.total_losses AS losses_a,side_a.pressure AS pressure_a,
+              country_b.name AS country_b_name,side_b.current_total AS current_b,
+              side_b.initial_total AS initial_b,side_b.total_losses AS losses_b,side_b.pressure AS pressure_b
+         FROM battles battle
+         LEFT JOIN battle_sides side_a ON side_a.battle_id=battle.id AND side_a.side_key='A'
+         LEFT JOIN countries country_a ON country_a.id=side_a.country_id
+         LEFT JOIN battle_sides side_b ON side_b.battle_id=battle.id AND side_b.side_key='B'
+         LEFT JOIN countries country_b ON country_b.id=side_b.country_id
+         LEFT JOIN settlements settlement ON settlement.id=battle.defender_settlement_id
+        WHERE battle.guild_id=$1
+        ORDER BY CASE WHEN battle.status IN ('FINISHED','CANCELLED') THEN 1 ELSE 0 END,
+                 battle.updated_at DESC
+        LIMIT 250`,
+      [adminConfig.guildId]
+    )).rows;
+  },
+
   async country(countryId: string) {
     if (!z.string().uuid().safeParse(countryId).success) throw new Error("Geçersiz devlet kimliği.");
     const country = (await adminPool.query(
@@ -164,8 +265,18 @@ export const adminPanelService = {
       [countryId]
     )).rows;
     const characters = (await adminPool.query(
-      `SELECT id,name,role,level,status,assignment FROM country_characters
-        WHERE country_id=$1 ORDER BY status,role,name`, [countryId]
+      `SELECT character.id,character.name,character.role,character.skill_bonus,
+              character.specialization_level AS level,character.character_status AS status,
+              character.assignment,character.specialization,character.doctrine,character.is_admiral,
+              character.unavailable_until_turn,trained.name AS trained_settlement_name,
+              assigned.name AS assigned_settlement_name,death_place.name AS death_settlement_name
+         FROM country_characters character
+         LEFT JOIN settlements trained ON trained.id=character.trained_settlement_id
+         LEFT JOIN settlements assigned ON assigned.id=character.assigned_settlement_id
+         LEFT JOIN settlements death_place ON death_place.id=character.death_settlement_id
+        WHERE character.country_id=$1
+        ORDER BY CASE WHEN character.character_status='ACTIVE' THEN 0 ELSE 1 END,
+                 character.role,character.name`, [countryId]
     )).rows;
     return { country, settlements, armies, fleets, characters };
   },

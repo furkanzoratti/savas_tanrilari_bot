@@ -54,6 +54,7 @@ nav { display: grid; gap: 5px; }
 .search-result small { color: var(--muted); }
 .status-badge, .pill { padding: 7px 10px; border-radius: 999px; background: var(--accent-dark); color: var(--accent); white-space: nowrap; font-size: 13px; }
 .pill.neutral { background: var(--surface-3); color: var(--muted); }
+.pill.warning { background: rgba(229, 173, 103, .14); color: var(--warning); }
 .page { padding: 24px; }
 .page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 18px; }
 .page-head h1 { margin: 0 0 5px; font-size: 25px; font-weight: 600; }
@@ -98,6 +99,21 @@ tr[data-country-id]:hover td { background: var(--surface-2); }
 .tabs { display: flex; gap: 6px; margin: 16px 0 12px; border-bottom: 1px solid var(--line); }
 .tabs button { padding: 10px 12px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); cursor: pointer; }
 .tabs button.active { border-color: var(--accent); color: var(--text); }
+.section-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 22px 2px 9px; }
+.section-title h2 { margin: 0; font-size: 17px; }
+.section-title span { color: var(--muted); font-size: 13px; }
+.section-gap { margin-top: 12px; }
+.compact-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
+.record-card { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg); }
+.record-card span, .record-card small { color: var(--muted); }
+.record-card span { font-size: 13px; }
+.record-card small { font-size: 12px; }
+.battle-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.battle-sides { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.battle-sides > div { display: grid; gap: 3px; padding: 11px; border-radius: 9px; background: var(--bg); }
+.battle-sides span { font-size: 18px; }
+.battle-sides small, .battle-structure { color: var(--muted); font-size: 12px; }
+.battle-structure { margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--line); }
 .empty { padding: 34px 16px; color: var(--muted); text-align: center; }
 .skeleton { min-height: 130px; border-radius: 13px; background: linear-gradient(90deg, var(--surface) 25%, var(--surface-2) 50%, var(--surface) 75%); background-size: 200% 100%; animation: loading 1.25s infinite; }
 @keyframes loading { to { background-position: -200% 0; } }
@@ -132,6 +148,8 @@ input:focus, select:focus { border-color: var(--accent); }
   .user-card > div:nth-child(2), .user-card button { display: none; }
   .kpi-grid, .detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .content-grid { grid-template-columns: 1fr; }
+  .compact-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .battle-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 620px) {
   .page { padding: 16px; }
@@ -142,4 +160,5 @@ input:focus, select:focus { border-color: var(--accent); }
   .data-row { grid-template-columns: 1fr auto; }
   .data-row > :nth-child(2), .data-row > :nth-child(3) { display: none; }
   .unit-row { grid-template-columns: 1fr 100px 38px; }
+  .compact-grid { grid-template-columns: 1fr; }
 }

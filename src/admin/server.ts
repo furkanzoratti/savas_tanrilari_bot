@@ -108,6 +108,22 @@ const server = createServer(async (request, response) => {
       if (!requireSession(request, response)) return;
       return json(response, 200, await adminPanelService.countries());
     }
+    if (request.method === "GET" && url.pathname === "/api/settlements") {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await adminPanelService.settlements());
+    }
+    if (request.method === "GET" && url.pathname === "/api/forces") {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await adminPanelService.forces());
+    }
+    if (request.method === "GET" && url.pathname === "/api/characters") {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await adminPanelService.characters());
+    }
+    if (request.method === "GET" && url.pathname === "/api/battles") {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await adminPanelService.battles());
+    }
     const countryMatch = request.method === "GET" ? url.pathname.match(/^\/api\/countries\/([0-9a-f-]+)$/iu) : null;
     if (countryMatch) {
       if (!requireSession(request, response)) return;
@@ -145,7 +161,7 @@ const server = createServer(async (request, response) => {
     const message = error instanceof ZodError
       ? error.issues.map((issue) => issue.message).join(" • ")
       : error instanceof Error ? error.message : "Beklenmeyen hata";
-    logger.error({ error, method: request.method, path: url.pathname }, "GM paneli isteği başarısız");
+    logger.error({ err: error, method: request.method, path: url.pathname }, "GM paneli isteği başarısız");
     json(response, 400, { error: "REQUEST_FAILED", message });
   }
 });
