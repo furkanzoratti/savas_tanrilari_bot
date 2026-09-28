@@ -7,6 +7,8 @@ import {
   CHARACTER_SPECIALIZATIONS,
   COMMANDER_DOCTRINES
 } from "../domain/characters.js";
+import { CULTURE_GROUPS, type CultureGroup } from "../domain/cultures.js";
+import { RESOURCES, type ResourceType } from "../domain/resources.js";
 import { adminConfig } from "./config.js";
 import { adminPool, withAdminTransaction, type AdminDbClient } from "./db.js";
 import { signValue, verifySignedValue } from "../security/signed-value.js";
@@ -282,7 +284,7 @@ export const adminPanelService = {
   },
 
   async settlements() {
-    return (await adminPool.query(
+    const rows = (await adminPool.query(
       `SELECT settlement.id,settlement.country_id,settlement.name,country.name AS country_name,
               country.status AS country_status,settlement.population,settlement.slave_population,
               settlement.local_treasury,settlement.resource_type,settlement.culture_group,
@@ -301,7 +303,12 @@ export const adminPanelService = {
         WHERE country.guild_id=$1
         ORDER BY CASE WHEN country.status='ACTIVE' THEN 0 ELSE 1 END,country.name,settlement.name`,
       [adminConfig.guildId]
-    )).rows;
+    )).rows as Array<Record<string, unknown> & { resource_type: ResourceType; culture_group: CultureGroup }>;
+    return rows.map((row) => ({
+      ...row,
+      resource_label: RESOURCES[row.resource_type]?.label ?? row.resource_type,
+      culture_label: CULTURE_GROUPS[row.culture_group]?.label ?? row.culture_group
+    }));
   },
 
   async forces() {
@@ -441,7 +448,7 @@ export const adminPanelService = {
       [countryId, adminConfig.guildId]
     )).rows[0];
     if (!country) throw new Error("Devlet bulunamadı.");
-    const settlements = (await adminPool.query(
+    const settlementRows = (await adminPool.query(
       `SELECT settlement.id,settlement.name,settlement.population,settlement.slave_population,
               settlement.local_treasury,settlement.resource_type,settlement.ruin_stage,
               settlement.tax_rate_percent,settlement.culture_group,settlement.is_coastal,
@@ -450,7 +457,12 @@ export const adminPanelService = {
               (SELECT COALESCE(SUM(quantity),0)::integer FROM naval_units WHERE settlement_id=settlement.id) AS ships
          FROM settlements settlement WHERE settlement.country_id=$1 ORDER BY settlement.name`,
       [countryId]
-    )).rows;
+    )).rows as Array<Record<string, unknown> & { resource_type: ResourceType; culture_group: CultureGroup }>;
+    const settlements = settlementRows.map((row) => ({
+      ...row,
+      resource_label: RESOURCES[row.resource_type]?.label ?? row.resource_type,
+      culture_label: CULTURE_GROUPS[row.culture_group]?.label ?? row.culture_group
+    }));
     const armies = (await adminPool.query(
       `SELECT army.id,army.name,army.created_turn,character.name AS commander_name,
               COALESCE(SUM(unit.quantity),0)::integer AS total,

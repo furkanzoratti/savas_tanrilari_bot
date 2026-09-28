@@ -93,6 +93,7 @@ nav { display: grid; gap: 5px; }
 table { width: 100%; border-collapse: collapse; }
 th, td { padding: 12px 10px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
 th { color: var(--muted); font-size: 12px; font-weight: 500; }
+td small { display: block; margin-top: 3px; color: var(--muted); }
 tr[data-country-id] { cursor: pointer; }
 tr[data-country-id]:hover td { background: var(--surface-2); }
 .detail-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }

@@ -83,11 +83,16 @@ const IGNORED_FIELDS = new Set(["id", "guild_id", "country_id", "created_at", "u
 
 export function auditActionLabel(action: string): string {
   if (ACTION_LABELS[action]) return ACTION_LABELS[action]!;
-  return action.replaceAll(".", " ").replaceAll("_", " ").replace(/\s+/gu, " ").trim();
+  const normalized = action.toLocaleLowerCase("tr-TR");
+  if (/(create|add|assign|start|declare)/u.test(normalized)) return "Yeni kayıt veya görevlendirme oluşturuldu";
+  if (/(cancel|remove|delete|withdraw|end|lift|disband)/u.test(normalized)) return "Kayıt veya görevlendirme sona erdirildi";
+  if (/(update|set|configure|correct|change)/u.test(normalized)) return "Kayıt bilgileri güncellendi";
+  if (/(resolve|apply|finish|complete)/u.test(normalized)) return "İşlem sonuçlandırıldı";
+  return "Sistem işlemi kaydedildi";
 }
 
 export function auditEntityTypeLabel(entityType: string): string {
-  return ENTITY_LABELS[entityType] ?? entityType.replaceAll("_", " ");
+  return ENTITY_LABELS[entityType] ?? "Oyun kaydı";
 }
 
 export function collectAuditUuids(value: unknown, result = new Set<string>()): Set<string> {
@@ -119,13 +124,13 @@ export function auditDetailsSummary(details: unknown, names: ReadonlyMap<string,
     const before = previous as Record<string, unknown>;
     const after = updated as Record<string, unknown>;
     const changes = Object.entries(after)
-      .filter(([key, value]) => !IGNORED_FIELDS.has(key) && JSON.stringify(before[key]) !== JSON.stringify(value))
-      .map(([key, value]) => `${FIELD_LABELS[key] ?? key}: ${displayValue(before[key], names)} → ${displayValue(value, names)}`);
+      .filter(([key, value]) => Boolean(FIELD_LABELS[key]) && !IGNORED_FIELDS.has(key) && JSON.stringify(before[key]) !== JSON.stringify(value))
+      .map(([key, value]) => `${FIELD_LABELS[key]}: ${displayValue(before[key], names)} → ${displayValue(value, names)}`);
     if (changes.length) return changes.slice(0, 6).join(" • ");
   }
   return Object.entries(object)
-    .filter(([key, value]) => !IGNORED_FIELDS.has(key) && key !== "previous" && key !== "updated" && value !== null && value !== false && value !== 0)
-    .map(([key, value]) => `${FIELD_LABELS[key] ?? key}: ${displayValue(value, names)}`)
+    .filter(([key, value]) => Boolean(FIELD_LABELS[key]) && !IGNORED_FIELDS.has(key) && key !== "previous" && key !== "updated" && value !== null && value !== false && value !== 0)
+    .map(([key, value]) => `${FIELD_LABELS[key]}: ${displayValue(value, names)}`)
     .slice(0, 6)
     .join(" • ");
 }
