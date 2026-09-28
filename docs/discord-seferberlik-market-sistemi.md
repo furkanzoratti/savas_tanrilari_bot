@@ -176,6 +176,15 @@ Aşağıdaki değerler **1.000 asker** içindir. Daha küçük alımlar 100'ün 
 • İber Caetratileri: **3.000 Altın** — Bakım: **300 Altın**
 • Cermen Şok Savaşçıları: **3.500 Altın** — Bakım: **350 Altın**
 • Anadolu Kalkanlıları (Thureophoroi): **3.000 Altın** — Bakım: **300 Altın**
+• Triarii Gazileri: **3.000 Altın** — Bakım: **300 Altın**
+• Pön Gazileri: **4.750 Altın** — Bakım: **475 Altın**
+• Gaesatae: **4.750 Altın** — Bakım: **475 Altın**
+• Peltastlar: **1.750 Altın** — Bakım: **175 Altın**
+• Gümüş Kalkanlılar: **3.500 Altın** — Bakım: **400 Altın**
+• Machimoi Phalangitai: **3.500 Altın** — Bakım: **400 Altın**
+• Maurya Savaş Filleri: **8.000 Altın** — Bakım: **800 Altın**
+• Çöl Akıncıları: **4.250 Altın** — Bakım: **425 Altın**
+• Chariot: **5.000 Altın** — Bakım: **500 Altın**
 
 ### 🪙 Bakım Hesaplaması
 
@@ -296,7 +305,7 @@ Kuşatma aletleri düzenli bakım ödemez.
 
 ## 🏰 12. KUŞATMA SAVAŞINDA ARAÇLAR VE HÜCUM ERİŞİMİ
 
-Kuşatma savaşında A tarafı saldıran, B tarafı savunandır. Saldıranın normal kuşatma cephesi **15.000 askerdir**.
+Kuşatma savaşında A tarafı saldıran, B tarafı savunandır. Saldıranın normal kuşatma cephesi **15.000 piyade + 5.000 menzilli**, toplam **20.000 askerdir**.
 
 Sur ve kapı birlikte sağlamken:
 
@@ -304,7 +313,9 @@ Sur ve kapı birlikte sağlamken:
 • 1 Kuşatma Kulesi, **3.000 Hücum Birliğine** erişim sağlar.
 • Kuleler kapasite hesabında önce, merdivenler kalan alanda değerlendirilir.
 • Toplam hücum erişimi 15.000 kişilik cepheyi aşamaz.
-• Sur veya kapı yıkılırsa saldıranın normal 15.000 kişilik cephesi açılır.
+• Sur yıkılırsa saldıranın normal 15.000 kişilik piyade cephesi açılır.
+• Kapı kırılırsa piyade cephesi **+3.000** artarak 18.000'e çıkar; 5.000 menzilli destekle toplam kapasite 23.000 olur.
+• Sur ve kapı birlikte yıkılsa da kapı bonusu birikmez; piyade cephesi 18.000'de kalır.
 
 Hücum Birlikleri:
 
@@ -318,21 +329,29 @@ Hücum Birlikleri:
 • İber Caetratileri
 • Cermen Şok Savaşçıları
 • Anadolu Kalkanlıları
+• Triarii Gazileri
+• Pön Gazileri
+• Gaesatae
+• Peltastlar
+• Gümüş Kalkanlılar
+• Machimoi Phalangitai
 
 Sadece menzilli veya atlı birliklerden oluşan ordu şehir ele geçiremez. Hücum Birliği kalmayan kuşatan taraf geri çekilir.
 
-Kuşatan taraf, sur ve kapı sağlamken `/savas suvari-indir` ile seçtiği süvarileri yaya karşılıklarıyla savaştırabilir. Kayıplar yine özgün süvari kaydından düşer.
+Kuşatan tarafın atlı birlikleri kuşatma hücumuna ve kayıp havuzuna otomatik girmez. `/savas suvari-indir` ile seçilen Hafif Süvari, Ağır Süvari, Atlı Okçu ve Deve Süvarisi kuşatma boyunca yaya karşılıklarıyla savaştırılabilir; kayıplar yine özgün süvari kaydından düşer.
+
+Saldıranın aldığı asker kayıpları, etkin kadro elverdiği ölçüde **%70 piyade** ve **%30 menzilli** havuzuna dağıtılır. Atlı birlikler ancak yaya savaşa indirilmişse bu kayıp hesabına girer.
 
 ### 🎲 Araçların Savaş Etkileri
 
 • Merdiven Grubu: Zar üretmez; 1.000 Hücum Birliğine erişim sağlar.
 • Koçbaşı: **1d8 × 35 Kapı Hasarı**
-• Mantlet Grubu: Adet başına **1d4 Çarpışma**; savunanın saldırana Hasarını adet başına %5 azaltır, azami %50.
-• Balista — Sur: Adet başına **1d10 × 5 Sur Hasarı**
+• Mantlet Grubu: Çarpışma veya Hasar üretmez; savunanın saldırana Hasarını adet başına %2 azaltır, azami %20.
+• Balista — Sur/Kapı: Adet başına **1d10 × 5 Sur veya Kapı Hasarı**
 • Balista — Ordu: Adet başına **1d10 Hasar**
 • Katapult — Sur: Adet başına **2d20 × 20 Sur Hasarı**
 • Katapult — Ordu: Adet başına **1d20 Hasar**
-• Kuşatma Kulesi: Adet başına **2d20 Çarpışma + 1d6 Hasar** ve 3.000 Hücum Birliğine erişim
+• Kuşatma Kulesi: Adet başına **1d10 Çarpışma + 1d6 Hasar** ve 3.000 Hücum Birliğine erişim
 • Hafif Sur Balistası: Adet başına **2d8 Savunma Hasarı**
 
 Bir araç türünden aynı savaş turunda en fazla 25 adet etkin olabilir. Koçbaşı 1 adetle; kule ve merdivenler ayrıca 15.000 kişilik erişim cephesiyle sınırlıdır.
@@ -379,6 +398,31 @@ Saldıran taraf, ordu hücumuna başlamadan önce yalnızca sur hedefli Katapult
 • Ordu taşıyan filodan gemi çıkarmak, komutanı değiştirmek veya filoyu dağıtmak için önce taşınan yük boşaltılmalıdır.
 
 • Etkin savaşa bağlı bir filonun kadrosu değiştirilemez.
+
+### ⚒️ Gemi Canı, İş Göremezlik ve Tamir
+
+• Kerkouros: **40 HP** — **10 HP ve altında** iş göremez
+• Trireme: **75 HP** — **20 HP ve altında** iş göremez
+• Quinquereme: **120 HP** — **30 HP ve altında** iş göremez
+
+İş göremez gemiler filoda kalabilir ancak savaşa, taşımaya ve etkin deniz görevlerine katılamaz. Batan gemiler kalıcı olarak kaybedilir.
+
+`/filo tamir` komutu iki farklı kapsamla kullanılabilir:
+
+• **Yalnız iş göremez gemiler:** Sadece iş göremez durumdaki gemileri tamir filosuna ayırır.
+• **Bütün hasarlı ve iş göremez gemiler:** Tam canın altındaki bütün gemileri tamir filosuna ayırır.
+
+Tamire alınan gemiler normal filodan otomatik çıkar ve belgede ayrı bir **Tamirdeki Filo** olarak görünür. Tamir için devlete ait kıyı yerleşkesinde etkin Tersane bulunmalıdır.
+
+• Tersane Sv1: Tur başına **150 HP** onarım
+• Tersane Sv2: Tur başına **300 HP** onarım
+• Tersane Sv3: Tur başına **500 HP** onarım
+
+Tamir süresi, tamir filosundaki toplam eksik HP'nin Tersane kapasitesine bölünüp yukarı yuvarlanmasıyla hesaplanır ve en az **1 turdur**.
+
+• `/filo tamirden-cikar`: Devam eden tamirdeki **iş göremez olmayan** gemileri erkenden çıkarıp seçilen normal filoya aktarır; iş göremez gemiler tamirde kalır.
+• `/filo tamirden-ekle`: Tamiri tamamlanan grubun bütün gemilerini seçilen normal filoya aktarır.
+• `/filo tamir-bilgi`: Devam eden ve tamamlanan tamir filolarını gösterir.
 
 ## ⚓ 15. LİMAN VE TERSANE KAPASİTESİ
 
@@ -431,13 +475,13 @@ Belgede gösterilen fiyatlar temel fiyatlardır. Etkin hammadde, politika, Tücc
 Askerî alımları doğrudan etkileyen hammaddeler:
 
 • Tahıl: Ordu bakımı **-%10**
-• Demir: Mızraklı, Ağır Piyade ve Ağır Süvari alımı **-%10**; Koçbaşı, Katapult ve Balista **-%10**
+• Demir: Mızraklı, Ağır Piyade, Ağır Süvari, Triarii Gazileri, Pön Gazileri, Gaesatae, Gümüş Kalkanlılar ve Machimoi Phalangitai alımı **-%10**; Koçbaşı, Katapult ve Balista **-%10**
 • Kereste: Gemi üretimi **-%10**
-• At: Hafif Süvari, Ağır Süvari ve Atlı Okçu alımı **-%10**
-• Deri: Hafif Piyade, Okçu ve Sapancı alımı **-%10**; Mantlet, Koçbaşı ve Kuşatma Kulesi **-%10**
+• At: Hafif Süvari, Ağır Süvari, Atlı Okçu, Maurya Savaş Filleri, Çöl Akıncıları ve Chariot alımı **-%10**; orduların hareket hızı **+%25**
+• Deri: Hafif Piyade, Okçu, Sapancı ve Peltast alımı **-%10**; Mantlet, Koçbaşı ve Kuşatma Kulesi **-%10**
 • Kurşun: Sapancı alımı **-%10**; Katapult ve Balista **-%10**
 
-Aynı alıma birden fazla geçerli kaynak indirimi uygulanabilir. Kaynak indirimlerinin toplamında nihai maliyet çarpanı en fazla **%50'ye** kadar düşebilir. Devlet ve Tüccar etkileri bot tarafından ayrıca hesaplanır.
+Aynı alıma birden fazla geçerli kaynak indirimi uygulanabilir. Kaynak, politika ve kurulabilir devlet indirimleri birlikte hesaplanır; nihai maliyet çarpanı en fazla **%50'ye** kadar düşebilir. Yeni özel birlikler botta piyade veya süvari sınıflarına bağlıdır ve kurulabilir ülkenin ilgili sınıf indirimi bunlara da otomatik uygulanır. Tüccar etkileri bot tarafından ayrıca hesaplanır.
 
 Bir yerleşkenin iki etkin ticareti varsa kendi yerel hammaddesinin etkisini kullanamaz; yalnız ticaretle eriştiği hammaddeler geçerli olur.
 
@@ -456,5 +500,9 @@ Bir yerleşkenin iki etkin ticareti varsa kendi yerel hammaddesinin etkisini kul
 • `/ordu kusatma-aleti-ekle` ve `/ordu kusatma-aleti-cikar` — Taşınabilir araç tahsislerini yönetir.
 • `/filo olustur` — Kalıcı filo kurar.
 • `/filo gemi-ekle` ve `/filo gemi-cikar` — Hazır gemi tahsislerini yönetir.
+• `/filo tamir` — Yalnız iş göremez veya bütün hasarlı gemileri tamir filosuna ayırır.
+• `/filo tamirden-cikar` — İş göremez olmayan gemileri devam eden tamirden normal filoya geri aktarır.
+• `/filo tamirden-ekle` — Tamamlanmış tamir filosunun bütün gemilerini normal filoya aktarır.
+• `/filo tamir-bilgi` — Tamir filolarını ve tamamlanma turlarını gösterir.
 
 Bot; yerel hazineyi, Eğitim Kapasitesini, yerleşke ve devlet Ordu Limitini, Tersane üretim puanını, Liman rıhtım kapasitesini, bina/atölye slotlarını ve geçerli indirimleri emri onaylamadan önce otomatik olarak denetler.

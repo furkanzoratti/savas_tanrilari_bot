@@ -75,7 +75,7 @@ describe("kuşatma bilgi gizliliği", () => {
     expect(rollJson).toContain("Ham Çarpışma: **100**");
     expect(rollJson).toContain("Ham Hasar: **80**");
     expect(rollJson).toContain("Tahkimat Sonrası Çarpışma: **150**");
-    expect(rollJson).toContain("Tahkimat Sonrası Hasar: **108**");
+    expect(rollJson).toContain("Tahkimat Sonrası Hasar: **104**");
   });
 
   it("şehir ele geçirilmeden savunucuyu dağılmış göstermez ve baskıyı açıklar", () => {
@@ -83,7 +83,7 @@ describe("kuşatma bilgi gizliliği", () => {
     view.sides.B.pressure = 6;
     const json = JSON.stringify(battleEmbed(view).toJSON());
     expect(json).toContain("Baskı:** 6 puan");
-    expect(json).toContain("Sarsılmış");
+    expect(json).toContain("Baskı Altında");
     expect(json).toContain("Oyun Turu 12");
     expect(json).toContain("2/4 kullanıldı");
     expect(json).toContain("2 hak kaldı");
@@ -95,9 +95,9 @@ describe("kuşatma bilgi gizliliği", () => {
       orderA: "ORDERED", orderB: "SHAKEN", wallDamage: 400, gateDamage: 200, ended: false,
       pressureA: 1, pressureB: 6, pressureTier: "MINOR", pressureWinner: "A",
       reserveReliefA: 0, reserveReliefB: 0,
-      defenderRawClash: 100, defenderEffectiveClash: 150,
-      defenderRawDamage: 80, defenderEffectiveDamage: 108,
-      defenderClashMultiplier: 1.50, defenderDamageMultiplier: 1.35
+      defenderRawClash: 100, defenderEffectiveClash: 200,
+      defenderRawDamage: 80, defenderEffectiveDamage: 140,
+      defenderClashMultiplier: 2.00, defenderDamageMultiplier: 1.75
     }).toJSON());
     expect(json).toContain("1.234");
     expect(json).not.toContain("Kayıp gizli");
@@ -111,6 +111,30 @@ describe("kuşatma bilgi gizliliği", () => {
 });
 
 describe("özel filo can durumu", () => {
+  it("tek taraf kilitlediğinde gizli filo emrini açık kartta göstermez",()=>{
+    const view=siegeView();
+    view.battle.terrain="NAVAL";
+    view.battle.siege_phase=null;
+    Object.assign(view.sides.A,{
+      initial_total:4,current_total:4,composition:{trireme:4},initial_composition:{trireme:4},
+      active_ship_total:4,disabled_ship_total:0,sunk_ship_total:0,initial_hull_hp:300,operational_hull_hp:300,
+      naval_maneuver_points:2,naval_order:"RAM",naval_order_locked:true
+    });
+    Object.assign(view.sides.B,{
+      initial_total:4,current_total:4,composition:{trireme:4},initial_composition:{trireme:4},
+      active_ship_total:4,disabled_ship_total:0,sunk_ship_total:0,initial_hull_hp:300,operational_hull_hp:300,
+      naval_maneuver_points:1,naval_order:null,naval_order_locked:false
+    });
+    const hidden=JSON.stringify(battleEmbed(view).toJSON());
+    expect(hidden).toContain("Kilitli • Gizli");
+    expect(hidden).not.toContain("Koçbaşı Hücumu");
+    view.sides.B.naval_order="DEFENSIVE";
+    view.sides.B.naval_order_locked=true;
+    const revealed=JSON.stringify(battleEmbed(view).toJSON());
+    expect(revealed).toContain("Koçbaşı Hücumu");
+    expect(revealed).toContain("Savunma Hattı");
+  });
+
   it("her gemiyi ayrı HP ve savaşabilirlik durumuyla gösterir", () => {
     const status: PlayerBattleFleetStatus = {
       battleId: "battle",

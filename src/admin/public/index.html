@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AMRP GM Operasyon Masası</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <main id="login" class="login-shell" hidden>
+    <section class="login-card">
+      <div class="brand-mark">⚔</div>
+      <p class="eyebrow">SAVAŞ TANRILARI ROLE PLAY</p>
+      <h1>GM Operasyon Masası</h1>
+      <p class="muted">Yalnızca yetkili yönetici hesabıyla erişilebilir.</p>
+      <a class="button primary block" href="/auth/login">Discord ile güvenli giriş</a>
+    </section>
+  </main>
+
+  <div id="app" class="app-shell" hidden>
+    <aside class="sidebar">
+      <div class="brand"><div class="brand-mark small">⚔</div><div><strong>AMRP GM</strong><span>Operasyon Masası</span></div></div>
+      <nav aria-label="Ana menü">
+        <button class="nav-item active" data-route="overview"><span>▦</span> Genel Bakış</button>
+        <button class="nav-item" data-route="countries"><span>♜</span> Devletler</button>
+        <button class="nav-item" data-route="settlements"><span>⌖</span> Yerleşkeler</button>
+        <button class="nav-item" data-route="armies"><span>⚔</span> Ordular & Filolar</button>
+        <button class="nav-item" data-route="characters"><span>♟</span> Karakterler</button>
+        <button class="nav-item" data-route="battles"><span>🔥</span> Savaşlar</button>
+        <button class="nav-item" data-route="audit"><span>↶</span> İşlem Geçmişi</button>
+      </nav>
+      <div class="user-card"><div class="avatar" id="user-avatar">GM</div><div><strong id="user-name">Yönetici</strong><span>Tek yetkili</span></div><button id="logout" aria-label="Çıkış">↪</button></div>
+    </aside>
+
+    <section class="workspace">
+      <header class="topbar">
+        <div class="search-wrap"><span>⌕</span><input id="global-search" autocomplete="off" placeholder="Devlet, şehir, ordu veya karakter ara…"><div id="search-results" class="search-results" hidden></div></div>
+        <span id="turn-badge" class="status-badge">Yükleniyor…</span>
+      </header>
+      <div id="page" class="page" aria-live="polite"></div>
+    </section>
+  </div>
+
+  <div id="army-modal" class="modal-backdrop" hidden>
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="army-modal-title">
+      <header class="modal-head"><div><p class="eyebrow">GÜVENLİ YÖNETİCİ İŞLEMİ</p><h2 id="army-modal-title">Yeni ordu oluştur</h2></div><button class="icon-button" data-close-modal aria-label="Kapat">×</button></header>
+      <form id="army-form">
+        <div id="army-fields">
+          <div class="form-grid">
+            <label>Devlet<select id="army-country" required></select></label>
+            <label>Bakım ve köken şehri<select id="army-settlement" required></select></label>
+          </div>
+          <label>Ordu adı<input id="army-name" minlength="2" maxlength="60" required placeholder="Örn. Pontus I. Ordusu"></label>
+          <label>Asker kaynağı<select id="army-mode"><option value="ALLOCATE_EXISTING">Mevcut yerleşke stokundan tahsis et</option><option value="CREATE_NEW">Yönetici olarak yeni asker oluştur</option></select><small>Yeni asker seçeneği stok ve bakımı seçilen yerleşkeye ekler.</small></label>
+          <div class="section-head"><div><strong>Birlikler</strong><span>Bir veya daha fazla birlik satırı ekle.</span></div><button type="button" class="button" id="add-unit">+ Birlik ekle</button></div>
+          <div id="unit-rows" class="unit-rows"></div>
+          <p id="army-error" class="error" hidden></p>
+          <footer class="modal-actions"><button type="button" class="button" data-close-modal>Vazgeç</button><button class="button primary" type="submit">İşlemi önizle</button></footer>
+        </div>
+        <div id="army-preview" hidden>
+          <div class="preview-warning"><strong>Henüz hiçbir veri değişmedi.</strong><span>Aşağıdaki işlem onaylandığında tek transaction olarak uygulanacak.</span></div>
+          <div id="preview-content"></div>
+          <p id="preview-error" class="error" hidden></p>
+          <footer class="modal-actions"><button type="button" class="button" id="back-to-army">Geri dön</button><button type="button" class="button primary" id="confirm-army">Onayla ve oluştur</button></footer>
+        </div>
+      </form>
+    </section>
+  </div>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>

@@ -49,7 +49,7 @@ import { batchDocumentEmbeds, renderDocument } from "./document.js";
 import { publishGreatPowerRanking } from "./great-power-ui.js";
 import { BRAND_BANNER_PATH, BRAND_BANNER_NAME, TEMPLE_BANNER_PATH, TEMPLE_BANNER_NAME, TURN_BANNER_PATH, TURN_BANNER_NAME } from "./assets.js";
 import { turnAnnouncement } from "./turn-announcements.js";
-import { handleBattleButton, handleBattleCommand, refreshActiveBattleCards } from "./battle-ui.js";
+import { handleBattleButton, handleBattleCommand, handleBattleSelect, refreshActiveBattleCards } from "./battle-ui.js";
 import { handleNavalOperationsAutocomplete,handleNavalOperationsButton,handleNavalOperationsCommand } from "./naval-operations-ui.js";
 import { handleLandRaidsAutocomplete,handleLandRaidsButton,handleLandRaidsCommand } from "./land-raids-ui.js";
 import { handleArmyCommand } from "./army-ui.js";
@@ -1489,6 +1489,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
 }
 
 async function handleSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+  if (await handleBattleSelect(interaction)) return;
   if (await handleMovementSelect(interaction)) return;
   if (await handleGreatGamesSelect(interaction)) return;
   if (await handleSettlementEventSelect(interaction)) return;

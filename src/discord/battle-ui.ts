@@ -1,5 +1,6 @@
-import { ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, type ButtonInteraction, type ChatInputCommandInteraction, type Client } from "discord.js";
-import { BATTLE_TERRAINS, BATTLE_UNIT_STATS, LADDER_GROUP_ASSAULT_CAPACITY, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, SIEGE_ASSET_BATTLE_STATS, SIEGE_ASSAULT_FRONTAGE, SIEGE_ATTACKER_DISMOUNT_MAP, SIEGE_TOWER_ASSAULT_CAPACITY, assessArmyComposition, orderState, remainingBombardments, siegeAssaultAccess, siegeAttackerDismountedComposition, siegeDefenderComposition, siegeDefenseModifiers, siegeOrderState, type ArmyCompositionContext, type BattleComposition, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain, type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeDismountUnitType, type SiegeTarget } from "../domain/battle.js";
+import { ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, StringSelectMenuBuilder, type ButtonInteraction, type ChatInputCommandInteraction, type Client, type StringSelectMenuInteraction } from "discord.js";
+import { BATTLE_TERRAINS, BATTLE_UNIT_STATS, FIELD_BATTLE_PRESSURE_LIMIT, LADDER_GROUP_ASSAULT_CAPACITY, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, SIEGE_ASSET_BATTLE_STATS, SIEGE_ASSAULT_FRONTAGE, SIEGE_ATTACKER_DISMOUNT_MAP, SIEGE_GATE_BREACH_FRONTAGE, SIEGE_GATE_BREACH_TOTAL_FRONTAGE, SIEGE_PRESSURE_LIMIT, SIEGE_RANGED_SUPPORT_FRONTAGE, SIEGE_TOTAL_ASSAULT_FRONTAGE, SIEGE_TOWER_ASSAULT_CAPACITY, assessArmyComposition, orderState, remainingBombardments, siegeAssaultAccess, siegeAttackerDismountedComposition, siegeDefenderComposition, siegeDefenseModifiers, siegeOrderState, type ArmyCompositionContext, type BattleComposition, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain, type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeDismountUnitType, type SiegeTarget } from "../domain/battle.js";
+import { NAVAL_BATTLE_ORDERS, isNavalRetreatOrder, navalFleetCondition, type NavalBattleOrder } from "../domain/naval-tactics.js";
 import { number } from "../domain/format.js";
 import { battleService, type BattleRoundResult, type BattleView, type PlayerBattleFleetStatus, type SiegePhase } from "../services/battle-service.js";
 import { gameService, GameError } from "../services/game-service.js";
@@ -17,6 +18,7 @@ const statusLabels: Record<string, string> = {
 };
 const orderLabels: Record<string, string> = { ORDERED: "Düzenli", WORN: "Baskı Altında", SHAKEN: "Sarsılmış", CRITICAL: "Kritik Hat", BROKEN: "Dağılmış" };
 const tierLabels: Record<string, string> = { BALANCED: "Dengeli Çarpışma", MINOR: "Hafif Üstünlük", CLEAR: "Belirgin Üstünlük", CRUSHING: "Ezici Üstünlük" };
+const navalConditionLabels = { OPERATIONAL:"Savaşabilir", DAMAGED:"Hasarlı", CRITICAL:"Zorunlu geri çekilme", OUT:"Savaş dışı" } as const;
 
 function currentCompositionLabel(view: BattleView, side: BattleSideKey): string {
   const restricted = view.battle.terrain === "SIEGE"
@@ -24,7 +26,7 @@ function currentCompositionLabel(view: BattleView, side: BattleSideKey): string 
     && (view.battle.gate_current_hp ?? 0) > 0;
   const context: ArmyCompositionContext = restricted ? "SIEGE_RESTRICTED" : "FIELD";
   const selectedDismountments: BattleComposition = {};
-  if (restricted && side === "A") {
+  if (view.battle.terrain === "SIEGE" && side === "A") {
     for (const participant of view.sides.A.participants) {
       for (const source of Object.keys(SIEGE_ATTACKER_DISMOUNT_MAP) as SiegeDismountUnitType[]) {
         selectedDismountments[source] = (selectedDismountments[source] ?? 0) + Number(participant.dismounted_composition?.[source] ?? 0);
@@ -33,7 +35,7 @@ function currentCompositionLabel(view: BattleView, side: BattleSideKey): string 
   }
   const composition: BattleComposition = view.battle.terrain === "SIEGE" && side === "B"
     ? siegeDefenderComposition(view.sides[side].composition)
-    : restricted && side === "A"
+    : view.battle.terrain === "SIEGE" && side === "A"
       ? siegeAttackerDismountedComposition(view.sides.A.composition, selectedDismountments)
       : view.sides[side].composition;
   return assessArmyComposition(composition,context).label;
@@ -53,10 +55,19 @@ export function battleEmbed(view: BattleView, roundResult?: BattleRoundResult): 
       : orderState(side.pressure, side.initial_total, side.current_total);
     const control = side.controller === "GM" ? "Oyun Yöneticisi (NPC)" : "Ülke Oyuncuları";
     if (view.battle.terrain === "SIEGE" && key === "B") return `**Toplam Asker:** Gizli\n**Otomatik Garnizon:** Dahil\n**Toplam Kayıp:** ${number(side.total_losses)}\n**Baskı:** ${number(side.pressure)} puan\n**Düzen:** ${orderLabels[order]}\n**Zar Yetkisi:** ${control}`;
-    const navalState=view.battle.terrain==="NAVAL"
-      ? `\n**Savaşabilir:** ${number(side.active_ship_total??side.current_total)}\n**İş göremez:** ${number(side.disabled_ship_total??0)}`
-      :"";
-    return `**Başlangıç:** ${number(side.initial_total)}\n**Mevcut:** ${number(side.current_total)}${navalState}\n**Toplam Kayıp:** ${number(side.total_losses)}\n**Baskı:** ${number(side.pressure)} puan\n**Düzen:** ${orderLabels[order]}\n**Zar Yetkisi:** ${control}`;
+    if(view.battle.terrain==="NAVAL"){
+      const condition=navalFleetCondition({
+        initialHullHp:side.initial_hull_hp??0,operationalHullHp:side.operational_hull_hp??0,
+        initialShips:side.initial_total,activeShips:side.active_ship_total??0,
+        disabledShips:side.disabled_ship_total??0,sunkShips:side.sunk_ship_total??0
+      });
+      const bothLocked=view.sides.A.naval_order_locked&&view.sides.B.naval_order_locked;
+      const orderStateLabel=side.naval_order_locked
+        ? bothLocked&&side.naval_order?NAVAL_BATTLE_ORDERS[side.naval_order].label:"Kilitli • Gizli"
+        : side.naval_order?"Seçildi • Kilit bekliyor":"Henüz seçilmedi";
+      return `**Başlangıç:** ${number(side.initial_total)} gemi\n**Savaşabilir:** ${number(side.active_ship_total??0)}\n**İş göremez:** ${number(side.disabled_ship_total??0)}\n**Batık:** ${number(side.sunk_ship_total??0)}\n**Savaşabilir HP:** ${number(side.operational_hull_hp??0)} / ${number(side.initial_hull_hp??0)}\n**Filo Durumu:** ${navalConditionLabels[condition]}\n**Manevra Puanı:** ${number(side.naval_maneuver_points??0)}/5\n**Filo Emri:** ${orderStateLabel}\n**Zar Yetkisi:** ${control}`;
+    }
+    return `**Başlangıç:** ${number(side.initial_total)}\n**Mevcut:** ${number(side.current_total)}\n**Toplam Kayıp:** ${number(side.total_losses)}\n**Baskı:** ${number(side.pressure)} puan\n**Düzen:** ${orderLabels[order]}\n**Zar Yetkisi:** ${control}`;
   };
   const frontage = view.battle.terrain === "NAVAL"
     ? "Cephe sınırı yok: iki tarafın bütün savaşabilir gemileri çatışmaya katılır."
@@ -68,6 +79,15 @@ export function battleEmbed(view: BattleView, roundResult?: BattleRoundResult): 
       ? `\n**Kuşatma Durumu:** Bombardıman — ordular temas etmiyor\n**Toplam Bombardıman:** ${view.battle.bombardment_round}\n**Oyun Turu ${view.battle.game_turn ?? 0}:** ${view.battle.bombardments_this_turn ?? 0}/${MAX_BOMBARDMENTS_PER_GAME_TURN} kullanıldı • ${remainingBombardments(view.battle.bombardments_this_turn ?? 0)} hak kaldı`
       : "\n**Kuşatma Durumu:** Hücum — ordular temas hâlinde"
     : "";
+  const navalStage=view.battle.terrain==="NAVAL"&&!["FINISHED","CANCELLED"].includes(view.battle.status)
+    ? !view.sides.A.naval_order_locked||!view.sides.B.naval_order_locked
+      ? "Gizli filo emirleri bekleniyor"
+      : isNavalRetreatOrder(view.sides.A.naval_order)||isNavalRetreatOrder(view.sides.B.naval_order)
+        ? "Yönetici filo emirlerini sonuçlandıracak"
+        : view.battle.status==="READY_TO_RESOLVE"
+          ? "Yönetici değerlendirmeyi çözecek"
+          : "Filo emirleri açıklandı; savaş zarları bekleniyor"
+    : null;
   const embed = new EmbedBuilder().setColor(view.battle.status === "FINISHED" ? 0x8b1a1a : 0xb68b36)
     .setTitle(`⚔️ ${view.sides.A.country_name} — ${view.sides.B.country_name}`)
     .setDescription(view.battle.narrative || "İki ordu savaş alanında karşı karşıya geldi.")
@@ -75,7 +95,7 @@ export function battleEmbed(view: BattleView, roundResult?: BattleRoundResult): 
       { name: "🗺️ Savaş Alanı", value: `${terrain.label}\n${frontage}`, inline: false },
       { name: `🟥 ${view.sides.A.country_name}`, value: sideField("A"), inline: true },
       { name: `🟦 ${view.sides.B.country_name}`, value: sideField("B"), inline: true },
-      { name: "📜 Durum", value: `**Savaş Turu:** ${view.battle.round_number}\n**Aşama:** ${statusLabels[view.battle.status] ?? view.battle.status}${siegeStage}`, inline: false }
+      { name: "📜 Durum", value: `**Savaş Turu:** ${view.battle.round_number}\n**Aşama:** ${navalStage??statusLabels[view.battle.status]??view.battle.status}${siegeStage}`, inline: false }
     );
   if (view.battle.terrain === "AMBUSH") embed.addFields({ name: "🌲 Pusu Düzeni", value: "A tarafı pusuyu kuran taraftır. İlk turda çarpışma +%25 ve hasar +%10 uygulanır." });
   if (view.battle.terrain === "SIEGE") {
@@ -83,21 +103,27 @@ export function battleEmbed(view: BattleView, roundResult?: BattleRoundResult): 
     const access = siegeAssaultAccess(view.sides.A.support_assets, SIEGE_ASSAULT_FRONTAGE);
     const ladders = Math.max(0, Math.floor(view.sides.A.support_assets.ladder_group ?? 0));
     const towers = Math.max(0, Math.floor(view.sides.A.support_assets.siege_tower ?? 0));
-    const breached = wallOpen || gateOpen;
-    const accessNote = breached
-      ? "**Gedik veya kapı açık:** Erişim sınırı kalktı; normal kuşatma cephesi uygulanır."
+    const wallBreachOnly = wallOpen && !gateOpen;
+    const effectiveInfantryAccess = gateOpen ? SIEGE_GATE_BREACH_FRONTAGE : wallBreachOnly ? SIEGE_ASSAULT_FRONTAGE : access.capacity;
+    const effectiveInfantryLimit = gateOpen ? SIEGE_GATE_BREACH_FRONTAGE : SIEGE_ASSAULT_FRONTAGE;
+    const effectiveTotalLimit = gateOpen ? SIEGE_GATE_BREACH_TOTAL_FRONTAGE : SIEGE_TOTAL_ASSAULT_FRONTAGE;
+    const accessNote = gateOpen
+      ? "**Kapı kırıldı:** Merdiven erişimi aranmaz; piyade cephesi +3.000 ile 18.000'e yükselir. Menzilli destek 5.000'de kalır."
+      : wallBreachOnly
+        ? "**Surda gedik açıldı:** Merdiven erişimi aranmaz; 15.000 piyade ve 5.000 menzilli sınırı uygulanır."
       : view.battle.siege_phase === "BOMBARDMENT"
         ? `**Hücum başlatılırsa doğrudan sur hücumuna katılabilecek azami piyade:** ${number(access.capacity)}`
         : `**Bu tur doğrudan sur hücumuna katılabilecek azami piyade:** ${number(access.capacity)}`;
     embed.addFields(
       { name: "🏰 Tahkimatlar", value: `**Sur:** ${number(view.battle.wall_current_hp ?? 0)} / ${number(view.battle.wall_max_hp ?? 0)} HP${wallOpen ? " — Yıkıldı" : ""}\n**Kapı:** ${number(view.battle.gate_current_hp ?? 0)} / ${number(view.battle.gate_max_hp ?? 0)} HP${gateOpen ? " — Kırıldı" : ""}\n**Erzak Dayanıklılığı:** ${number(view.battle.starvation_remaining ?? 0)} / ${number(view.battle.starvation_capacity ?? 0)} oyun turu${view.battle.starvation_capacity !== null && view.battle.starvation_remaining === 0 ? " — Erzak tükendi; yönetici sonucu belirler." : ""}` },
-      { name: "🪜 Hücum Erişimi", value: `**Merdiven Grupları:** ${number(access.activeLadderGroups)} / ${number(ladders)} aktif → ${number(access.activeLadderGroups * LADDER_GROUP_ASSAULT_CAPACITY)}\n**Kuşatma Kuleleri:** ${number(access.activeSiegeTowers)} / ${number(towers)} aktif → ${number(access.activeSiegeTowers * SIEGE_TOWER_ASSAULT_CAPACITY)}\n**Toplam Hücum Kapasitesi:** ${number(access.capacity)} / ${number(SIEGE_ASSAULT_FRONTAGE)}
+      { name: "🪜 Hücum Erişimi", value: `**Merdiven Grupları:** ${number(access.activeLadderGroups)} / ${number(ladders)} aktif → ${number(access.activeLadderGroups * LADDER_GROUP_ASSAULT_CAPACITY)}\n**Kuşatma Kuleleri:** ${number(access.activeSiegeTowers)} / ${number(towers)} aktif → ${number(access.activeSiegeTowers * SIEGE_TOWER_ASSAULT_CAPACITY)}\n**Piyade Hücum Kapasitesi:** ${number(effectiveInfantryAccess)} / ${number(effectiveInfantryLimit)}\n**Menzilli Destek Kapasitesi:** ${number(SIEGE_RANGED_SUPPORT_FRONTAGE)}\n**Toplam Hücum Kapasitesi:** ${number(effectiveInfantryAccess + SIEGE_RANGED_SUPPORT_FRONTAGE)} / ${number(effectiveTotalLimit)}
 ${accessNote}` }
     );
   }
   embed.setImage(`attachment://${terrain.preset}`).setFooter({ text: "Tam birlik kompozisyonu yalnızca oyun yöneticisine görünür." }).setTimestamp();
   const factor = (value: number) => value.toFixed(2).replace(".", ",");
   if (roundResult) {
+    const pressureLimit = view.battle.terrain === "SIEGE" ? SIEGE_PRESSURE_LIMIT : FIELD_BATTLE_PRESSURE_LIMIT;
     const winner = roundResult.winner ? view.sides[roundResult.winner].country_name : "Yok";
     const pressureWinner = roundResult.pressureWinner ? view.sides[roundResult.pressureWinner].country_name : "Yok";
     const navalDamage=view.battle.terrain==="NAVAL"
@@ -108,7 +134,10 @@ ${accessNote}` }
       : roundResult.chariotPressureBonusB > 0
         ? `\n🐎 **${view.sides.B.country_name}** Chariot birlikleri düşman düzenine +${roundResult.chariotPressureBonusB} baskı uyguladı.`
         : "";
-    embed.addFields({ name: `⚔️ Tur Sonucu — ${tierLabels[roundResult.tier] ?? roundResult.tier}`, value: `Kayıp hesabındaki üstün taraf: **${winner}**\nBaskı üstünlüğü: **${pressureWinner}** (${tierLabels[roundResult.pressureTier] ?? roundResult.pressureTier})\n${view.sides.A.country_name}: **-${number(roundResult.lossA)}** • Baskı **${number(roundResult.pressureA)}/8** • ${orderLabels[roundResult.orderA]}\n${view.sides.B.country_name}: **-${number(roundResult.lossB)}** • Baskı **${number(roundResult.pressureB)}/8** • ${orderLabels[roundResult.orderB]}${chariotPressure}${navalDamage}${roundResult.wallDamage ? `\nSurlara verilen hasar: **${number(roundResult.wallDamage)}**` : ""}${roundResult.gateDamage ? `\nKapıya verilen hasar: **${number(roundResult.gateDamage)}**` : ""}` });
+    const resultValue=view.battle.terrain==="NAVAL"
+      ? `Değerlendirme üstünlüğü: **${winner}**${roundResult.winner?" • +1 Manevra Puanı":" • Puan yok"}\n${view.sides.A.country_name}: **${NAVAL_BATTLE_ORDERS[roundResult.navalOrderA!]?.label??"—"}** • Manevra **${number(roundResult.maneuverPointsA??0)}/5** • ${navalConditionLabels[roundResult.navalConditionA??"OPERATIONAL"]}\n${view.sides.B.country_name}: **${NAVAL_BATTLE_ORDERS[roundResult.navalOrderB!]?.label??"—"}** • Manevra **${number(roundResult.maneuverPointsB??0)}/5** • ${navalConditionLabels[roundResult.navalConditionB??"OPERATIONAL"]}${navalDamage}`
+      : `Kayıp hesabındaki üstün taraf: **${winner}**\nBaskı üstünlüğü: **${pressureWinner}** (${tierLabels[roundResult.pressureTier] ?? roundResult.pressureTier})\n${view.sides.A.country_name}: **-${number(roundResult.lossA)}** • Baskı **${number(roundResult.pressureA)}/${pressureLimit}** • ${orderLabels[roundResult.orderA]}\n${view.sides.B.country_name}: **-${number(roundResult.lossB)}** • Baskı **${number(roundResult.pressureB)}/${pressureLimit}** • ${orderLabels[roundResult.orderB]}${chariotPressure}${roundResult.wallDamage ? `\nSurlara verilen hasar: **${number(roundResult.wallDamage)}**` : ""}${roundResult.gateDamage ? `\nKapıya verilen hasar: **${number(roundResult.gateDamage)}**` : ""}`;
+    embed.addFields({ name: `⚔️ Tur Sonucu — ${tierLabels[roundResult.tier] ?? roundResult.tier}`, value: resultValue });
     if (view.battle.terrain !== "NAVAL") embed.addFields({
       name: "🧩 Kayıplar Sonrası Kompozisyon",
       value: `${view.sides.A.country_name}: **${currentCompositionLabel(view,"A")}**\n${view.sides.B.country_name}: **${currentCompositionLabel(view,"B")}**`
@@ -137,6 +166,40 @@ function components(view: BattleView) {
   }
   if (["CANCELLED", "DRAFT"].includes(view.battle.status)) return [];
   const expected = expectedSide(view);
+  if(view.battle.terrain==="NAVAL"){
+    const fleetButtons=()=>[
+      new ButtonBuilder().setCustomId(`battle_fleet_status|${view.battle.id}`).setLabel("Filo Durumu").setEmoji("❤️‍🩹").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`battle_fleet_status_gm|${view.battle.id}`).setLabel("Yönetici: İki Taraf").setEmoji("🔐").setStyle(ButtonStyle.Secondary)
+    ];
+    const bothLocked=view.sides.A.naval_order_locked&&view.sides.B.naval_order_locked;
+    if(!bothLocked){
+      const orderOptions=(Object.keys(NAVAL_BATTLE_ORDERS) as NavalBattleOrder[]).flatMap((order)=>
+        (["A","B"] as BattleSideKey[]).map((side)=>({
+          label:`${view.sides[side].country_name} • ${NAVAL_BATTLE_ORDERS[order].label}`.slice(0,100),
+          description:`${NAVAL_BATTLE_ORDERS[order].description} Maliyet: ${NAVAL_BATTLE_ORDERS[order].maneuverCost} MP`.slice(0,100),
+          value:`${side}|${order}`
+        }))
+      );
+      const selectRow=new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+        new StringSelectMenuBuilder().setCustomId(`battle_naval_order|${view.battle.id}`).setPlaceholder("Taraf ve gizli filo emrini seç").addOptions(orderOptions)
+      );
+      const lockRow=new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId(`battle_naval_lock_A|${view.battle.id}`).setLabel(`${view.sides.A.country_name} Emrini Kilitle`.slice(0,80)).setStyle(ButtonStyle.Primary).setDisabled(view.sides.A.naval_order_locked),
+        new ButtonBuilder().setCustomId(`battle_naval_lock_B|${view.battle.id}`).setLabel(`${view.sides.B.country_name} Emrini Kilitle`.slice(0,80)).setStyle(ButtonStyle.Primary).setDisabled(view.sides.B.naval_order_locked),
+        ...fleetButtons()
+      );
+      return [selectRow,lockRow];
+    }
+    const hasRetreat=isNavalRetreatOrder(view.sides.A.naval_order)||isNavalRetreatOrder(view.sides.B.naval_order);
+    if(hasRetreat)return [new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(`battle_naval_retreat_resolve|${view.battle.id}`).setLabel("Yönetici: Emirleri Sonuçlandır").setEmoji("⚓").setStyle(ButtonStyle.Danger),
+      ...fleetButtons()
+    )];
+    const actionButton=expected
+      ?new ButtonBuilder().setCustomId(`battle_roll|${view.battle.id}`).setLabel(`${view.sides[expected].country_name} Savaş Zarlarını At`.slice(0,80)).setEmoji("🎲").setStyle(ButtonStyle.Primary)
+      :new ButtonBuilder().setCustomId(`battle_resolve|${view.battle.id}`).setLabel("Yönetici: Değerlendirmeyi Çöz").setEmoji("⚖️").setStyle(ButtonStyle.Success);
+    return [new ActionRowBuilder<ButtonBuilder>().addComponents(actionButton,...fleetButtons())];
+  }
   if (view.battle.terrain === "SIEGE" && view.battle.siege_phase === "BOMBARDMENT") return [new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(`battle_bombard|${view.battle.id}`).setLabel(((view.battle.bombardments_this_turn ?? 0) >= MAX_BOMBARDMENTS_PER_GAME_TURN ? "Bombardıman Hakkı Doldu" : `${view.sides.A.country_name} Katapult Bombardımanı Yap`).slice(0, 80)).setEmoji("💥").setStyle(ButtonStyle.Primary).setDisabled((view.battle.bombardments_this_turn ?? 0) >= MAX_BOMBARDMENTS_PER_GAME_TURN),
     new ButtonBuilder().setCustomId(`battle_retreat|${view.battle.id}`).setLabel("Geri Çekil").setEmoji("🏳️").setStyle(ButtonStyle.Danger)
@@ -145,10 +208,6 @@ function components(view: BattleView) {
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(`battle_roll|${view.battle.id}`).setLabel(label).setEmoji("🎲").setStyle(ButtonStyle.Primary).setDisabled(!expected),
     new ButtonBuilder().setCustomId(`battle_retreat|${view.battle.id}`).setLabel("Geri Çekil").setEmoji("🏳️").setStyle(ButtonStyle.Danger).setDisabled(!expected)
-  );
-  if (view.battle.terrain === "NAVAL") row.addComponents(
-    new ButtonBuilder().setCustomId(`battle_fleet_status|${view.battle.id}`).setLabel("Filo Durumu").setEmoji("❤️‍🩹").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(`battle_fleet_status_gm|${view.battle.id}`).setLabel("Yönetici: İki Taraf").setEmoji("🔐").setStyle(ButtonStyle.Secondary)
   );
   return [row];
 }
@@ -256,7 +315,7 @@ export function battleRollEmbed(view: BattleView, side: BattleSideKey): EmbedBui
   const commander = roll.detail?.__commander;
   const details = view.battle.terrain === "SIEGE" && side === "B"
     ? (() => {
-        const defense = siegeDefenseModifiers(view.battle.wall_current_hp ?? 0, view.battle.gate_current_hp ?? 0);
+        const defense = siegeDefenseModifiers(view.battle.round_number);
         return [
           `Ham Çarpışma: **${number(roll.clash_total)}**`,
           `Ham Hasar: **${number(roll.damage_total)}**`,
@@ -539,7 +598,38 @@ export async function handleBattleButton(interaction: ButtonInteraction): Promis
   if (!interaction.guildId || !interaction.channelId) throw new GameError("Sunucu veya kanal bulunamadı.");
   const battleId = interaction.customId.split("|")[1];
   if (!battleId) throw new GameError("Savaş düğmesi bozuk.");
-  if (interaction.customId.startsWith("battle_fleet_status_gm|")) {
+  if(interaction.customId.startsWith("battle_naval_lock_")){
+    await interaction.deferReply({ephemeral:true});
+    const side=interaction.customId.startsWith("battle_naval_lock_A|")?"A":"B";
+    const view=await battleService.lockNavalOrder({
+      guildId:interaction.guildId,channelId:interaction.channelId,battleId,actorId:interaction.user.id,
+      isGameMaster:isGameMaster(interaction),side
+    });
+    await refreshBattleCard(interaction.client,view);
+    await interaction.editReply(`🔒 **${view.sides[side].country_name}** filo emri gizli olarak kilitlendi.`);
+  } else if(interaction.customId.startsWith("battle_naval_retreat_resolve|")){
+    await interaction.deferReply();
+    if(!isGameMaster(interaction))throw new GameError("Filo emirlerini yalnızca oyun yöneticisi sonuçlandırabilir.");
+    const result=await battleService.resolveNavalRetreatOrders({
+      guildId:interaction.guildId,channelId:interaction.channelId,battleId,actorId:interaction.user.id
+    });
+    const reply=await interaction.editReply(publicPayload(result.view));
+    await retireBattleCard(interaction.client,result.view,reply.id);
+    await battleService.setPublicMessage(result.view.battle.id,reply.id);
+    await interaction.followUp({embeds:[casualtyReportEmbed(result.view,result.report)],ephemeral:true});
+    await publishCharacterTurnLogs(interaction.client,interaction.guildId,[]).catch(()=>undefined);
+  } else if(interaction.customId.startsWith("battle_resolve|")){
+    await interaction.deferReply();
+    if(!isGameMaster(interaction))throw new GameError("Değerlendirmeyi yalnızca oyun yöneticisi sonuçlandırabilir.");
+    const result=await battleService.resolve({guildId:interaction.guildId,channelId:interaction.channelId,actorId:interaction.user.id});
+    const reply=await interaction.editReply(publicPayload(result.view,result.round));
+    await retireBattleCard(interaction.client,result.view,reply.id);
+    await battleService.setPublicMessage(result.view.battle.id,reply.id);
+    if(result.round.ended){
+      await interaction.followUp({embeds:[casualtyReportEmbed(result.view,result.report)],ephemeral:true});
+      await publishCharacterTurnLogs(interaction.client,interaction.guildId,[]).catch(()=>undefined);
+    }
+  } else if (interaction.customId.startsWith("battle_fleet_status_gm|")) {
     await interaction.deferReply({ ephemeral: true });
     if(!isGameMaster(interaction))throw new GameError("İki tarafın gemi durumunu yalnızca oyun yöneticileri görebilir.");
     const status=await battleService.adminFleetStatus({guildId:interaction.guildId,battleId});
@@ -585,5 +675,25 @@ export async function handleBattleButton(interaction: ButtonInteraction): Promis
     const retreatText = result.retreatLoss ? ` Takip sırasında **${number(result.retreatLoss)}** ek kayıp verdi.` : " İlk savaş turunda çekildiği için ek kayıp yaşamadı.";
     await interaction.editReply({ content: `🏳️ **${result.view.sides[result.side].country_name}** geri çekildi.${retreatText}`, ...publicPayload(result.view) });
   }
+  return true;
+}
+
+export async function handleBattleSelect(interaction:StringSelectMenuInteraction):Promise<boolean>{
+  if(!interaction.customId.startsWith("battle_naval_order|"))return false;
+  if(!interaction.guildId||!interaction.channelId)throw new GameError("Sunucu veya kanal bulunamadı.");
+  const battleId=interaction.customId.split("|")[1];
+  const [sideRaw,orderRaw]=(interaction.values[0]??"").split("|");
+  if(!battleId||!sideRaw||!["A","B"].includes(sideRaw)||!NAVAL_BATTLE_ORDERS[orderRaw as NavalBattleOrder]){
+    throw new GameError("Filo emri seçimi bozuk; güncel savaş kartını kullanın.");
+  }
+  await interaction.deferReply({ephemeral:true});
+  const side=sideRaw as BattleSideKey;
+  const order=orderRaw as NavalBattleOrder;
+  const view=await battleService.setNavalOrder({
+    guildId:interaction.guildId,channelId:interaction.channelId,battleId,actorId:interaction.user.id,
+    isGameMaster:isGameMaster(interaction),side,order
+  });
+  await refreshBattleCard(interaction.client,view);
+  await interaction.editReply(`⚓ **${view.sides[side].country_name}** için **${NAVAL_BATTLE_ORDERS[order].label}** seçildi. Emir henüz kilitli değil; kilitlenene kadar değiştirilebilir.`);
   return true;
 }

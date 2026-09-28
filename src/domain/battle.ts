@@ -9,7 +9,7 @@ export const BATTLE_TERRAINS = {
   MOUNTAIN: { label: "Dağlık Arazi", frontageA: 12_000, frontageB: 12_000, preset: "mountain.png" },
   MOUNTAIN_PASS: { label: "Dağ Geçidi", frontageA: 6_000, frontageB: 6_000, preset: "mountain-pass.png" },
   RIVER_CROSSING: { label: "Nehir Geçişi", frontageA: 10_000, frontageB: 20_000, preset: "river-crossing.png" },
-  SIEGE: { label: "Kuşatma", frontageA: 15_000, frontageB: 18_000, preset: "siege.png" },
+  SIEGE: { label: "Kuşatma", frontageA: 20_000, frontageB: 18_000, preset: "siege.png" },
   NAVAL: { label: "Deniz Savaşı", frontageA: Number.MAX_SAFE_INTEGER, frontageB: Number.MAX_SAFE_INTEGER, preset: "naval.png" }
 } as const;
 
@@ -28,8 +28,15 @@ export type BattleOrder = "ORDERED" | "WORN" | "SHAKEN" | "CRITICAL" | "BROKEN";
 
 export const MAX_BOMBARDMENTS_PER_GAME_TURN = 4;
 export const BASE_SIEGE_STARVATION_TURNS = 6;
+export const FIELD_BATTLE_PRESSURE_LIMIT = 10;
+export const SIEGE_PRESSURE_LIMIT = 12;
 export const remainingBombardments = (used: number): number => Math.max(0, MAX_BOMBARDMENTS_PER_GAME_TURN - Math.max(0, Math.floor(used)));
 export const SIEGE_ASSAULT_FRONTAGE = 15_000;
+export const SIEGE_RANGED_SUPPORT_FRONTAGE = 5_000;
+export const SIEGE_TOTAL_ASSAULT_FRONTAGE = SIEGE_ASSAULT_FRONTAGE + SIEGE_RANGED_SUPPORT_FRONTAGE;
+export const SIEGE_GATE_BREACH_INFANTRY_BONUS = 3_000;
+export const SIEGE_GATE_BREACH_FRONTAGE = SIEGE_ASSAULT_FRONTAGE + SIEGE_GATE_BREACH_INFANTRY_BONUS;
+export const SIEGE_GATE_BREACH_TOTAL_FRONTAGE = SIEGE_GATE_BREACH_FRONTAGE + SIEGE_RANGED_SUPPORT_FRONTAGE;
 export const LADDER_GROUP_ASSAULT_CAPACITY = 1_000;
 export const SIEGE_TOWER_ASSAULT_CAPACITY = 3_000;
 
@@ -405,7 +412,7 @@ export interface SiegeAssaultAccess {
 }
 
 export function siegeAssaultAccess(composition: SiegeComposition, frontage = SIEGE_ASSAULT_FRONTAGE): SiegeAssaultAccess {
-  const safeFrontage = Math.max(0, Math.floor(frontage));
+  const safeFrontage = Math.min(SIEGE_ASSAULT_FRONTAGE, Math.max(0, Math.floor(frontage)));
   const towers = Math.max(0, Math.floor(composition.siege_tower ?? 0));
   const ladders = Math.max(0, Math.floor(composition.ladder_group ?? 0));
   const activeSiegeTowers = Math.min(towers, Math.floor(safeFrontage / SIEGE_TOWER_ASSAULT_CAPACITY));
@@ -427,25 +434,41 @@ export function activeSiegeAssaultAssets(composition: SiegeComposition, frontage
   return result;
 }
 
-export function siegeAssaultComposition(
-  composition: BattleComposition, support: SiegeComposition, wallHp: number, gateHp: number, frontage = SIEGE_ASSAULT_FRONTAGE
-): BattleComposition {
-  if (wallHp <= 0 || gateHp <= 0) return engagedComposition(composition, frontage);
-  const access = siegeAssaultAccess(support, frontage);
+export interface SiegeAssaultGroups {
+  infantry: BattleComposition;
+  ranged: BattleComposition;
+  combined: BattleComposition;
+}
+
+export function siegeAssaultGroups(
+  composition: BattleComposition, support: SiegeComposition, wallHp: number, gateHp: number, frontage = SIEGE_TOTAL_ASSAULT_FRONTAGE
+): SiegeAssaultGroups {
+  const restricted = wallHp > 0 && gateHp > 0;
+  const access = siegeAssaultAccess(support, SIEGE_ASSAULT_FRONTAGE);
   const meleeSource: BattleComposition = {};
   for (const key of ASSAULT_UNIT_TYPES) {
     const quantity = composition[key] ?? 0;
     if (quantity > 0) meleeSource[key] = quantity;
   }
-  const melee = engagedComposition(meleeSource, access.capacity);
-  const rangedCapacity = Math.max(0, frontage - compositionTotal(melee));
+  const infantryFrontage = gateHp <= 0
+    ? SIEGE_GATE_BREACH_FRONTAGE
+    : restricted
+      ? access.capacity
+      : SIEGE_ASSAULT_FRONTAGE;
+  const infantry = engagedComposition(meleeSource, infantryFrontage);
   const rangedSource: BattleComposition = {};
-  for (const key of ["slinger", "archer", "horse_archer", "briton_longbow"] as BattleUnitType[]) {
+  for (const key of ["slinger", "archer", "briton_longbow"] as BattleUnitType[]) {
     const quantity = composition[key] ?? 0;
     if (quantity > 0) rangedSource[key] = quantity;
   }
-  const ranged = engagedComposition(rangedSource, rangedCapacity);
-  return { ...melee, ...ranged };
+  const ranged = engagedComposition(rangedSource, Math.min(SIEGE_RANGED_SUPPORT_FRONTAGE, Math.max(0, frontage)));
+  return { infantry, ranged, combined: { ...infantry, ...ranged } };
+}
+
+export function siegeAssaultComposition(
+  composition: BattleComposition, support: SiegeComposition, wallHp: number, gateHp: number, frontage = SIEGE_TOTAL_ASSAULT_FRONTAGE
+): BattleComposition {
+  return siegeAssaultGroups(composition, support, wallHp, gateHp, frontage).combined;
 }
 
 export function rollBattlePool(
@@ -526,13 +549,17 @@ export function rollSiegeSupport(
   const ram = Math.min(1, composition.ram ?? 0), mantlet = composition.mantlet ?? 0;
   const ballista = composition.ballista ?? 0, wallBallista = composition.wall_ballista ?? 0, catapult = composition.catapult ?? 0, tower = composition.siege_tower ?? 0;
   // Merdivenler yalnızca surlara hücum erişimi sağlar; doğrudan çarpışma puanı üretmez.
-  const ladderClash = 0, towerClash = roll(tower, 2, 20), mantletClash = roll(mantlet, 1, 4);
+  const ladderClash = 0, towerClash = roll(tower, 1, 10), mantletClash = 0;
   const ballistaRoll = roll(ballista, 1, 10) + diceBonus("ballista", ballista, 1);
   const wallBallistaDamage = roll(wallBallista, 2, 8) + diceBonus("wall_ballista", wallBallista, 2);
   const catapultRoll = roll(catapult, 1, 20) + diceBonus("catapult", catapult, 1);
   const towerDamage = roll(tower, 1, 6);
   const ramGate = roll(ram, 1, 8) * 35;
-  const ballistaWall = targets.ballista === "WALL" ? (roll(ballista, 1, 10) + diceBonus("ballista", ballista, 1)) * 5 : 0;
+  const ballistaStructure = ["WALL", "GATE"].includes(targets.ballista ?? "")
+    ? (roll(ballista, 1, 10) + diceBonus("ballista", ballista, 1)) * 5
+    : 0;
+  const ballistaWall = targets.ballista === "WALL" ? ballistaStructure : 0;
+  const ballistaGate = targets.ballista === "GATE" ? ballistaStructure : 0;
   const catapultWall = targets.catapult === "WALL" ? (roll(catapult, 2, 20) + diceBonus("catapult", catapult, 2)) * 20 : 0;
   const ballistaArmy = targets.ballista === "ARMY" ? ballistaRoll : 0;
   const catapultArmy = targets.catapult === "ARMY" ? catapultRoll : 0;
@@ -540,11 +567,11 @@ export function rollSiegeSupport(
     clash: ladderClash + towerClash + mantletClash,
     damage: ballistaArmy + wallBallistaDamage + catapultArmy + towerDamage,
     wallDamage: ballistaWall + catapultWall,
-    gateDamage: ramGate,
-    defense: Math.min(0.50, mantlet * 0.05),
+    gateDamage: ramGate + ballistaGate,
+    defense: Math.min(0.20, mantlet * 0.02),
     detail: {
       ladderClash, towerClash, mantletClash, ballistaArmy, wallBallistaDamage, catapultArmy, towerDamage,
-      ramGate, ballistaWall, catapultWall, artilleryDamageDieBonus: bonus,
+      ramGate, ballistaWall, ballistaGate, catapultWall, artilleryDamageDieBonus: bonus,
       ballistaTarget: targets.ballista ?? "WALL", catapultTarget: targets.catapult ?? "WALL"
     }
   };
@@ -665,12 +692,39 @@ function applyDamageWithCounter(
   return { remaining: counter.remaining, loss: normal.loss + counter.loss };
 }
 
+function applySplitDamageWithCounter(
+  fullComposition: BattleComposition,
+  primaryComposition: BattleComposition,
+  secondaryComposition: BattleComposition,
+  primaryShare: number,
+  totalDamage: number,
+  antiCavalryDamage: number,
+  mode: "LAND" | "NAVAL",
+  durabilityOverrides: CasualtyDurabilityOverrides = {}
+): { remaining: BattleComposition; loss: number } {
+  const primaryAvailable = compositionTotal(primaryComposition) > 0;
+  const secondaryAvailable = compositionTotal(secondaryComposition) > 0;
+  const safePrimaryShare = Math.min(1, Math.max(0, primaryShare));
+  const appliedPrimaryShare = primaryAvailable && secondaryAvailable ? safePrimaryShare : primaryAvailable ? 1 : 0;
+  const appliedSecondaryShare = primaryAvailable && secondaryAvailable ? 1 - safePrimaryShare : secondaryAvailable ? 1 : 0;
+  const primary = applyDamageWithCounter(
+    fullComposition, primaryComposition, totalDamage * appliedPrimaryShare,
+    antiCavalryDamage * appliedPrimaryShare, mode, durabilityOverrides
+  );
+  const secondary = applyDamageWithCounter(
+    primary.remaining, secondaryComposition, totalDamage * appliedSecondaryShare,
+    antiCavalryDamage * appliedSecondaryShare, mode, durabilityOverrides
+  );
+  return { remaining: secondary.remaining, loss: primary.loss + secondary.loss };
+}
+
 export function resolveRound(
   compositionA: BattleComposition, compositionB: BattleComposition, rollA: BattleRoll, rollB: BattleRoll,
   options: {
     mode?: "LAND" | "NAVAL"; damageFactorA?: number; damageFactorB?: number;
     pressureClashA?: number; pressureClashB?: number;
     casualtyCompositionA?: BattleComposition | undefined; casualtyCompositionB?: BattleComposition | undefined;
+    casualtySplitA?: { primaryComposition: BattleComposition; secondaryComposition: BattleComposition; primaryShare: number } | undefined;
     casualtyDurabilityOverridesA?: CasualtyDurabilityOverrides | undefined;
     casualtyDurabilityOverridesB?: CasualtyDurabilityOverrides | undefined;
   } = {}
@@ -688,10 +742,21 @@ export function resolveRound(
     compositionB, options.casualtyCompositionB, rollA.damage * scale * factorA,
     (rollA.antiCavalryDamage ?? 0) * scale * factorA, mode, options.casualtyDurabilityOverridesB
   );
-  const againstA = applyDamageWithCounter(
-    compositionA, options.casualtyCompositionA, rollB.damage * scale * factorB,
-    (rollB.antiCavalryDamage ?? 0) * scale * factorB, mode, options.casualtyDurabilityOverridesA
-  );
+  const againstA = options.casualtySplitA
+    ? applySplitDamageWithCounter(
+      compositionA,
+      options.casualtySplitA.primaryComposition,
+      options.casualtySplitA.secondaryComposition,
+      options.casualtySplitA.primaryShare,
+      rollB.damage * scale * factorB,
+      (rollB.antiCavalryDamage ?? 0) * scale * factorB,
+      mode,
+      options.casualtyDurabilityOverridesA
+    )
+    : applyDamageWithCounter(
+      compositionA, options.casualtyCompositionA, rollB.damage * scale * factorB,
+      (rollB.antiCavalryDamage ?? 0) * scale * factorB, mode, options.casualtyDurabilityOverridesA
+    );
   const pressure = pressureOutcome.tier === "MINOR" ? 1 : pressureOutcome.tier === "CLEAR" ? 2 : pressureOutcome.tier === "CRUSHING" ? 3 : 0;
   return {
     tier: outcome.tier, winner: outcome.winner,
@@ -702,10 +767,12 @@ export function resolveRound(
     pressureTier: pressureOutcome.tier, pressureWinner: pressureOutcome.winner
   };
 }
-export function siegeDefenseModifiers(wallHp: number, gateHp: number): { defenderClash: number; defenderDamage: number; attackerDamage: number } {
-  if (wallHp > 0 && gateHp > 0) return { defenderClash: 1.50, defenderDamage: 1.35, attackerDamage: 0.50 };
-  if (wallHp > 0 || gateHp > 0) return { defenderClash: 1.25, defenderDamage: 1.15, attackerDamage: 0.75 };
-  return { defenderClash: 1.10, defenderDamage: 1.00, attackerDamage: 1.00 };
+export function siegeDefenseModifiers(assaultRound: number): { defenderClash: number; defenderDamage: number; attackerDamage: number } {
+  const round = Math.max(1, Math.floor(assaultRound));
+  if (round <= 3) return { defenderClash: 1.50, defenderDamage: 1.30, attackerDamage: 0.70 };
+  if (round <= 6) return { defenderClash: 1.40, defenderDamage: 1.20, attackerDamage: 0.80 };
+  if (round <= 9) return { defenderClash: 1.30, defenderDamage: 1.10, attackerDamage: 0.90 };
+  return { defenderClash: 1.00, defenderDamage: 1.00, attackerDamage: 1.00 };
 }
 
 export interface SiegePressureState {
@@ -720,7 +787,7 @@ export function siegePressureAfterRound(currentPressure: number, delta: number, 
   const reserve = Math.max(0, Math.floor(remaining) - safeFrontage);
   const reserveRelief = reserve >= safeFrontage ? 2 : reserve >= Math.ceil(safeFrontage / 2) ? 1 : 0;
   return {
-    pressure: Math.min(8, Math.max(0, Math.floor(currentPressure) + Math.floor(delta) - reserveRelief)),
+    pressure: Math.min(SIEGE_PRESSURE_LIMIT, Math.max(0, Math.floor(currentPressure) + Math.floor(delta) - reserveRelief)),
     reserve,
     reserveRelief,
     hasUsableReserve: reserve >= Math.ceil(safeFrontage / 2)
@@ -729,26 +796,19 @@ export function siegePressureAfterRound(currentPressure: number, delta: number, 
 
 export function siegeOrderState(pressure: number, remaining: number): BattleOrder {
   if (remaining <= 0) return "BROKEN";
-  if (pressure >= 7) return "CRITICAL";
-  if (pressure >= 5) return "SHAKEN";
-  if (pressure >= 3) return "WORN";
+  if (pressure >= SIEGE_PRESSURE_LIMIT) return "CRITICAL";
+  if (pressure >= 8) return "SHAKEN";
+  if (pressure >= 4) return "WORN";
   return "ORDERED";
 }
 
-export function siegeLineBreaks(previousPressure: number, currentPressure: number, lostRound: boolean, remaining: number, hasUsableReserve: boolean): boolean {
-  return remaining <= 0 || (previousPressure >= 8 && currentPressure >= 8 && lostRound && !hasUsableReserve);
+export function siegeAttackerBreaks(pressure: number, initial: number, remaining: number): boolean {
+  const casualtyRate = initial > 0 ? 1 - remaining / initial : 1;
+  return remaining <= 0 || (pressure >= SIEGE_PRESSURE_LIMIT && casualtyRate >= 0.50);
 }
 
-export function siegeDefenderCaptured(input: {
-  initial: number; remaining: number; previousPressure: number; currentPressure: number; lostRound: boolean;
-  wallHp: number; gateHp: number; assaultCapacity?: number; defenderFrontage?: number;
-}): boolean {
-  const access = input.wallHp <= 0 || input.gateHp <= 0 || (input.assaultCapacity ?? 0) > 0;
-  if (!access) return false;
-  if (input.remaining <= 0) return true;
-  const frontage = input.defenderFrontage ?? BATTLE_TERRAINS.SIEGE.frontageB;
-  const depleted = input.remaining <= Math.floor(input.initial * 0.30) && input.remaining <= Math.floor(frontage * 0.50);
-  return input.previousPressure >= 8 && input.currentPressure >= 8 && input.lostRound && depleted;
+export function siegeDefenderCaptured(input: { remaining: number }): boolean {
+  return input.remaining <= 0;
 }
 
 export function baseRetreatRate(roundNumber: number): number {
@@ -757,10 +817,14 @@ export function baseRetreatRate(roundNumber: number): number {
 }
 export function orderState(pressure: number, initial: number, remaining: number): BattleOrder {
   const casualtyRate = initial > 0 ? 1 - remaining / initial : 1;
-  if (pressure >= 6 || casualtyRate >= 0.40 || remaining <= 0) return "BROKEN";
-  if (pressure >= 4 || casualtyRate >= 0.30) return "SHAKEN";
+  if (remaining <= 0 || (pressure >= FIELD_BATTLE_PRESSURE_LIMIT && casualtyRate >= 0.50)) return "BROKEN";
+  if (pressure >= FIELD_BATTLE_PRESSURE_LIMIT || casualtyRate >= 0.50) return "CRITICAL";
+  if (pressure >= 6 || casualtyRate >= 0.40) return "SHAKEN";
   if (pressure >= 2 || casualtyRate >= 0.10) return "WORN";
   return "ORDERED";
 }
 
 export const battleEnds = (pressure: number, initial: number, remaining: number): boolean => orderState(pressure, initial, remaining) === "BROKEN";
+
+export const fieldPressureAfterRound = (currentPressure: number, delta: number): number =>
+  Math.min(FIELD_BATTLE_PRESSURE_LIMIT, Math.max(0, Math.floor(currentPressure) + Math.floor(delta)));

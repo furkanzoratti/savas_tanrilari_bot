@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BASE_SIEGE_STARVATION_TURNS, MAX_BOMBARDMENTS_PER_GAME_TURN, activeSiegeAssaultAssets, advantageTier, remainingBombardments, baseRetreatRate, battleEnds, commanderClashBonus, compositionTotal, engagedComposition, orderState, resolveRound, restoreSiegeAttackerCasualtyTypes, rollBattlePool, rollNavalPool, rollSiegeSupport, siegeAssaultAccess, siegeAssaultComposition, siegeAttackerDismountedComposition, siegeDefenderCaptured, siegeDefenderComposition, siegeDefenseModifiers, siegeLineBreaks, siegeOrderState, siegePressureAfterRound } from "./battle.js";
+import { BASE_SIEGE_STARVATION_TURNS, MAX_BOMBARDMENTS_PER_GAME_TURN, activeSiegeAssaultAssets, advantageTier, remainingBombardments, baseRetreatRate, battleEnds, commanderClashBonus, compositionTotal, engagedComposition, fieldPressureAfterRound, orderState, resolveRound, restoreSiegeAttackerCasualtyTypes, rollBattlePool, rollNavalPool, rollSiegeSupport, siegeAssaultAccess, siegeAssaultComposition, siegeAttackerBreaks, siegeAttackerDismountedComposition, siegeDefenderCaptured, siegeDefenderComposition, siegeDefenseModifiers, siegeOrderState, siegePressureAfterRound } from "./battle.js";
 
 describe("savaş motoru", () => {
   it("kuşatma açlığının temel süresini altı oyun turu kabul eder", () => {
@@ -25,6 +25,18 @@ describe("savaş motoru", () => {
     });
     expect(restoreSiegeAttackerCasualtyTypes(original, { heavy_infantry: 1_000, archer: 500 }, dismounted)).toEqual({
       heavy_infantry: 500, heavy_cavalry: 500, archer: 250, horse_archer: 250
+    });
+  });
+
+  it("saldıran atlıları kuşatma cephesinden çıkarır, yalnız manuel indirilenleri yaya olarak dahil eder", () => {
+    const original = { heavy_infantry: 1_000, light_cavalry: 2_000, horse_archer: 2_000 } as const;
+    expect(siegeAssaultComposition(original, {}, 0, 0)).toEqual({ heavy_infantry: 1_000 });
+
+    const dismounted = siegeAttackerDismountedComposition(original, { light_cavalry: 1_000, horse_archer: 1_000 });
+    expect(siegeAssaultComposition(dismounted, {}, 0, 0)).toEqual({
+      light_infantry: 1_000,
+      heavy_infantry: 1_000,
+      archer: 1_000
     });
   });
 
@@ -55,10 +67,14 @@ describe("savaş motoru", () => {
     expect(advantageTier(160, 100)).toEqual({ tier: "CRUSHING", winner: "A" });
   });
 
-  it("ana çarpışma tekrar eder ve yalnızca dağılma koşulunda biter", () => {
-    expect(battleEnds(3, 10_000, 8_000)).toBe(false);
-    expect(orderState(4, 10_000, 8_000)).toBe("SHAKEN");
-    expect(battleEnds(6, 10_000, 8_000)).toBe(true);
+  it("meydan savaşı yalnız 10 baskı ve en az yüzde 50 kayıp birlikte oluşunca otomatik biter", () => {
+    expect(battleEnds(10, 10_000, 6_000)).toBe(false);
+    expect(orderState(10, 10_000, 6_000)).toBe("CRITICAL");
+    expect(battleEnds(8, 10_000, 5_000)).toBe(false);
+    expect(orderState(8, 10_000, 5_000)).toBe("CRITICAL");
+    expect(battleEnds(10, 10_000, 5_000)).toBe(true);
+    expect(fieldPressureAfterRound(9, 3)).toBe(10);
+    expect(fieldPressureAfterRound(1, -3)).toBe(0);
   });
 
   it("kayıpları kompozisyona uygular fakat tur çıktısı yalnızca toplam verir", () => {
@@ -96,7 +112,8 @@ describe("savaş motoru", () => {
     expect(support.wallDamage).toBeGreaterThan(0);
     expect(support.gateDamage).toBeGreaterThan(0);
     expect(support.clash).toBeGreaterThan(0);
-    expect(support.defense).toBeCloseTo(0.10);
+    expect(support.defense).toBeCloseTo(0.04);
+    expect(support.detail.mantletClash).toBe(0);
   });
 
   it("kuşatma aletlerinin yeni zarlarını ve tek Koçbaşı sınırını uygular", () => {
@@ -106,7 +123,7 @@ describe("savaş motoru", () => {
       () => 0
     );
     expect(minimum.detail.ladderClash).toBe(0);
-    expect(minimum.detail.towerClash).toBe(2);
+    expect(minimum.detail.towerClash).toBe(1);
     expect(minimum.detail.ballistaWall).toBe(5);
     expect(minimum.detail.catapultWall).toBe(40);
     expect(minimum.gateDamage).toBe(35);
@@ -122,6 +139,22 @@ describe("savaş motoru", () => {
     );
     expect(army.detail.ballistaArmy).toBe(10);
     expect(army.detail.catapultArmy).toBe(20);
+
+    const gate = rollSiegeSupport(
+      { ballista: 2 },
+      { ballista: "GATE" },
+      () => 0
+    );
+    expect(gate.wallDamage).toBe(0);
+    expect(gate.gateDamage).toBe(10);
+    expect(gate.detail.ballistaGate).toBe(10);
+  });
+
+  it("Mantlet yalnız hasar azaltır ve toplam azaltımı yüzde 20 ile sınırlar", () => {
+    const support = rollSiegeSupport({ mantlet: 25 }, { mantlet: "ASSAULT" }, (max) => max - 1);
+    expect(support.clash).toBe(0);
+    expect(support.detail.mantletClash).toBe(0);
+    expect(support.defense).toBeCloseTo(0.20);
   });
   it("on katapult ve on balista suru iki turda yıkamaz", () => {
     const support = rollSiegeSupport({ catapult: 10, ballista: 10 }, { catapult: "WALL", ballista: "WALL" }, (max) => max - 1);
@@ -146,35 +179,29 @@ describe("savaş motoru", () => {
     expect(result.pressureDeltaB).toBe(0);
   });
 
-  it("kuşatma rezervleri baskıyı azaltır ve baskıyı sekizde sınırlar", () => {
-    expect(siegePressureAfterRound(7, 3, 40_000, 18_000)).toEqual({
-      pressure: 8, reserve: 22_000, reserveRelief: 2, hasUsableReserve: true
+  it("kuşatma rezervleri baskıyı azaltır ve baskıyı on ikide sınırlar", () => {
+    expect(siegePressureAfterRound(11, 3, 40_000, 18_000)).toEqual({
+      pressure: 12, reserve: 22_000, reserveRelief: 2, hasUsableReserve: true
     });
-    expect(siegePressureAfterRound(6, 3, 27_000, 18_000)).toEqual({
-      pressure: 8, reserve: 9_000, reserveRelief: 1, hasUsableReserve: true
+    expect(siegePressureAfterRound(10, 3, 27_000, 18_000)).toEqual({
+      pressure: 12, reserve: 9_000, reserveRelief: 1, hasUsableReserve: true
     });
-    expect(siegePressureAfterRound(6, 3, 20_000, 18_000)).toEqual({
-      pressure: 8, reserve: 2_000, reserveRelief: 0, hasUsableReserve: false
+    expect(siegePressureAfterRound(10, 3, 20_000, 18_000)).toEqual({
+      pressure: 12, reserve: 2_000, reserveRelief: 0, hasUsableReserve: false
     });
-    expect(siegeOrderState(8, 10_000)).toBe("CRITICAL");
+    expect(siegeOrderState(12, 10_000)).toBe("CRITICAL");
   });
 
-  it("ilk kritik turda hat kırılmaz; rezervsiz ikinci yenilgide kırılır", () => {
-    expect(siegeLineBreaks(7, 8, true, 10_000, false)).toBe(false);
-    expect(siegeLineBreaks(8, 8, true, 10_000, false)).toBe(true);
-    expect(siegeLineBreaks(8, 8, true, 30_000, true)).toBe(false);
+  it("kuşatan yalnız 12 baskı ve en az yüzde 50 kayıp birlikte oluşunca otomatik geri çekilir", () => {
+    expect(siegeAttackerBreaks(12, 20_000, 11_000)).toBe(false);
+    expect(siegeAttackerBreaks(10, 20_000, 10_000)).toBe(false);
+    expect(siegeAttackerBreaks(12, 20_000, 10_000)).toBe(true);
+    expect(siegeAttackerBreaks(0, 20_000, 0)).toBe(true);
   });
 
-  it("şehir yalnız erişim, ikinci kritik yenilgi ve ağır tükenme birlikte oluşunca düşer", () => {
-    const base = {
-      initial: 40_000, previousPressure: 8, currentPressure: 8, lostRound: true,
-      wallHp: 0, gateHp: 1_000, assaultCapacity: 0, defenderFrontage: 18_000
-    };
-    expect(siegeDefenderCaptured({ ...base, remaining: 10_000 })).toBe(false);
-    expect(siegeDefenderCaptured({ ...base, remaining: 9_000 })).toBe(true);
-    expect(siegeDefenderCaptured({ ...base, remaining: 9_000, previousPressure: 7 })).toBe(false);
-    expect(siegeDefenderCaptured({ ...base, remaining: 9_000, wallHp: 30_000 })).toBe(false);
-    expect(siegeDefenderCaptured({ ...base, remaining: 0, wallHp: 30_000, assaultCapacity: 1_000 })).toBe(true);
+  it("şehir yalnız savunan ordunun mevcudu tamamen sıfırlandığında düşer", () => {
+    expect(siegeDefenderCaptured({ remaining: 1 })).toBe(false);
+    expect(siegeDefenderCaptured({ remaining: 0 })).toBe(true);
   });
 
   it("merdiven ve kuleleri 15.000 kişilik hücum kapasitesine dönüştürür", () => {
@@ -189,19 +216,33 @@ describe("savaş motoru", () => {
     });
   });
 
-  it("gedik öncesinde yakın dövüş piyadesini erişimle sınırlar, menzillileri kalan cepheye alır ve süvariyi dışarıda tutar", () => {
+  it("gedik öncesinde yakın dövüş piyadesini erişimle, menzillileri 5.000 destek kapasitesiyle sınırlar ve süvariyi dışarıda tutar", () => {
     const engaged = siegeAssaultComposition({
       light_infantry: 4_000, spear: 4_000, heavy_infantry: 4_000, archer: 6_000, slinger: 6_000, heavy_cavalry: 5_000
     }, { ladder_group: 2, siege_tower: 1 }, 30_000, 1_000);
     expect((engaged.light_infantry ?? 0) + (engaged.spear ?? 0) + (engaged.heavy_infantry ?? 0)).toBe(5_000);
-    expect((engaged.archer ?? 0) + (engaged.slinger ?? 0)).toBe(10_000);
+    expect((engaged.archer ?? 0) + (engaged.slinger ?? 0)).toBe(5_000);
     expect(engaged.heavy_cavalry ?? 0).toBe(0);
-    expect(compositionTotal(engaged)).toBe(15_000);
+    expect(compositionTotal(engaged)).toBe(10_000);
   });
 
-  it("sur veya kapı açıldığında erişim kısıtını kaldırır", () => {
+  it("sur yıkıldığında 15.000, kapı kırıldığında 18.000 piyade ve 5.000 menzilli kullanır", () => {
     const army = { heavy_infantry: 6_000, heavy_cavalry: 6_000 };
-    expect(siegeAssaultComposition(army, {}, 0, 1_000)).toEqual(army);
+    expect(siegeAssaultComposition(army, {}, 0, 1_000)).toEqual({ heavy_infantry: 6_000 });
+    const composition = { heavy_infantry: 16_500, spear: 6_000, archer: 7_500 };
+    const wallBreach = siegeAssaultComposition(composition, { ladder_group: 15 }, 0, 1_000);
+    expect((wallBreach.heavy_infantry ?? 0) + (wallBreach.spear ?? 0)).toBe(15_000);
+    expect(wallBreach.archer).toBe(5_000);
+    expect(compositionTotal(wallBreach)).toBe(20_000);
+
+    const gateBreach = siegeAssaultComposition(composition, {}, 30_000, 0);
+    expect((gateBreach.heavy_infantry ?? 0) + (gateBreach.spear ?? 0)).toBe(18_000);
+    expect(gateBreach.archer).toBe(5_000);
+    expect(compositionTotal(gateBreach)).toBe(23_000);
+
+    const bothBreached = siegeAssaultComposition(composition, {}, 0, 0);
+    expect((bothBreached.heavy_infantry ?? 0) + (bothBreached.spear ?? 0)).toBe(18_000);
+    expect(compositionTotal(bothBreached)).toBe(23_000);
   });
 
   it("gedik veya açık kapı yokken kaybı yalnız hücuma erişen birliklerden düşer", () => {
@@ -216,9 +257,26 @@ describe("savaş motoru", () => {
     expect(result.remainingA.heavy_cavalry).toBe(2_000);
   });
 
-  it("sağlam tahkimat savunana belirgin üstünlük verir", () => {
-    expect(siegeDefenseModifiers(30_000, 1_000)).toEqual({ defenderClash: 1.50, defenderDamage: 1.35, attackerDamage: 0.50 });
-    expect(siegeDefenseModifiers(0, 1_000)).toEqual({ defenderClash: 1.25, defenderDamage: 1.15, attackerDamage: 0.75 });
+  it("kuşatma saldırganının kaybını yüzde 70 piyade ve yüzde 30 menzilli olarak dağıtır", () => {
+    const result = resolveRound(
+      { light_infantry: 5_000, archer: 5_000 }, { light_infantry: 1_000 },
+      { clash: 10, damage: 0, detail: {} }, { clash: 10, damage: 20, detail: {} },
+      { casualtySplitA: {
+        primaryComposition: { light_infantry: 5_000 },
+        secondaryComposition: { archer: 5_000 },
+        primaryShare: 0.70
+      } }
+    );
+    expect(result.remainingA.light_infantry).toBe(4_776);
+    expect(result.remainingA.archer).toBe(4_904);
+  });
+
+  it("kuşatma yorgunluğu tahkimat bonuslarını üçer değerlendirmelik kademelerde azaltır", () => {
+    expect(siegeDefenseModifiers(1)).toEqual({ defenderClash: 1.50, defenderDamage: 1.30, attackerDamage: 0.70 });
+    expect(siegeDefenseModifiers(3)).toEqual({ defenderClash: 1.50, defenderDamage: 1.30, attackerDamage: 0.70 });
+    expect(siegeDefenseModifiers(4)).toEqual({ defenderClash: 1.40, defenderDamage: 1.20, attackerDamage: 0.80 });
+    expect(siegeDefenseModifiers(7)).toEqual({ defenderClash: 1.30, defenderDamage: 1.10, attackerDamage: 0.90 });
+    expect(siegeDefenseModifiers(10)).toEqual({ defenderClash: 1.00, defenderDamage: 1.00, attackerDamage: 1.00 });
   });
 
   it("geri çekilme yalnızca ilk turda kayıpsızdır", () => {

@@ -954,13 +954,14 @@ export async function processCharacterTurn(
     );
     const arrivedDiplomats = await client.query<{
       diplomat_character_id: string; completion_text: string | null; task_type:DiplomatTask;
-      diplomat_name:string; target_country_name:string|null; target_settlement_name:string|null;
+      diplomat_name:string; country_name:string; target_country_name:string|null; target_settlement_name:string|null;
     }>(
       `SELECT operation.diplomat_character_id,operation.completion_text,operation.task_type,
-              character.name AS diplomat_name,target_country.name AS target_country_name,
+              character.name AS diplomat_name,owner.name AS country_name,target_country.name AS target_country_name,
               target_settlement.name AS target_settlement_name
          FROM diplomat_operations operation
          JOIN country_characters character ON character.id=operation.diplomat_character_id
+         JOIN countries owner ON owner.id=operation.country_id
          LEFT JOIN countries target_country ON target_country.id=operation.target_country_id
          LEFT JOIN settlements target_settlement ON target_settlement.id=operation.target_settlement_id
         WHERE operation.guild_id=$1 AND operation.status='ACTIVE' AND operation.arrival_turn<=$2
@@ -974,6 +975,7 @@ export async function processCharacterTurn(
       );
       logs.push(
         "🤝 **"+arrived.diplomat_name+"** • **"+DIPLOMAT_TASK_LABELS[arrived.task_type]+" görevi başladı**\n"+
+        "↳ Ülke: **"+arrived.country_name+"**\n"+
         "↳ Hedef: **"+[arrived.target_country_name,arrived.target_settlement_name].filter(Boolean).join(" / ")+"**\n"+
         "↳ Durum: Yolculuk tamamlandı; görevin bu turdaki çözümü aşağıda ayrıca gösterilir."
       );
@@ -1136,6 +1138,7 @@ export async function processCharacterTurn(
         await progressSpecialization(client,character,"PROVINCIAL_GOVERNOR");
         logs.push(
           "🤝 **"+operation.name+"** • **Halkla Uzlaşma tamamlandı**\n"+
+          "↳ Ülke: **"+operation.country_name+"**\n"+
           "↳ Hedef: **"+targetText+"** • Olay: **"+(EVENT_LABELS[operation.target_event_type??"UNREST"]??operation.target_event_type??"Huzursuzluk")+"**\n"+
           "↳ Mekanik sonuç: Olay etkisi doğrudan sonlandırıldı; diplomat serbest bırakıldı ve Eyalet Valisi ilerlemesi işlendi."
         );
@@ -1171,6 +1174,7 @@ export async function processCharacterTurn(
           );
           logs.push(
             "⏸️ **"+operation.name+"** • **Diplomatik Vassallaştırma durakladı**\n"+
+            "↳ Ülke: **"+operation.country_name+"**\n"+
             "↳ Hedef: **"+targetText+"**"+powerText+"\n"+
             "↳ Neden: Gerekli asgari **1,50x** güç oranı sağlanmadı; bu tur zar atılmadı."
           );
@@ -1206,6 +1210,7 @@ export async function processCharacterTurn(
         );
         logs.push(
           "❌ **"+operation.name+"** • **Diplomatik Vassallaştırma başarısız**\n"+
+          "↳ Ülke: **"+operation.country_name+"**\n"+
           "↳ Hedef: **"+targetText+"**"+powerText+"\n"+
           "↳ Başarı: 1d20 **"+attackRoll+"** + bonus **"+attackBonus+"** = **"+(attackRoll+attackBonus)+"** • Savunma: 1d20 **"+defenseRoll+"** + bonus **"+defenseBonus+"** = **"+(defenseRoll+defenseBonus)+"**\n"+
           "↳ Sonuç: Savunma farkı 9 veya üzeri; diplomat **Tur "+(turn+6)+"** başına kadar kullanılamaz."
@@ -1246,6 +1251,7 @@ export async function processCharacterTurn(
       if (delta>0) await progressSpecialization(client,character,expectedSpecialization);
       logs.push(
         "🤝 **"+operation.name+"** • **"+DIPLOMAT_TASK_LABELS[operation.task_type]+"**\n"+
+        "↳ Ülke: **"+operation.country_name+"**\n"+
         "↳ Hedef: **"+targetText+"**"+powerText+"\n"+
         "↳ Başarı: 1d20 **"+attackRoll+"** + bonus **"+attackBonus+"** = **"+(attackRoll+attackBonus)+"** • Savunma: 1d20 **"+defenseRoll+"** + bonus **"+defenseBonus+"** = **"+(defenseRoll+defenseBonus)+"**\n"+
         "↳ Tur etkisi: **"+(delta>=0?"+":"")+delta+" ilerleme** • Önceki: "+operation.progress+"/"+operation.goal+" • Güncel: **"+next+"/"+operation.goal+"**"+(complete?" • **TAMAMLANDI**":"")

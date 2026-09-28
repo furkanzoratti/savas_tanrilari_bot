@@ -110,7 +110,7 @@ Dayanıklılık zar toplamını değiştirmez. Rakibin ham hasarı birlik türle
 **Birim — Çarpışma / Hasar — Dayanıklılık**
 
 • Lejyoner: **2d10 / 2d8 — Yüksek**
-• Hoplit: **2d8 / 1d10 — Yüksek**
+• Hoplit: **2d8 / 1d12 — Yüksek**
 • Atlı Okçu: **2d8 / 2d8 — Orta**
 • Deve Süvarisi: **2d8 / 1d10 — Orta**
 • Briton Uzun Yaycıları: **1d12 / 2d12 — Düşük**
@@ -119,18 +119,29 @@ Dayanıklılık zar toplamını değiştirmez. Rakibin ham hasarı birlik türle
 • İber Caetratileri: **2d6 / 2d8 — Düşük**
 • Cermen Şok Savaşçıları: **2d10 / 2d8 — Düşük**
 • Anadolu Kalkanlıları (Thureophoroi): **2d6 / 1d10 — Orta**; kompozisyonda %70 Hat, %30 Mızraklı sayılır.
+• Triarii Gazileri: **2d6 / 1d8 — Orta**
+• Pön Gazileri: **3d6 / 2d8 — Yüksek**
+• Gaesatae: **2d10 / 2d8 — Orta**
+• Peltastlar: **1d8 / 1d8 — Düşük**; kompozisyonda %80 Hat, %20 Menzilli sayılır.
+• Gümüş Kalkanlılar: **2d8 / 1d10 — Yüksek**
+• Machimoi Phalangitai: **2d8 / 1d10 — Yüksek**
+• Maurya Savaş Filleri: **3d12 / 2d12 — Yüksek**
+• Çöl Akıncıları: **2d8 / 2d8 — Orta**
+• Chariot: **2d12 / 2d12 — Orta**; kompozisyonda %50 Hareketli, %50 Menzilli sayılır.
 
 Özel birliklerin savaş zarları standart birliklerle aynı hesap akışına girer. Bir ülke, yalnız DM tarafından kendisine açılmış özel birlikleri satın alabilir; fakat savaş kadrosuna kayıtlı mevcudunun tamamını koyabilir.
+
+**Chariot özel etkisi:** Yalnız ilk değerlendirmede, Açık Ova veya Çöl arazisinde çalışır. Chariot bulunan taraf ham Çarpışma üstünlüğünü kazanır ve düşmanın hareketli birlik karşılama oranı %50'nin altındaysa rakibe ayrıca **+1 Baskı** uygular.
 
 ## MESAJ 8/20 — 🧩 ORDU KOMPOZİSYONU
 
 Kompozisyon, ordunun tamamından değil **o tur cepheye giren birliklerden** hesaplanır. Yedekler cepheye girene kadar değerlendirmeyi etkilemez.
 
 **Roller:**
-• Hat: Hafif Piyade, Milis, Ağır Piyade, Lejyoner, Pers Ölümsüzleri, İber Caetratileri, Cermen Şok Savaşçıları; Anadolu Kalkanlılarının %70'i
-• Mızrak: Mızraklı %100; Hoplit %50 Mızrak + %50 Hat; Anadolu Kalkanlıları %30 Mızrak + %70 Hat
+• Hat: Hafif Piyade, Milis, Ağır Piyade, Lejyoner, Pers Ölümsüzleri, İber Caetratileri, Cermen Şok Savaşçıları, Pön Gazileri ve Gaesatae; Anadolu Kalkanlılarının %70'i, Peltastların %80'i
+• Mızrak: Mızraklı, Triarii Gazileri, Gümüş Kalkanlılar ve Machimoi Phalangitai %100; Hoplit %50 Mızrak + %50 Hat; Anadolu Kalkanlıları %30 Mızrak + %70 Hat
 • Menzilli: Sapancı, Okçu, Briton Uzun Yaycıları; Atlı Okçu %50 Menzilli + %50 Hareketli
-• Hareketli: Hafif/Ağır/Deve Süvarisi ve Kartaca Savaş Filleri; Atlı Okçu %50 Hareketli
+• Hareketli: Hafif/Ağır/Deve Süvarisi, Kartaca/Maurya Savaş Filleri ve Çöl Akıncıları; Atlı Okçu %50 Hareketli; Chariot %50 Hareketli + %50 Menzilli
 
 **Tekdüze Ordu:** Tek tür en az %80 → Çarpışma ×0,85; Hasar ×0,90
 
@@ -171,10 +182,16 @@ Bu kural yalnız **kuşatma dışındaki kara savaşlarında** uygulanır.
 • 1 Mızraklı = 1
 • 1 Hoplit = 0,5
 • 1 Anadolu Kalkanlısı = 0,3
+• 1 Triarii Gazisi = 1
+• 1 Gümüş Kalkanlı = 1
+• 1 Machimoi Phalangitai = 1
 
 **Süvari Gücü:**
 • 1 Hafif, Ağır veya Deve Süvarisi = 1
 • 1 Kartaca Savaş Fili = 1
+• 1 Maurya Savaş Fili = 1
+• 1 Çöl Akıncısı = 1
+• 1 Chariot = 1
 • 1 Atlı Okçu = 0,5
 
 Bot iki tarafın cephedeki kuvvetlerini karşılaştırır. Mızrak Gücü ile düşman Süvari Gücünden düşük olan değer **eşleşen kuvvettir**. Yalnız eşleşen mızrak payı bonus kazanır:
@@ -208,7 +225,7 @@ Kaybeden çarpanı, kaybedenin rakibine vereceği hasarı azaltır; alacağı ha
 
 **Kara Ham Hasarı = Hasar toplamı × 20 × Üstünlük çarpanı × Özel savaş çarpanı**
 
-**Deniz Ham Hasarı = Hasar toplamı × 0,012 × Üstünlük çarpanı × Özel savaş çarpanı**
+Deniz savaşında asker kaybı formülü kullanılmaz. Üstünlük ve filo emri çarpanlarından geçen Hasar, gemilerin ayrı HP havuzlarına dağıtılır; gövde katsayısı ve Zırh uygulandıktan sonra tekil gemi canlarından düşülür.
 
 Ham hasar hedef birliklere dayanıklılık ağırlığıyla dağıtılır:
 
@@ -221,9 +238,9 @@ Ham hasar hedef birliklere dayanıklılık ağırlığıyla dağıtılır:
 
 Mızrak karşılaşmasının hedefli ek hasarı genel hasardan ayrılır ve yalnız uygun süvari birliklerinden düşülür.
 
-## MESAJ 13/20 — 🧠 BASKI, KAYIP YÜZDESİ VE DÜZEN
+## MESAJ 13/20 — 🧠 MEYDAN BASKISI, KAYIP YÜZDESİ VE OTOMATİK GERİ ÇEKİLME
 
-Normal meydan, pusu ve deniz savaşlarında:
+Normal meydan ve pusu savaşlarında:
 
 • Dengeli tur: Baskı değişmez
 • Hafif üstünlük: Kaybeden +1
@@ -233,13 +250,16 @@ Normal meydan, pusu ve deniz savaşlarında:
 
 **Kayıp yüzdesi = (Başlangıç − Mevcut) ÷ Başlangıç × 100**
 
-Bot gerçekleşen en ağır eşiği uygular:
-• Düzenli: Baskı 0–1 ve kayıp %10’dan az
-• Yıpranmış: Baskı 2–3 veya kayıp %10+
-• Sarsılmış: Baskı 4–5 veya kayıp %30+
-• Dağılmış: Baskı 6+, kayıp %40+ veya kuvvet 0
+Meydan baskısı **0–10** arasında tutulur. Bir tarafın otomatik geri çekilmesi için iki şartın birlikte gerçekleşmesi gerekir:
 
-Bu savaş türlerinde bir taraf Dağılmış olduğunda savaş biter. İki taraf aynı turda dağılırsa daha fazla kuvveti kalan kazanır; eşitse galip çıkmaz.
+• Baskı **10** olmalı.
+• Başlangıç kuvvetinin en az **%50'si kaybedilmiş** olmalı.
+
+Yalnızca şartlardan birinin gerçekleşmesi savaşı bitirmez. Kuvvetin tamamen sıfırlanması doğrudan yenilgidir. İki taraf aynı değerlendirmede savaş dışı kalırsa daha fazla kuvveti kalan kazanır; eşitse galip çıkmaz.
+
+**Düzen göstergesi:** Baskı 0–1 ve kayıp <%10: Düzenli; Baskı 2+ veya kayıp ≥%10: Yıpranmış; Baskı 6+ veya kayıp ≥%40: Sarsılmış; Baskı 10 veya kayıp ≥%50: Kritik Hat. Baskı 10 ile kayıp ≥%50 birlikte gerçekleştiğinde Dağılmış olur.
+
+Deniz savaşlarında baskı kullanılmaz; filo durumu, tekil gemi HP'leri, Manevra Puanları ve filo emirleri kullanılır.
 
 ## MESAJ 14/20 — 🗺️ ARAZİ, CEPHE, PUSU VE KOMUTAN
 
@@ -252,7 +272,7 @@ Bu savaş türlerinde bir taraf Dağılmış olduğunda savaş biter. İki taraf
 • Dağ Geçidi: 6.000 / 6.000
 • Nehir Geçişi: Saldıran 10.000 / Savunan 20.000
 • Pusu: Pusu Kuran 15.000 / Pusuya Düşen 8.000
-• Kuşatma: Saldıran 15.000 / Savunan 18.000
+• Kuşatma: Saldıran 15.000 piyade + 5.000 menzilli / Savunan 18.000
 • Deniz: Cephe sınırı yok; savaşabilir bütün gemiler katılır
 
 Kara cephe kapasitesi tek başına güç bonusu vermez; yalnız zar üretecek kara kuvvetini sınırlar.
@@ -267,12 +287,13 @@ Kuşatmada A saldıran, B savunandır. Sur **30.000 HP**, kapı **1.000 HP** ile
 
 **Bombardıman:** Ordular temas etmez; asker kaybı, baskı ve savaş turu ilerlemesi oluşmaz. Yalnız sur hedefli Katapultlar çalışır. Bir kuşatma aynı oyun turunda en fazla **4 kez** bombalanabilir; haklar yeni oyun turunda yenilenir. Hücuma geçildikten sonra bombardımana dönülemez.
 
-**Tahkimat çarpanları:**
-• Sur ve kapı sağlam: B Çarpışma ×1,50; B Hasar ×1,35; A Hasar ×0,50
-• Yalnız biri sağlam: B Çarpışma ×1,25; B Hasar ×1,15; A Hasar ×0,75
-• İkisi de yıkılmış: B Çarpışma ×1,10; diğer Hasarlar ×1,00
+**Tahkimat ve kuşatma yorgunluğu:**
+• 1–3. değerlendirme: B Çarpışma ×1,50; B Hasar ×1,30; B'nin aldığı Hasar ×0,70
+• 4–6. değerlendirme: B Çarpışma ×1,40; B Hasar ×1,20; B'nin aldığı Hasar ×0,80
+• 7–9. değerlendirme: B Çarpışma ×1,30; B Hasar ×1,10; B'nin aldığı Hasar ×0,90
+• 10. ve sonraki değerlendirmeler: B Çarpışma ×1,00; B Hasar ×1,00; B'nin aldığı Hasar ×1,00
 
-Tahkimat kademesi turun başındaki HP’ye göre belirlenir. Aynı tur kırılan sur veya kapı hücum erişimini hemen açabilir; fakat düşük tahkimat çarpanı sonraki savaş turunda uygulanır.
+Tahkimat etkisi kuşatma uzadıkça azalır. Aynı değerlendirmede kırılan sur veya kapı hücum erişimini hemen değiştirebilir. Kuşatma baskısı, tahkimatla büyütülmüş sonuçtan değil tarafların **ham Çarpışma zarlarından** hesaplanır.
 
 Bot savunucunun **Ham Zar** ve **Tahkimat Sonrası Zar** sonuçlarını ayrı gösterir. Kayıp üstünlüğü çarpanlı sonuçtan, kuşatma baskısı ise tarafların ham Çarpışma sonuçlarından hesaplanır.
 
@@ -284,11 +305,16 @@ Sur ve kapı birlikte sağlamken bütün saldıran ordu doğrudan savaşamaz:
 • 1 Kuşatma Kulesi, en fazla **3.000 Hücum Birliğine** erişim sağlar.
 • Toplam hücum erişimi saldıranın 15.000 kişilik cephesini aşamaz.
 • Kuleler kapasite hesabında önce, merdivenler kalan alanda değerlendirilir.
-• Sur veya kapı kırılırsa saldıranın normal 15.000 kişilik cephesi açılır.
+• Sur yıkılırsa merdiven/kule erişim şartı kalkar ve normal 15.000 piyade cephesi açılır.
+• Kapı kırılırsa piyade cephesi **+3.000** artarak 18.000'e çıkar.
+• Kapı kırıldığında 5.000 menzilli destekle toplam hücum kapasitesi **23.000** olur.
+• Sur ve kapı birlikte yıkılsa da kapı bonusu birikmez; piyade cephesi 18.000'de kalır.
 
-**Hücum Birlikleri:** Hafif Piyade, Milis, Mızraklı, Ağır Piyade, Lejyoner, Hoplit, Pers Ölümsüzleri, İber Caetratileri, Cermen Şok Savaşçıları ve Anadolu Kalkanlılarıdır.
+**Hücum Birlikleri:** Hafif Piyade, Milis, Mızraklı, Ağır Piyade, Lejyoner, Hoplit, Pers Ölümsüzleri, İber Caetratileri, Cermen Şok Savaşçıları, Anadolu Kalkanlıları, Triarii Gazileri, Pön Gazileri, Gaesatae, Peltastlar, Gümüş Kalkanlılar ve Machimoi Phalangitai'dir.
 
-Sadece menzilli veya atlı birliklerden oluşan ordu şehir alamaz. Hücum Birliği kalmazsa kuşatan taraf otomatik geri çekilir. Sur ve kapı sağlamken saldıran süvariler normalde cepheye ve kayıp havuzuna girmez; Atlı Okçular menzilli destek verebilir, ayrıca aşağıdaki yaya hücum emri kullanılabilir. Sur veya kapı kırılınca normal cepheye geçilir.
+Sadece menzilli veya atlı birliklerden oluşan ordu şehir alamaz. Hücum Birliği kalmazsa kuşatan taraf otomatik geri çekilir. Saldıran atlı birlikler kuşatmanın hiçbir aşamasında cepheye veya kayıp havuzuna otomatik girmez; yalnız aşağıdaki yaya hücum emriyle seçilenler piyade karşılığıyla savaşa katılır.
+
+Saldıranın aldığı kayıpların **%70'i cephedeki piyade havuzuna**, **%30'u menzilli destek havuzuna** dağıtılır. Havuzlardan biri boşsa karşılayamadığı kayıp diğer havuza aktarılır.
 
 Savunucu süvariler kuşatma boyunca attan inerek savaşır:
 • Hafif Süvari → Hafif Piyade zarları
@@ -298,15 +324,13 @@ Savunucu süvariler kuşatma boyunca attan inerek savaşır:
 
 Kayıplar belgede özgün birlik adından düşülür.
 
-Kuşatan taraf, sur ve kapı birlikte sağlamken `/savas suvari-indir` ile kendi Hafif Süvari, Ağır Süvari, Atlı Okçu veya Deve Süvarilerinin istediği kısmını aynı yaya karşılıklarıyla hücuma hazırlayabilir. Emir tur zarları başlamadan değiştirilebilir ve **0** girilerek kaldırılır. İndirilen birlikler yaya birimin savaş ve dayanıklılık değerlerini kullanır; kayıp yine özgün süvari kaydından düşer. Surda gedik açılır veya kapı kırılırsa bütün saldırgan süvariler normal atlı değerlerine döner. Kartaca Savaş Filleri attan indirilemez.
+Kuşatan taraf `/savas suvari-indir` ile kendi Hafif Süvari, Ağır Süvari, Atlı Okçu veya Deve Süvarilerinin istediği kısmını aynı yaya karşılıklarıyla hücuma hazırlayabilir. Emir her değerlendirmede zarlar başlamadan değiştirilebilir ve **0** girilerek kaldırılır. İndirilen birlikler yaya birimin savaş ve dayanıklılık değerlerini kullanır; kayıp yine özgün süvari kaydından düşer. Emir, sur veya kapı kırıldıktan sonra da geçerliliğini korur. Kartaca Savaş Filleri ve diğer indirilemeyen hareketli özel birlikler hücum cephesine girmez.
 
 ## MESAJ 17/20 — 🚨 KUŞATMA BASKISI, AÇLIK VE ŞEHRİN DÜŞMESİ
 
-Kuşatma baskısı 0–8 arasındadır:
-• 0–2 Düzenli
-• 3–4 Baskı Altında
-• 5–6 Sarsılmış
-• 7–8 Kritik Hat
+Kuşatma baskısı **0–12** arasındadır. Tahkimat çarpanları kayıp hesabını etkiler; baskı hesabı ise ham Çarpışma sonuçları üzerinden yürür.
+
+**Düzen göstergesi:** 0–3 Düzenli; 4–7 Baskı Altında; 8–11 Sarsılmış; 12 Kritik Hat.
 
 Tur kaybından sonra kullanılabilir yedek baskıyı azaltır:
 • En az yarım cephe yedeği: −1
@@ -314,16 +338,9 @@ Tur kaybından sonra kullanılabilir yedek baskıyı azaltır:
 
 Savunucudaki Panteon Sv3, kuşatma boyunca ilk olumlu baskı artışını 1 puan azaltır.
 
-**Saldıranın baskıyla çekilmesi için:** Önceki turdan beri 8 baskıda olmalı, yeni ham baskı turunu kaybetmeli ve en az yarım cephe kullanılabilir yedeği kalmamalıdır. Hücum Birliğinin tamamen tükenmesi ayrıca doğrudan geri çekilme sebebidir.
+**Kuşatan tarafın otomatik geri çekilmesi için:** Baskı 12 olmalı ve başlangıç kuvvetinin en az %50'si kaybedilmiş olmalıdır. Hücum Birliğinin tamamen tükenmesi ayrıca doğrudan geri çekilme sebebidir; geride yalnız menzilli veya atlı birlik kalması şehri almaya yetmez.
 
-**Savunucunun baskıyla şehri kaybetmesi için şartların tamamı gerekir:**
-• Sur=0, Kapı=0 veya etkin merdiven/kule erişimi bulunmalı
-• Önceki turdan beri 8 baskıda olmalı
-• Yeni ham baskı turunu kaybetmeli
-• Kalan kuvvet başlangıcın en fazla %30’u olmalı
-• Kalan kuvvet en fazla 9.000 olmalı
-
-Savunucu kuvvet 0 ve erişim açık ise şehir doğrudan düşer.
+**Savunan taraf baskı veya kayıp yüzdesi nedeniyle otomatik geri çekilmez.** Şehrin savaşla düşmesi için savunan ordunun ve kuşatmaya dâhil garnizonun toplam mevcudu tamamen **0** olmalıdır.
 
 **Açlık:** Temel erzak dayanıklılığı **6 oyun turudur**. Çiftlik Sv2 +1, Sv3 +3; Su Kemeri Sv2+ +2; Garnizon Güçlendirme +1 ve ülke bonusları eklenir. Toplam ek bina/politika/ülke bonusu en fazla +8’dir. Erzak 0 olduğunda bot otomatik teslim vermez; sonucu DM belirler.
 
@@ -331,13 +348,15 @@ Savunucu kuvvet 0 ve erişim açık ise şehir doğrudan düşer.
 
 • **Merdiven Grubu:** Çarpışma veya Hasar üretmez; 1.000 Hücum Birliğine erişim sağlar.
 • **Koçbaşı:** Her kuşatmada en fazla 1; birikmez. 1d8×35 Kapı Hasarı.
-• **Mantlet:** Adet başına 1d4 Çarpışma; savunanın saldırana Hasarını adet başına %5 azaltır, üst sınır %50.
-• **Balista — Sur:** Adet başına 1d10×5 Sur Hasarı.
+• **Mantlet:** Çarpışma veya Hasar üretmez; savunanın saldırana Hasarını adet başına %2 azaltır, üst sınır %20.
+• **Balista — Sur/Kapı:** Adet başına 1d10×5 Sur veya Kapı Hasarı.
 • **Balista — Ordu:** Adet başına 1d10 saldıran Hasarı.
 • **Katapult — Sur:** Adet başına 2d20×20 Sur Hasarı.
 • **Katapult — Ordu:** Adet başına 1d20 saldıran Hasarı.
-• **Kuşatma Kulesi:** Adet başına 2d20 Çarpışma + 1d6 Hasar; 3.000 Hücum Birliğine erişim.
+• **Kuşatma Kulesi:** Adet başına 1d10 Çarpışma + 1d6 Hasar; 3.000 Hücum Birliğine erişim.
 • **Hafif Sur Balistası:** Savunmaya özgü; adet başına 2d8 savunma Hasarı.
+
+Kapı kırıldığında saldıranın piyade hücum cephesi **+3.000** artarak 18.000'e çıkar. Menzilli destek cephesi 5.000 olarak kalır; toplam hücum kapasitesi 23.000 olur. Yalnız surun yıkılması bu ek kapasiteyi vermez. Sur ve kapı birlikte yıkılsa da bonus birikmez.
 
 Bir alet türünden aynı savaş turunda en fazla 25 adet etkindir; Koçbaşı 1 ile, kule ve merdivenler ayrıca 15.000 erişim cephesiyle sınırlıdır.
 
@@ -345,24 +364,45 @@ Yapı Hasarı asker kaybına dönüşmez. Ordu hedefli aletler normal üstünlü
 
 Mühendislik Atölyesi Sv3’te geliştirilmiş olarak üretilen kayıtlı Balista ve Katapultların ilgili hasar zarlarına +1 uygulanır. Merdiven ve Koçbaşı kuşatma başladıktan sonra, zarlar başlamadan önce anlık satın alınabilir; saha aleti alımı yeni bir savaş formu yayımlamaz.
 
-## MESAJ 19/20 — 🚢 DENİZ SAVAŞI VE GERİ ÇEKİLME
+## MESAJ 19/20 — 🚢 DENİZ SAVAŞI, GEMİ CANI VE FİLO EMİRLERİ
 
-**Gemi — Fiyat / Bakım — Çarpışma / Hasar — Dayanıklılık — Mürettebat / Taşıma**
-• Kerkouros: 750 / 75 — 1d6 / 1d6 — Düşük — 50 / 200
-• Trireme: 1.500 / 150 — 2d8 / 2d8 — Orta — 100 / 500
-• Quinquereme: 3.000 / 300 — 3d10 / 3d10 — Yüksek — 150 / 800
+**Gemi — Fiyat / Bakım — Çarpışma / Hasar — Can / Zırh — İş Göremezlik — Mürettebat / Taşıma**
 
-Her gemi bir zar bloğudur. Deniz savaşında cephe kapasitesi bulunmaz; savaşabilir durumdaki bütün gemiler aynı değerlendirmede zar üretir. İş göremez ve batmış gemiler zar havuzuna katılmaz. İllirya’nın toplam taşıma kapasitesi %10 fazladır.
+• Kerkouros: 750 / 75 — **1d6 / 1d12** — 40 HP / 1 Zırh — 10 HP — 50 / 200
+• Trireme: 1.500 / 150 — **2d8 / 2d12** — 75 HP / 3 Zırh — 20 HP — 100 / 500
+• Quinquereme: 3.000 / 300 — **3d10 / 3d12** — 120 HP / 6 Zırh — 30 HP — 150 / 800
 
-**Geri çekilme temel kaybı:** 1. tur %0; 2. tur %5; 3. tur %8; 4. tur %11; 5+ tur %14.
+Kerkouros gelen gövde hasarını ×1,15; Trireme ×1,00; Quinquereme ×0,85 oranında alır. Ardından Zırh düşülür; geçerli vuruş en az 1 HP verir. İllirya'nın taşıma kapasitesi %10 fazladır.
 
-İkinci turdan itibaren takip ekleri:
-• Kara: Rakibin Hafif+Ağır Süvari oranı ×%20; Orman, Bataklık ve Dağlıkta yarısı
-• Deniz: Rakibin Kerkouros oranı ×%15
-• Pusu veya Dağ Geçidi: +5 yüzde puanı
-• Kuşatma savunucusu: +5 yüzde puanı
+Deniz savaşında cephe sınırı yoktur. **Savaşabilir bütün gemiler** aynı değerlendirmede zar üretir. İş göremez ve batmış gemiler katılmaz. Paralı asker şirketlerine ait savaşabilir gemiler de aynı tekil HP ve hasar sistemine dâhildir.
 
-Toplam geri çekilme kaybı mevcut kuvvetin en fazla %25’i olabilir. İlk turda hiçbir ek takip cezası uygulanmaz. Bombardıman savaş turu sayılmaz. Geri çekilen taraf savaşı kaybeder.
+Her gemi ayrı izlenir:
+• **Hasarlı:** HP kaybetmiştir fakat iş göremezlik sınırının üzerindedir; savaşmaya devam eder.
+• **İş Göremez:** Eşik HP veya altındadır; sonraki değerlendirmelerde zar üretmez fakat tamir edilebilir.
+• **Batmış:** Kalıcı olarak silinir ve tamir edilemez.
+
+Bir gemi savaşabilir durumdayken aldığı ilk ağır darbede doğrudan batmaz; önce iş göremez olur. Daha önceki bir değerlendirmede iş göremez olmuş gemi sonraki değerlendirmelerde yeniden hasar alırsa batabilir.
+
+Deniz savaşlarında **baskı ve ayrı Geri Çekil düğmesi kullanılmaz**. Her değerlendirmede iki taraf da gizli filo emrini seçip kilitler:
+
+• **Dengeli Muharebe:** Çarpışma ve Hasar değişmez.
+• **Koçbaşı Hücumu:** Verilen Hasar +%20; alınan Hasar +%10.
+• **Savunma Hattı:** Alınan Hasar −%20; verilen Hasar −%15.
+• **Kanat Manevrası:** Çarpışma +%15; verilen Hasar −%10.
+• **Temas Kesme:** Zar atılmadan savaştan çekilme emridir.
+• **Kontrollü Temas Kesme:** 3 Manevra Puanı harcar ve takip kaybını yarıya indirir.
+
+İki emir de kilitlenmeden zar açılamaz. Taraflardan biri temas kesmeyi seçerse zar yerine yönetici emirleri sonuçlandırır. İki taraf da temas keserse filolar savaşmadan ayrılır.
+
+Her değerlendirmede Çarpışma üstünlüğünü kazanan taraf **+1 Manevra Puanı** kazanır; azami 5 puan tutulabilir.
+
+Filo şu iki şart birlikte gerçekleştiğinde zorunlu geri çekilir:
+• Savaşabilir gemilerin toplam HP havuzu başlangıcın **%40'ı veya altına** düşmüş olmalı.
+• Başlangıç gemilerinin en az **%50'si batmış veya iş göremez** olmalı.
+
+`Filo Durumu` yalnız oyuncunun kendi ülkesine ait gemilerin tekil HP ve durumlarını gizli gösterir. `Yönetici: İki Taraf` düğmesi oyun yöneticisine iki tarafın bütün gemilerini gizli gösterir.
+
+Savaş sonrasında gemi hasarları korunur. `/filo tamir` komutunda **yalnız iş göremezler** veya **bütün hasarlı ve iş göremezler** seçilebilir. Tamirde olup artık iş göremez olmayan gemiler `/filo tamirden-cikar` ile erken alınabilir; tamamlanan tamir filosu `/filo tamirden-ekle` ile normal filoya aktarılır. Tersane tamir kapasitesi Sv1/Sv2/Sv3 için tur başına sırasıyla **150 / 300 / 500 HP**'dir.
 
 ## MESAJ 20/20 — 📜 AÇIK BİLGİ, KAYIP KAYDI VE KOMUTLAR
 
@@ -390,3 +430,59 @@ Bot savaş sonu kayıplarını belgelere yalnız bir kez işler:
 • `/savas bitir`, `/savas iptal`
 
 Tekil düzeltmeler için `/savas birlik-ayarla` ve `/savas gemi-ayarla` kullanılabilir. Formülleri bot uygular; oyuncular veya DM savaş çarpanlarını elle giremez.
+
+---
+
+## EK — 🗺️ KARA VE DENİZ KARŞILAŞMA KURALLARI
+
+**Kara Pususu:** Pusuya düşen ordunun sahibi 1d3 atar. Sonuç, ordunun Temas Kesme/Geri Çekilme kullanabilmesi için tamamlaması gereken asgari değerlendirme sayısıdır. Süre dolmadan geri çekilemez.
+
+**Meydan Savaşı:** İki düşman ordusu aynı Hex'te karşılaştığında taraflardan biri savaş başlamadan geri çekilebilir. Savaş başladıktan sonra normal geri çekilme ve takip kuralları uygulanır. Taraflardan biri savaş Hex'ini doğru tahmin ederek bölgeye iki farklı yönden ordu sokmuşsa karşı taraf 1d3 atar; sonuç savaşın asgari değerlendirme sayısını belirler.
+
+**Kuşatma Karşılaşması:** Savunanın takviyesi kuşatma ordusunu iki taraftan sıkıştırırsa mevcut kuşatma formu kapatılır ve katılan kuvvetlerle meydan savaşı açılır. Kuşatma ordusu geri çekilmek isterse 1d3 sonucu kadar değerlendirmeyi tamamlamalıdır.
+
+**Açık Deniz Karşılaşması:** Düşman filolarının aynı deniz Hex'ine girmesi, karşılıklı geçmeye çalışması veya bir filonun düşman filosunun Hex'i üzerinden ilerlemesi deniz savaşı doğurur. Savaş formu açıldıktan sonra ayrı bir Geri Çekil düğmesi kullanılmaz; çekilme, gizli **Temas Kesme** veya **Kontrollü Temas Kesme** filo emriyle seçilir.
+
+**Deniz Pususu:** Yalnız GM tarafından belirlenen gizli bekleme, istihbarat üstünlüğü veya kıyı saklanması durumlarında uygulanır. Aynı Hex'te karşılaşmak tek başına pusu değildir. Pusuya düşen taraf 1d3 atar; sonuç kadar değerlendirme bitmeden temas kesme emri sonuçlandırılamaz.
+
+## EK — ⚓ ABLUKA KIRMA VE ÇIKARMA SAVAŞI
+
+Abluka altındaki kıyı yerleşkesine gelen dost veya müttefik filo doğrudan limana giremez; önce ablukacı filoyla savaşır.
+
+• Yalnız yardım filosu geldiyse normal deniz savaşı açılır.
+• Ablukacı geri çekilir veya yenilirse abluka kalkar.
+• Yardım filosu geri çekilir veya yenilirse limana ulaşamaz ve abluka sürer.
+• Limandaki filo çıkış yaparsa dışarıdaki yardım filosuyla birlikte ablukacıya saldırabilir; bu, denizde iki taraftan sıkıştırma sayılır.
+• Ablukacı taraf 1d3 atar ve sonuç kadar değerlendirme tamamlanmadan temas kesemez.
+• Limandaki filo savaşa çıkmak zorunda değildir; fakat abluka kalkmadan denize açılamaz.
+• Abluka kalktığında Abluka Uzmanı Sv3 nedeniyle eksilen bir turluk erzak dayanıklılığı, kuşatma devam ediyorsa geri verilir.
+
+**Çıkarma:** Çıkarma bir tam tur sürer ve tamamlanana kadar ordu gemide sayılır. Düşman filosu çıkarma Hex'ine ulaşırsa deniz savaşı kara birlikleri inmeden başlar. Çıkarma filosu ilk değerlendirme tamamlanmadan temas kesemez. Kara birlikleri deniz savaşına katılmaz. Filo çekilirse çıkarma iptal edilir; kazanırsa çıkarma sonraki çözümlemede tamamlanır. Çıkarma sürerken gemideki orduyla kara savaşı açılamaz.
+
+## EK — 🏛️ LİMANA SIĞINMA VE LİMAN BASKINI
+
+KIYI etiketi tek başına güvenli liman sağlamaz. Aktif Limanı olmayan kıyı yerleşkesindeki filo kıyıda demirlemiş sayılır ve normal deniz savaşına hedef olabilir. Aktif Limana giren filo normal açık deniz saldırısından korunur; düşman filoyu içeride tutmak için abluka kurabilir veya Liman Baskını düzenleyebilir.
+
+Liman Baskını için saldıran filo hedef kıyı Hex'inde bulunmalı, yerleşke saldıran tarafından abluka altında tutulmalı, hedef limanda en az bir filo/gemi bulunmalı ve işlem yönetici tarafından başlatılmalıdır. Aynı limana her 6 turda yalnız bir baskın yapılabilir.
+
+**Saldıran:** 1d20 + Amiral ve filo baskın bonusları
+
+**Savunan:** 1d20 + Liman seviyesi + Tersane seviyesi + Amiral bonusları
+
+• Fark 0 veya altı: Baskın püskürtülür.
+• Fark 1–4: Kısmi sızma; limandaki gemiler hakkında sınırlı bilgi alınır.
+• Fark 5–9: Limandaki filo dışarı çekilir; 1d3 asgari değerlendirmeli deniz savaşı başlar.
+• Fark 10+: Üstün baskın; 1d6+1 asgari değerlendirmeli deniz savaşı başlar.
+
+Limana sığınmak filoyu abluka, Liman Baskını veya yerleşkenin karadan fethedilmesine karşı dokunulmaz yapmaz.
+
+## EK — ⚓ DENİZ ABLUKASININ ETKİLERİ
+
+Abluka yalnız KIYI yerleşkesine, yönetici tarafından ülke ve filo bağlanarak uygulanır. Aynı yerleşkede bir etkin abluka; aynı filoda bir etkin deniz operasyonu bulunabilir.
+
+• Standart abluka: hedef yerleşkenin deniz ticareti geliri −%10.
+• Abluka Uzmanı Sv1: −%15.
+• Abluka Uzmanı Sv2: −%30.
+• Abluka Uzmanı Sv3: −%60; devam eden kuşatmanın erzak dayanıklılığını bir defaya mahsus 1 tur azaltır.
+
+Ekonomik kayıp alım turunda hedef yerleşkeye eksik gelir olarak yansır. Etkin abluka filosu hareket edemez, gemi veya Amiral değiştiremez, başka savaşa/operasyona katılamaz ve tamire gönderilemez. Abluka `/abluka kaldir` ile sona erdiğinde filo yeniden kullanılabilir.

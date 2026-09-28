@@ -9,8 +9,10 @@
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/copy-admin-assets.mjs",
     "start": "node dist/register-commands.js && node dist/index.js",
+    "start:admin": "node dist/admin/server.js",
+    "dev:admin": "tsx watch src/admin/server.ts",
     "migrate": "tsx src/db/migrate.ts",
     "register": "tsx src/register-commands.ts",
     "test": "vitest run",

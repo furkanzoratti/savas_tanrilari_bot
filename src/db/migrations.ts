@@ -22,6 +22,9 @@ import { expandedAncientSpecialUnitsMigration } from "./expanded-ancient-special
 import { indianCultureGroupsMigration } from "./indian-culture-groups-migration.js";
 import { regionalRaidsWithoutWarMigration } from "./regional-raids-without-war-migration.js";
 import { manualKerkourosRestorationMigration } from "./manual-kerkouros-restoration-migration.js";
+import { navalBattleTacticsMigration } from "./naval-battle-tactics-migration.js";
+import { pontusSinopArmyRestorationMigration } from "./pontus-sinop-army-restoration-migration.js";
+import { adminPanelMigration } from "./admin-panel-migration.js";
 
 export const migrations = [
   {
@@ -2261,5 +2264,8 @@ export const migrations = [
   expandedAncientSpecialUnitsMigration,
   indianCultureGroupsMigration,
   regionalRaidsWithoutWarMigration,
-  manualKerkourosRestorationMigration
+  manualKerkourosRestorationMigration,
+  navalBattleTacticsMigration,
+  pontusSinopArmyRestorationMigration,
+  adminPanelMigration
 ] as const;

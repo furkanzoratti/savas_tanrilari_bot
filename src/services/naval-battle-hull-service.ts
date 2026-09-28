@@ -8,6 +8,16 @@ interface BattleHullRow {
   disabled_round:number|null;sunk_round:number|null;damage_record_id:string|null;
 }
 
+export interface BattleHullMetrics {
+  initialHullHp:number;
+  operationalHullHp:number;
+  remainingHullHp:number;
+  initialShips:number;
+  activeShips:number;
+  disabledShips:number;
+  sunkShips:number;
+}
+
 function toState(row:BattleHullRow):NavalHullState{
   return {id:row.id,shipType:row.ship_type,maxHp:Number(row.max_hp),currentHp:Number(row.current_hp),
     disabledRound:row.disabled_round===null?null:Number(row.disabled_round),
@@ -94,6 +104,28 @@ export async function battleHullComposition(
 ):Promise<BattleComposition>{
   await initializeBattleShipHulls(client,battleId);
   return composition(await hullRows(client,battleId,side),mode);
+}
+
+export async function battleHullMetrics(
+  client:DbClient,battleId:string,side:BattleSideKey
+):Promise<BattleHullMetrics>{
+  await initializeBattleShipHulls(client,battleId);
+  const rows=await hullRows(client,battleId,side);
+  return rows.reduce<BattleHullMetrics>((summary,row)=>{
+    const state=toState(row);
+    summary.initialHullHp+=state.maxHp;
+    summary.initialShips+=1;
+    if(state.sunkRound!==null||state.currentHp<=0){
+      summary.sunkShips+=1;
+      return summary;
+    }
+    summary.remainingHullHp+=state.currentHp;
+    if(isHullOperational(state)){
+      summary.activeShips+=1;
+      summary.operationalHullHp+=state.currentHp;
+    }else summary.disabledShips+=1;
+    return summary;
+  },{initialHullHp:0,operationalHullHp:0,remainingHullHp:0,initialShips:0,activeShips:0,disabledShips:0,sunkShips:0});
 }
 
 export async function applyBattleHullDamage(client:DbClient,input:{

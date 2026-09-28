@@ -1,0 +1,163 @@
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import pino from "pino";
+import { ZodError } from "zod";
+import { adminConfig } from "./config.js";
+import { adminPool } from "./db.js";
+import {
+  assertMutationRequest,
+  beginDiscordLogin,
+  clearSession,
+  completeDiscordLogin,
+  sessionFromRequest,
+  type AdminSession
+} from "./auth.js";
+import { adminPanelService } from "./service.js";
+
+const logger = pino({ level: adminConfig.logLevel });
+const publicFiles = {
+  "/": { path: fileURLToPath(new URL("./public/index.html", import.meta.url)), type: "text/html; charset=utf-8" },
+  "/app.css": { path: fileURLToPath(new URL("./public/app.css", import.meta.url)), type: "text/css; charset=utf-8" },
+  "/app.js": { path: fileURLToPath(new URL("./public/app.js", import.meta.url)), type: "text/javascript; charset=utf-8" }
+} as const;
+
+function securityHeaders(response: ServerResponse): void {
+  response.setHeader("x-content-type-options", "nosniff");
+  response.setHeader("x-frame-options", "DENY");
+  response.setHeader("referrer-policy", "no-referrer");
+  response.setHeader("permissions-policy", "camera=(), microphone=(), geolocation=()");
+  response.setHeader("content-security-policy", "default-src 'self'; connect-src 'self'; img-src 'self' https://cdn.discordapp.com data:; style-src 'self'; script-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self' https://discord.com");
+}
+
+function json(response: ServerResponse, status: number, value: unknown): void {
+  securityHeaders(response);
+  response.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+  response.end(JSON.stringify(value));
+}
+
+function redirect(response: ServerResponse, location: string): void {
+  securityHeaders(response);
+  response.writeHead(302, { location, "cache-control": "no-store" }).end();
+}
+
+async function body(request: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.length;
+    if (size > 1_000_000) throw new Error("İstek gövdesi çok büyük.");
+    chunks.push(buffer);
+  }
+  if (!chunks.length) return {};
+  try { return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown; }
+  catch { throw new Error("Geçersiz JSON isteği."); }
+}
+
+function requireSession(request: IncomingMessage, response: ServerResponse): AdminSession | null {
+  const session = sessionFromRequest(request);
+  if (!session) json(response, 401, { error: "AUTH_REQUIRED" });
+  return session;
+}
+
+function requireMutation(request: IncomingMessage, response: ServerResponse): AdminSession | null {
+  const session = requireSession(request, response);
+  if (!session) return null;
+  if (!assertMutationRequest(request, session)) {
+    json(response, 403, { error: "CSRF_REJECTED", message: "İşlem güvenlik doğrulamasından geçemedi." });
+    return null;
+  }
+  return session;
+}
+
+async function serveStatic(pathname: keyof typeof publicFiles, response: ServerResponse): Promise<void> {
+  const file = publicFiles[pathname];
+  const content = await readFile(file.path);
+  securityHeaders(response);
+  response.writeHead(200, { "content-type": file.type, "cache-control": pathname === "/" ? "no-store" : "public, max-age=300" });
+  response.end(content);
+}
+
+const server = createServer(async (request, response) => {
+  const url = new URL(request.url ?? "/", adminConfig.baseUrl);
+  try {
+    if (request.method === "GET" && url.pathname === "/health") {
+      await adminPool.query("SELECT 1");
+      return json(response, 200, { ok: true, service: "gm-panel" });
+    }
+    if (request.method === "GET" && url.pathname === "/auth/login") return beginDiscordLogin(response);
+    if (request.method === "GET" && url.pathname === "/auth/callback") {
+      await completeDiscordLogin(request, response, url);
+      return redirect(response, "/");
+    }
+    if (request.method === "POST" && url.pathname === "/auth/logout") {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      clearSession(response);
+      return json(response, 200, { ok: true });
+    }
+    if (request.method === "GET" && url.pathname === "/api/session") {
+      const session = requireSession(request, response);
+      if (!session) return;
+      return json(response, 200, { user: { id: session.sub, username: session.username, avatar: session.avatar }, csrf: session.csrf });
+    }
+    if (request.method === "GET" && url.pathname === "/api/overview") {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await adminPanelService.overview());
+    }
+    if (request.method === "GET" && url.pathname === "/api/countries") {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await adminPanelService.countries());
+    }
+    const countryMatch = request.method === "GET" ? url.pathname.match(/^\/api\/countries\/([0-9a-f-]+)$/iu) : null;
+    if (countryMatch) {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await adminPanelService.country(countryMatch[1]!));
+    }
+    if (request.method === "GET" && url.pathname === "/api/search") {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await adminPanelService.search(url.searchParams.get("q") ?? ""));
+    }
+    if (request.method === "GET" && url.pathname === "/api/audit") {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await adminPanelService.audit(Number(url.searchParams.get("limit") ?? 60)));
+    }
+    if (request.method === "GET" && url.pathname === "/api/catalog/units") {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, adminPanelService.unitCatalog());
+    }
+    if (request.method === "POST" && url.pathname === "/api/operations/army/preview") {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.previewArmy(session.sub, await body(request)));
+    }
+    if (request.method === "POST" && url.pathname === "/api/operations/army/create") {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      const input = await body(request) as { previewToken?: unknown };
+      if (typeof input.previewToken !== "string") throw new Error("Önizleme anahtarı eksik.");
+      return json(response, 200, await adminPanelService.createArmy(session.sub, input.previewToken));
+    }
+    if (request.method === "GET" && url.pathname in publicFiles) {
+      return serveStatic(url.pathname as keyof typeof publicFiles, response);
+    }
+    json(response, 404, { error: "NOT_FOUND" });
+  } catch (error) {
+    const message = error instanceof ZodError
+      ? error.issues.map((issue) => issue.message).join(" • ")
+      : error instanceof Error ? error.message : "Beklenmeyen hata";
+    logger.error({ error, method: request.method, path: url.pathname }, "GM paneli isteği başarısız");
+    json(response, 400, { error: "REQUEST_FAILED", message });
+  }
+});
+
+server.listen(adminConfig.port, "0.0.0.0", () => {
+  logger.info({ port: adminConfig.port, baseUrl: adminConfig.baseUrl }, "GM Operasyon Masası hazır");
+});
+
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.on(signal, () => {
+    server.close(() => { void adminPool.end().finally(() => process.exit(0)); });
+  });
+}
