@@ -1,13 +1,17 @@
+import "dotenv/config";
 import pg from "pg";
-import { config } from "../config.js";
-import { logger } from "../logger.js";
+import pino from "pino";
+
+const databaseUrl = process.env.DATABASE_URL?.trim();
+if (!databaseUrl) throw new Error("DATABASE_URL ortam değişkeni eksik.");
+const databaseLogger = pino({ level: process.env.LOG_LEVEL?.trim() || "info" });
 
 pg.types.setTypeParser(pg.types.builtins.INT8, (value) => Number(value));
 pg.types.setTypeParser(pg.types.builtins.NUMERIC, (value) => Number(value));
 
 export const pool = new pg.Pool({
-  connectionString: config.DATABASE_URL,
-  ssl: config.DATABASE_URL.includes("localhost") ? false : { rejectUnauthorized: false },
+  connectionString: databaseUrl,
+  ssl: databaseUrl.includes("localhost") ? false : { rejectUnauthorized: false },
   max: 10,
   min: 1,
   idleTimeoutMillis: 30_000,
@@ -16,7 +20,7 @@ export const pool = new pg.Pool({
   keepAliveInitialDelayMillis: 10_000
 });
 
-pool.on("error", (error) => logger.error({ error }, "Boştaki PostgreSQL bağlantısı beklenmedik şekilde kapandı"));
+pool.on("error", (error) => databaseLogger.error({ error }, "Boştaki PostgreSQL bağlantısı beklenmedik şekilde kapandı"));
 
 export type DbClient = pg.PoolClient;
 
@@ -76,7 +80,7 @@ export async function withTransaction<T>(work: (client: DbClient) => Promise<T>)
       if (client && phase !== "CONNECT") {
         try { await client.query("ROLLBACK"); } catch (rollbackError) {
           discardClient = true;
-          logger.warn({ rollbackError, originalError: error }, "PostgreSQL işlemi geri alınırken bağlantı hatası oluştu");
+          databaseLogger.warn({ rollbackError, originalError: error }, "PostgreSQL işlemi geri alınırken bağlantı hatası oluştu");
         }
       }
       if (client && !released) {
@@ -84,7 +88,7 @@ export async function withTransaction<T>(work: (client: DbClient) => Promise<T>)
         released = true;
       }
       if (attempt + 1 < maximumAttempts && isRetryableTransactionError(error, phase)) {
-        logger.warn({ attempt: attempt + 1, phase, code: errorCode(error) }, "Geçici PostgreSQL hatası; işlem güvenli biçimde yeniden deneniyor");
+        databaseLogger.warn({ attempt: attempt + 1, phase, code: errorCode(error) }, "Geçici PostgreSQL hatası; işlem güvenli biçimde yeniden deneniyor");
         await retryDelay(attempt);
         continue;
       }
