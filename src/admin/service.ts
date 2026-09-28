@@ -10,6 +10,12 @@ import {
 import { adminConfig } from "./config.js";
 import { adminPool, withAdminTransaction, type AdminDbClient } from "./db.js";
 import { signValue, verifySignedValue } from "../security/signed-value.js";
+import {
+  auditActionLabel,
+  auditDetailsSummary,
+  auditEntityTypeLabel,
+  collectAuditUuids
+} from "./audit-presenter.js";
 
 const usableUnitTypes = (Object.keys(BATTLE_UNIT_STATS) as BattleUnitType[]).filter((unitType) => unitType !== "militia");
 const usableUnitTypeSet = new Set<string>(usableUnitTypes);
@@ -103,6 +109,71 @@ async function writeAdminAudit(
   );
 }
 
+async function auditEntityNames(ids: string[]): Promise<Map<string, string>> {
+  if (!ids.length) return new Map();
+  const rows = (await adminPool.query<{ id: string; label: string }>(
+    `SELECT DISTINCT ON (entry.id) entry.id,entry.label FROM (
+       SELECT country.id,country.name AS label,1 AS priority
+         FROM countries country WHERE country.guild_id=$1 AND country.id=ANY($2::uuid[])
+       UNION ALL
+       SELECT settlement.id,settlement.name||' ('||country.name||')',2
+         FROM settlements settlement JOIN countries country ON country.id=settlement.country_id
+        WHERE country.guild_id=$1 AND settlement.id=ANY($2::uuid[])
+       UNION ALL
+       SELECT army.id,army.name||' ('||country.name||')',3
+         FROM armies army JOIN countries country ON country.id=army.country_id
+        WHERE army.guild_id=$1 AND army.id=ANY($2::uuid[])
+       UNION ALL
+       SELECT fleet.id,fleet.name||' ('||country.name||')',4
+         FROM fleets fleet JOIN countries country ON country.id=fleet.country_id
+        WHERE fleet.guild_id=$1 AND fleet.id=ANY($2::uuid[])
+       UNION ALL
+       SELECT character.id,character.name||' ('||country.name||')',5
+         FROM country_characters character JOIN countries country ON country.id=character.country_id
+        WHERE country.guild_id=$1 AND character.id=ANY($2::uuid[])
+       UNION ALL
+       SELECT battle.id,'Savaş: '||COALESCE(country_a.name,'A Tarafı')||' — '||COALESCE(country_b.name,'B Tarafı'),6
+         FROM battles battle
+         LEFT JOIN battle_sides side_a ON side_a.battle_id=battle.id AND side_a.side_key='A'
+         LEFT JOIN countries country_a ON country_a.id=side_a.country_id
+         LEFT JOIN battle_sides side_b ON side_b.battle_id=battle.id AND side_b.side_key='B'
+         LEFT JOIN countries country_b ON country_b.id=side_b.country_id
+        WHERE battle.guild_id=$1 AND battle.id=ANY($2::uuid[])
+     ) entry ORDER BY entry.id,entry.priority`,
+    [adminConfig.guildId, ids]
+  )).rows;
+  return new Map(rows.map((row) => [row.id, row.label]));
+}
+
+interface AdminAuditRow {
+  id: string;
+  actor_user_id: string;
+  action: string;
+  entity_type: string;
+  entity_id: string | null;
+  details: unknown;
+  created_at: string;
+}
+
+async function presentAuditRows(rows: AdminAuditRow[]) {
+  const ids = new Set<string>();
+  for (const row of rows) {
+    collectAuditUuids(row.entity_id, ids);
+    collectAuditUuids(row.details, ids);
+  }
+  const names = await auditEntityNames([...ids]);
+  return rows.map((row) => ({
+    id: row.id,
+    actionLabel: auditActionLabel(row.action),
+    entityLabel: row.entity_id && names.has(row.entity_id)
+      ? names.get(row.entity_id)
+      : auditEntityTypeLabel(row.entity_type),
+    actorLabel: row.action.startsWith("admin.panel.") ? "Operasyon Masası yöneticisi" : "Discord işlemi",
+    detailSummary: auditDetailsSummary(row.details, names),
+    created_at: row.created_at
+  }));
+}
+
 function reduceComposition(raw: unknown, unitType: string, amount: number): Record<string, number> {
   const composition = { ...((raw && typeof raw === "object" ? raw : {}) as Record<string, number>) };
   const next = Math.max(0, Number(composition[unitType] ?? 0) - amount);
@@ -189,11 +260,12 @@ export const adminPanelService = {
         ORDER BY army_count DESC,personnel DESC,country.name
         LIMIT 8`, [adminConfig.guildId]
     )).rows;
-    const audit = (await adminPool.query(
+    const auditRows = (await adminPool.query<AdminAuditRow>(
       `SELECT id,actor_user_id,action,entity_type,entity_id,details,created_at
          FROM audit_logs WHERE guild_id=$1 ORDER BY created_at DESC LIMIT 12`,
       [adminConfig.guildId]
     )).rows;
+    const audit = await presentAuditRows(auditRows);
     return { guild, counts, countries, audit };
   },
 
@@ -531,6 +603,103 @@ export const adminPanelService = {
     });
   },
 
+  async cancelCharacterAssignment(actorId: string, characterId: string) {
+    if (!z.string().uuid().safeParse(characterId).success) throw new Error("Geçersiz karakter kimliği.");
+    return withAdminTransaction(async (client) => {
+      const character = (await client.query<{
+        id: string; country_id: string; name: string; country_name: string; assignment: string;
+        character_status: string; actively_captured: boolean;
+      }>(
+        `SELECT character.id,character.country_id,character.name,country.name AS country_name,
+                character.assignment,character.character_status,
+                EXISTS(
+                  SELECT 1 FROM espionage_operations operation
+                  JOIN guilds state ON state.discord_id=operation.guild_id
+                  WHERE operation.spy_character_id=character.id AND operation.status='RESOLVED'
+                    AND operation.captured=TRUE AND operation.executed_at IS NULL
+                    AND operation.return_turn+2>state.current_turn
+                ) AS actively_captured
+           FROM country_characters character JOIN countries country ON country.id=character.country_id
+          WHERE character.id=$1 AND country.guild_id=$2 AND country.status='ACTIVE'
+            AND character.character_status='ACTIVE'
+          FOR UPDATE OF character`,
+        [characterId, adminConfig.guildId]
+      )).rows[0];
+      if (!character) throw new Error("Aktif karakter bulunamadı.");
+      if (character.assignment === "CAPTURED" || character.actively_captured) {
+        throw new Error("Tutsaklık bir karakter görevi değildir; görev iptaliyle kaldırılamaz.");
+      }
+      const state = (await client.query<{ current_turn: number }>(
+        "SELECT current_turn FROM guilds WHERE discord_id=$1 FOR UPDATE", [adminConfig.guildId]
+      )).rows[0];
+      if (!state) throw new Error("Oyun durumu bulunamadı.");
+
+      const merchantOperations = await client.query(
+        `UPDATE merchant_operations SET status='CANCELLED',ended_turn=$1,updated_at=NOW()
+          WHERE merchant_character_id=$2 AND status IN ('PENDING_ACCEPTANCE','TRAVELING','ACTIVE','CONTROLLED') RETURNING id`,
+        [state.current_turn, character.id]
+      );
+      if (merchantOperations.rowCount) {
+        await client.query(
+          "UPDATE purchase_agent_discounts SET consumed_at=NOW() WHERE merchant_character_id=$1 AND consumed_at IS NULL",
+          [character.id]
+        );
+      }
+      const diplomatOperations = await client.query(
+        `UPDATE diplomat_operations SET status='CANCELLED',updated_at=NOW(),
+                completion_text='Yönetici tarafından Operasyon Masası üzerinden iptal edildi.'
+          WHERE diplomat_character_id=$1 AND status IN ('TRAVELING','ACTIVE','PAUSED') RETURNING id`,
+        [character.id]
+      );
+      const espionageOperations = await client.query(
+        "UPDATE espionage_operations SET status='CANCELLED',resolved_at=NOW() WHERE spy_character_id=$1 AND status='TRAVELING' RETURNING id",
+        [character.id]
+      );
+      const assimilationAssignments = await client.query(
+        "DELETE FROM settlement_assimilation_diplomats WHERE character_id=$1 RETURNING settlement_id",
+        [character.id]
+      );
+      const armyCommands = await client.query(
+        "UPDATE armies SET commander_character_id=NULL,updated_at=NOW() WHERE commander_character_id=$1 RETURNING id",
+        [character.id]
+      );
+      const fleetCommands = await client.query(
+        "UPDATE fleets SET commander_character_id=NULL,updated_at=NOW() WHERE commander_character_id=$1 RETURNING id",
+        [character.id]
+      );
+      const battleCommands = await client.query(
+        "UPDATE battle_sides SET chief_commander_character_id=NULL WHERE chief_commander_character_id=$1 RETURNING battle_id",
+        [character.id]
+      );
+      const changed = character.assignment !== "NONE" || Boolean(
+        merchantOperations.rowCount || diplomatOperations.rowCount || espionageOperations.rowCount ||
+        assimilationAssignments.rowCount || armyCommands.rowCount || fleetCommands.rowCount || battleCommands.rowCount
+      );
+      if (!changed) throw new Error("Bu karakterin iptal edilecek etkin görevi bulunmuyor.");
+      await client.query(
+        `UPDATE country_characters
+            SET assignment='NONE',assigned_settlement_id=NULL,protected_character_id=NULL,assignment_ready_turn=NULL
+          WHERE id=$1`,
+        [character.id]
+      );
+      const result = {
+        id: character.id,
+        name: character.name,
+        countryName: character.country_name,
+        previousAssignment: character.assignment,
+        merchantOperations: merchantOperations.rowCount ?? 0,
+        diplomatOperations: diplomatOperations.rowCount ?? 0,
+        espionageOperations: espionageOperations.rowCount ?? 0,
+        assimilationAssignments: assimilationAssignments.rowCount ?? 0,
+        armyCommands: armyCommands.rowCount ?? 0,
+        fleetCommands: fleetCommands.rowCount ?? 0,
+        battleCommands: battleCommands.rowCount ?? 0
+      };
+      await writeAdminAudit(client, actorId, "admin.panel.character.assignment.cancel", "character", character.id, result);
+      return result;
+    });
+  },
+
   async updateArmy(actorId: string, armyId: string, rawInput: unknown) {
     const input = armyUpdateSchema.parse(rawInput);
     return withAdminTransaction(async (client) => {
@@ -698,11 +867,12 @@ export const adminPanelService = {
 
   async audit(limit = 60) {
     const safeLimit = Math.min(200, Math.max(1, Math.floor(limit)));
-    return (await adminPool.query(
+    const rows = (await adminPool.query<AdminAuditRow>(
       `SELECT id,actor_user_id,action,entity_type,entity_id,details,created_at
          FROM audit_logs WHERE guild_id=$1 ORDER BY created_at DESC LIMIT $2`,
       [adminConfig.guildId, safeLimit]
     )).rows;
+    return presentAuditRows(rows);
   },
 
   async previewArmy(actorId: string, rawInput: unknown) {

@@ -172,6 +172,12 @@ const server = createServer(async (request, response) => {
       if (!session) return;
       return json(response, 200, await adminPanelService.updateCharacter(session.sub, characterUpdateMatch[1]!, await body(request)));
     }
+    const characterCancelMatch = request.method === "POST" ? url.pathname.match(/^\/api\/admin\/characters\/([0-9a-f-]+)\/cancel-assignment$/iu) : null;
+    if (characterCancelMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.cancelCharacterAssignment(session.sub, characterCancelMatch[1]!));
+    }
     const armyUpdateMatch = request.method === "PATCH" ? url.pathname.match(/^\/api\/admin\/armies\/([0-9a-f-]+)$/iu) : null;
     if (armyUpdateMatch) {
       const session = requireMutation(request, response);
