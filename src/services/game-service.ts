@@ -40,6 +40,7 @@ interface SettlementRow {
   black_market_active: boolean; epidemic_active: boolean; unrest_active: boolean; rebellion_active: boolean;
   drought_active: boolean; famine_active: boolean; bountiful_harvest_active: boolean; trade_boom_active: boolean;
   migration_wave_active: boolean; master_craftsmen_active: boolean; local_volunteers_active: boolean;
+  tax_rate_percent: number;
 }
 interface BuildingRow { settlement_id: string; building_type: string; level: number; target_level: number | null; status: "ACTIVE" | "BUILDING" | "SABOTAGED"; started_turn: number | null; completion_turn: number | null; sabotaged_until_turn: number | null; sabotage_repair_cost:number }
 interface SettlementIncomePenaltyRow {
@@ -1716,7 +1717,7 @@ export const gameService = {
         const effectiveResources = resourceState?.resources ?? [];
         const economy = calculateCategorizedIncome({
           settlementIncome: 0,
-          taxIncome: populationTaxIncome(settlement.population),
+          taxIncome: populationTaxIncome(settlement.population,Number(settlement.tax_rate_percent)),
           landTradeIncome: settlement.base_land_trade_income,
           seaTradeIncome: 0,
           agreementLandIncome: agreementBonus.land,
@@ -2899,7 +2900,7 @@ export const gameService = {
             const effectiveResources = resourceAccess.get(settlement.id) ?? [];
             const economy = calculateCategorizedIncome({
               settlementIncome: 0,
-              taxIncome: populationTaxIncome(settlement.population),
+              taxIncome: populationTaxIncome(settlement.population,Number(settlement.tax_rate_percent)),
               landTradeIncome: settlement.base_land_trade_income,
               seaTradeIncome: 0,
               agreementLandIncome: agreementBonus.land,

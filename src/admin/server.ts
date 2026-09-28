@@ -124,6 +124,15 @@ const server = createServer(async (request, response) => {
       if (!requireSession(request, response)) return;
       return json(response, 200, await adminPanelService.battles());
     }
+    if (request.method === "GET" && url.pathname === "/api/sieges") {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await adminPanelService.activeSieges());
+    }
+    const armyDetailMatch = request.method === "GET" ? url.pathname.match(/^\/api\/armies\/([0-9a-f-]+)$/iu) : null;
+    if (armyDetailMatch) {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await adminPanelService.army(armyDetailMatch[1]!));
+    }
     const countryMatch = request.method === "GET" ? url.pathname.match(/^\/api\/countries\/([0-9a-f-]+)$/iu) : null;
     if (countryMatch) {
       if (!requireSession(request, response)) return;
@@ -140,6 +149,39 @@ const server = createServer(async (request, response) => {
     if (request.method === "GET" && url.pathname === "/api/catalog/units") {
       if (!requireSession(request, response)) return;
       return json(response, 200, adminPanelService.unitCatalog());
+    }
+    if (request.method === "GET" && url.pathname === "/api/catalog/characters") {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, adminPanelService.characterCatalog());
+    }
+    const countryUpdateMatch = request.method === "PATCH" ? url.pathname.match(/^\/api\/admin\/countries\/([0-9a-f-]+)$/iu) : null;
+    if (countryUpdateMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.updateCountry(session.sub, countryUpdateMatch[1]!, await body(request)));
+    }
+    const settlementUpdateMatch = request.method === "PATCH" ? url.pathname.match(/^\/api\/admin\/settlements\/([0-9a-f-]+)$/iu) : null;
+    if (settlementUpdateMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.updateSettlement(session.sub, settlementUpdateMatch[1]!, await body(request)));
+    }
+    const characterUpdateMatch = request.method === "PATCH" ? url.pathname.match(/^\/api\/admin\/characters\/([0-9a-f-]+)$/iu) : null;
+    if (characterUpdateMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.updateCharacter(session.sub, characterUpdateMatch[1]!, await body(request)));
+    }
+    const armyUpdateMatch = request.method === "PATCH" ? url.pathname.match(/^\/api\/admin\/armies\/([0-9a-f-]+)$/iu) : null;
+    if (armyUpdateMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.updateArmy(session.sub, armyUpdateMatch[1]!, await body(request)));
+    }
+    if (request.method === "POST" && url.pathname === "/api/admin/army-units") {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.updateArmyUnit(session.sub, await body(request)));
     }
     if (request.method === "POST" && url.pathname === "/api/operations/army/preview") {
       const session = requireMutation(request, response);

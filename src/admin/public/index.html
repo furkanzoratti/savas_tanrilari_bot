@@ -66,6 +66,17 @@
     </section>
   </div>
 
+  <div id="editor-modal" class="modal-backdrop" hidden>
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="editor-title">
+      <header class="modal-head"><div><p class="eyebrow">GM DÜZENLEME İŞLEMİ</p><h2 id="editor-title">Kaydı düzenle</h2><p id="editor-subtitle" class="muted"></p></div><button class="icon-button" data-close-editor aria-label="Kapat">×</button></header>
+      <form id="editor-form">
+        <div id="editor-content"></div>
+        <p id="editor-error" class="error" hidden></p>
+        <footer class="modal-actions"><button type="button" class="button" data-close-editor>Vazgeç</button><button id="editor-save" class="button primary" type="submit">Değişiklikleri kaydet</button></footer>
+      </form>
+    </section>
+  </div>
+
   <div id="toast" class="toast" role="status" hidden></div>
   <script src="/app.js" defer></script>
 </body>

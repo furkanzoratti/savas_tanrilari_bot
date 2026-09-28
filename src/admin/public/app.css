@@ -64,6 +64,7 @@ nav { display: grid; gap: 5px; }
 .button:hover { background: var(--surface-2); }
 .button.primary { border-color: var(--accent); background: var(--accent); color: #102017; font-weight: 600; }
 .button.block { width: 100%; }
+.button.compact { min-height: 30px; padding: 5px 9px; font-size: 12px; }
 .button:disabled { opacity: .55; cursor: wait; }
 .kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .card { padding: 16px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); }
@@ -114,6 +115,14 @@ tr[data-country-id]:hover td { background: var(--surface-2); }
 .battle-sides span { font-size: 18px; }
 .battle-sides small, .battle-structure { color: var(--muted); font-size: 12px; }
 .battle-structure { margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--line); }
+.siege-list { display: grid; gap: 12px; }
+.army-unit-editor { display: grid; gap: 7px; }
+.army-unit-line { display: grid; grid-template-columns: minmax(0, 1fr) 160px; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg); }
+.army-unit-line strong, .army-unit-line small { display: block; }
+.army-unit-line small { margin-top: 3px; color: var(--muted); }
+.check-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+label.check { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+label.check input { width: auto; min-height: 0; }
 .empty { padding: 34px 16px; color: var(--muted); text-align: center; }
 .skeleton { min-height: 130px; border-radius: 13px; background: linear-gradient(90deg, var(--surface) 25%, var(--surface-2) 50%, var(--surface) 75%); background-size: 200% 100%; animation: loading 1.25s infinite; }
 @keyframes loading { to { background-position: -200% 0; } }
@@ -160,5 +169,7 @@ input:focus, select:focus { border-color: var(--accent); }
   .data-row { grid-template-columns: 1fr auto; }
   .data-row > :nth-child(2), .data-row > :nth-child(3) { display: none; }
   .unit-row { grid-template-columns: 1fr 100px 38px; }
+  .army-unit-line { grid-template-columns: 1fr 110px; }
+  .check-grid { grid-template-columns: 1fr; }
   .compact-grid { grid-template-columns: 1fr; }
 }

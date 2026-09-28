@@ -8,6 +8,11 @@ describe("ikinci sürüm yerleşke ekonomisi", () => {
     expect(populationTaxIncome(50_000)).toBe(1_500);
   });
 
+  it("yerleşkeye özel vergi oranını uygular", () => {
+    expect(populationTaxIncome(100_000, 5)).toBe(5_000);
+    expect(populationTaxIncome(80_000, 2.5)).toBe(2_000);
+  });
+
   it("bina yüzdesini şehrin tüm gelir tabanına uygular ve bina kalemine yazar", () => {
     const result = calculateCategorizedIncome({
       settlementIncome: 0,

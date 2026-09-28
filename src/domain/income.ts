@@ -41,8 +41,8 @@ export function applyIncomePenalty(value: IncomeBreakdown, penaltyPercent: numbe
   return scaleIncome(value, (100 - normalizedPercent) / 100);
 }
 
-export function populationTaxIncome(population: number): number {
-  return Math.max(0, Math.floor(population * 0.03));
+export function populationTaxIncome(population: number, taxRatePercent = 3): number {
+  return Math.max(0, Math.floor(population * Math.max(0, taxRatePercent) / 100));
 }
 
 export function calculateCategorizedIncome(input: {
