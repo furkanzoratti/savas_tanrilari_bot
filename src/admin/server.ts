@@ -13,6 +13,7 @@ import {
   type AdminSession
 } from "./auth.js";
 import { adminPanelService } from "./service.js";
+import { aiCountryGovernanceService } from "../services/ai-country-governance-service.js";
 
 const logger = pino({ level: adminConfig.logLevel });
 const publicFiles = {
@@ -150,6 +151,20 @@ const server = createServer(async (request, response) => {
       if (!requireSession(request, response)) return;
       return json(response, 200, await adminPanelService.audit(Number(url.searchParams.get("limit") ?? 60)));
     }
+    if (request.method === "GET" && url.pathname === "/api/ai-governance") {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await aiCountryGovernanceService.dashboard());
+    }
+    const aiObservationMatch = request.method === "GET" ? url.pathname.match(/^\/api\/ai-governance\/countries\/([0-9a-f-]+)\/observation$/iu) : null;
+    if (aiObservationMatch) {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await aiCountryGovernanceService.observation(aiObservationMatch[1]!));
+    }
+    const aiPlanMatch = request.method === "GET" ? url.pathname.match(/^\/api\/ai-governance\/plans\/([0-9a-f-]+)$/iu) : null;
+    if (aiPlanMatch) {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await aiCountryGovernanceService.plan(aiPlanMatch[1]!));
+    }
     if (request.method === "GET" && url.pathname === "/api/catalog/units") {
       if (!requireSession(request, response)) return;
       return json(response, 200, adminPanelService.unitCatalog());
@@ -175,6 +190,29 @@ const server = createServer(async (request, response) => {
       const session = requireMutation(request, response);
       if (!session) return;
       return json(response, 200, await adminPanelService.updateCharacter(session.sub, characterUpdateMatch[1]!, await body(request)));
+    }
+    const aiProfileMatch = request.method === "PATCH" ? url.pathname.match(/^\/api\/admin\/ai-governance\/countries\/([0-9a-f-]+)$/iu) : null;
+    if (aiProfileMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await aiCountryGovernanceService.saveProfile(session.sub, aiProfileMatch[1]!, await body(request)));
+    }
+    if (request.method === "PATCH" && url.pathname === "/api/admin/ai-governance/settings") {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await aiCountryGovernanceService.setTestMode(session.sub, await body(request)));
+    }
+    const aiDraftMatch = request.method === "POST" ? url.pathname.match(/^\/api\/admin\/ai-governance\/countries\/([0-9a-f-]+)\/generate-draft$/iu) : null;
+    if (aiDraftMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await aiCountryGovernanceService.generateDraft(session.sub, aiDraftMatch[1]!));
+    }
+    const aiReviewMatch = request.method === "POST" ? url.pathname.match(/^\/api\/admin\/ai-governance\/plans\/([0-9a-f-]+)\/review$/iu) : null;
+    if (aiReviewMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await aiCountryGovernanceService.reviewPlan(session.sub, aiReviewMatch[1]!, await body(request)));
     }
     const characterCancelMatch = request.method === "POST" ? url.pathname.match(/^\/api\/admin\/characters\/([0-9a-f-]+)\/cancel-assignment$/iu) : null;
     if (characterCancelMatch) {

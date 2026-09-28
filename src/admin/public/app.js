@@ -51,6 +51,21 @@ const battleStatusLabels = {
   DRAFT: "Taslak", WAITING_FIRST_ROLL: "İlk zar bekleniyor", WAITING_SECOND_ROLL: "İkinci zar bekleniyor",
   READY_TO_RESOLVE: "Çözümleme hazır", FINISHED: "Tamamlandı", CANCELLED: "İptal edildi"
 };
+const aiPlanStatusLabels = {
+  DRAFT: "İnceleme bekliyor", APPROVED: "Manuel uygulamaya uygun", REJECTED: "Reddedildi",
+  SEALED: "Mühürlendi", VALIDATED: "Doğrulandı", EXECUTED: "Uygulandı", EXPIRED: "Süresi doldu"
+};
+const aiOrderCategoryLabels = { ECONOMY: "Ekonomi", MILITARY: "Kara ordusu", NAVAL: "Donanma", DIPLOMACY: "Diplomasi", CHARACTER: "Karakter" };
+const aiOrderKindLabels = {
+  HOLD_RESERVE: "Rezervi koru", CONSTRUCT: "Bina inşa et", RECRUIT: "Asker al", BUILD_SHIP: "Gemi üret",
+  TRANSFER_TREASURY: "Hazine aktar", HIRE_MERCENARY: "Paralı asker kirala", REPAIR_FLEET: "Filoyu onar",
+  MOVE_ARMY: "Orduyu hareket ettir", MOVE_FLEET: "Filoyu hareket ettir", DEFEND: "Savun", REINFORCE: "Takviye et",
+  BESIEGE: "Kuşatma başlat", BLOCKADE: "Abluka kur", RAID: "Yağma yap", DISEMBARK: "Çıkarma yap",
+  ASSIGN_CHARACTER: "Karakter görevlendir", PROPOSE_TRADE: "Ticaret öner", PROPOSE_ALLIANCE: "İttifak öner",
+  PROPOSE_PACT: "Pakt öner", PROPOSE_PEACE: "Barış öner", DECLARE_WAR: "Savaş ilanı öner", NO_ACTION: "Hamle yapma"
+};
+const aiBattlePostureLabels = { AGGRESSIVE: "Saldırgan", BALANCED: "Dengeli", CAUTIOUS: "Temkinli", WITHDRAW: "Geri çekil" };
+const aiNavalOrderLabels = { BALANCED: "Dengeli", RAM: "Mahmuz hücumu", DEFENSIVE: "Savunma düzeni", FLANK: "Kanat manevrası", RETREAT: "Geri çekil", CONTROLLED_RETREAT: "Kontrollü geri çekil" };
 const siegePhaseLabels = { BOMBARDMENT: "Bombardıman", ASSAULT: "Hücum" };
 const roleLabel = (row) => row.is_admiral ? "Amiral" : (roleLabels[row.role] || row.role);
 const characterStatusLabel = (value) => characterStatusLabels[value] || value;
@@ -215,6 +230,131 @@ async function battlesPage() {
   }));
 }
 
+async function aiGovernancePage() {
+  setActiveRoute("ai-governance"); loading();
+  const data = await api("/api/ai-governance");
+  const playerless = data.countries.filter((country) => Number(country.player_count) === 0).length;
+  const candidates = data.countries.filter((country) => country.profile_enabled).length;
+  const testModeEnabled = data.settings.enabled === true;
+  page.innerHTML = `<div class="page-head"><div><h1>Yapay Zekâ Devletleri</h1><p>Oyuncusuz devletler için ülkeye özel, sınırlı ve denetlenebilir karar altyapısı</p></div><div class="actions"><span class="pill ${testModeEnabled ? "" : "warning"}">${testModeEnabled ? "Test modu açık" : "Test modu kapalı"}</span><span class="pill neutral">${number(candidates)} aday / ${number(playerless)} oyuncusuz</span><button class="button ${testModeEnabled ? "danger" : "primary"}" data-toggle-ai-global>${testModeEnabled ? "Test modunu kapat" : "Test modunu aç"}</button></div></div>
+    <section class="card ai-safety-banner"><div><strong>Hiçbir oyun emri otomatik uygulanmıyor.</strong><p>Test modu yalnız sen düğmeye bastığında taslak üretimine izin verir. Zamanlanmış planlama ve emir yürütme daima kapalıdır. AI yalnız seçilen ülkenin kendi kayıtlarını, kamuya açık diplomasiyi, katıldığı savaşları ve o ülkeye teslim edilmiş istihbaratı görebilir.</p></div><div class="ai-safety-grid"><span>Model<br><strong>${escapeHtml(data.settings.model)}</strong></span><span>API<br><strong>${data.apiConfigured ? "Hazır" : "Anahtar bekliyor"}</strong></span><span>Manuel taslak<br><strong>${testModeEnabled ? "Açık" : "Kapalı"}</strong></span><span>Emir yürütme<br><strong>Kapalı</strong></span></div></section>
+    <section class="card table-wrap section-gap"><table><thead><tr><th>Devlet</th><th>Oyuncu</th><th>Doktrin</th><th>Karakter</th><th>Son taslak</th><th>Durum</th><th></th></tr></thead><tbody>${data.countries.map((country) => {
+      const doctrine = data.doctrines[country.doctrine] || { label: country.doctrine };
+      const playerCount = Number(country.player_count);
+      const planStatus = aiPlanStatusLabels[country.latest_plan_status] || country.latest_plan_status;
+      const countryEnabled = testModeEnabled && country.profile_enabled;
+      return `<tr><td><strong>${escapeHtml(country.name)}</strong><small>${escapeHtml(country.strategic_goals || "Stratejik hedef girilmedi")}</small></td><td>${playerCount ? `<span class="pill warning">${number(playerCount)} oyuncu</span>` : '<span class="pill neutral">Oyuncusuz</span>'}</td><td>${escapeHtml(doctrine.label)}</td><td>Saldırganlık ${number(country.aggression)}<small>Risk ${number(country.risk_tolerance)} · Rezerv %${number(country.reserve_percent)}</small></td><td>${country.latest_plan_id ? `<strong>Tur ${number(country.latest_plan_turn)} · ${escapeHtml(planStatus)}</strong><small>${escapeHtml(country.latest_plan_summary || "Özet yok")}</small>${country.latest_plan_review_note ? `<small>İnceleme: ${escapeHtml(country.latest_plan_review_note)}</small>` : ""}` : "Taslak yok"}</td><td><span class="pill ${countryEnabled ? "" : "neutral"}">${countryEnabled ? "AI açık" : country.profile_enabled ? "Test modu kapalı" : "AI kapalı"}</span></td><td><div class="row-actions"><button class="button compact" data-edit-ai-country="${country.id}">Profil</button>${country.latest_plan_id ? `<button class="button compact" data-review-ai-plan="${country.latest_plan_id}">Planı incele</button>` : ""}${playerCount === 0 ? `<button class="button compact ${country.profile_enabled ? "danger" : ""}" data-toggle-ai-country="${country.id}">${country.profile_enabled ? "Ülkeyi kapat" : "Ülkeyi aç"}</button><button class="button compact" data-inspect-ai-country="${country.id}">Görünür veri</button><button class="button compact primary" data-generate-ai-country="${country.id}" ${!data.apiConfigured || !country.profile_enabled || !testModeEnabled ? "disabled" : ""}>Taslak üret</button>` : ""}</div></td></tr>`;
+    }).join("") || '<tr><td colspan="7" class="empty">Aktif devlet bulunmuyor.</td></tr>'}</tbody></table></section>`;
+  document.querySelectorAll("[data-edit-ai-country]").forEach((button) => button.addEventListener("click", () => {
+    const country = data.countries.find((item) => item.id === button.dataset.editAiCountry);
+    if (country) openAiCountryEditor(country, data.doctrines);
+  }));
+  document.querySelector("[data-toggle-ai-global]").addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    const nextEnabled = !testModeEnabled;
+    if (!window.confirm(`AI test modu ${nextEnabled ? "açılsın" : "kapatılsın"} mı? Bu işlem otomatik oyun emri oluşturmaz.`)) return;
+    button.disabled = true;
+    try {
+      await api("/api/admin/ai-governance/settings", { method: "PATCH", body: JSON.stringify({ enabled: nextEnabled }) });
+      toast(`AI test modu ${nextEnabled ? "açıldı" : "kapatıldı"}; otomatik emir yürütme kapalı kaldı.`);
+      await aiGovernancePage();
+    } catch (error) { toast(error.message, "error"); button.disabled = false; }
+  });
+  document.querySelectorAll("[data-toggle-ai-country]").forEach((button) => button.addEventListener("click", async () => {
+    const country = data.countries.find((item) => item.id === button.dataset.toggleAiCountry);
+    if (!country) return;
+    const enabled = !country.profile_enabled;
+    button.disabled = true;
+    try {
+      await api(`/api/admin/ai-governance/countries/${country.id}`, { method: "PATCH", body: JSON.stringify({
+        enabled, doctrine: country.doctrine, aggression: Number(country.aggression), riskTolerance: Number(country.risk_tolerance),
+        reservePercent: Number(country.reserve_percent), strategicGoals: country.strategic_goals || "", customInstructions: country.custom_instructions || ""
+      }) });
+      toast(`${country.name} için AI taslak üretimi ${enabled ? "açıldı" : "kapatıldı"}; hiçbir emir uygulanmadı.`);
+      await aiGovernancePage();
+    } catch (error) { toast(error.message, "error"); button.disabled = false; }
+  }));
+  document.querySelectorAll("[data-review-ai-plan]").forEach((button) => button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      const record = await api(`/api/ai-governance/plans/${button.dataset.reviewAiPlan}`);
+      openAiPlanReport(record);
+    } catch (error) { toast(error.message, "error"); }
+    finally { button.disabled = false; }
+  }));
+  document.querySelectorAll("[data-inspect-ai-country]").forEach((button) => button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      const observation = await api(`/api/ai-governance/countries/${button.dataset.inspectAiCountry}/observation`);
+      const country = data.countries.find((item) => item.id === button.dataset.inspectAiCountry);
+      openEditor("AI görünür veri özeti", `${country?.name || "Devlet"} · düşmanların gizli kayıtları dahil değildir`, `<div class="detail-grid"><div class="detail-cell"><span>Tur</span><strong>${number(observation.turn)}</strong></div><div class="detail-cell"><span>Yerleşke</span><strong>${number(observation.settlements.length)}</strong></div><div class="detail-cell"><span>Ordu / Filo</span><strong>${number(observation.armies.length)} / ${number(observation.fleets.length)}</strong></div><div class="detail-cell"><span>İstihbarat</span><strong>${number(observation.intelligenceReports.length)}</strong></div></div><pre class="json-preview">${escapeHtml(JSON.stringify(observation, null, 2))}</pre>`, async () => closeEditor());
+      document.getElementById("editor-save").textContent = "Kapat";
+    } catch (error) { toast(error.message, "error"); }
+    finally { button.disabled = false; }
+  }));
+  document.querySelectorAll("[data-generate-ai-country]").forEach((button) => button.addEventListener("click", async () => {
+    const country = data.countries.find((item) => item.id === button.dataset.generateAiCountry);
+    if (!country || !window.confirm(`${country.name} için yalnızca TASLAK plan üretilecek. Hiçbir emir uygulanmayacak. Devam edilsin mi?`)) return;
+    button.disabled = true; button.textContent = "Üretiliyor…";
+    try {
+      const result = await api(`/api/admin/ai-governance/countries/${country.id}/generate-draft`, { method: "POST" });
+      toast(`${country.name}: Tur ${number(result.game_turn)} taslağı oluşturuldu; hiçbir emir uygulanmadı.`);
+      await aiGovernancePage();
+    } catch (error) { toast(error.message, "error"); button.disabled = false; button.textContent = "Taslak üret"; }
+  }));
+}
+
+function openAiPlanReport(record) {
+  const plan = record.plan || {};
+  const observation = record.observation || {};
+  const references = new Map();
+  const addReferences = (rows, prefix = "") => (rows || []).forEach((row) => {
+    if (row?.id) references.set(row.id, `${prefix}${row.name || row.opponent_country_name || row.id}`);
+  });
+  addReferences(observation.publicCountries);
+  if (observation.country?.id) references.set(observation.country.id, observation.country.name);
+  addReferences(observation.settlements, "Yerleşke: ");
+  addReferences(observation.armies, "Ordu: ");
+  addReferences(observation.fleets, "Filo: ");
+  addReferences(observation.characters, "Karakter: ");
+  (observation.visibleBattles || []).forEach((battle) => references.set(battle.id, `Savaş: ${observation.country?.name || "Yönetilen devlet"} — ${battle.opponent_country_name || "bilinmeyen taraf"}`));
+  const refLabel = (value) => value ? (references.get(value) || value) : "—";
+  const list = (items, empty) => items?.length ? `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : `<p class="muted">${empty}</p>`;
+  const orders = (plan.orders || []).map((order, index) => `<article class="ai-order-card"><div class="ai-order-head"><div><span>${escapeHtml(aiOrderCategoryLabels[order.category] || order.category)}</span><strong>${index + 1}. ${escapeHtml(aiOrderKindLabels[order.kind] || order.kind)}</strong></div><span class="ai-priority">Öncelik ${number(order.priority)}/5</span></div><div class="ai-order-route"><span><small>Kaynak</small>${escapeHtml(refLabel(order.sourceRef))}</span><span><small>Hedef</small>${escapeHtml(refLabel(order.targetRef))}</span>${order.amount !== null && order.amount !== undefined ? `<span><small>Miktar</small>${number(order.amount)}</span>` : ""}</div><p><strong>Gerekçe:</strong> ${escapeHtml(order.reason)}</p>${order.condition ? `<p><strong>Koşul:</strong> ${escapeHtml(order.condition)}</p>` : ""}</article>`).join("") || '<div class="empty">AI bu tur için işlem önermedi.</div>';
+  const policies = (plan.battlePolicies || []).map((policy) => `<article class="ai-order-card"><div class="ai-order-head"><div><span>Savaş planı</span><strong>${escapeHtml(refLabel(policy.battleId))}</strong></div><span class="ai-priority">${escapeHtml(aiBattlePostureLabels[policy.posture] || policy.posture)}</span></div><p><strong>Geri çekilme ölçütü:</strong> ${escapeHtml(policy.retreatRule)}</p>${policy.preferredNavalOrder ? `<p><strong>Deniz manevrası:</strong> ${escapeHtml(aiNavalOrderLabels[policy.preferredNavalOrder] || policy.preferredNavalOrder)}</p>` : ""}<p><strong>Gerekçe:</strong> ${escapeHtml(policy.reason)}</p></article>`).join("") || '<div class="empty">Aktif savaşa özel öneri yok.</div>';
+  const validationErrors = record.validation?.errors || [];
+  const status = aiPlanStatusLabels[record.status] || record.status;
+  const reviewable = ["DRAFT", "APPROVED", "REJECTED"].includes(record.status);
+  openEditor("AI hamle raporu", `${record.country_name} · Tur ${number(record.game_turn)} · ${status}`, `<div class="preview-warning ai-plan-boundary"><strong>Yalnız öneri — oyun emri değildir</strong><span>Bu rapor hiçbir komut oluşturmaz ve oyun verisini değiştirmez. “Manuel uygulamaya uygun” kararı yalnız senin inceleme notundur; hamleyi istersen daha sonra kendin uygularsın.</span></div><div class="detail-grid ai-plan-facts"><div class="detail-cell"><span>Durum</span><strong>${escapeHtml(status)}</strong></div><div class="detail-cell"><span>Tur / Sürüm</span><strong>${number(record.game_turn)} / ${number(record.revision)}</strong></div><div class="detail-cell"><span>Model</span><strong>${escapeHtml(record.model)}</strong></div><div class="detail-cell"><span>Doğrulama</span><strong>${record.validation?.valid ? "Geçti" : "Hatalı"}</strong></div></div><section class="ai-plan-section"><h3>Genel plan</h3><p>${escapeHtml(plan.summary || "Özet yok.")}</p></section><section class="ai-plan-section"><h3>Stratejik değerlendirme</h3>${list(plan.strategicAssessment, "Değerlendirme yok.")}</section><section class="ai-plan-section"><div class="section-head"><strong>Önerilen hamleler</strong><span>${number(plan.orders?.length)} öneri</span></div><div class="ai-order-list">${orders}</div></section><section class="ai-plan-section"><div class="section-head"><strong>Savaş yaklaşımı</strong><span>${number(plan.battlePolicies?.length)} savaş</span></div><div class="ai-order-list">${policies}</div></section><div class="ai-plan-two-columns"><section class="ai-plan-section"><h3>Riskler</h3>${list(plan.risks, "Belirtilen risk yok.")}</section><section class="ai-plan-section"><h3>Sonraki tur hedefleri</h3>${list(plan.nextTurnGoals, "Sonraki tur hedefi yok.")}</section></div>${validationErrors.length ? `<section class="ai-plan-section error"><h3>Doğrulama hataları</h3>${list(validationErrors, "")}</section>` : ""}<label>İnceleme notu<textarea id="ai-review-note" maxlength="2000" rows="3" placeholder="Neden uygun bulduğunu veya reddettiğini yazabilirsin.">${escapeHtml(record.review_note || "")}</textarea></label>${reviewable ? `<div class="ai-review-actions"><button type="button" class="button danger" data-ai-review="REJECT">Reddet</button><button type="button" class="button primary" data-ai-review="APPROVE" ${record.validation?.valid ? "" : "disabled"}>Manuel uygulamaya uygun</button></div>` : ""}`, async () => closeEditor());
+  document.getElementById("editor-save").textContent = "Kapat";
+  document.querySelectorAll("[data-ai-review]").forEach((button) => button.addEventListener("click", async () => {
+    const decision = button.dataset.aiReview;
+    button.disabled = true;
+    try {
+      await api(`/api/admin/ai-governance/plans/${record.id}/review`, { method: "POST", body: JSON.stringify({ decision, note: document.getElementById("ai-review-note").value }) });
+      closeEditor();
+      toast(decision === "APPROVE" ? "Plan manuel uygulamaya uygun işaretlendi; hiçbir oyun emri uygulanmadı." : "Plan reddedildi; hiçbir oyun emri uygulanmadı.");
+      await aiGovernancePage();
+    } catch (error) { toast(error.message, "error"); button.disabled = false; }
+  }));
+}
+
+function openAiCountryEditor(country, doctrines) {
+  const doctrineOptions = Object.entries(doctrines).map(([value, item]) => `<option value="${value}" ${selected(value, country.doctrine)}>${escapeHtml(item.label)}</option>`).join("");
+  openEditor("AI devlet profilini düzenle", `${country.name} · yalnız manuel taslak üretimini ayarlar`, `<label class="check"><input id="edit-ai-enabled" type="checkbox" ${country.profile_enabled ? "checked" : ""} ${Number(country.player_count) > 0 ? "disabled" : ""}> Bu ülke için AI taslak üretimini aç</label><div class="form-grid"><label>Doktrin<select id="edit-ai-doctrine">${doctrineOptions}</select></label><label>Hazine rezervi (%)<input id="edit-ai-reserve" type="number" min="0" max="100" step="1" value="${Number(country.reserve_percent)}"></label><label>Saldırganlık (0–100)<input id="edit-ai-aggression" type="number" min="0" max="100" step="1" value="${Number(country.aggression)}"></label><label>Risk toleransı (0–100)<input id="edit-ai-risk" type="number" min="0" max="100" step="1" value="${Number(country.risk_tolerance)}"></label></div><label>Uzun vadeli stratejik hedefler<textarea id="edit-ai-goals" maxlength="2000" rows="4" placeholder="Örn. Ege adalarını koru; kara savaşından kaçın…">${escapeHtml(country.strategic_goals || "")}</textarea></label><label>Ülke karakteri ve özel sınırlar<textarea id="edit-ai-instructions" maxlength="4000" rows="5" placeholder="Örn. Antlaşmaları kolay bozma; sivillere karşı yağma yapma…">${escapeHtml(country.custom_instructions || "")}</textarea><small>Bu alan yalnız ülkenin oyun kişiliğini tanımlar; oyun kurallarını geçersiz kılamaz.</small></label><div class="preview-warning"><strong>Test sınırı</strong><span>Bu ayar yalnız senin başlatacağın taslak üretimini açar. Zamanlanmış planlama ve oyun emri yürütme kapalı kalır.</span></div>`, async () => {
+    await api(`/api/admin/ai-governance/countries/${country.id}`, { method: "PATCH", body: JSON.stringify({
+      enabled: document.getElementById("edit-ai-enabled").checked,
+      doctrine: document.getElementById("edit-ai-doctrine").value,
+      aggression: Number(document.getElementById("edit-ai-aggression").value),
+      riskTolerance: Number(document.getElementById("edit-ai-risk").value),
+      reservePercent: Number(document.getElementById("edit-ai-reserve").value),
+      strategicGoals: document.getElementById("edit-ai-goals").value,
+      customInstructions: document.getElementById("edit-ai-instructions").value
+    }) });
+    closeEditor(); toast(`${country.name} AI profili kaydedildi; otomatik emir yürütme kapalı kaldı.`); await aiGovernancePage();
+  });
+}
+
 function showPageError(error) {
   page.innerHTML = `<div class="card error"><strong>Veri yüklenemedi.</strong><br>${escapeHtml(error.message)}</div>`;
 }
@@ -233,6 +373,10 @@ function openEditor(title, subtitle, content, submit) {
   document.getElementById("editor-subtitle").textContent = subtitle || "";
   document.getElementById("editor-content").innerHTML = content;
   document.getElementById("editor-error").hidden = true;
+  const saveButton = document.getElementById("editor-save");
+  saveButton.hidden = false;
+  saveButton.disabled = false;
+  saveButton.textContent = "Değişiklikleri kaydet";
   editorModal.hidden = false;
   document.body.style.overflow = "hidden";
 }
@@ -328,6 +472,7 @@ async function navigate(route) {
     if (route === "armies") return forcesPage();
     if (route === "characters") return charactersPage();
     if (route === "assignments") return assignmentsPage();
+    if (route === "ai-governance") return aiGovernancePage();
     if (route === "battles") return battlesPage();
     if (route === "audit") return auditPage();
     return overview();

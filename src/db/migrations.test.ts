@@ -298,3 +298,18 @@ describe("doksanıncı migration", () => {
     expect(migration?.sql).toContain("'SOUTHEAST_ASIAN'");
   });
 });
+
+describe("doksan sekizinci migration", () => {
+  const migration = migrations.find((item) => item.version === 98);
+
+  it("AI devlet yönetimini kapalı ve mühürlenebilir plan kayıtlarıyla kurar", () => {
+    expect(migration?.name).toBe("sealed_ai_country_governance");
+    expect(migration?.sql).toContain("enabled BOOLEAN NOT NULL DEFAULT FALSE");
+    expect(migration?.sql).toContain("automatic_execution BOOLEAN NOT NULL DEFAULT FALSE");
+    expect(migration?.sql).toContain("CREATE TABLE IF NOT EXISTS ai_country_turn_plans");
+    expect(migration?.sql).toContain("plan_hash TEXT NOT NULL");
+    expect(migration?.sql).toContain("'APPROVED'");
+    expect(migration?.sql).toContain("reviewed_at TIMESTAMPTZ");
+    expect(migration?.sql).toContain("review_note TEXT");
+  });
+});

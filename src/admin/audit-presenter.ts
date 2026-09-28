@@ -6,6 +6,10 @@ const ACTION_LABELS: Record<string, string> = {
   "admin.panel.army.update": "Ordu bilgileri güncellendi",
   "admin.panel.army.unit.update": "Ordu mevcudu güncellendi",
   "admin.panel.army.create": "Yeni ordu oluşturuldu",
+  "admin.panel.ai.profile.update": "AI devlet profili güncellendi",
+  "admin.panel.ai.test_mode.update": "AI test modu güncellendi",
+  "admin.panel.ai.plan.generate": "AI devlet planı taslağı üretildi",
+  "admin.panel.ai.plan.review": "AI devlet planı incelendi",
   "CHARACTER_ASSIGN": "Karakter görevlendirildi",
   "CHARACTER_UNASSIGN": "Karakter görevi kaldırıldı",
   "ACADEMY_CHARACTER_CREATE": "Akademi karakteri oluşturuldu",
@@ -65,7 +69,12 @@ const FIELD_LABELS: Record<string, string> = {
   unitType: "Birlik", quantity: "Yeni mevcut", previousQuantity: "Önceki mevcut", settlementId: "Yerleşke",
   targetSettlementId: "Hedef yerleşke", targetCountryId: "Hedef devlet", countryId: "Devlet",
   armyId: "Ordu", fleetId: "Filo", commanderId: "Komutan", characterId: "Karakter",
-  side: "Taraf", terrain: "Savaş türü", total: "Toplam", loot: "Yağmalanan altın"
+  side: "Taraf", terrain: "Savaş türü", total: "Toplam", loot: "Yağmalanan altın",
+  aggression: "Saldırganlık", riskTolerance: "Risk toleransı",
+  reservePercent: "Hazine rezervi", strategicGoals: "Stratejik hedefler", enabled: "Planlamaya hazır",
+  testModeEnabled: "AI test modu", automaticPlanning: "Otomatik planlama", automaticExecution: "Otomatik yürütme",
+  turn: "Tur", revision: "Taslak sürümü", status: "Taslak durumu", model: "Model",
+  executionApplied: "Oyun emri uygulandı", decision: "İnceleme kararı", reviewNote: "İnceleme notu"
 };
 
 const VALUE_LABELS: Record<string, string> = {

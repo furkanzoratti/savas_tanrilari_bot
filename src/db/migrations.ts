@@ -27,6 +27,7 @@ import { pontusSinopArmyRestorationMigration } from "./pontus-sinop-army-restora
 import { adminPanelMigration } from "./admin-panel-migration.js";
 import { adminPanelLoginMigration } from "./admin-panel-login-migration.js";
 import { adminPanelControlsMigration } from "./admin-panel-controls-migration.js";
+import { aiCountryGovernanceMigration } from "./ai-country-governance-migration.js";
 
 export const migrations = [
   {
@@ -2271,5 +2272,6 @@ export const migrations = [
   pontusSinopArmyRestorationMigration,
   adminPanelMigration,
   adminPanelLoginMigration,
-  adminPanelControlsMigration
+  adminPanelControlsMigration,
+  aiCountryGovernanceMigration
 ] as const;
