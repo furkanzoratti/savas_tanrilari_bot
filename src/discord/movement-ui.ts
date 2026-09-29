@@ -1,4 +1,4 @@
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ModalBuilder,
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, ModalBuilder,
   StringSelectMenuBuilder, TextInputBuilder, TextInputStyle,
   type ButtonInteraction, type ChatInputCommandInteraction, type ModalSubmitInteraction,
   type StringSelectMenuInteraction } from "discord.js";
@@ -34,7 +34,7 @@ function coordinate(value: string): string {
 
 export async function handleMovementCommand(interaction: ChatInputCommandInteraction): Promise<void> {
   if (!interaction.guildId) throw new GameError("Hareket komutları yalnızca bir sunucuda kullanılabilir.");
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
   const sub = interaction.options.getSubcommand();
 

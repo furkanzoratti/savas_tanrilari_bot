@@ -144,7 +144,9 @@ export const armyService = {
     const client = await pool.connect();
     try {
       const ids = (await client.query<{ id: string }>("SELECT id FROM armies WHERE country_id=$1 ORDER BY created_at,name", [countryId])).rows;
-      return Promise.all(ids.map((row) => loadArmy(client, row.id, countryId)));
+      const armies: ArmyView[] = [];
+      for (const row of ids) armies.push(await loadArmy(client, row.id, countryId));
+      return armies;
     } finally { client.release(); }
   },
 
@@ -228,7 +230,9 @@ export const armyService = {
           ORDER BY a.created_at,a.name`,
         [battleId, countryId, guildId]
       )).rows;
-      return Promise.all(ids.map((row) => loadArmy(client, row.id, countryId)));
+      const armies: ArmyView[] = [];
+      for (const row of ids) armies.push(await loadArmy(client, row.id, countryId));
+      return armies;
     } finally { client.release(); }
   },
 

@@ -1,5 +1,5 @@
 import {
-  ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, LabelBuilder, ModalBuilder,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, LabelBuilder, MessageFlags, ModalBuilder,
   StringSelectMenuBuilder, TextDisplayBuilder, TextInputBuilder, TextInputStyle,
   type ButtonInteraction, type ChatInputCommandInteraction, type ModalSubmitInteraction, type StringSelectMenuInteraction
 } from "discord.js";
@@ -343,7 +343,7 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
   if (subcommand === "panel") {
     if (!isGameMaster(interaction)) throw new GameError("Büyük Oyunlar yönetim panelini yalnızca oyun yöneticisi açabilir.");
     await greatGamesService.openSeason(interaction.guildId, interaction.user.id);
-    await interaction.reply({ ...(await adminDashboardPayload(interaction.guildId)), ephemeral: true });
+    await interaction.reply({ ...(await adminDashboardPayload(interaction.guildId)), flags: MessageFlags.Ephemeral });
     return true;
   }
   if (subcommand === "katilimci-ulkeler") {
@@ -351,7 +351,7 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
     const wallets = await greatGamesWalletService.listParticipants(interaction.guildId);
     if (!wallets.length) throw new GameError("Büyük Oyunlara katılmış devlet bulunmuyor.");
     const lines = wallets.map((wallet, index) => `${index + 1}. **${wallet.country_name}** — ${gold(Number(wallet.balance))}${wallet.closed_at ? " • Kapalı" : " • Açık"}`);
-    await interaction.reply({ embeds: [new EmbedBuilder().setColor(0xd6ad3c).setTitle("🏛️ Büyük Oyunlar • Katılımcı Ülkeler").setDescription(clip(lines.join("\n"), 3_900))], ephemeral: true });
+    await interaction.reply({ embeds: [new EmbedBuilder().setColor(0xd6ad3c).setTitle("🏛️ Büyük Oyunlar • Katılımcı Ülkeler").setDescription(clip(lines.join("\n"), 3_900))], flags: MessageFlags.Ephemeral });
     return true;
   }
   if (subcommand === "puan-durumu") {
@@ -370,13 +370,13 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
         .setTitle("🏆 Büyük Oyunlar • Puan Durumu")
         .setDescription(clip(`💰 **Müzayede Ödül Havuzu:** ${gold(Number(dashboard.season?.prize_pool ?? 0))}\nKapanışta genel sıralamanın ilk üçüne %50 / %30 / %20 dağıtılır.\n\n${lines.join("\n\n")}`, 3_900))
         .setFooter({ text: "Puanlar oyunlar sonuçlandırıldığında kalıcı olarak kaydedilir; ödül dağıtımı yalnızca yönetici kapanışında yapılır." })],
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
     return true;
   }
   if (subcommand === "cuzdan-bonusu") {
     if (!isGameMaster(interaction)) throw new GameError("Bu komut yalnızca oyun yöneticileri tarafından kullanılabilir.");
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const result = await greatGamesWalletService.grantAuctionBonus(interaction.guildId, `discord:${interaction.id}`);
     await interaction.editReply(
       `💰 **Müzayede cüzdan bonusu tamamlandı.**\n` +
@@ -395,7 +395,7 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
   }
   if (subcommand === "cuzdan-onar") {
     if (!isGameMaster(interaction)) throw new GameError("Bu komut yalnızca oyun yöneticileri tarafından kullanılabilir.");
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const result = await greatGamesService.repairFinishedCaravanPayments(interaction.guildId);
     const lines = result.countries.map((item) => `**${item.countryName}:** ${gold(item.before)} → ${gold(item.after)} • Katılım −${gold(item.stake)} • Ödül +${gold(item.payout)}`);
     await interaction.editReply({ content: clip(`✅ Ticaret Kervanı cüzdan denetimi tamamlandı.\n**Toplam katılım havuzu:** ${gold(result.totalStake)} • **Dağıtılan:** ${gold(result.totalPayout)}\n\n${lines.join("\n")}`, 1_990) });
@@ -403,7 +403,7 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
   }
   if (subcommand === "yonetici-bitir") {
     if (!isGameMaster(interaction)) throw new GameError("Bu komut yalnızca oyun yöneticileri tarafından kullanılabilir.");
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const result = await greatGamesWalletService.closeAll(interaction.guildId);
     const awards = result.prizeAwards.length
       ? `\n\n🏆 **Müzayede ödül havuzu dağıtımı**\n${result.prizeAwards.map((award) =>
@@ -418,19 +418,19 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
     const result = await greatGamesWalletService.join(interaction.guildId, country.id, interaction.user.id);
     await interaction.reply({ content: result.created
       ? `✅ ${country.name}, beş oyunun tamamına aday kaydedildi. Oyun cüzdanına **${gold(5_000)}** yüklendi.`
-      : `ℹ️ ${country.name} zaten kayıtlı. Eksik oyun adaylıkları tamamlandı; güncel bakiye **${gold(result.balance)}**.`, ephemeral: true });
+      : `ℹ️ ${country.name} zaten kayıtlı. Eksik oyun adaylıkları tamamlandı; güncel bakiye **${gold(result.balance)}**.`, flags: MessageFlags.Ephemeral });
     return true;
   }
   if (subcommand === "cuzdan") {
     const wallet = await greatGamesWalletService.get(interaction.guildId, country.id);
     if (!wallet) throw new GameError("Önce `/oyunlar katil` kullanmalısın.");
-    await interaction.reply({ content: `🎟️ **${country.name} • Oyun Cüzdanı**\nBakiye: **${gold(Number(wallet.balance))}**`, ephemeral: true });
+    await interaction.reply({ content: `🎟️ **${country.name} • Oyun Cüzdanı**\nBakiye: **${gold(Number(wallet.balance))}**`, flags: MessageFlags.Ephemeral });
     return true;
   }
   if (subcommand === "para-aktar") {
     const amount = interaction.options.getInteger("miktar", true);
     const result = await greatGamesWalletService.transferFromRandomSettlement({ guildId: interaction.guildId, countryId: country.id, amount, sourceKey: `discord:${interaction.id}` });
-    await interaction.reply({ content: `✅ **${result.settlementName}** hazinesinden ${gold(amount)} aktarıldı. Yeni oyun bakiyesi: **${gold(result.walletBalance)}**`, ephemeral: true });
+    await interaction.reply({ content: `✅ **${result.settlementName}** hazinesinden ${gold(amount)} aktarıldı. Yeni oyun bakiyesi: **${gold(result.walletBalance)}**`, flags: MessageFlags.Ephemeral });
     return true;
   }
   throw new GameError("Büyük Oyunlar alt komutu tanınmadı.");
@@ -586,12 +586,12 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
     const amount = Number(interaction.fields.getTextInputValue("amount").replaceAll(".", ""));
     const targetCountryName = interaction.fields.getTextInputValue("target").trim();
     await greatGamesBetService.place({ guildId: interaction.guildId, bettorCountryId: country.id, targetCountryName, amount });
-    await interaction.reply({ content: `✅ ${targetCountryName} sürücüsüne ${gold(amount)} bahis kilitlendi.`, ephemeral: true }); return true;
+    await interaction.reply({ content: `✅ ${targetCountryName} sürücüsüne ${gold(amount)} bahis kilitlendi.`, flags: MessageFlags.Ephemeral }); return true;
   }
   if (action === "bid") {
     const amount = Number(interaction.fields.getTextInputValue("amount").replaceAll(".", ""));
     const result = await greatGamesAuctionService.bid({ guildId: interaction.guildId, countryId: country.id, userId: interaction.user.id, lotId: rawType!, amount });
-    await interaction.reply({ content: `✅ Açık artırma teklifin **${gold(result.amount)}** olarak kaydedildi; cüzdandan para kesilmedi. Diğer lider tekliflerin hesaba katıldığında kalan teklif kapasiten: **${gold(result.availableAfter)}**.`, ephemeral: true }); return true;
+    await interaction.reply({ content: `✅ Açık artırma teklifin **${gold(result.amount)}** olarak kaydedildi; cüzdandan para kesilmedi. Diğer lider tekliflerin hesaba katıldığında kalan teklif kapasiten: **${gold(result.availableAfter)}**.`, flags: MessageFlags.Ephemeral }); return true;
   }
   if (action !== "action") return false;
   const type = gameId(rawType!);
@@ -644,9 +644,9 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
     : "✅ Büyük Oyun hamlen gizlice kaydedildi.";
   if (interaction.isFromMessage()) {
     await interaction.update(await publicGamePayload(interaction.guildId, type));
-    await interaction.followUp({ content: confirmation, ephemeral: true });
+    await interaction.followUp({ content: confirmation, flags: MessageFlags.Ephemeral });
   } else {
-    await interaction.reply({ content: confirmation, ephemeral: true });
+    await interaction.reply({ content: confirmation, flags: MessageFlags.Ephemeral });
   }
   return true;
 }

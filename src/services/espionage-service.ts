@@ -90,6 +90,12 @@ export interface EspionageResolutionResult {
 interface CountryRow { id: string; guild_id: string; name: string; status: string }
 interface GuildRow { current_turn: number; turn_phase: string; espionage_log_channel_id: string | null }
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function requireUuid(value: string | null | undefined, label: string): void {
+  if (!value || !UUID_PATTERN.test(value)) throw new GameError(`${label} seçimi geçersiz. Açılır listeden yeniden seçim yapın.`);
+}
+
 const operationViewSql = `
   SELECT operation.*,attacker.name AS attacker_country_name,target.name AS target_country_name,
          settlement.name AS target_settlement_name,spy.name AS spy_name,spy.skill_bonus AS spy_skill_bonus,
@@ -327,6 +333,12 @@ export const espionageService = {
     targetCountryId: string; targetSettlementId: string; targetType: EspionageTarget; preparation: EspionagePreparation;
     targetCharacterId?: string | null; targetArmyId?: string | null;
   }): Promise<EspionageOperationView> {
+    requireUuid(input.attackerCountryId, "Saldıran ülke");
+    requireUuid(input.targetCountryId, "Hedef ülke");
+    requireUuid(input.targetSettlementId, "Hedef şehir");
+    requireUuid(input.spyCharacterId, "Casus");
+    if (input.targetCharacterId) requireUuid(input.targetCharacterId, "Hedef karakter");
+    if (input.targetArmyId) requireUuid(input.targetArmyId, "Hedef ordu");
     return withTransaction(async (client) => {
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`espionage-spy:${input.spyCharacterId}`]);
       const state = await guild(client, input.guildId);

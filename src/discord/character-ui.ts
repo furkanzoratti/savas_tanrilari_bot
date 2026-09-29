@@ -1,4 +1,4 @@
-import { EmbedBuilder, type AutocompleteInteraction, type ChatInputCommandInteraction, type Client } from "discord.js";
+import { EmbedBuilder, MessageFlags, type AutocompleteInteraction, type ChatInputCommandInteraction, type Client } from "discord.js";
 import { CHARACTER_ROLES } from "../domain/catalog.js";
 import {
   ADMIRAL_DOCTRINES, ADMIRAL_SPECIALIZATIONS, CHARACTER_SPECIALIZATIONS, COMMANDER_DOCTRINES, DIPLOMAT_TASK_LABELS, MERCHANT_TASK_LABELS,
@@ -292,7 +292,7 @@ async function logCharacterCommand(
 export async function handleCharacterCommand(interaction: ChatInputCommandInteraction): Promise<boolean> {
   if (!interaction.guildId) return false;
   if (interaction.commandName === "karakterlerim") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const country = await resolveCountry(interaction);
     const [characters,capacity] = await Promise.all([
       characterService.list(country.id),cityService.academyCapacity(country.id)
@@ -303,7 +303,7 @@ export async function handleCharacterCommand(interaction: ChatInputCommandIntera
   }
   if (interaction.commandName === "karakter-yonetim") {
     requireGameMaster(interaction);
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const sub=interaction.options.getSubcommand();
     if(sub==="karakter-ekle"||sub==="casus-ekle"){
       const country=await gameService.countryByName(interaction.guildId,interaction.options.getString("ulke",true));
@@ -362,7 +362,7 @@ export async function handleCharacterCommand(interaction: ChatInputCommandIntera
     return true;
   }
   if (!["komutan","amiral","tuccar","diplomat"].includes(interaction.commandName)) return false;
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const country = await resolveCountry(interaction);
   const sub = interaction.options.getSubcommand();
   if (interaction.commandName === "amiral") {

@@ -1,5 +1,5 @@
 import {
-  ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ModalBuilder,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, ModalBuilder,
   StringSelectMenuBuilder, TextInputBuilder, TextInputStyle,
   type ButtonInteraction, type ChatInputCommandInteraction, type ModalSubmitInteraction, type StringSelectMenuInteraction
 } from "discord.js";
@@ -70,7 +70,7 @@ async function dashboardPayload(guildId: string, userId: string, gm: boolean) {
       new ButtonBuilder().setCustomId("gg|cancel").setLabel("İptal ve İade").setStyle(ButtonStyle.Danger)
     );
   }
-  return { embeds: [embed], components: gameButtons ? [gameButtons, controls] : [controls], ephemeral: true as const };
+  return { embeds: [embed], components: gameButtons ? [gameButtons, controls] : [controls] };
 }
 
 function gameRules(type: GreatGameType): string {
@@ -112,7 +112,7 @@ async function gamePayload(guildId: string, userId: string, gm: boolean, type: G
         .addOptions(available.slice(0, 25).map((lot) => ({ label: lot.title.slice(0, 100), value: lot.id, description: `${"Açık artırma"}${lot.own_bid ? ` • Teklifin ${gold(Number(lot.own_bid))}` : ""}`.slice(0, 100) })))
     ));
   }
-  return { embeds: [embed], components, ephemeral: true as const };
+  return { embeds: [embed], components };
 }
 
 function caravanRegistrationModal(): ModalBuilder {
@@ -150,7 +150,7 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
   if (!interaction.guildId) throw new GameError("Bu komut yalnızca sunucuda kullanılabilir.");
   const subcommand = interaction.options.getSubcommand();
   if (subcommand === "panel") {
-    await interaction.reply(await dashboardPayload(interaction.guildId, interaction.user.id, isGameMaster(interaction)));
+    await interaction.reply({ ...(await dashboardPayload(interaction.guildId, interaction.user.id, isGameMaster(interaction))), flags: MessageFlags.Ephemeral });
     return true;
   }
   if (subcommand === "katilimci-ulkeler") {
@@ -170,7 +170,7 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
       .setTitle(index === 0 ? "🏛️ Büyük Oyunlar • Katılımcı Ülkeler" : `Katılımcı Ülkeler • ${index + 1}`)
       .setDescription(page)
       .setFooter({ text: `Toplam ${wallets.length} devlet • ${openWallets.length} açık cüzdan • Açık bakiye ${gold(total)}` }));
-    await interaction.reply({ embeds, ephemeral: true });
+    await interaction.reply({ embeds, flags: MessageFlags.Ephemeral });
     return true;
   }
   if (subcommand === "yonetici-bitir") {
@@ -187,19 +187,19 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
     const result = await greatGamesWalletService.join(interaction.guildId, country.id, interaction.user.id);
     await interaction.reply({ content: result.created
       ? `✅ ${country.name}, beş Büyük Oyunun tamamına kaydedildi. Oyun cüzdanına **${gold(5_000)}** yüklendi.`
-      : `ℹ️ ${country.name} zaten etkinliğe katılmış. Beş oyun kaydı kontrol edilip eksikleri tamamlandı; ikinci başlangıç bakiyesi verilmedi. Güncel bakiye: **${gold(result.balance)}**.`, ephemeral: true });
+      : `ℹ️ ${country.name} zaten etkinliğe katılmış. Beş oyun kaydı kontrol edilip eksikleri tamamlandı; ikinci başlangıç bakiyesi verilmedi. Güncel bakiye: **${gold(result.balance)}**.`, flags: MessageFlags.Ephemeral });
     return true;
   }
   if (subcommand === "cuzdan") {
     const wallet = await greatGamesWalletService.get(interaction.guildId, country.id);
     if (!wallet) throw new GameError("Bu devlet etkinliğe katılmadı. Önce `/oyunlar katil` kullanın.");
-    await interaction.reply({ content: `🎟️ **${country.name} • Oyun Cüzdanı**\nBakiye: **${gold(Number(wallet.balance))}**${wallet.closed_at ? "\nDurum: Kapatıldı" : ""}`, ephemeral: true });
+    await interaction.reply({ content: `🎟️ **${country.name} • Oyun Cüzdanı**\nBakiye: **${gold(Number(wallet.balance))}**${wallet.closed_at ? "\nDurum: Kapatıldı" : ""}`, flags: MessageFlags.Ephemeral });
     return true;
   }
   if (subcommand === "para-aktar") {
     const amount = interaction.options.getInteger("miktar", true);
     const result = await greatGamesWalletService.transferFromRandomSettlement({ guildId: interaction.guildId, countryId: country.id, amount, sourceKey: `discord:${interaction.id}` });
-    await interaction.reply({ content: `✅ Rastgele seçilen **${result.settlementName}** hazinesinden ${gold(amount)} oyun cüzdanına aktarıldı.\nYeni cüzdan bakiyesi: **${gold(result.walletBalance)}**`, ephemeral: true });
+    await interaction.reply({ content: `✅ Rastgele seçilen **${result.settlementName}** hazinesinden ${gold(amount)} oyun cüzdanına aktarıldı.\nYeni cüzdan bakiyesi: **${gold(result.walletBalance)}**`, flags: MessageFlags.Ephemeral });
     return true;
   }
   throw new GameError("Büyük Oyunlar alt komutu tanınmadı.");
@@ -306,7 +306,7 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
     const result = await greatGamesService.startGame(interaction.guildId, type, "MANUAL", countryNames);
     const content = `📝 **Elle oluşturulan eşleşmeler**\n${result.rooms.map((room, index) => `${index + 1}. ${room}`).join("\n")}`.slice(0, 2_000);
     if (interaction.isFromMessage()) await interaction.update({ content, embeds: [], components: [] });
-    else await interaction.reply({ content, ephemeral: true });
+    else await interaction.reply({ content, flags: MessageFlags.Ephemeral });
     return true;
   }
   const country = await ownCountry(interaction.guildId, interaction.user.id);
@@ -314,13 +314,13 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
     const amount = Number(interaction.fields.getTextInputValue("amount").replaceAll(".", ""));
     const targetCountryName = interaction.fields.getTextInputValue("target").trim();
     await greatGamesBetService.place({ guildId: interaction.guildId, bettorCountryId: country.id, targetCountryName, amount });
-    await interaction.reply({ content: `${targetCountryName} sürücüsüne ${gold(amount)} bahis kilitlendi.`, ephemeral: true });
+    await interaction.reply({ content: `${targetCountryName} sürücüsüne ${gold(amount)} bahis kilitlendi.`, flags: MessageFlags.Ephemeral });
     return true;
   }
   if (action === "bid") {
     const amount = Number(interaction.fields.getTextInputValue("amount").replaceAll(".", ""));
     const result = await greatGamesAuctionService.bid({ guildId: interaction.guildId, countryId: country.id, userId: interaction.user.id, lotId: rawType!, amount });
-    await interaction.reply({ content: `${result.phase === "SEALED" ? "Kapalı" : "Açık final"} teklifin ${gold(result.amount)} olarak kaydedildi; cüzdandan para kesilmedi. Kalan teklif kapasiten: ${gold(result.availableAfter)}.`, ephemeral: true });
+    await interaction.reply({ content: `${result.phase === "SEALED" ? "Kapalı" : "Açık final"} teklifin ${gold(result.amount)} olarak kaydedildi; cüzdandan para kesilmedi. Kalan teklif kapasiten: ${gold(result.availableAfter)}.`, flags: MessageFlags.Ephemeral });
     return true;
   }
   const type = gameId(rawType!);
@@ -330,7 +330,7 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
   if (action === "register" && type === "CHARIOT") {
     const driverName = interaction.fields.getTextInputValue("driver").trim();
     await greatGamesService.register({ guildId: interaction.guildId, countryId: country.id, userId: interaction.user.id, gameType: type, driverName });
-    await interaction.reply({ content: `${driverName}, ${country.name} adına Savaş Arabaları Turnuvasına kaydedildi.`, ephemeral: true }); return true;
+    await interaction.reply({ content: `${driverName}, ${country.name} adına Savaş Arabaları Turnuvasına kaydedildi.`, flags: MessageFlags.Ephemeral }); return true;
   }
   if (action === "register" && type === "CARAVAN") {
     const role = interaction.fields.getTextInputValue("role").trim().toUpperCase() as CaravanRole;
@@ -340,7 +340,7 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
     const investment = Number(interaction.fields.getTextInputValue("investment").replaceAll(".", ""));
     const shareWeight = Number(interaction.fields.getTextInputValue("share"));
     await greatGamesService.register({ guildId: interaction.guildId, countryId: country.id, userId: interaction.user.id, gameType: type, investment, teamName: interaction.fields.getTextInputValue("team"), role, route, shareWeight });
-    await interaction.reply({ content: `${country.name}, Ticaret Kervanına ${gold(investment)} yatırımla kaydedildi.`, ephemeral: true }); return true;
+    await interaction.reply({ content: `${country.name}, Ticaret Kervanına ${gold(investment)} yatırımla kaydedildi.`, flags: MessageFlags.Ephemeral }); return true;
   }
   if (action === "action") {
     let payload: Record<string, unknown>;
@@ -369,7 +369,7 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
       payload = { primary: primary.id, secondary: secondary?.id ?? null };
     } else throw new GameError("Bu oyun için oyuncu hamlesi bulunmuyor.");
     await greatGamesService.submitAction({ guildId: interaction.guildId, countryId: country.id, gameType: type, actionType: "ROUND", payload });
-    await interaction.reply({ content: `${GREAT_GAME_TYPES[type].label} gizli hamlen kaydedildi. Aşama çözülene kadar aynı düğmeyle değiştirebilirsin.`, ephemeral: true }); return true;
+    await interaction.reply({ content: `${GREAT_GAME_TYPES[type].label} gizli hamlen kaydedildi. Aşama çözülene kadar aynı düğmeyle değiştirebilirsin.`, flags: MessageFlags.Ephemeral }); return true;
   }
   return false;
 }

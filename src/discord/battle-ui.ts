@@ -1,4 +1,4 @@
-import { ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, StringSelectMenuBuilder, type ButtonInteraction, type ChatInputCommandInteraction, type Client, type StringSelectMenuInteraction } from "discord.js";
+import { ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, StringSelectMenuBuilder, type ButtonInteraction, type ChatInputCommandInteraction, type Client, type StringSelectMenuInteraction } from "discord.js";
 import { BATTLE_TERRAINS, BATTLE_UNIT_STATS, FIELD_BATTLE_PRESSURE_LIMIT, LADDER_GROUP_ASSAULT_CAPACITY, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, SIEGE_ASSET_BATTLE_STATS, SIEGE_ASSAULT_FRONTAGE, SIEGE_ATTACKER_DISMOUNT_MAP, SIEGE_GATE_BREACH_FRONTAGE, SIEGE_GATE_BREACH_TOTAL_FRONTAGE, SIEGE_PRESSURE_LIMIT, SIEGE_RANGED_SUPPORT_FRONTAGE, SIEGE_TOTAL_ASSAULT_FRONTAGE, SIEGE_TOWER_ASSAULT_CAPACITY, assessArmyComposition, orderState, remainingBombardments, siegeAssaultAccess, siegeAttackerDismountedComposition, siegeDefenderComposition, siegeDefenseModifiers, siegeOrderState, type ArmyCompositionContext, type BattleComposition, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain, type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeDismountUnitType, type SiegeTarget } from "../domain/battle.js";
 import { NAVAL_BATTLE_ORDERS, isNavalRetreatOrder, navalFleetCondition, type NavalBattleOrder } from "../domain/naval-tactics.js";
 import { number } from "../domain/format.js";
@@ -553,7 +553,7 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
     await retireBattleCard(interaction.client, result.view, reply.id);
     await battleService.setPublicMessage(result.view.battle.id, reply.id);
     if (result.round.ended) {
-      await interaction.followUp({ embeds: [casualtyReportEmbed(result.view, result.report)], ephemeral: true });
+      await interaction.followUp({ embeds: [casualtyReportEmbed(result.view, result.report)], flags: MessageFlags.Ephemeral });
       await publishCharacterTurnLogs(interaction.client,interaction.guildId,[]).catch(() => undefined);
     }
   } else if (sub === "ordu-detay") {
@@ -584,7 +584,7 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
     const winnerRaw = interaction.options.getString("galip", true);
     const result = await battleService.finish({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id, winner: winnerRaw === "NONE" ? null : winnerRaw as BattleSideKey, reason: interaction.options.getString("neden", true) });
     await interaction.editReply(publicPayload(result.view));
-    await interaction.followUp({ embeds: [casualtyReportEmbed(result.view, result.report)], ephemeral: true });
+    await interaction.followUp({ embeds: [casualtyReportEmbed(result.view, result.report)], flags: MessageFlags.Ephemeral });
     await publishCharacterTurnLogs(interaction.client,interaction.guildId,[]).catch(() => undefined);
   } else if (sub === "iptal") {
     requireGameMaster(interaction);
@@ -630,7 +630,7 @@ export async function handleBattleButton(interaction: ButtonInteraction): Promis
       await publishCharacterTurnLogs(interaction.client,interaction.guildId,[]).catch(()=>undefined);
     }
   } else if (interaction.customId.startsWith("battle_fleet_status_gm|")) {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     if(!isGameMaster(interaction))throw new GameError("İki tarafın gemi durumunu yalnızca oyun yöneticileri görebilir.");
     const status=await battleService.adminFleetStatus({guildId:interaction.guildId,battleId});
     const embeds=playerFleetStatusEmbeds(status,"GM");
@@ -639,15 +639,15 @@ export async function handleBattleButton(interaction: ButtonInteraction): Promis
       await interaction.followUp({embeds:embeds.slice(index,index+10),ephemeral:true});
     }
   } else if (interaction.customId.startsWith("battle_fleet_status|")) {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const status = await battleService.playerFleetStatus({ guildId: interaction.guildId, battleId, actorId: interaction.user.id });
     const embeds = playerFleetStatusEmbeds(status);
     await interaction.editReply({ content: "⚓ Savaştaki kendi filolarınızın gemi can durumu:", embeds: embeds.slice(0, 10) });
     for (let index = 10; index < embeds.length; index += 10) {
-      await interaction.followUp({ embeds: embeds.slice(index, index + 10), ephemeral: true });
+      await interaction.followUp({ embeds: embeds.slice(index, index + 10), flags: MessageFlags.Ephemeral });
     }
   } else if (interaction.customId.startsWith("battle_armies|")) {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const country = await gameService.countryForUser(interaction.guildId, interaction.user.id);
     if (!country) throw new GameError("Discord hesabına atanmış bir ülke bulunamadı.");
     const armies = await armyService.listBattleCountry(interaction.guildId, country.id, battleId);

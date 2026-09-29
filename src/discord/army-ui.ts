@@ -1,4 +1,4 @@
-import type { ChatInputCommandInteraction } from "discord.js";
+import { MessageFlags, type ChatInputCommandInteraction } from "discord.js";
 import type { BattleUnitType } from "../domain/battle.js";
 import { BATTLE_UNIT_STATS } from "../domain/battle.js";
 import type { MobileSiegeAssetType } from "../services/army-service.js";
@@ -22,7 +22,7 @@ async function logCommanderAssignment(interaction: ChatInputCommandInteraction,c
 export async function handleArmyCommand(interaction: ChatInputCommandInteraction): Promise<void> {
   if (!interaction.guildId) throw new GameError("Ordu komutları yalnızca bir sunucuda kullanılabilir.");
   const sub = interaction.options.getSubcommand();
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const country = await resolveCountry(interaction);
 
   if (sub === "olustur") {

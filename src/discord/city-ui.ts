@@ -1,5 +1,5 @@
 import {
-  ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ModalBuilder,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, ModalBuilder,
   TextInputBuilder, TextInputStyle,
   type AutocompleteInteraction, type ButtonInteraction, type ChatInputCommandInteraction, type ModalSubmitInteraction
 } from "discord.js";
@@ -240,7 +240,7 @@ export async function handleCityButton(interaction: ButtonInteraction): Promise<
     await interaction.showModal(modal);
     return true;
   }
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   await assertCountryAccess(interaction, countryId);
   const session = await cityService.rollTraining({ guildId: interaction.guildId, actorId: interaction.user.id, countryId, sessionId });
   const document = await gameService.document(countryId);

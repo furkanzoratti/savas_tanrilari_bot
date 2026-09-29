@@ -7,8 +7,17 @@ vi.hoisted(() => {
 });
 import { commandBuilders } from "./commands.js";
 import { isSpyDefenseAssignment } from "../services/espionage-service.js";
+import { resolveEspionageChoice } from "./espionage-ui.js";
 
 describe("casusluk komutları", () => {
+  it("otomatik tamamlama değerini kimlik veya karakter adıyla güvenli çözer", () => {
+    const choices = [{ id: "4c091f0b-3457-4d3d-a4f8-20a63076bc66", name: "Abi Ben Romalıyım" }];
+    expect(resolveEspionageChoice(choices, choices[0]!.id, "Casus")).toBe(choices[0]);
+    expect(resolveEspionageChoice(choices, "abi ben romalıyım", "Casus")).toBe(choices[0]);
+    expect(() => resolveEspionageChoice(choices, "bulunmayan", "Casus"))
+      .toThrow("Casus bulunamadı. Açılır listeden geçerli bir seçim yapın.");
+  });
+
   it("şahsi koruma dâhil bütün casus savunma görevlerini iptal edilebilir sayar", () => {
     expect(isSpyDefenseAssignment("PERSONAL_GUARD")).toBe(true);
     expect(isSpyDefenseAssignment("COUNTERINTELLIGENCE_COUNTRY")).toBe(true);

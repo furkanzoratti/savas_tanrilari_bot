@@ -1,4 +1,4 @@
-import { EmbedBuilder, type AutocompleteInteraction, type ChatInputCommandInteraction, type Client } from "discord.js";
+import { EmbedBuilder, MessageFlags, type AutocompleteInteraction, type ChatInputCommandInteraction, type Client } from "discord.js";
 import { ESPIONAGE_PREPARATIONS, ESPIONAGE_SEVERITY_LABELS, ESPIONAGE_TARGETS, type EspionagePreparation, type EspionageTarget } from "../domain/espionage.js";
 import { gold } from "../domain/format.js";
 import { espionageService, isSpyDefenseAssignment, type EspionageOperationView } from "../services/espionage-service.js";
@@ -22,6 +22,17 @@ const assignmentLabels: Record<string, string> = {
   AGORA: "Agora görevi",
   ARMY: "Ordu görevi"
 };
+
+export function resolveEspionageChoice<T extends { id: string; name: string }>(
+  choices: readonly T[],
+  rawValue: string,
+  label: string
+): T {
+  const normalized = rawValue.trim().toLocaleLowerCase("tr-TR");
+  const choice = choices.find((item) => item.id === rawValue || item.name.trim().toLocaleLowerCase("tr-TR") === normalized);
+  if (!choice) throw new GameError(`${label} bulunamadı. Açılır listeden geçerli bir seçim yapın.`);
+  return choice;
+}
 
 function playerOperationLine(operation: EspionageOperationView): string {
   const state = operation.status === "TRAVELING"
@@ -92,22 +103,42 @@ export async function handleEspionageCommand(interaction: ChatInputCommandIntera
   if (!interaction.guildId) return false;
   if (interaction.commandName === "casusluk") {
     const sub = interaction.options.getSubcommand();
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const country = await resolveCountry(interaction);
     if (sub === "gorev-baslat") {
-      const targetCountry = await gameService.countryByName(interaction.guildId, interaction.options.getString("hedef-ulke", true));
-      if (!targetCountry) throw new GameError("Hedef ülke bulunamadı.");
+      const targetCountry = resolveEspionageChoice(
+        (await gameService.listCountries(interaction.guildId)).filter((item) => item.id !== country.id),
+        interaction.options.getString("hedef-ulke", true),
+        "Hedef ülke"
+      );
+      const spy = resolveEspionageChoice(
+        (await espionageService.spies(country.id)).filter((item) => item.assignment === "NONE"),
+        interaction.options.getString("casus", true),
+        "Casus"
+      );
+      const targetSettlement = resolveEspionageChoice(
+        await gameService.listSettlements(targetCountry.id),
+        interaction.options.getString("hedef-sehir", true),
+        "Hedef şehir"
+      );
+      const targetType = interaction.options.getString("hedef", true) as EspionageTarget;
+      const specialTargetKind = ["DISCREDIT","KIDNAP","ASSASSINATE"].includes(targetType) ? "CHARACTER"
+        : ["SUPPLY_COLLAPSE","DESERTION"].includes(targetType) ? "ARMY" : null;
+      const rawSpecialTarget = interaction.options.getString("ozel-hedef");
+      const specialTarget = specialTargetKind && rawSpecialTarget
+        ? resolveEspionageChoice(await espionageService.targets(targetCountry.id, specialTargetKind), rawSpecialTarget, "Özel hedef")
+        : null;
       const operation = await espionageService.startOperation({
         guildId: interaction.guildId,
         actorId: interaction.user.id,
         attackerCountryId: country.id,
-        spyCharacterId: interaction.options.getString("casus", true),
+        spyCharacterId: spy.id,
         targetCountryId: targetCountry.id,
-        targetSettlementId: interaction.options.getString("hedef-sehir", true),
-        targetType: interaction.options.getString("hedef", true) as EspionageTarget,
+        targetSettlementId: targetSettlement.id,
+        targetType,
         preparation: interaction.options.getString("hazirlik", true) as EspionagePreparation,
-        targetCharacterId: ["DISCREDIT","KIDNAP","ASSASSINATE"].includes(interaction.options.getString("hedef",true)) ? interaction.options.getString("ozel-hedef") : null,
-        targetArmyId: ["SUPPLY_COLLAPSE","DESERTION"].includes(interaction.options.getString("hedef",true)) ? interaction.options.getString("ozel-hedef") : null
+        targetCharacterId: specialTargetKind === "CHARACTER" ? specialTarget?.id ?? null : null,
+        targetArmyId: specialTargetKind === "ARMY" ? specialTarget?.id ?? null : null
       });
       await interaction.editReply([
         `🕵️ **${operation.spy_name}**, **${operation.target_country_name} / ${operation.target_settlement_name}** hedefine gönderildi.`,
@@ -168,7 +199,7 @@ export async function handleEspionageCommand(interaction: ChatInputCommandIntera
   if (interaction.commandName === "casusluk-yonetim") {
     requireGameMaster(interaction);
     const sub = interaction.options.getSubcommand();
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     if (sub === "log-kanali") {
       const operation = interaction.options.getString("islem", true);
       const channel = interaction.options.getChannel("kanal");

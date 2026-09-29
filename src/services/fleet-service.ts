@@ -155,7 +155,9 @@ export const fleetService = {
     const client = await pool.connect();
     try {
       const ids = (await client.query<{ id: string }>("SELECT id FROM fleets WHERE country_id=$1 ORDER BY created_at,name", [countryId])).rows;
-      return Promise.all(ids.map((row) => loadFleet(client, row.id, countryId)));
+      const fleets: FleetView[] = [];
+      for (const row of ids) fleets.push(await loadFleet(client, row.id, countryId));
+      return fleets;
     } finally { client.release(); }
   },
 
@@ -200,7 +202,9 @@ export const fleetService = {
           WHERE bfa.battle_id=$1 AND bfa.country_id=$2 AND b.guild_id=$3 ORDER BY f.created_at,f.name`,
         [battleId,countryId,guildId]
       )).rows;
-      return Promise.all(ids.map((row) => loadFleet(client,row.id,countryId)));
+      const fleets: FleetView[] = [];
+      for (const row of ids) fleets.push(await loadFleet(client,row.id,countryId));
+      return fleets;
     } finally { client.release(); }
   },
 

@@ -1,8 +1,8 @@
 import {
-  ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ModalBuilder,
+  ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, ModalBuilder,
   StringSelectMenuBuilder, TextInputBuilder, TextInputStyle,
   type AutocompleteInteraction, type ButtonInteraction, type ChatInputCommandInteraction, type Client,
-  type Interaction, type ModalSubmitInteraction, type StringSelectMenuInteraction
+  type Interaction, type InteractionReplyOptions, type ModalSubmitInteraction, type StringSelectMenuInteraction
 } from "discord.js";
 import { config } from "../config.js";
 import { logger } from "../logger.js";
@@ -162,7 +162,7 @@ export async function processDueCharacterSystems(
 async function handleCharacterTurnRecovery(interaction: ChatInputCommandInteraction): Promise<void> {
   requireGameMaster(interaction);
   if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const guild = await gameService.guildState(interaction.guildId);
   const result = await processDueCharacterSystems(
     interaction.client,interaction.guildId,guild.current_turn,
@@ -176,15 +176,15 @@ async function handleCharacterTurnRecovery(interaction: ChatInputCommandInteract
   ].join("\n"));
 }
 async function sendDocument(interaction: ChatInputCommandInteraction, countryId: string): Promise<void> {
-  if (!interaction.deferred && !interaction.replied) await interaction.deferReply({ ephemeral: true });
+  if (!interaction.deferred && !interaction.replied) await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const embeds = renderDocument(await gameService.document(countryId));
   const batches = batchDocumentEmbeds(embeds);
   await interaction.editReply({ embeds: batches[0] ?? [], files: [new AttachmentBuilder(TEMPLE_BANNER_PATH, { name: TEMPLE_BANNER_NAME })] });
-  for (const batch of batches.slice(1)) await interaction.followUp({ embeds: batch, files: [new AttachmentBuilder(TEMPLE_BANNER_PATH, { name: TEMPLE_BANNER_NAME })], ephemeral: true });
+  for (const batch of batches.slice(1)) await interaction.followUp({ embeds: batch, files: [new AttachmentBuilder(TEMPLE_BANNER_PATH, { name: TEMPLE_BANNER_NAME })], flags: MessageFlags.Ephemeral });
 }
 
 async function startPurchase(interaction: ChatInputCommandInteraction, kind: "build" | "unit" | "ship"): Promise<void> {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
   const settlements = await gameService.listSettlements(country.id);
   const prefix = kind === "build" ? "bs" : kind === "unit" ? "us" : "ss";
@@ -204,7 +204,7 @@ async function handleMercenaryCommand(interaction: ChatInputCommandInteraction):
   if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
   const sub = interaction.options.getSubcommand();
   if (mercenarySubcommandRequiresGameMaster(sub)) requireGameMaster(interaction);
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const requestedCountry = interaction.options.getString("ulke", true);
   const country = ["kirala", "feshet"].includes(sub)
     ? await resolveCountry(interaction, requestedCountry)
@@ -427,7 +427,7 @@ async function handleTurn(interaction: ChatInputCommandInteraction): Promise<voi
         `**${movementSummary.disembarkations.completed}** tamamlandı • `+
         `**${movementSummary.disembarkations.blocked}** engelli` +
         (movementSummary.alreadyProcessed ? "\nBu aşama önceden çözülmüştü; tekrar hareket uygulanmadı." : ""),
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
   if (characterAutomationWarnings.length) {
@@ -441,7 +441,7 @@ async function handleTurn(interaction: ChatInputCommandInteraction): Promise<voi
 async function handleMap(interaction: ChatInputCommandInteraction): Promise<void> {
   requireGameMaster(interaction);
   if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const sub = interaction.options.getSubcommand();
   if (sub === "log-kanali") {
     const channel=interaction.options.getChannel("kanal",true);
@@ -650,7 +650,7 @@ async function handleMap(interaction: ChatInputCommandInteraction): Promise<void
 async function handleWelcomeCommand(interaction: ChatInputCommandInteraction): Promise<void> {
   requireGameMaster(interaction);
   if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const operation = interaction.options.getString("islem", true);
   if (operation === "clear") {
     await welcomeService.clearConfig(interaction.guildId);
@@ -667,7 +667,7 @@ async function handleWelcomeCommand(interaction: ChatInputCommandInteraction): P
 async function handleCountryRoles(interaction: ChatInputCommandInteraction): Promise<void> {
   requireGameMaster(interaction);
   if (!interaction.guildId || !interaction.guild) throw new GameError("Sunucu bulunamadı.");
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const countries = await gameService.listCountries(interaction.guildId);
   if (!countries.length) throw new GameError("Rolü oluşturulacak kayıtlı devlet bulunmuyor.");
@@ -727,7 +727,7 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
   requireGameMaster(interaction);
   if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
   const sub = interaction.options.getSubcommand();
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   if (sub === "ulke-olustur") {
     const country = await gameService.createCountry(interaction.guildId, interaction.user.id, interaction.options.getString("ad", true), interaction.options.getInteger("hazine", true));
@@ -750,7 +750,7 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
       const pages: string[] = [];
       for (let index = 0; index < rows.length; index += 20) pages.push(rows.slice(index, index + 20).join("\n"));
       await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0xc59b45).setTitle(`🌍 Aktif Devletler — ${countries.length}`).setDescription(pages[0]!)] });
-      for (let index = 1; index < pages.length; index += 1) await interaction.followUp({ embeds: [new EmbedBuilder().setColor(0xc59b45).setTitle(`🌍 Aktif Devletler — Devam ${index + 1}`).setDescription(pages[index]!)], ephemeral: true });
+      for (let index = 1; index < pages.length; index += 1) await interaction.followUp({ embeds: [new EmbedBuilder().setColor(0xc59b45).setTitle(`🌍 Aktif Devletler — Devam ${index + 1}`).setDescription(pages[index]!)], flags: MessageFlags.Ephemeral });
     }
   } else if (sub === "devlet-belgeleri") {
     const countries = await gameService.listCountries(interaction.guildId);
@@ -763,7 +763,7 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
         for (let index = 0; index < embeds.length; index += 10) {
           const payload = { embeds: embeds.slice(index, index + 10), files: [new AttachmentBuilder(TEMPLE_BANNER_PATH, { name: TEMPLE_BANNER_NAME })] };
           if (firstBatch) { await interaction.editReply(payload); firstBatch = false; }
-          else await interaction.followUp({ ...payload, ephemeral: true });
+          else await interaction.followUp({ ...payload, flags: MessageFlags.Ephemeral });
         }
       }
     }
@@ -988,7 +988,7 @@ async function handleSpecialUnitAccess(interaction: ChatInputCommandInteraction)
   requireGameMaster(interaction);
   if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
   const sub = interaction.options.getSubcommand();
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
   if (!country) throw new GameError("Ülke bulunamadı.");
   if (sub === "listele") {
@@ -1034,7 +1034,7 @@ async function sendNpcPages(interaction: ChatInputCommandInteraction, title: str
   if (current) pages.push(current);
   await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0xc59b45).setTitle(title).setDescription(pages[0]!).setFooter({ text: footer })] });
   for (let index = 1; index < pages.length; index += 1) {
-    await interaction.followUp({ embeds: [new EmbedBuilder().setColor(0xc59b45).setTitle(`${title} • ${index + 1}/${pages.length}`).setDescription(pages[index]!)], ephemeral: true });
+    await interaction.followUp({ embeds: [new EmbedBuilder().setColor(0xc59b45).setTitle(`${title} • ${index + 1}/${pages.length}`).setDescription(pages[index]!)], flags: MessageFlags.Ephemeral });
   }
 }
 
@@ -1042,7 +1042,7 @@ async function handleNpcAutoPurchase(interaction: ChatInputCommandInteraction): 
   requireGameMaster(interaction);
   if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
   const sub = interaction.options.getSubcommand();
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   if (sub === "ayarla") {
     const config = await npcAutoPurchaseService.saveConfig({
       guildId: interaction.guildId,
@@ -1113,7 +1113,7 @@ async function handleGreatPowerCommand(interaction: ChatInputCommandInteraction)
   requireGameMaster(interaction);
   if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
   const subcommand = interaction.options.getSubcommand();
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   if (subcommand === "kanal") {
     const operation = interaction.options.getString("islem", true);
@@ -1152,7 +1152,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
   if (interaction.commandName === "operasyon-masasi") {
     requireGameMaster(interaction);
     if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const login = await adminPanelLoginService.issue({
       guildId: interaction.guildId,
       userId: interaction.user.id,
@@ -1173,7 +1173,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
   if (interaction.commandName === "olay-yoneticisi") {
     requireGameMaster(interaction);
     if (!interaction.guild) throw new GameError("Sunucu bulunamadı.");
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const user = interaction.options.getUser("uye", true);
     const grant = interaction.options.getString("islem", true) === "grant";
     const result = await setEventManagerRole({ guild: interaction.guild, actorId: interaction.user.id, userId: user.id, grant });
@@ -1231,7 +1231,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     requireGameMaster(interaction);
     if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
     const action = interaction.options.getSubcommand();
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     if (action === "listele") {
       const countries = await gameService.listDestroyedCountries(interaction.guildId);
       if (!countries.length) {
@@ -1242,7 +1242,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
         for (let index = 0; index < rows.length; index += 15) pages.push(rows.slice(index, index + 15).join("\n"));
         await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x4b4d52).setTitle(`🏴 Yok Edilmiş Devletler — ${countries.length}`).setDescription(pages[0]!)] });
         for (let index = 1; index < pages.length; index += 1) {
-          await interaction.followUp({ embeds: [new EmbedBuilder().setColor(0x4b4d52).setTitle(`🏴 Yok Edilmiş Devletler — Devam ${index + 1}`).setDescription(pages[index]!)], ephemeral: true });
+          await interaction.followUp({ embeds: [new EmbedBuilder().setColor(0x4b4d52).setTitle(`🏴 Yok Edilmiş Devletler — Devam ${index + 1}`).setDescription(pages[index]!)], flags: MessageFlags.Ephemeral });
         }
       }
     } else {
@@ -1264,7 +1264,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
   } else if (interaction.commandName === "parali-bakim-topla") {
     requireGameMaster(interaction);
     if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const result = await gameService.collectAllMercenaryUpkeep({ guildId: interaction.guildId, actorId: interaction.user.id });
     const lines = [
       ...result.paid.map((item) => `✅ **${item.countryName}** • ${item.companyName} — ${gold(item.amount)} ödendi`),
@@ -1283,7 +1283,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
   } else if (interaction.commandName === "ulke-formla") {
     requireGameMaster(interaction);
     if (!interaction.guildId || !interaction.guild) throw new GameError("Sunucu bulunamadı.");
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const result = await gameService.formCountry({ guildId: interaction.guildId, actorId: interaction.user.id, currentCountryName: interaction.options.getString("mevcut-ulke", true), tier: interaction.options.getInteger("tier", true) as FormableTier, formableKeyInput: interaction.options.getString("formlanan-ulke", true) });
     const country = await gameService.countryByName(interaction.guildId, result.formedName);
     let roleText = "Bağlı devlet rolü bulunmadığı için yalnız belge adı güncellendi.";
@@ -1297,11 +1297,11 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     }
     await interaction.editReply(`✅ **${result.previousName}**, **${result.formedName}** olarak **${FORMABLE_TIER_LABELS[result.tier]}** seviyesinde formlandı.\n${roleText}${result.foundingRewards.length ? `\n\n🎁 **Kuruluş ödülleri**\n${result.foundingRewards.map((reward) => `• ${reward}`).join("\n")}` : ""}\n\n✨ **Etkin ülke bonusları**\n${result.buffs.map((buff) => `• ${buff}`).join("\n")}`);
   } else if (interaction.commandName === "belge") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
     await sendDocument(interaction, country.id);
   } else if (interaction.commandName === "hazine-tasi") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const country = await resolveCountry(interaction);
     const result = await gameService.transferSettlementTreasury({
       guildId: interaction.guildId!,
@@ -1321,7 +1321,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
   } else if (interaction.commandName === "alim-iptal") {
     requireGameMaster(interaction);
     if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const result = await gameService.cancelPendingPurchase({
       guildId: interaction.guildId,
       actorId: interaction.user.id,
@@ -1336,7 +1336,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     requireGameMaster(interaction);
     if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
     const sub = interaction.options.getSubcommand();
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
     if (!country) throw new GameError("Ülke bulunamadı.");
     const settlement = await findSettlement(country.id, interaction.options.getString("yerleske", true));
@@ -1387,7 +1387,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
   } else if (interaction.commandName === "asker-alimi") {
     await startPurchase(interaction, "unit");
   } else if (interaction.commandName === "asker-terhis") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
     const settlement = await findSettlement(country.id, interaction.options.getString("yerleske", true));
     const unitType = interaction.options.getString("birim", true) as keyof typeof UNITS;
@@ -1401,13 +1401,13 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
   } else if (interaction.commandName === "gemi-alimi") {
     await startPurchase(interaction, "ship");
   } else if (interaction.commandName === "gozcu-alimi") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
     const settlement = await findSettlement(country.id, interaction.options.getString("yerleske", true));
     const result = await gameService.purchaseObserver({ guildId: interaction.guildId!, actorId: interaction.user.id, countryId: country.id, settlementId: settlement.id });
     await interaction.editReply({ content: `✅ **${settlement.name}** için Gözcü Birliği alındı. **${gold(result.cost)}** ödendi; **Tur ${result.dueTurn}** hazır olacak.` });
   } else if (interaction.commandName === "kusatma-uretimi") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
     const settlement = await findSettlement(country.id, interaction.options.getString("yerleske", true));
     const assetType = interaction.options.getString("alet", true) as keyof typeof SIEGE_ASSETS;
@@ -1415,7 +1415,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     const result = await gameService.purchaseSiegeAsset({ guildId: interaction.guildId!, actorId: interaction.user.id, countryId: country.id, settlementId: settlement.id, assetType, quantity });
     await interaction.editReply({ content: `✅ ${quantity} **${SIEGE_ASSETS[assetType].name}** üretime alındı. **${gold(result.cost)}** ödendi; ${result.slots} atölye slotu kullanıldı ve **Tur ${result.completionTurn}** tamamlanacak.` });
   } else if (interaction.commandName === "seferberlik") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
     await gameService.setMobilization({ guildId: interaction.guildId!, actorId: interaction.user.id, countryId: country.id, mobilization: interaction.options.getString("seviye", true) as Mobilization });
     await interaction.editReply({ content: `✅ **${country.name}** artık **${MOBILIZATION_RULES[interaction.options.getString("seviye", true) as Mobilization].label}** durumunda.` });
@@ -1461,7 +1461,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
   } else if (interaction.commandName === "nufus-ekle") {
     requireGameMaster(interaction);
     if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
     if (!country) throw new GameError("Ülke bulunamadı.");
     const settlement = await findSettlement(country.id, interaction.options.getString("yerleske", true));
@@ -1478,7 +1478,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
   } else if (interaction.commandName === "milis-ekle") {
     requireGameMaster(interaction);
     if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
     if (!country) throw new GameError("Ülke bulunamadı.");
     const settlement = await findSettlement(country.id, interaction.options.getString("yerleske", true));
@@ -1495,7 +1495,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
   } else if (interaction.commandName === "tamamlanmis-bina-ekle") {
     requireGameMaster(interaction);
     if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
     if (!country) throw new GameError("Ülke bulunamadı.");
     const settlement = await findSettlement(country.id, interaction.options.getString("yerleske", true));
@@ -1536,7 +1536,7 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
     return;
   }
   if (!kind || !["trade_end", "bs", "bc", "us", "ss"].includes(kind)) {
-    await interaction.reply({ content: "Bu seçim menüsü eskimiş. İlgili komutu yeniden açın.", ephemeral: true });
+    await interaction.reply({ content: "Bu seçim menüsü eskimiş. İlgili komutu yeniden açın.", flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -1618,7 +1618,7 @@ async function handleButton(interaction: ButtonInteraction): Promise<void> {
   if (await handleCityButton(interaction)) return;
   if (interaction.customId.startsWith("trade_accept|") || interaction.customId.startsWith("trade_reject|")) {
     if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const [action, agreementId] = interaction.customId.split("|");
     const agreement = await tradeService.get(agreementId!);
     if (!agreement) throw new GameError("Ticaret teklifi bulunamadı.");
@@ -1639,7 +1639,7 @@ async function handleButton(interaction: ButtonInteraction): Promise<void> {
   }
   const [kind, countryId, settlementId, buildingType] = interaction.customId.split("|");
   if (kind !== "bx" || !countryId || !settlementId || !buildingType || !interaction.guildId) {
-    await interaction.reply({ content: "Bu düğme eskimiş. İlgili komutu yeniden açın.", ephemeral: true });
+    await interaction.reply({ content: "Bu düğme eskimiş. İlgili komutu yeniden açın.", flags: MessageFlags.Ephemeral });
     return;
   }
   await interaction.deferUpdate();
@@ -1655,7 +1655,7 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
   if (await handleCityModal(interaction)) return;
   const [kind, countryId, settlementId, itemType] = interaction.customId.split("|");
   if (!countryId || !settlementId || !itemType || !interaction.guildId) throw new GameError("Form bilgisi bozuk.");
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   await assertCountryAccess(interaction, countryId);
   const quantity = Number(interaction.fields.getTextInputValue("quantity").replaceAll(".", "").replaceAll(",", ""));
   if (!Number.isSafeInteger(quantity)) throw new GameError("Geçerli bir tam sayı girilmelidir.");
@@ -2197,11 +2197,11 @@ async function reportError(interaction: Interaction, error: unknown): Promise<vo
   const message = error instanceof GameError
     ? error.message
     : `Beklenmeyen bir hata oluştu. İşlem daha önce uygulanmış olabilir; belgeyi kontrol edin. Hata kodu: ${reference}`;
-  const payload = { content: `❌ ${message}`, components: [] as ActionRowBuilder<any>[], ephemeral: true };
+  const payload: InteractionReplyOptions = { content: `❌ ${message}`, components: [], flags: MessageFlags.Ephemeral };
   if (!interaction.isRepliable()) return;
   try {
     if (interaction.deferred && interaction.isMessageComponent()) await interaction.followUp(payload);
-    else if (interaction.deferred) await interaction.editReply({ content: payload.content, components: [] });
+    else if (interaction.deferred) await interaction.editReply({ content: `❌ ${message}`, components: [] });
     else if (interaction.replied) await interaction.followUp(payload);
     else await interaction.reply(payload);
   } catch (responseError) {

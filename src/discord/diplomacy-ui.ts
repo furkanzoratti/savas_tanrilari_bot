@@ -1,5 +1,5 @@
 import {
-  ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, ChannelType, EmbedBuilder,
+  ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, ChannelType, EmbedBuilder, MessageFlags,
   type ButtonInteraction, type ChatInputCommandInteraction, type TextChannel
 } from "discord.js";
 import { RESOURCES } from "../domain/resources.js";
@@ -286,7 +286,7 @@ export async function handleDiplomacyCommand(interaction: ChatInputCommandIntera
   if (interaction.commandName === "vassallik") {
     requireGameMaster(interaction);
     const action = interaction.options.getSubcommand();
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const overlord = await gameService.countryByName(interaction.guildId, interaction.options.getString("hakim-ulke", true));
     const vassal = await gameService.countryByName(interaction.guildId, interaction.options.getString("vassal-ulke", true));
     if (!overlord || !vassal) throw new GameError("Hâkim veya vassal devlet bulunamadı.");
@@ -339,7 +339,7 @@ export async function handleDiplomacyCommand(interaction: ChatInputCommandIntera
     const action = interaction.options.getString("islem", true);
     const channel = interaction.options.getChannel("kanal");
     if (action === "set" && !channel) throw new GameError("Diplomasi kanalını ayarlamak için bir metin kanalı seçmelisiniz.");
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     await diplomacyService.setChannel({ guildId: interaction.guildId, actorId: interaction.user.id, channelId: action === "set" ? channel!.id : null });
     await interaction.editReply(action === "set"
       ? `✅ İttifak ve pakt davetleri artık ${channel} kanalında yürütülecek. Davetler, katılımlar ve bilgi kartları herkese açık yayımlanır.`
@@ -371,7 +371,7 @@ export async function handleDiplomacyButton(interaction: ButtonInteraction): Pro
   const invitationId = match[3]!;
 
   if (kind === "alliance") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const offer = await diplomacyService.getAlliance(invitationId);
     if (!offer || offer.guild_id !== interaction.guildId) throw new GameError("İttifak daveti bulunamadı.");
     if (!isGameMaster(interaction)) {
@@ -402,7 +402,7 @@ export async function handleDiplomacyButton(interaction: ButtonInteraction): Pro
     return true;
   }
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const invitation = await diplomacyService.getPactInvitation(invitationId);
   if (!invitation || invitation.guild_id !== interaction.guildId) throw new GameError("Pakt daveti bulunamadı.");
   if (!isGameMaster(interaction)) {

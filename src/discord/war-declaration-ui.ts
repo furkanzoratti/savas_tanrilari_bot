@@ -1,6 +1,6 @@
 import {
   ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, ChannelType,
-  EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle,
+  EmbedBuilder, MessageFlags, ModalBuilder, TextInputBuilder, TextInputStyle,
   type ButtonInteraction, type ChatInputCommandInteraction, type ModalSubmitInteraction, type TextChannel
 } from "discord.js";
 import { gold } from "../domain/format.js";
@@ -236,7 +236,7 @@ export async function handleWarDeclarationCommand(interaction: ChatInputCommandI
     const operation = interaction.options.getString("islem", true);
     const channel = interaction.options.getChannel("kanal");
     if (operation === "set" && !channel) throw new GameError("Duyuru kanalını ayarlamak için bir metin kanalı seçmelisiniz.");
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     await warDeclarationService.setChannel({ guildId: interaction.guildId, actorId: interaction.user.id, channelId: operation === "set" ? channel!.id : null });
     await interaction.editReply(operation === "set" ? `✅ Savaş ve barış duyuruları ${channel} kanalında yayımlanacak.` : "✅ Savaş duyuru kanalı kaldırıldı.");
     return true;
@@ -254,7 +254,7 @@ export async function handleWarDeclarationCommand(interaction: ChatInputCommandI
 
   if (interaction.commandName === "savas-sonlandir") {
     requireGameMaster(interaction);
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const channel = await warChannel(interaction);
     const warId = interaction.options.getString("savas", true);
     const winnerSelection = interaction.options.getString("kazanan", true);
@@ -277,7 +277,7 @@ export async function handleWarDeclarationCommand(interaction: ChatInputCommandI
 
   if (interaction.commandName === "savas-yapilandir") {
     requireGameMaster(interaction);
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const channel = await warChannel(interaction);
     const subcommand = interaction.options.getSubcommand();
     const warId = interaction.options.getString("savas", true);
@@ -353,7 +353,7 @@ export async function handleWarDeclarationCommand(interaction: ChatInputCommandI
   }
 
   if (interaction.commandName === "savas-cagrisi") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const channel = await warChannel(interaction);
     const own = await resolveCountry(interaction, interaction.options.getString("ulke"));
     const target = await countryByOption(interaction, "hedef-ulke");
@@ -412,7 +412,7 @@ export async function handleWarDeclarationModal(interaction: ModalSubmitInteract
   let [kind, firstId, secondId] = interaction.customId.split("|");
   if (kind !== "war_context" && kind !== "war_declare" && kind !== "war_pact" && kind !== "war_pact_country" && kind !== "peace_offer") return false;
   if (!interaction.guildId || !firstId) throw new GameError("Savaş veya barış formunun bilgileri geçersiz.");
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const channel = await warChannel(interaction);
 
   if (kind === "war_context") {
@@ -540,7 +540,7 @@ export async function handleWarDeclarationButton(interaction: ButtonInteraction)
   const [action, offerId] = interaction.customId.split("|");
   if (action === "war_invite_accept" || action === "war_invite_reject") {
     if (!offerId || !interaction.guildId) throw new GameError("Savaş çağrısının bilgileri geçersiz.");
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const invitation = await warDeclarationService.getWarInvitation(offerId);
     if (!invitation || invitation.guild_id !== interaction.guildId) throw new GameError("Savaş çağrısı bulunamadı.");
     if (!isGameMaster(interaction)) {
@@ -567,7 +567,7 @@ export async function handleWarDeclarationButton(interaction: ButtonInteraction)
   }
   if (action !== "peace_accept" && action !== "peace_reject") return false;
   if (!offerId || !interaction.guildId) throw new GameError("Barış teklifinin bilgileri geçersiz.");
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const offer = await warDeclarationService.getPeaceOffer(offerId);
   if (!offer || offer.guild_id !== interaction.guildId) throw new GameError("Barış teklifi bulunamadı.");
   if (!isGameMaster(interaction)) {
