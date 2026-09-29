@@ -827,19 +827,21 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
     const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
     if (!country) throw new GameError("Ülke bulunamadı.");
     if (!interaction.guild) throw new GameError("Sunucu bulunamadı.");
-    const user = interaction.options.getUser("oyuncu", true);
+    const userId = interaction.options.getString("oyuncu", true).trim();
+    if (!/^\d{17,20}$/.test(userId)) throw new GameError("Geçerli bir ülke oyuncusu seçmelisiniz.");
+    const user = await interaction.client.users.fetch(userId).catch(() => null);
     const linkedRole = country.discord_role_id ? await interaction.guild.roles.fetch(country.discord_role_id).catch(() => null) : null;
     let roleRemoved = false;
-    if (linkedRole) roleRemoved = await removeCountryRoleFromMember(interaction.guild, user.id, linkedRole.id);
+    if (linkedRole) roleRemoved = await removeCountryRoleFromMember(interaction.guild, userId, linkedRole.id);
     try {
-      await gameService.removePlayer(interaction.guildId, interaction.user.id, country.id, user.id);
+      await gameService.removePlayer(interaction.guildId, interaction.user.id, country.id, userId);
     } catch (error) {
       if (roleRemoved && linkedRole) {
-        await addCountryRoleToMember(interaction.guild, user.id, linkedRole).catch(() => undefined);
+        await addCountryRoleToMember(interaction.guild, userId, linkedRole).catch(() => undefined);
       }
       throw error;
     }
-    await interaction.editReply(`✅ ${user} oyuncusunun **${country.name}** ülke ataması ve Discord rolü kaldırıldı.`);
+    await interaction.editReply(`✅ ${user ? `${user.username} (<@${userId}>)` : `<@${userId}>`} oyuncusunun **${country.name}** ülke ataması${roleRemoved ? " ve Discord rolü" : ""} kaldırıldı.`);
   } else if (sub === "yerleske-ekle") {
     const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
     if (!country) throw new GameError("Ülke bulunamadı.");
@@ -2143,6 +2145,20 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
       name: `${icons[purchase.kind]} ${purchase.countryName} / ${purchase.settlementName} • ${number(purchase.quantity)} ${purchase.itemName} • iade ${gold(purchase.refundableAmount)}`.slice(0, 100),
       value: purchase.key
     })));
+    return;
+  }
+  if (interaction.commandName === "yonetim" && interaction.options.getSubcommand(false) === "oyuncu-cikar" && focused.name === "oyuncu") {
+    if (!interaction.guildId || !isGameMaster(interaction)) { await interaction.respond([]); return; }
+    const countryName = interaction.options.getString("ulke");
+    const country = countryName ? await gameService.countryByName(interaction.guildId, countryName) : null;
+    if (!country) { await interaction.respond([]); return; }
+    const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
+    const choices = await Promise.all((await gameService.playerIds(country.id)).slice(0, 25).map(async (userId) => {
+      const user = await interaction.client.users.fetch(userId).catch(() => null);
+      const username = user?.globalName ?? user?.username ?? "Sunucudan ayrılmış oyuncu";
+      return { name: `${username} • ${userId}`.slice(0, 100), value: userId, search: `${username} ${user?.username ?? ""} ${userId}`.toLocaleLowerCase("tr-TR") };
+    }));
+    await interaction.respond(choices.filter((choice) => !query || choice.search.includes(query)).map(({ name, value }) => ({ name, value })));
     return;
   }
   if (interaction.commandName !== "yonetim" || focused.name !== "kultur") {

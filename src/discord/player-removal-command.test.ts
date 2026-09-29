@@ -7,5 +7,6 @@ describe("oyuncu ülke ataması", () => {
     const removal = admin?.options?.find((option) => option.name === "oyuncu-cikar");
     expect(removal?.options?.map((option) => option.name)).toEqual(["ulke", "oyuncu"]);
     expect(removal?.options?.every((option) => option.required)).toBe(true);
+    expect(removal?.options?.find((option) => option.name === "oyuncu")).toMatchObject({ type: 3, autocomplete: true });
   });
 });
