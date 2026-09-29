@@ -5,6 +5,7 @@ export type MercenaryCategory = "CHEAP" | "STANDARD" | "ELITE" | "SIEGE" | "FLEE
 export interface MercenaryCompany {
   name: string;
   category: MercenaryCategory;
+  tier?: 1 | 2;
   hireCost: number;
   turnUpkeep: number;
   slotCost?: number;
@@ -34,20 +35,41 @@ const MERCENARY_COMPANY_DEFINITIONS = {
   macedonian_sarissa_company: { name: "Makedon Sarissa Birliği", category: "ELITE", hireCost: 7800, turnUpkeep: 1750, land: { spear: 3000, heavy_infantry: 1000, archer: 500 } },
   silver_shields: { name: "Gümüş Kalkanlılar", category: "ELITE", hireCost: 9300, turnUpkeep: 1850, land: { heavy_infantry: 2500, archer: 500, light_cavalry: 500 } },
   punic_expeditionary_army: { name: "Pön Sefer Ordusu", category: "ELITE", hireCost: 9000, turnUpkeep: 1950, land: { spear: 2000, heavy_infantry: 1000, slinger: 1000, heavy_cavalry: 500 } },
-  heirs_of_ten_thousand: { name: "On Binlerin Mirasçıları", category: "ELITE", hireCost: 12500, turnUpkeep: 2800, slotCost: 2, land: { light_infantry: 3000, spear: 2000, archer: 1000, heavy_infantry: 1000, light_cavalry: 1000 } },
+  heirs_of_ten_thousand: { name: "On Binlerin Mirasçıları", category: "ELITE", tier: 2, hireCost: 15050, turnUpkeep: 3225, slotCost: 2, land: { light_infantry: 3000, spear: 2500, archer: 1500, heavy_infantry: 1500, light_cavalry: 1000 } },
   tyrian_siege_masters: { name: "Tyros Kuşatma Ustaları", category: "SIEGE", hireCost: 8500, turnUpkeep: 1600, land: { light_infantry: 1000, archer: 500 }, siege: { ballista: 2, catapult: 1, mantlet: 10 } },
   hellas_breach_company: { name: "Hellas Gedik Birliği", category: "SIEGE", hireCost: 9500, turnUpkeep: 1900, land: { heavy_infantry: 1500, spear: 1000 }, siege: { ram: 1, ladder_group: 1, siege_tower: 1 } },
   aegean_free_fleet: { name: "Ege Serbest Filosu", category: "FLEET", hireCost: 6500, turnUpkeep: 1300, ships: { kerkouros: 6, trireme: 2 } },
   phoenician_purple_sails: { name: "Fenike Mor Yelkenleri", category: "FLEET", hireCost: 15000, turnUpkeep: 2800, land: { archer: 1000 }, ships: { trireme: 4, quinquereme: 3 } },
-  nile_marines: { name: "Nil Deniz Piyadeleri", category: "FLEET", hireCost: 11000, turnUpkeep: 2400, land: { light_infantry: 1000, spear: 500 }, ships: { trireme: 3, quinquereme: 2 } }
+  nile_marines: { name: "Nil Deniz Piyadeleri", category: "FLEET", hireCost: 11000, turnUpkeep: 2400, land: { light_infantry: 1000, spear: 500 }, ships: { trireme: 3, quinquereme: 2 } },
+
+  hellenic_grand_sarissa_army: { name: "Hellas Büyük Sarissa Ordusu", category: "ELITE", tier: 2, hireCost: 16625, turnUpkeep: 3563, slotCost: 2, land: { spear: 4000, heavy_infantry: 2000, archer: 1500, light_cavalry: 1000 } },
+  galatian_grand_war_host: { name: "Galat Büyük Savaş Kafilesi", category: "ELITE", tier: 2, hireCost: 17500, turnUpkeep: 3750, slotCost: 2, land: { heavy_infantry: 3500, light_infantry: 4000, slinger: 1500, light_cavalry: 1000 } },
+  sarmatian_iron_horde: { name: "Sarmat Demir Ordası", category: "ELITE", tier: 2, hireCost: 19425, turnUpkeep: 4163, slotCost: 2, land: { heavy_cavalry: 3000, light_cavalry: 3000, archer: 1500 } },
+  iberian_grand_shield_army: { name: "İber Büyük Kalkan Ordusu", category: "ELITE", tier: 2, hireCost: 18200, turnUpkeep: 3900, slotCost: 2, land: { heavy_infantry: 3000, spear: 2500, slinger: 2000, light_cavalry: 1500 } },
+  eastern_silver_expedition: { name: "Doğu Gümüş Sefer Ordusu", category: "ELITE", tier: 2, hireCost: 19250, turnUpkeep: 4125, slotCost: 2, land: { heavy_infantry: 3000, spear: 3000, archer: 2000, light_cavalry: 1000 } },
+  tyrian_grand_siege_company: { name: "Tyros Büyük Kuşatma Kumpanyası", category: "SIEGE", tier: 2, hireCost: 32900, turnUpkeep: 7050, slotCost: 2, land: { light_infantry: 3000, spear: 2000 }, siege: { ballista: 4, catapult: 2, mantlet: 10, siege_tower: 2 } },
+  rhodian_grand_free_fleet: { name: "Rodos Büyük Serbest Filosu", category: "FLEET", tier: 2, hireCost: 14700, turnUpkeep: 3150, slotCost: 2, ships: { kerkouros: 12, trireme: 8 } },
+  phoenician_grand_war_fleet: { name: "Fenike Büyük Savaş Filosu", category: "FLEET", tier: 2, hireCost: 23625, turnUpkeep: 5063, slotCost: 2, land: { archer: 1500 }, ships: { trireme: 8, quinquereme: 6 } }
 } as const;
 
 export type MercenaryCompanyKey = keyof typeof MERCENARY_COMPANY_DEFINITIONS;
 export const MERCENARY_COMPANIES: Record<MercenaryCompanyKey, MercenaryCompany> = MERCENARY_COMPANY_DEFINITIONS;
-export const MERCENARY_CONTRACT_LIMITS = { PEACE: 1, PARTIAL: 1, GENERAL: 1 } as const;
+export const MERCENARY_CONTRACT_LIMITS = { PEACE: 2, PARTIAL: 2, GENERAL: 2 } as const;
 export const MERCENARY_CATEGORY_LABELS: Record<MercenaryCategory, string> = {
   CHEAP: "Ucuz Grup", STANDARD: "Orta Sınıf", ELITE: "Seçkin Grup", SIEGE: "Kuşatma Şirketi", FLEET: "Kiralık Filo"
 };
+
+export function mercenaryTier(company: MercenaryCompany): 1 | 2 {
+  return company.tier ?? 1;
+}
+
+export function mercenarySlotCost(company: MercenaryCompany): number {
+  return company.slotCost ?? 1;
+}
+
+export function mercenarySlotsUsed(companyKeys: readonly MercenaryCompanyKey[]): number {
+  return companyKeys.reduce((sum, key) => sum + mercenarySlotCost(MERCENARY_COMPANIES[key]), 0);
+}
 
 export function mercenaryPersonnel(company: MercenaryCompany): number {
   const land = Object.values(company.land ?? {}).reduce((sum, value) => sum + (value ?? 0), 0);

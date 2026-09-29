@@ -8,6 +8,7 @@ import { RESOURCES } from "../domain/resources.js";
 import { SPECIAL_UNITS } from "../domain/special-units.js";
 import { FORMABLE_COUNTRIES, formableEffectLines, formableModifiers, formableTier } from "../domain/formable-countries.js";
 import { TRADE_ROUTE_LABELS } from "../domain/trade.js";
+import { MERCENARY_COMPANIES, mercenarySlotCost, mercenaryTier } from "../domain/mercenaries.js";
 import type { CountryDocument } from "../services/game-service.js";
 import { TEMPLE_BANNER_URL } from "./assets.js";
 import { renderArmyEmbed } from "./army-embed.js";
@@ -89,6 +90,7 @@ const mercenaryStatusLabels: Record<string, string> = {
 };
 
 function renderMercenaryContract(contract: CountryDocument["mercenaries"][number], currentTurn: number): string {
+  const company = MERCENARY_COMPANIES[contract.company_key];
   const units = contract.units.filter((row) => row.current_quantity > 0)
     .map((row) => `• **${number(row.current_quantity)}** ${UNITS[row.unit_type]?.name ?? row.unit_type}`);
   const ships = contract.ships.filter((row) => row.current_quantity > 0)
@@ -99,8 +101,8 @@ function renderMercenaryContract(contract: CountryDocument["mercenaries"][number
     ? `Ulaşma: **Tur ${contract.arrival_turn}**`
     : `Sözleşme: **Feshedilene kadar**${contract.last_upkeep_turn === currentTurn ? " • Bu turun bakımı ödendi" : ""}`;
   return [
-    `**${contract.companyName}** • ${mercenaryStatusLabels[contract.status] ?? contract.status}`,
-    `${timing} • Bakım: **${gold(contract.turn_upkeep)}**`,
+    `**${contract.companyName}** • Tier ${mercenaryTier(company)} • ${mercenarySlotCost(company)} slot • ${mercenaryStatusLabels[contract.status] ?? contract.status}`,
+    `${timing} • Üç turluk bakım: **${gold(contract.turn_upkeep)}**`,
     ...units,
     ...ships,
     ...assets
@@ -114,7 +116,10 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
   const remainingCapacity = Math.max(0, document.militaryLimit - document.militaryUsed);
   const formable = document.country.active_formable_key ? FORMABLE_COUNTRIES[document.country.active_formable_key] : null;
   const mercenarySummary = (document.mercenaries ?? []).length
-    ? (document.mercenaries ?? []).map((contract) => `• **${contract.companyName}** — ${contract.settlement_name}\n↳ ${mercenaryStatusLabels[contract.status] ?? contract.status} • Bakım ${gold(contract.turn_upkeep)}`).join("\n\n")
+    ? (document.mercenaries ?? []).map((contract) => {
+        const company = MERCENARY_COMPANIES[contract.company_key];
+        return `• **${contract.companyName}** — Tier ${mercenaryTier(company)} • ${mercenarySlotCost(company)} slot — ${contract.settlement_name}\n↳ ${mercenaryStatusLabels[contract.status] ?? contract.status} • Üç turluk bakım ${gold(contract.turn_upkeep)}`;
+      }).join("\n\n")
     : "Aktif veya yolda paralı asker sözleşmesi yok.";
 
   const summary = new EmbedBuilder()

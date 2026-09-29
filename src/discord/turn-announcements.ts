@@ -123,19 +123,19 @@ export function turnAnnouncement(input: TurnAnnouncementInput): EmbedBuilder {
   if (input.mercenaryArrivalDetails?.length) embed.addFields({
     name: "\u{1FA99} Yerleşkeye Ulaşan Paralı Askerler",
     value: fieldValue(input.mercenaryArrivalDetails.map((item) =>
-      `- **${item.countryName} / ${item.settlementName}** - ${item.companyName} - Ilk bakim: ${item.upkeep.toLocaleString("tr-TR")} Altin`
+      `- **${item.countryName} / ${item.settlementName}** - ${item.companyName} - Üç turluk bakım: ${item.upkeep.toLocaleString("tr-TR")} Altın`
     ))
   });
   if (input.mercenaryUpkeepDetails?.length) embed.addFields({
     name: "\u{1F4B0} Paralı Asker Bakımları",
     value: fieldValue(input.mercenaryUpkeepDetails.map((item) =>
-      `- **${item.countryName}** - ${item.companyName}: -${item.amount.toLocaleString("tr-TR")} Altin`
+      `- **${item.countryName}** - ${item.companyName}: üç turluk bakım -${item.amount.toLocaleString("tr-TR")} Altın`
     ))
   });
   if (input.mercenaryUnpaidDetails?.length) embed.addFields({
     name: "\u26A0\uFE0F Ödenemeyen Paralı Asker Bakımları",
     value: fieldValue(input.mercenaryUnpaidDetails.map((item) =>
-      `- **${item.countryName}** - ${item.companyName}: ${item.amount.toLocaleString("tr-TR")} Altin - Hareket ve savas kilitlendi`
+      `- **${item.countryName}** - ${item.companyName}: ${item.amount.toLocaleString("tr-TR")} Altın - Hareket ve savaş kilitlendi`
     ))
   });
   if (input.mercenaryEndedDetails?.length) embed.addFields({

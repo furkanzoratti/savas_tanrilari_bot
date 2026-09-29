@@ -15,7 +15,7 @@ import { currentLocalDate } from "../domain/great-power.js";
 import { isAcquisitionTurn } from "../domain/mobilization.js";
 import type { Mobilization, UnitStatus } from "../domain/types.js";
 import { TRADE_ROUTE_LABELS, type TradeRoute } from "../domain/trade.js";
-import { MERCENARY_COMPANIES, type MercenaryCompanyKey } from "../domain/mercenaries.js";
+import { MERCENARY_COMPANIES, MERCENARY_CONTRACT_LIMITS, mercenarySlotCost, mercenarySlotsUsed, mercenaryTier, type MercenaryCompanyKey } from "../domain/mercenaries.js";
 import { NPC_AUTO_PURCHASE_DOCTRINES, type NpcAutoPurchaseDoctrine } from "../domain/npc-auto-purchase.js";
 import { SPECIAL_UNITS, isSpecialUnitType, type SpecialUnitType } from "../domain/special-units.js";
 import { FORMABLE_COUNTRIES, FORMABLE_TIER_LABELS, formableModifiers, formableTier, type FormableTier } from "../domain/formable-countries.js";
@@ -215,7 +215,8 @@ async function handleMercenaryCommand(interaction: ChatInputCommandInteraction):
     const settlement = await findSettlement(country.id, interaction.options.getString("yerleske", true));
     const companyKey = interaction.options.getString("sirket", true) as MercenaryCompanyKey;
     const result = await gameService.hireMercenary({ guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id, settlementId: settlement.id, companyKey });
-    await interaction.editReply(`✅ **${result.contract.companyName}**, **${country.name}** adına kiralandı. **${gold(result.cost)}** ödendi. Birlik **Tur ${result.contract.arrival_turn}** başında ${settlement.name} yerleşkesine ulaşacak ve ilk **${gold(result.contract.turn_upkeep)}** bakımı aynı tur ilerletmesinde tahsil edilecek.`);
+    const company = MERCENARY_COMPANIES[companyKey];
+    await interaction.editReply(`✅ **${result.contract.companyName}** (Tier ${mercenaryTier(company)} • ${mercenarySlotCost(company)} slot), **${country.name}** adına kiralandı. **${gold(result.cost)}** ödendi. Birlik **Tur ${result.contract.arrival_turn}** başında ${settlement.name} yerleşkesine ulaşacak; **${gold(result.contract.turn_upkeep)}** tutarındaki üç turluk bakım ilk uygun Alım Turunda tahsil edilecek.`);
     return;
   }
 
@@ -227,17 +228,20 @@ async function handleMercenaryCommand(interaction: ChatInputCommandInteraction):
       guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id,
       settlementId: settlement.id, companyKey
     });
-    await interaction.editReply(`✅ **${contract.companyName}**, daha önce ücreti alınmış sözleşme olarak **${country.name} / ${settlement.name}** kaydına ücretsiz eklendi. Kiralama bedeli kesilmedi; ilk otomatik bakım **Tur ${contract.last_upkeep_turn! + 1}** ilerletmesinde **${gold(contract.turn_upkeep)}** olarak tahsil edilecek.`);
+    await interaction.editReply(`✅ **${contract.companyName}**, daha önce ücreti alınmış sözleşme olarak **${country.name} / ${settlement.name}** kaydına ücretsiz eklendi. Kiralama bedeli kesilmedi; **${gold(contract.turn_upkeep)}** tutarındaki üç turluk bakım sonraki uygun Alım Turunda tahsil edilecek.`);
     return;
   }
 
   if (sub === "listele") {
     const contracts = await gameService.listMercenaryContracts(country.id);
     const text = contracts.length ? contracts.map((contract) => {
+      const company = MERCENARY_COMPANIES[contract.company_key];
       const status = contract.status === "PENDING" ? `Yolda • Tur ${contract.arrival_turn}` : contract.status === "UNPAID" ? "Bakımı ödenmedi • hareketsiz" : "Aktif • feshedilene kadar";
-      return `• **${contract.companyName}** — ${contract.settlement_name}\n  ${status} • Bakım **${gold(contract.turn_upkeep)}**`;
+      return `• **${contract.companyName}** — Tier ${mercenaryTier(company)} • ${mercenarySlotCost(company)} slot — ${contract.settlement_name}\n  ${status} • Üç turluk bakım **${gold(contract.turn_upkeep)}**`;
     }).join("\n") : "Canlı paralı asker sözleşmesi bulunmuyor.";
-    await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0xc59b45).setTitle(`🪙 ${country.name} • Paralı Askerler`).setDescription(text)] });
+    const usedSlots = mercenarySlotsUsed(contracts.filter((contract) => ["PENDING", "ACTIVE", "UNPAID"].includes(contract.status)).map((contract) => contract.company_key));
+    const slotLimit = MERCENARY_CONTRACT_LIMITS[country.mobilization];
+    await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0xc59b45).setTitle(`🪙 ${country.name} • Paralı Askerler • Slot ${usedSlots}/${slotLimit}`).setDescription(text)] });
     return;
   }
 
@@ -2072,6 +2076,7 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
     if (!gameMaster && (!interaction.guildId || !await gameService.countryForUser(interaction.guildId, interaction.user.id))) { await interaction.respond([]); return; }
     const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
     let companies = Object.entries(MERCENARY_COMPANIES) as Array<[MercenaryCompanyKey, (typeof MERCENARY_COMPANIES)[MercenaryCompanyKey]]>;
+    companies.sort((left, right) => mercenaryTier(right[1]) - mercenaryTier(left[1]) || left[1].name.localeCompare(right[1].name, "tr"));
     if (interaction.commandName === "savas" && subcommand === "parali-asker-ayarla" && interaction.guildId) {
       const countryName = interaction.options.getString("ulke");
       if (!countryName) { await interaction.respond([]); return; }
@@ -2081,7 +2086,11 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
       companies = companies.filter(([companyKey]) => contracted.has(companyKey));
     }
     if (interaction.commandName === "parali-asker" && ["kirala", "ucretsiz-ekle"].includes(subcommand) && interaction.guildId) {
-      const available = new Set(await gameService.availableMercenaryCompanyKeys(interaction.guildId));
+      const requestedName = interaction.options.getString("ulke");
+      const targetCountry = gameMaster && requestedName
+        ? await gameService.countryByName(interaction.guildId, requestedName)
+        : await gameService.countryForUser(interaction.guildId, interaction.user.id);
+      const available = new Set(await gameService.availableMercenaryCompanyKeys(interaction.guildId, targetCountry?.id));
       companies = companies.filter(([companyKey]) => available.has(companyKey));
     }
     if (interaction.commandName === "parali-asker" && subcommand === "feshet" && interaction.guildId) {
@@ -2110,7 +2119,7 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
         const upkeep = terms?.turnUpkeep??company.turnUpkeep;
         const hireDiscount = terms?.hireDiscountPercent ? ` (-%${terms.hireDiscountPercent})` : "";
         const upkeepDiscount = terms?.upkeepDiscountPercent ? ` (-%${terms.upkeepDiscountPercent})` : "";
-        return { name:`${company.name} • ${gold(hire)}${hireDiscount} / bakım ${gold(upkeep)}${upkeepDiscount}`.slice(0,100),value };
+        return { name:`T${mercenaryTier(company)} • ${mercenarySlotCost(company)} slot • ${company.name} • ${gold(hire)}${hireDiscount} / 3 tur bakım ${gold(upkeep)}${upkeepDiscount}`.slice(0,100),value };
       }));
     return;
   }

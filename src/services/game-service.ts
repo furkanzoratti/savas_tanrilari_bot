@@ -10,7 +10,7 @@ import type { CultureGroup } from "../domain/cultures.js";
 import type { CharacterRole, ForceType, Mobilization, RuinStage, ShipStatus, UnitStatus } from "../domain/types.js";
 import { RESOURCES, buildingCostMultiplier, buildingDurationReduction, shipCostMultiplier, siegeCostMultiplier, unitCostMultiplier, type ResourceType } from "../domain/resources.js";
 import { countryResourceAccess, settlementResourceAccess, settlementResourceStates } from "./resource-service.js";
-import { MERCENARY_COMPANIES, MERCENARY_CONTRACT_LIMITS, importedMercenarySchedule, mercenaryContractSchedule, mercenaryPriceTerms, mercenaryTerminationUpkeep, type MercenaryCompanyKey, type MercenaryPriceTerms } from "../domain/mercenaries.js";
+import { MERCENARY_COMPANIES, MERCENARY_CONTRACT_LIMITS, importedMercenarySchedule, mercenaryContractSchedule, mercenaryPriceTerms, mercenarySlotCost, mercenarySlotsUsed, mercenaryTerminationUpkeep, type MercenaryCompanyKey, type MercenaryPriceTerms } from "../domain/mercenaries.js";
 import { cancelActiveGarrisonReplenishment, completeDueGarrisonReplenishments, scheduleAllMissingGarrisons, scheduleMandatoryGarrisonReplenishment, type GarrisonReplenishmentReason } from "./garrison-service.js";
 import { isSpecialUnitType, type SpecialUnitType } from "../domain/special-units.js";
 import { applyFormableShipUpkeepDiscount, FORMABLE_COUNTRIES, formableBuildingDiscount, formableEffectLines, formableModifiers, formableTier, formableUnitDiscount, isFormableCountryKey, missingFormableTerritories, type FormableCountryDefinition, type FormableCountryKey, type FormableTier } from "../domain/formable-countries.js";
@@ -1150,12 +1150,26 @@ export const gameService = {
     finally { client.release(); }
   },
 
-  async availableMercenaryCompanyKeys(guildId: string): Promise<MercenaryCompanyKey[]> {
+  async availableMercenaryCompanyKeys(guildId: string, countryId?: string): Promise<MercenaryCompanyKey[]> {
     const unavailable = new Set((await pool.query<{ company_key: MercenaryCompanyKey }>(
       "SELECT DISTINCT company_key FROM mercenary_contracts WHERE guild_id=$1 AND status IN ('PENDING','ACTIVE','UNPAID')",
       [guildId]
     )).rows.map((row) => row.company_key));
-    return (Object.keys(MERCENARY_COMPANIES) as MercenaryCompanyKey[]).filter((companyKey) => !unavailable.has(companyKey));
+    let remainingSlots = Number.POSITIVE_INFINITY;
+    if (countryId) {
+      const country = (await pool.query<Pick<CountryRow, "guild_id" | "mobilization">>(
+        "SELECT guild_id,mobilization FROM countries WHERE id=$1",
+        [countryId]
+      )).rows[0];
+      if (!country || country.guild_id !== guildId) throw new GameError("Ülke bu sunucuya ait değil.");
+      const liveKeys = (await pool.query<{ company_key: MercenaryCompanyKey }>(
+        "SELECT company_key FROM mercenary_contracts WHERE country_id=$1 AND status IN ('PENDING','ACTIVE','UNPAID')",
+        [countryId]
+      )).rows.map((row) => row.company_key);
+      remainingSlots = Math.max(0, MERCENARY_CONTRACT_LIMITS[country.mobilization] - mercenarySlotsUsed(liveKeys));
+    }
+    return (Object.keys(MERCENARY_COMPANIES) as MercenaryCompanyKey[])
+      .filter((companyKey) => !unavailable.has(companyKey) && mercenarySlotCost(MERCENARY_COMPANIES[companyKey]) <= remainingSlots);
   },
 
   async mercenaryCompanyPrices(countryId: string): Promise<Record<MercenaryCompanyKey,MercenaryPriceTerms>> {
@@ -1181,7 +1195,9 @@ export const gameService = {
       if (unavailable.rowCount) throw new GameError("Bu parali asker grubu halen baska bir sozlesmeye bagli.");
       const currentContracts = await loadMercenaryContracts(client, country.id);
       const slotLimit = MERCENARY_CONTRACT_LIMITS[country.mobilization];
-      if (currentContracts.length >= slotLimit) throw new GameError("Her devlet aynı anda en fazla 1 canlı paralı asker sözleşmesine sahip olabilir.");
+      const usedSlots = mercenarySlotsUsed(currentContracts.map((contract) => contract.company_key));
+      const requiredSlots = mercenarySlotCost(company);
+      if (usedSlots + requiredSlots > slotLimit) throw new GameError(`Bu şirket ${requiredSlots} slot kullanır. Kullanılan paralı asker slotu: ${usedSlots}/${slotLimit}.`);
       const terms = (await countryMercenaryPrices(client,country))[input.companyKey];
       const cost = terms.hireCost;
       await adjustCountryLocalTreasuries(client, country.id, -cost);
@@ -1222,7 +1238,9 @@ export const gameService = {
       if (unavailable.rowCount) throw new GameError("Bu paralı asker grubu halen başka bir sözleşmeye bağlı.");
       const currentContracts = await loadMercenaryContracts(client, country.id);
       const slotLimit = MERCENARY_CONTRACT_LIMITS[country.mobilization];
-      if (currentContracts.length >= slotLimit) throw new GameError("Her devlet aynı anda en fazla 1 canlı paralı asker sözleşmesine sahip olabilir.");
+      const usedSlots = mercenarySlotsUsed(currentContracts.map((contract) => contract.company_key));
+      const requiredSlots = mercenarySlotCost(company);
+      if (usedSlots + requiredSlots > slotLimit) throw new GameError(`Bu şirket ${requiredSlots} slot kullanır. Kullanılan paralı asker slotu: ${usedSlots}/${slotLimit}.`);
 
       const { hiredTurn, arrivalTurn, firstUpkeepTurn } = importedMercenarySchedule(guild.current_turn);
       const inserted = (await client.query<{ id: string }>(
