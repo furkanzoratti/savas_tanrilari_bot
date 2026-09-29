@@ -781,6 +781,7 @@ export const commandBuilders = [
       .addIntegerOption((o) => o.setName("iber-caetratileri").setDescription("İber Caetratileri").setMinValue(0))
       .addIntegerOption((o) => o.setName("cermen-sok-savascisi").setDescription("Cermen Şok Savaşçıları").setMinValue(0))
       .addIntegerOption((o) => o.setName("anadolu-kalkanlilari").setDescription("Anadolu Kalkanlıları (Thureophoroi)").setMinValue(0))
+      .addStringOption((o) => o.setName("ozel-birimler").setDescription("Ek özel birlikler: anahtar=miktar, virgülle ayırın").setMaxLength(1000))
       .addStringOption((o) => o.setName("yerleske").setDescription("İsteğe bağlı: kadronun ve kayıpların kaynak yerleşkesi").setAutocomplete(true)))
     .addSubcommand((sub) => sub.setName("gemi-ayarla").setDescription("Deniz savaşı taslağının gizli gemi kadrosunu düzenler")
       .addStringOption((o) => o.setName("taraf").setDescription("Savaş tarafı").setRequired(true).addChoices({ name: "A Tarafı", value: "A" }, { name: "B Tarafı", value: "B" }))

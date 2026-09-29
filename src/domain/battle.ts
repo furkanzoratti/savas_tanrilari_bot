@@ -17,6 +17,38 @@ export type BattleTerrain = keyof typeof BATTLE_TERRAINS;
 export type BattleSideKey = "A" | "B";
 export type BattleController = "PLAYERS" | "GM";
 export type BattleUnitType = Exclude<keyof typeof UNITS, "observer">;
+
+/** Parse compact extra-special-unit input used by `/savas kadro-ayarla`. */
+export function parseExtraBattleComposition(
+  raw: string | null | undefined,
+): Partial<Record<BattleUnitType, number>> {
+  const composition: Partial<Record<BattleUnitType, number>> = {};
+  if (!raw?.trim()) return composition;
+
+  for (const token of raw.split(/[;,]/)) {
+    const part = token.trim();
+    if (!part) continue;
+    const separatorIndex = part.search(/[=:]/);
+    if (separatorIndex <= 0) {
+      throw new Error(
+        `Özel birlik biçimi geçersiz: "${part}". Beklenen biçim anahtar=miktar.`,
+      );
+    }
+
+    const key = part.slice(0, separatorIndex).trim() as BattleUnitType;
+    const amountText = part.slice(separatorIndex + 1).trim();
+    if (!(key in BATTLE_UNIT_STATS)) {
+      throw new Error(`Bilinmeyen savaş birimi anahtarı: ${key}`);
+    }
+    const amount = Number(amountText);
+    if (!Number.isSafeInteger(amount) || amount < 0) {
+      throw new Error(`Birlik miktarı geçersiz: ${key}=${amountText}`);
+    }
+    composition[key] = (composition[key] ?? 0) + amount;
+  }
+
+  return composition;
+}
 export type NavalUnitType = "kerkouros" | "trireme" | "quinquereme";
 export type SiegeAssetType = "ladder_group" | "ram" | "mantlet" | "ballista" | "wall_ballista" | "catapult" | "siege_tower";
 export type BattleForceType = BattleUnitType | NavalUnitType;

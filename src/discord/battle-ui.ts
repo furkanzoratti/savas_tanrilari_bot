@@ -447,6 +447,12 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
     requireGameMaster(interaction);
     const countryName = interaction.options.getString("ulke", true);
     const sourceSettlement = interaction.options.getString("yerleske");
+    let extraComposition: Partial<Record<BattleUnitType, number>> = {};
+    try {
+      extraComposition = parseExtraBattleComposition(interaction.options.getString("ozel-birimler"));
+    } catch (error) {
+      throw new GameError(error instanceof Error ? error.message : "Ek özel birlikler okunamadı.");
+    }
     const view = await battleService.setRoster({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id, naval: false, countryName, sourceSettlement,
       composition: {
         light_infantry: interaction.options.getInteger("hafif-piyade", true), slinger: interaction.options.getInteger("sapanci", true),
@@ -460,7 +466,8 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
         carthaginian_war_elephant: interaction.options.getInteger("kartaca-savas-fili") ?? 0,
         iberian_caetrati: interaction.options.getInteger("iber-caetratileri") ?? 0,
         germanic_shock_warrior: interaction.options.getInteger("cermen-sok-savascisi") ?? 0,
-        anatolian_thureophoroi: interaction.options.getInteger("anadolu-kalkanlilari") ?? 0
+        anatolian_thureophoroi: interaction.options.getInteger("anadolu-kalkanlilari") ?? 0,
+        ...extraComposition
       } });
     const side = (["A","B"] as const).find((sideKey) => view.sides[sideKey].participants
       .some((item) => item.country_name.toLocaleLowerCase("tr-TR") === countryName.trim().toLocaleLowerCase("tr-TR")));
@@ -697,3 +704,4 @@ export async function handleBattleSelect(interaction:StringSelectMenuInteraction
   await interaction.editReply(`⚓ **${view.sides[side].country_name}** için **${NAVAL_BATTLE_ORDERS[order].label}** seçildi. Emir henüz kilitli değil; kilitlenene kadar değiştirilebilir.`);
   return true;
 }
+import { parseExtraBattleComposition } from "../domain/battle.js";
