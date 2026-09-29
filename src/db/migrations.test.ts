@@ -287,6 +287,18 @@ describe("seksen dokuzuncu migration", () => {
   });
 });
 
+describe("doksan dokuzuncu migration", () => {
+  const migration = migrations.find((item) => item.version === 99);
+
+  it("dört bölgesel özel birliği ülke izinlerine ekler", () => {
+    expect(migration?.name).toBe("regional_special_units");
+    expect(migration?.sql).toContain("germanic_companion_cavalry");
+    expect(migration?.sql).toContain("balearic_slinger");
+    expect(migration?.sql).toContain("sarmatian_longswordsmen");
+    expect(migration?.sql).toContain("briton_noble_spearmen");
+  });
+});
+
 describe("doksanıncı migration", () => {
   const migration = migrations.find((item) => item.version === 90);
 

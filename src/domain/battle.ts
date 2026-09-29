@@ -73,7 +73,11 @@ export const BATTLE_UNIT_STATS: Record<BattleUnitType, {
   machimoi_phalangitai: { label: "Machimoi Phalangitai", clashDice: 2, clashSides: 8, damageDice: 1, damageSides: 10, durability: 3 },
   mauryan_war_elephant: { label: "Maurya Savaş Filleri", clashDice: 3, clashSides: 12, damageDice: 2, damageSides: 12, durability: 3 },
   desert_raider: { label: "Çöl Akıncıları", clashDice: 2, clashSides: 8, damageDice: 2, damageSides: 8, durability: 2 },
-  egyptian_war_chariot: { label: "Chariot", clashDice: 2, clashSides: 12, damageDice: 2, damageSides: 12, durability: 2 }
+  egyptian_war_chariot: { label: "Chariot", clashDice: 2, clashSides: 12, damageDice: 2, damageSides: 12, durability: 2 },
+  germanic_companion_cavalry: { label: "Cermen Atlı Yoldaşları", clashDice: 2, clashSides: 10, damageDice: 2, damageSides: 8, durability: 2 },
+  balearic_slinger: { label: "Balear Sapancıları", clashDice: 1, clashSides: 10, damageDice: 2, damageSides: 10, durability: 1 },
+  sarmatian_longswordsmen: { label: "Sarmat Uzun Kılıçlıları", clashDice: 2, clashSides: 8, damageDice: 2, damageSides: 10, durability: 2 },
+  briton_noble_spearmen: { label: "Briton Asil Mızraklıları", clashDice: 2, clashSides: 8, damageDice: 1, damageSides: 10, durability: 2 }
 };
 
 export const NAVAL_UNIT_STATS: Record<NavalUnitType, {
@@ -145,12 +149,13 @@ export const compositionTotal = (composition: BattleComposition): number => Obje
 export const ASSAULT_UNIT_TYPES = [
   "light_infantry", "militia", "spear", "heavy_infantry", "legionary", "hoplite",
   "persian_immortal", "iberian_caetrati", "germanic_shock_warrior", "anatolian_thureophoroi",
-  "triarii_veteran", "punic_veteran", "gaesatae", "peltast", "silver_shield", "machimoi_phalangitai"
+  "triarii_veteran", "punic_veteran", "gaesatae", "peltast", "silver_shield", "machimoi_phalangitai",
+  "sarmatian_longswordsmen", "briton_noble_spearmen"
 ] as const satisfies readonly BattleUnitType[];
 
 export const CAVALRY_UNIT_TYPES = [
   "light_cavalry", "heavy_cavalry", "horse_archer", "camel_cavalry", "carthaginian_war_elephant",
-  "mauryan_war_elephant", "desert_raider", "egyptian_war_chariot"
+  "mauryan_war_elephant", "desert_raider", "egyptian_war_chariot", "germanic_companion_cavalry"
 ] as const satisfies readonly BattleUnitType[];
 
 export function assaultUnitTotal(composition: BattleComposition): number {
@@ -162,14 +167,16 @@ const SIEGE_DEFENDER_DISMOUNT_MAP = {
   light_cavalry: "light_infantry",
   heavy_cavalry: "heavy_infantry",
   horse_archer: "archer",
-  camel_cavalry: "spear"
+  camel_cavalry: "spear",
+  germanic_companion_cavalry: "heavy_infantry"
 } as const satisfies Partial<Record<BattleUnitType, BattleUnitType>>;
 
 export const SIEGE_ATTACKER_DISMOUNT_MAP = {
   light_cavalry: "light_infantry",
   heavy_cavalry: "heavy_infantry",
   horse_archer: "archer",
-  camel_cavalry: "spear"
+  camel_cavalry: "spear",
+  germanic_companion_cavalry: "heavy_infantry"
 } as const satisfies Partial<Record<BattleUnitType, BattleUnitType>>;
 export type SiegeDismountUnitType = keyof typeof SIEGE_ATTACKER_DISMOUNT_MAP;
 
@@ -251,12 +258,12 @@ const roleWeights: Record<BattleUnitType, Partial<Record<keyof ArmyCompositionAs
   light_infantry: { line: 1 }, militia: { line: 1 }, heavy_infantry: { line: 1 }, legionary: { line: 1 }, persian_immortal: { line: 1 },
   punic_veteran: { line: 1 }, gaesatae: { line: 1 }, peltast: { line: 0.8, ranged: 0.2 },
   spear: { spear: 1 }, hoplite: { line: 0.5, spear: 0.5 }, triarii_veteran: { spear: 1 },
-  silver_shield: { spear: 1 }, machimoi_phalangitai: { spear: 1 },
-  slinger: { ranged: 1 }, archer: { ranged: 1 }, briton_longbow: { ranged: 1 },
+  silver_shield: { spear: 1 }, machimoi_phalangitai: { spear: 1 }, briton_noble_spearmen: { spear: 1 },
+  slinger: { ranged: 1 }, archer: { ranged: 1 }, briton_longbow: { ranged: 1 }, balearic_slinger: { ranged: 1 },
   light_cavalry: { mobile: 1 }, heavy_cavalry: { mobile: 1 }, camel_cavalry: { mobile: 1 }, carthaginian_war_elephant: { mobile: 1 },
-  mauryan_war_elephant: { mobile: 1 }, desert_raider: { mobile: 1 }, egyptian_war_chariot: { ranged: 0.5, mobile: 0.5 },
+  mauryan_war_elephant: { mobile: 1 }, desert_raider: { mobile: 1 }, egyptian_war_chariot: { ranged: 0.5, mobile: 0.5 }, germanic_companion_cavalry: { mobile: 1 },
   horse_archer: { ranged: 0.5, mobile: 0.5 },
-  iberian_caetrati: { line: 1 }, germanic_shock_warrior: { line: 1 },
+  iberian_caetrati: { line: 1 }, germanic_shock_warrior: { line: 1 }, sarmatian_longswordsmen: { line: 1 },
   anatolian_thureophoroi: { line: 0.70, spear: 0.30 }
 };
 
@@ -266,7 +273,8 @@ const spearCounterWeights: Partial<Record<BattleUnitType, number>> = {
   anatolian_thureophoroi: 0.3,
   triarii_veteran: 1,
   silver_shield: 1,
-  machimoi_phalangitai: 1
+  machimoi_phalangitai: 1,
+  briton_noble_spearmen: 1
 };
 
 const cavalryCounterWeights: Partial<Record<BattleUnitType, number>> = {
@@ -277,7 +285,8 @@ const cavalryCounterWeights: Partial<Record<BattleUnitType, number>> = {
   carthaginian_war_elephant: 1,
   mauryan_war_elephant: 1,
   desert_raider: 1,
-  egyptian_war_chariot: 1
+  egyptian_war_chariot: 1,
+  germanic_companion_cavalry: 1
 };
 
 function weightedCounterTotal(
@@ -457,7 +466,7 @@ export function siegeAssaultGroups(
       : SIEGE_ASSAULT_FRONTAGE;
   const infantry = engagedComposition(meleeSource, infantryFrontage);
   const rangedSource: BattleComposition = {};
-  for (const key of ["slinger", "archer", "briton_longbow"] as BattleUnitType[]) {
+  for (const key of ["slinger", "archer", "briton_longbow", "balearic_slinger"] as BattleUnitType[]) {
     const quantity = composition[key] ?? 0;
     if (quantity > 0) rangedSource[key] = quantity;
   }

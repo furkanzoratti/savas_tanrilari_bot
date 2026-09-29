@@ -30,6 +30,10 @@ describe("hammadde etkileri", () => {
     }
     expect(unitCostMultiplier("peltast", ["IRON"])).toBe(1);
     expect(unitCostMultiplier("triarii_veteran", ["LEATHER"])).toBe(1);
+    expect(unitCostMultiplier("germanic_companion_cavalry", ["IRON", "HORSES"])).toBe(0.8);
+    expect(unitCostMultiplier("balearic_slinger", ["LEATHER", "LEAD"])).toBe(0.8);
+    expect(unitCostMultiplier("sarmatian_longswordsmen", ["IRON"])).toBe(0.9);
+    expect(unitCostMultiplier("briton_noble_spearmen", ["IRON"])).toBe(0.9);
   });
 
   it("Şarap, Cam ve İpek etkilerini yeni ekonomi binalarına uygular", () => {

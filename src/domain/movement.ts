@@ -36,9 +36,7 @@ export interface MovementRules {
   pureCavalryBonus: number;
   strategicRedeploymentBonus: number;
   forcedMarchBonus: number;
-  lightSiegePenaltyAboveHalf: number;
-  heavySiegePenaltyAtMostHalf: number;
-  heavySiegePenaltyAboveHalf: number;
+  siegeAssetPenalty: number;
   allKerkourosBonus: number;
   quinqueremePenalty: number;
   fleetCargoPenaltyBands: readonly { maximumUtilization: number; penalty: number }[];
@@ -64,9 +62,7 @@ export const DEFAULT_MOVEMENT_RULES = {
   pureCavalryBonus: 1,
   strategicRedeploymentBonus: 2,
   forcedMarchBonus: 2,
-  lightSiegePenaltyAboveHalf: 1,
-  heavySiegePenaltyAtMostHalf: 1,
-  heavySiegePenaltyAboveHalf: 2,
+  siegeAssetPenalty: 1,
   allKerkourosBonus: 1,
   quinqueremePenalty: 1,
   fleetCargoPenaltyBands: [
@@ -153,12 +149,7 @@ export function calculateArmyMovement(input: ArmyMovementInput): ArmyMovementRes
   const load = siegeLoad(assets);
   const capacity = siegeCapacity(totalTroops);
   const utilization = load / capacity;
-  const heavy = whole(assets.catapult) > 0 || whole(assets.siege_tower) > 0;
-  const siegePenalty = load === 0
-    ? 0
-    : heavy
-      ? (utilization <= 0.5 ? rules.heavySiegePenaltyAtMostHalf : rules.heavySiegePenaltyAboveHalf)
-      : (utilization <= 0.5 ? 0 : rules.lightSiegePenaltyAboveHalf);
+  const siegePenalty = load === 0 ? 0 : rules.siegeAssetPenalty;
   const pureCavalry = load === 0 && isPureLightHeavyCavalry(input.composition);
   const formationBonus = pureCavalry ? rules.pureCavalryBonus : 0;
   const territoryBonus = input.friendlyTerritoryRoute ? 1 : 0;

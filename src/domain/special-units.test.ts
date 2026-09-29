@@ -24,7 +24,11 @@ describe("ülkeye özel birlikler", () => {
       machimoi_phalangitai: { name: "Machimoi Phalangitai", price: 3_500, upkeep: 400 },
       mauryan_war_elephant: { name: "Maurya Savaş Filleri", price: 8_000, upkeep: 800 },
       desert_raider: { name: "Çöl Akıncıları", price: 4_250, upkeep: 425 },
-      egyptian_war_chariot: { name: "Chariot", price: 5_000, upkeep: 500 }
+      egyptian_war_chariot: { name: "Chariot", price: 5_000, upkeep: 500 },
+      germanic_companion_cavalry: { name: "Cermen Atlı Yoldaşları", price: 4_250, upkeep: 425 },
+      balearic_slinger: { name: "Balear Sapancıları", price: 3_000, upkeep: 300 },
+      sarmatian_longswordsmen: { name: "Sarmat Uzun Kılıçlıları", price: 4_000, upkeep: 400 },
+      briton_noble_spearmen: { name: "Briton Asil Mızraklıları", price: 3_000, upkeep: 300 }
     });
     for (const unitType of SPECIAL_UNIT_TYPES) expect(UNITS[unitType]).toEqual(SPECIAL_UNITS[unitType]);
   });
@@ -49,6 +53,10 @@ describe("ülkeye özel birlikler", () => {
     expect(BATTLE_UNIT_STATS.mauryan_war_elephant).toMatchObject({ clashDice: 3, clashSides: 12, damageDice: 2, damageSides: 12, durability: 3 });
     expect(BATTLE_UNIT_STATS.desert_raider).toMatchObject({ clashDice: 2, clashSides: 8, damageDice: 2, damageSides: 8, durability: 2 });
     expect(BATTLE_UNIT_STATS.egyptian_war_chariot).toMatchObject({ clashDice: 2, clashSides: 12, damageDice: 2, damageSides: 12, durability: 2 });
+    expect(BATTLE_UNIT_STATS.germanic_companion_cavalry).toMatchObject({ clashDice: 2, clashSides: 10, damageDice: 2, damageSides: 8, durability: 2 });
+    expect(BATTLE_UNIT_STATS.balearic_slinger).toMatchObject({ clashDice: 1, clashSides: 10, damageDice: 2, damageSides: 10, durability: 1 });
+    expect(BATTLE_UNIT_STATS.sarmatian_longswordsmen).toMatchObject({ clashDice: 2, clashSides: 8, damageDice: 2, damageSides: 10, durability: 2 });
+    expect(BATTLE_UNIT_STATS.briton_noble_spearmen).toMatchObject({ clashDice: 2, clashSides: 8, damageDice: 1, damageSides: 10, durability: 2 });
   });
 
   it("özel birlik tür denetimini korur; özel alım kotası tanımlamaz", () => {
@@ -56,6 +64,10 @@ describe("ülkeye özel birlikler", () => {
     expect(isSpecialUnitType("carthaginian_war_elephant")).toBe(true);
     expect(isSpecialUnitType("anatolian_thureophoroi")).toBe(true);
     expect(isSpecialUnitType("egyptian_war_chariot")).toBe(true);
+    expect(isSpecialUnitType("germanic_companion_cavalry")).toBe(true);
+    expect(isSpecialUnitType("balearic_slinger")).toBe(true);
+    expect(isSpecialUnitType("sarmatian_longswordsmen")).toBe(true);
+    expect(isSpecialUnitType("briton_noble_spearmen")).toBe(true);
     expect(isSpecialUnitType("archer")).toBe(false);
   });
 });

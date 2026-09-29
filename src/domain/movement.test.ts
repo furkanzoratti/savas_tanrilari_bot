@@ -25,16 +25,16 @@ describe("kara ve deniz hareket kuralları", () => {
     expect(result).toMatchObject({ canMove: true, baseAllowance: 4, speedBonus: 1, formationBonus: 1, allowance: 6 });
   });
 
-  it("örnekteki tam kuşatma yükünü ağır konvoy olarak iki Hex yavaşlatır", () => {
+  it("kuşatma konvoyunun türü ve doluluğu ne olursa olsun bir Hex ceza uygular", () => {
     const result = calculateArmyMovement({
       totalTroops: 22_000,
       composition: { light_infantry: 22_000 },
       siegeAssets: { catapult: 2, ballista: 4 }
     });
-    expect(result).toMatchObject({ siegeLoad: 4, siegeCapacity: 4, siegePenalty: 2, allowance: 2 });
+    expect(result).toMatchObject({ siegeLoad: 4, siegeCapacity: 4, siegePenalty: 1, allowance: 3 });
   });
 
-  it("az sayıdaki ağır aracı tam dolu konvoy kadar yavaşlatmaz", () => {
+  it("az sayıdaki ağır araca da aynı tek Hex cezasını uygular", () => {
     const result = calculateArmyMovement({
       totalTroops: 22_000,
       composition: { light_infantry: 22_000 },

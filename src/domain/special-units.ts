@@ -17,7 +17,11 @@ export const SPECIAL_UNITS = {
   machimoi_phalangitai: { name: "Machimoi Phalangitai", price: 3_500, upkeep: 400 },
   mauryan_war_elephant: { name: "Maurya Savaş Filleri", price: 8_000, upkeep: 800 },
   desert_raider: { name: "Çöl Akıncıları", price: 4_250, upkeep: 425 },
-  egyptian_war_chariot: { name: "Chariot", price: 5_000, upkeep: 500 }
+  egyptian_war_chariot: { name: "Chariot", price: 5_000, upkeep: 500 },
+  germanic_companion_cavalry: { name: "Cermen Atlı Yoldaşları", price: 4_250, upkeep: 425 },
+  balearic_slinger: { name: "Balear Sapancıları", price: 3_000, upkeep: 300 },
+  sarmatian_longswordsmen: { name: "Sarmat Uzun Kılıçlıları", price: 4_000, upkeep: 400 },
+  briton_noble_spearmen: { name: "Briton Asil Mızraklıları", price: 3_000, upkeep: 300 }
 } as const;
 
 export type SpecialUnitType = keyof typeof SPECIAL_UNITS;

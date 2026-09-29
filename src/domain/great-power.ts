@@ -32,7 +32,11 @@ export const UNIT_POWER: Record<keyof typeof UNITS, number> = {
   machimoi_phalangitai: 2.50,
   mauryan_war_elephant: 5.00,
   desert_raider: 3.00,
-  egyptian_war_chariot: 3.10
+  egyptian_war_chariot: 3.10,
+  germanic_companion_cavalry: 3.00,
+  balearic_slinger: 2.30,
+  sarmatian_longswordsmen: 2.70,
+  briton_noble_spearmen: 2.20
 };
 
 export const SHIP_POWER: Record<keyof typeof SHIPS, number> = {

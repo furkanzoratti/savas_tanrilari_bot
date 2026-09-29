@@ -429,16 +429,18 @@ export function applyFormableShipUpkeepDiscount(baseUpkeep: number, key: Formabl
   return Math.ceil(Math.max(0, baseUpkeep) * (1 - discount));
 }
 
-const infantry = new Set(["light_infantry", "slinger", "spear", "archer", "heavy_infantry", "legionary", "hoplite", "briton_longbow", "persian_immortal", "iberian_caetrati", "germanic_shock_warrior", "anatolian_thureophoroi", "triarii_veteran", "punic_veteran", "gaesatae", "peltast", "silver_shield", "machimoi_phalangitai"]);
-const cavalry = new Set(["light_cavalry", "heavy_cavalry", "horse_archer", "camel_cavalry", "carthaginian_war_elephant", "mauryan_war_elephant", "desert_raider", "egyptian_war_chariot"]);
+const infantry = new Set(["light_infantry", "slinger", "spear", "archer", "heavy_infantry", "legionary", "hoplite", "briton_longbow", "persian_immortal", "iberian_caetrati", "germanic_shock_warrior", "anatolian_thureophoroi", "triarii_veteran", "punic_veteran", "gaesatae", "peltast", "silver_shield", "machimoi_phalangitai", "balearic_slinger", "sarmatian_longswordsmen", "briton_noble_spearmen"]);
+const cavalry = new Set(["light_cavalry", "heavy_cavalry", "horse_archer", "camel_cavalry", "carthaginian_war_elephant", "mauryan_war_elephant", "desert_raider", "egyptian_war_chariot", "germanic_companion_cavalry"]);
+const archerSlinger = new Set(["archer", "slinger", "briton_longbow", "balearic_slinger"]);
+const archerSlingerLight = new Set([...archerSlinger, "light_infantry"]);
 
 export function formableUnitDiscount(key: FormableCountryKey | null | undefined, unitType: string): number {
   const modifier = formableModifiers(key);
   let discount = modifier.unitDiscount ?? 0;
   if (infantry.has(unitType)) discount += modifier.infantryDiscount ?? 0;
   if (cavalry.has(unitType)) discount += modifier.cavalryDiscount ?? 0;
-  if (["archer", "slinger", "briton_longbow"].includes(unitType)) discount += modifier.archerSlingerDiscount ?? 0;
-  if (["archer", "slinger", "briton_longbow", "light_infantry"].includes(unitType)) discount += modifier.archerSlingerLightDiscount ?? 0;
+  if (archerSlinger.has(unitType)) discount += modifier.archerSlingerDiscount ?? 0;
+  if (archerSlingerLight.has(unitType)) discount += modifier.archerSlingerLightDiscount ?? 0;
   return discount;
 }
 

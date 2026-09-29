@@ -63,14 +63,15 @@ export function unitCostMultiplier(unitType: string, resources: readonly Resourc
   let discounts = 0;
   if (has(resources, "IRON") && [
     "spear", "heavy_infantry", "heavy_cavalry",
-    "triarii_veteran", "punic_veteran", "gaesatae", "silver_shield", "machimoi_phalangitai"
+    "triarii_veteran", "punic_veteran", "gaesatae", "silver_shield", "machimoi_phalangitai",
+    "germanic_companion_cavalry", "sarmatian_longswordsmen", "briton_noble_spearmen"
   ].includes(unitType)) discounts++;
   if (has(resources, "HORSES") && [
     "light_cavalry", "heavy_cavalry", "horse_archer",
-    "mauryan_war_elephant", "desert_raider", "egyptian_war_chariot"
+    "mauryan_war_elephant", "desert_raider", "egyptian_war_chariot", "germanic_companion_cavalry"
   ].includes(unitType)) discounts++;
-  if (has(resources, "LEATHER") && ["light_infantry", "archer", "slinger", "peltast"].includes(unitType)) discounts++;
-  if (has(resources, "LEAD") && unitType === "slinger") discounts++;
+  if (has(resources, "LEATHER") && ["light_infantry", "archer", "slinger", "peltast", "balearic_slinger"].includes(unitType)) discounts++;
+  if (has(resources, "LEAD") && ["slinger", "balearic_slinger"].includes(unitType)) discounts++;
   return cappedDiscount(discounts);
 }
 

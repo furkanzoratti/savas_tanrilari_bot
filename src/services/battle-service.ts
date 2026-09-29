@@ -26,6 +26,7 @@ import {
 } from "../domain/characters.js";
 import { deductPopulationForCasualties } from "./population-loss.js";
 import { applyBattleHullDamage,applyBattleRetreatLoss,battleHullComposition,battleHullMetrics,initializeBattleShipHulls,persistBattleHullDamage } from "./naval-battle-hull-service.js";
+import { siegeStarvationBonus } from "../domain/siege-starvation.js";
 
 export type BattleStatus = "DRAFT" | "WAITING_FIRST_ROLL" | "WAITING_SECOND_ROLL" | "READY_TO_RESOLVE" | "FINISHED" | "CANCELLED";
 
@@ -1151,19 +1152,24 @@ export const battleService = {
       let activeBlockadeId: string | null = null;
       let currentTurn: number | null = null;
       if (defenderSettlementId) {
+        currentTurn = (await client.query<{ current_turn: number }>("SELECT current_turn FROM guilds WHERE discord_id=$1", [input.guildId])).rows[0]?.current_turn ?? 0;
         const structures = (await client.query<{ building_type: string; level: number }>(
           "SELECT building_type,level FROM buildings WHERE settlement_id=$1 AND status IN ('ACTIVE','BUILDING') AND level>0 AND building_type IN ('farm','aqueduct')", [defenderSettlementId]
         )).rows;
         const farmLevel = structures.find((item) => item.building_type === "farm")?.level ?? 0;
         const aqueductLevel = structures.find((item) => item.building_type === "aqueduct")?.level ?? 0;
         const reinforced = Boolean((await client.query(
-          "SELECT 1 FROM settlement_policies WHERE settlement_id=$1 AND policy_key='GARRISON_REINFORCEMENT' AND status='ACTIVE'", [defenderSettlementId]
+          "SELECT 1 FROM settlement_policies WHERE settlement_id=$1 AND policy_key='GARRISON_REINFORCEMENT' AND status='ACTIVE' AND (suspended_until_turn IS NULL OR suspended_until_turn<=$2)", [defenderSettlementId,currentTurn]
         )).rowCount);
         const defenderFormable = (await client.query<{ active_formable_key: FormableCountryKey | null }>("SELECT c.active_formable_key FROM settlements s JOIN countries c ON c.id=s.country_id WHERE s.id=$1", [defenderSettlementId])).rows[0]?.active_formable_key;
-        const bonus = Math.min(8, (farmLevel >= 3 ? 3 : farmLevel >= 2 ? 1 : 0) + (aqueductLevel >= 2 ? 1 : 0) + (reinforced ? 1 : 0) + (formableModifiers(defenderFormable).starvationBonus ?? 0));
+        const bonus = siegeStarvationBonus({
+          farmLevel,
+          aqueductLevel,
+          garrisonReinforcement: reinforced,
+          formableBonus: formableModifiers(defenderFormable).starvationBonus
+        });
         starvationCapacity = BASE_SIEGE_STARVATION_TURNS + bonus;
         starvationRemaining = starvationCapacity;
-        currentTurn = (await client.query<{ current_turn: number }>("SELECT current_turn FROM guilds WHERE discord_id=$1", [input.guildId])).rows[0]?.current_turn ?? 0;
         const blockade = (await client.query<{ id:string }>(
           `SELECT id FROM naval_blockades
             WHERE guild_id=$1 AND target_settlement_id=$2 AND status='ACTIVE'

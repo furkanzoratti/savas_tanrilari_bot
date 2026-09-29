@@ -19,7 +19,11 @@ const UNIT_TYPE_ALIASES = {
   machimoi_phalangitai: "mp",
   mauryan_war_elephant: "mwe",
   desert_raider: "dr",
-  egyptian_war_chariot: "ewc"
+  egyptian_war_chariot: "ewc",
+  germanic_companion_cavalry: "gcc",
+  balearic_slinger: "bsl",
+  sarmatian_longswordsmen: "sls",
+  briton_noble_spearmen: "bns"
 } as const;
 
 const UNIT_TYPE_BY_ALIAS = Object.fromEntries(

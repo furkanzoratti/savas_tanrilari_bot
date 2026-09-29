@@ -25,6 +25,7 @@ import { syncObserverPosts } from "./movement-observer-service.js";
 import { awardCharacterSpecializationProgress } from "./character-specialization-progress.js";
 import { conquestArmyPopulationDeparture, loadDisplacedArmySupport, supportedPersonnel } from "./displaced-army-support.js";
 import { grantFormableFoundingReward } from "./formable-country-reward-service.js";
+import { siegeStarvationBonus } from "../domain/siege-starvation.js";
 
 export class GameError extends Error {}
 
@@ -96,7 +97,12 @@ function activePolicyKeys(policies: readonly SettlementPolicyRow[], currentTurn:
 function settlementStarvationBonus(buildings: Array<{ buildingType: string; level: number }>, policies: readonly CityPolicyKey[], formableKey?: FormableCountryKey | null): number {
   const farm = buildings.find((building) => building.buildingType === "farm")?.level ?? 0;
   const aqueduct = buildings.find((building) => building.buildingType === "aqueduct")?.level ?? 0;
-  return Math.min(8, (farm >= 3 ? 3 : farm >= 2 ? 1 : 0) + (aqueduct >= 2 ? 1 : 0) + (policies.includes("GARRISON_REINFORCEMENT") ? 1 : 0) + (formableModifiers(formableKey).starvationBonus ?? 0));
+  return siegeStarvationBonus({
+    farmLevel: farm,
+    aqueductLevel: aqueduct,
+    garrisonReinforcement: policies.includes("GARRISON_REINFORCEMENT"),
+    formableBonus: formableModifiers(formableKey).starvationBonus
+  });
 }
 
 function settlementUnrestChance(buildings: Array<{ buildingType: string; level: number }>, resources: readonly ResourceType[], policies: readonly CityPolicyKey[], formableKey?: FormableCountryKey | null): number {

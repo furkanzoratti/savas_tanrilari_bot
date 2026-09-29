@@ -40,6 +40,11 @@ describe("kurulabilir ülkeler", () => {
     }
     expect(formableUnitDiscount("ITALY", "peltast")).toBe(0.05);
     expect(formableUnitDiscount("ITALY", "egyptian_war_chariot")).toBe(0.05);
+    expect(formableUnitDiscount("SARMATIA", "germanic_companion_cavalry")).toBe(0.10);
+    expect(formableUnitDiscount("GALLIC_CONFEDERATION", "sarmatian_longswordsmen")).toBe(0.10);
+    expect(formableUnitDiscount("GALLIC_CONFEDERATION", "briton_noble_spearmen")).toBe(0.10);
+    expect(formableUnitDiscount("IBERIA", "balearic_slinger")).toBe(0.05);
+    expect(formableUnitDiscount("GREAT_BRITAIN", "balearic_slinger")).toBe(0.10);
   });
 
   it("ülkeye özgü bina ve gelir bonuslarını hesaplar", () => {

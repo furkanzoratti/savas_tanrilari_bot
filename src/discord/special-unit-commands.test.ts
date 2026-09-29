@@ -10,7 +10,8 @@ describe("özel birlik Discord komutları", () => {
       "legionary", "hoplite", "horse_archer", "camel_cavalry", "briton_longbow",
       "persian_immortal", "carthaginian_war_elephant", "iberian_caetrati", "germanic_shock_warrior", "anatolian_thureophoroi",
       "triarii_veteran", "punic_veteran", "gaesatae", "peltast", "silver_shield", "machimoi_phalangitai",
-      "mauryan_war_elephant", "desert_raider", "egyptian_war_chariot"
+      "mauryan_war_elephant", "desert_raider", "egyptian_war_chariot",
+      "germanic_companion_cavalry", "balearic_slinger", "sarmatian_longswordsmen", "briton_noble_spearmen"
     ]);
   });
 
@@ -19,7 +20,8 @@ describe("özel birlik Discord komutları", () => {
       "legionary", "hoplite", "horse_archer", "camel_cavalry", "briton_longbow",
       "persian_immortal", "carthaginian_war_elephant", "iberian_caetrati", "germanic_shock_warrior", "anatolian_thureophoroi"
       ,"triarii_veteran", "punic_veteran", "gaesatae", "peltast", "silver_shield", "machimoi_phalangitai",
-      "mauryan_war_elephant", "desert_raider", "egyptian_war_chariot"
+      "mauryan_war_elephant", "desert_raider", "egyptian_war_chariot",
+      "germanic_companion_cavalry", "balearic_slinger", "sarmatian_longswordsmen", "briton_noble_spearmen"
     ]));
     const battle = commandBuilders.find((item) => item.name === "savas");
     const singleUnit = battle?.options?.find((option) => option.name === "birlik-ayarla");

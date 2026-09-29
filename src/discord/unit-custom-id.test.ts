@@ -22,5 +22,10 @@ describe("asker alım modalı kimlikleri", () => {
     expect(decodeUnitTypeFromCustomId("mp")).toBe("machimoi_phalangitai");
     expect(encodeUnitTypeForCustomId("egyptian_war_chariot")).toBe("ewc");
     expect(decodeUnitTypeFromCustomId("ewc")).toBe("egyptian_war_chariot");
+    expect(encodeUnitTypeForCustomId("germanic_companion_cavalry")).toBe("gcc");
+    expect(decodeUnitTypeFromCustomId("gcc")).toBe("germanic_companion_cavalry");
+    expect(encodeUnitTypeForCustomId("balearic_slinger")).toBe("bsl");
+    expect(encodeUnitTypeForCustomId("sarmatian_longswordsmen")).toBe("sls");
+    expect(encodeUnitTypeForCustomId("briton_noble_spearmen")).toBe("bns");
   });
 });

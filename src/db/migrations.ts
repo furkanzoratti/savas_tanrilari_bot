@@ -28,6 +28,7 @@ import { adminPanelMigration } from "./admin-panel-migration.js";
 import { adminPanelLoginMigration } from "./admin-panel-login-migration.js";
 import { adminPanelControlsMigration } from "./admin-panel-controls-migration.js";
 import { aiCountryGovernanceMigration } from "./ai-country-governance-migration.js";
+import { regionalSpecialUnitsMigration } from "./regional-special-units-migration.js";
 
 export const migrations = [
   {
@@ -2273,5 +2274,6 @@ export const migrations = [
   adminPanelMigration,
   adminPanelLoginMigration,
   adminPanelControlsMigration,
-  aiCountryGovernanceMigration
+  aiCountryGovernanceMigration,
+  regionalSpecialUnitsMigration
 ] as const;
