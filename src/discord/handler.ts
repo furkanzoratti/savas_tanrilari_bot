@@ -49,7 +49,17 @@ import { assertCountryAccess, isGameMaster, requireGameMaster, resolveCountry } 
 import { buildingChoices, shipChoices, unitChoices } from "./commands.js";
 import { batchDocumentEmbeds, embedTextLength, renderDocument } from "./document.js";
 import { publishGreatPowerRanking } from "./great-power-ui.js";
-import { BRAND_BANNER_PATH, BRAND_BANNER_NAME, TEMPLE_BANNER_PATH, TEMPLE_BANNER_NAME, TURN_BANNER_PATH, TURN_BANNER_NAME } from "./assets.js";
+import {
+  BRAND_BANNER_PATH,
+  BRAND_BANNER_NAME,
+  STATE_DETAIL_BANNER_NAME,
+  STATE_DETAIL_BANNER_PATH,
+  STATE_DETAIL_BANNER_URL,
+  TEMPLE_BANNER_PATH,
+  TEMPLE_BANNER_NAME,
+  TURN_BANNER_PATH,
+  TURN_BANNER_NAME
+} from "./assets.js";
 import { turnAnnouncement } from "./turn-announcements.js";
 import { handleBattleButton, handleBattleCommand, handleBattleModal, handleBattleSelect, refreshActiveBattleCards } from "./battle-ui.js";
 import { handleNavalOperationsAutocomplete,handleNavalOperationsButton,handleNavalOperationsCommand } from "./naval-operations-ui.js";
@@ -226,19 +236,24 @@ function renderCountryDetail(detail:CountryDetailView):EmbedBuilder[] {
     return [
       `🏛️ **${settlement.name}** • ${gold(settlement.localTreasury)}`,
       `↳ Kültür: **${CULTURE_GROUPS[settlement.cultureGroup]?.label??settlement.cultureGroup}** • Özgür nüfus: **${number(settlement.population)}**`,
+      `↳ Ordu: **${number(settlement.militaryUsed)} / ${number(settlement.militaryLimit)}** mevcut/limit`,
       `↳ Din: ${beliefs.join(" • ")||"Kayıt yok"}`
     ].join("\n");
   });
   const settlementChunks=detailChunks(settlementBlocks.length?settlementBlocks:["Bu devlete bağlı yerleşke bulunmuyor."]);
-  const embeds=settlementChunks.map((chunk,index)=>new EmbedBuilder()
-    .setColor(0xc59b45)
-    .setTitle(`🏛️ ${detail.country.name} • Devlet Detayı${settlementChunks.length>1?` • ${index+1}/${settlementChunks.length}`:""}`)
-    .setDescription(index===0?[
-      `💰 **Devlet Toplam Hazinesi:** ${gold(detail.totalTreasury)}`,
-      `🏘️ **Toplam Yerleşke:** ${number(detail.settlementCount)}`,
-      `👥 **Toplam Özgür Nüfus:** ${number(detail.totalPopulation)}`
-    ].join("\n"):null)
-    .addFields({name:`Yerleşkeler${settlementChunks.length>1?` • ${index+1}`:""}`,value:chunk}));
+  const embeds=settlementChunks.map((chunk,index)=>{
+    const embed=new EmbedBuilder()
+      .setColor(0xc59b45)
+      .setTitle(`🏛️ ${detail.country.name} • Devlet Detayı${settlementChunks.length>1?` • ${index+1}/${settlementChunks.length}`:""}`)
+      .setDescription(index===0?[
+        `💰 **Devlet Toplam Hazinesi:** ${gold(detail.totalTreasury)}`,
+        `🏘️ **Toplam Yerleşke:** ${number(detail.settlementCount)}`,
+        `👥 **Toplam Özgür Nüfus:** ${number(detail.totalPopulation)}`
+      ].join("\n"):null)
+      .addFields({name:`Yerleşkeler${settlementChunks.length>1?` • ${index+1}`:""}`,value:chunk});
+    if (index===0) embed.setImage(STATE_DETAIL_BANNER_URL);
+    return embed;
+  });
   const summaryFields:Array<{name:string;lines:string[]}>= [
     {name:"⛩️ Devlet İçindeki Dinler",lines:detail.religions.map((entry)=>`• **${entry.label}: %${detailPercent(entry.percent)}** • Ana inanç %${detailPercent(entry.primaryPercent)} • ${number(Math.round(entry.population))} nüfus`)},
     {name:"📿 Devlet İçindeki Mezhepler",lines:detail.sects.map((entry)=>`• **${entry.label}: %${detailPercent(entry.percent)}** • ${number(Math.round(entry.population))} nüfus`)},
@@ -1365,7 +1380,10 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     await interaction.deferReply({flags:MessageFlags.Ephemeral});
     const country=await resolveCountry(interaction,interaction.options.getString("ulke"));
     const embeds=renderCountryDetail(await gameService.countryDetail(country.id));
-    await interaction.editReply({embeds:[embeds[0]!]});
+    await interaction.editReply({
+      embeds:[embeds[0]!],
+      files:[new AttachmentBuilder(STATE_DETAIL_BANNER_PATH,{name:STATE_DETAIL_BANNER_NAME})]
+    });
     for (const embed of embeds.slice(1)) await interaction.followUp({embeds:[embed],flags:MessageFlags.Ephemeral});
   } else if (interaction.commandName === "belge") {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });

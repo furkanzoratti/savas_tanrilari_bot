@@ -276,6 +276,7 @@ export interface CountryDetailView {
   settlementCount:number;
   settlements:Array<{
     id:string;name:string;localTreasury:number;population:number;cultureGroup:CultureGroup;
+    militaryUsed:number;militaryLimit:number;
     religionDistribution:ReligionBeliefShare[];
   }>;
   religions:Array<{key:ReligionKey;label:string;population:number;percent:number;primaryPopulation:number;primaryPercent:number}>;
@@ -820,6 +821,32 @@ export const gameService = {
         [countryId]
       )).rows;
       const distributions=await loadReligionDistributions(client,settlements.map((settlement)=>settlement.id));
+      const settlementIds=settlements.map((settlement)=>settlement.id);
+      const personnelRows=settlementIds.length?(await client.query<{settlement_id:string;total:number}>(
+        `SELECT settlement_id,COALESCE(SUM(quantity),0)::bigint AS total FROM (
+           SELECT settlement_id,quantity::bigint AS quantity FROM unit_stacks WHERE settlement_id=ANY($1::uuid[])
+           UNION ALL
+           SELECT settlement_id,remaining_quantity::bigint FROM recruitment_orders
+            WHERE settlement_id=ANY($1::uuid[]) AND status='TRAINING'
+           UNION ALL
+           SELECT settlement_id,personnel_reserved::bigint FROM garrison_replenishment_orders
+            WHERE settlement_id=ANY($1::uuid[]) AND status='BUILDING'
+         ) personnel GROUP BY settlement_id`,[settlementIds]
+      )).rows:[];
+      const shipRows=settlementIds.length?(await client.query<{settlement_id:string;ship_type:keyof typeof SHIPS;quantity:number}>(
+        `SELECT settlement_id,ship_type,SUM(quantity)::integer AS quantity FROM (
+           SELECT settlement_id,ship_type,quantity FROM naval_units WHERE settlement_id=ANY($1::uuid[])
+           UNION ALL
+           SELECT settlement_id,ship_type,quantity FROM naval_orders
+            WHERE settlement_id=ANY($1::uuid[]) AND status='BUILDING'
+         ) ships GROUP BY settlement_id,ship_type`,[settlementIds]
+      )).rows:[];
+      const personnelBySettlement=new Map(personnelRows.map((row)=>[row.settlement_id,Number(row.total)]));
+      for (const ship of shipRows) personnelBySettlement.set(
+        ship.settlement_id,
+        (personnelBySettlement.get(ship.settlement_id)??0)+(SHIPS[ship.ship_type]?.manpower??0)*Number(ship.quantity)
+      );
+      const marshalPartial=await hasActiveMarshalPartialMobilization(client,countryId,country.mobilization);
       const totalPopulation=settlements.reduce((sum,settlement)=>sum+Math.max(0,Number(settlement.population)),0);
       const religionPopulations=new Map<ReligionKey,number>();
       const primaryReligionPopulations=new Map<ReligionKey,number>();
@@ -837,6 +864,8 @@ export const gameService = {
         return {
           id:settlement.id,name:settlement.name,localTreasury:Number(settlement.local_treasury),population,
           cultureGroup:settlement.culture_group,
+          militaryUsed:personnelBySettlement.get(settlement.id)??0,
+          militaryLimit:settlement.is_conquered?0:settlementMobilizationLimit(population,country.mobilization,marshalPartial),
           religionDistribution:religionBeliefShares(distribution,settlement.religion_key)
         };
       });
