@@ -173,6 +173,10 @@ const server = createServer(async (request, response) => {
       if (!requireSession(request, response)) return;
       return json(response, 200, adminPanelService.characterCatalog());
     }
+    if (request.method === "GET" && url.pathname === "/api/catalog/religions") {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, adminPanelService.religionCatalog());
+    }
     const countryUpdateMatch = request.method === "PATCH" ? url.pathname.match(/^\/api\/admin\/countries\/([0-9a-f-]+)$/iu) : null;
     if (countryUpdateMatch) {
       const session = requireMutation(request, response);

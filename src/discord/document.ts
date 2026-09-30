@@ -1,6 +1,7 @@
 import { EmbedBuilder } from "discord.js";
 import { BUILDINGS, CITY_POLICIES, MOBILIZATION_RULES, SHIPS, SIEGE_ASSETS, UNITS, fleetTransportCapacity, portShipCapacity, shipHarborRequirement } from "../domain/catalog.js";
 import { CULTURE_GROUPS } from "../domain/cultures.js";
+import { NATIONAL_RELIGION_EFFECT_THRESHOLD, RELIGIONS, SECONDARY_RELIGIONS, religionEffectScale, religionUnitDiscount, secondaryReligionEffectScale } from "../domain/religions.js";
 import { calculateShipUpkeep, calculateUnitUpkeep } from "../domain/economy.js";
 import { SETTLEMENT_EVENT_TYPES, type SettlementEventType } from "../domain/events.js";
 import { gold, number } from "../domain/format.js";
@@ -11,7 +12,6 @@ import { TRADE_ROUTE_LABELS } from "../domain/trade.js";
 import { MERCENARY_COMPANIES, mercenarySlotCost, mercenaryTier } from "../domain/mercenaries.js";
 import type { CountryDocument } from "../services/game-service.js";
 import { TEMPLE_BANNER_URL } from "./assets.js";
-import { renderArmyEmbed } from "./army-embed.js";
 import { renderFleetEmbed } from "./fleet-embed.js";
 import { renderRepairFleetEmbed } from "./repair-fleet-embed.js";
 
@@ -73,7 +73,7 @@ function renderLandForces(
 ): string | null {
   const units = settlement.units.filter((unit) => unit.force_type === forceType);
   if (!units.length) return null;
-  const upkeep = units.reduce((sum, unit) => sum + calculateUnitUpkeep(unit.unit_type, unit.quantity, unit.status, mobilization, settlement.effectiveResources, overLimitPenalty), 0);
+  const upkeep = units.reduce((sum, unit) => sum + calculateUnitUpkeep(unit.unit_type, unit.quantity, unit.status, mobilization, settlement.effectiveResources, overLimitPenalty, religionUnitDiscount(settlement.religionModifiers?.unitUpkeepDiscounts ?? [], unit.unit_type)), 0);
   const rows = units.map((unit) => unit.unit_type === "observer"
     ? `• **${number(Math.ceil(unit.quantity / 200))}** Gözcü Birliği (${number(unit.quantity)} personel)`
     : `• **${number(unit.quantity)}** ${UNITS[unit.unit_type]?.name ?? unit.unit_type}`);
@@ -136,6 +136,9 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
       { name: "🏦 Hazine", value: spacedSection(`**${gold(document.country.treasury)}**`), inline: true },
       { name: "👥 Özgür Nüfus", value: spacedSection(`**${number(document.freePopulation)}**`), inline: true },
       { name: "⚔️ Askerî Kapasite", value: spacedSection(`Mevcut: **${number(document.militaryUsed)}**\nSınır: ${number(document.militaryLimit)}\nKalan: ${number(remainingCapacity)}${document.manpowerPenaltyActive ? "\n⚠️ Sınır aşımı: bakım +%25" : document.militaryUsed > document.militaryLimit ? "\n⏳ Sınır aşımı: düzeltme süresi" : ""}`), inline: true },
+      { name: "⛩️ Baskın Din", value: spacedSection(document.dominantReligion
+        ? `**${RELIGIONS[document.dominantReligion.key].label}** • %${number(document.dominantReligion.sharePercent)}\n${RELIGIONS[document.dominantReligion.key].nationalEffect}`
+        : `Özgür nüfusun en az %${NATIONAL_RELIGION_EFFECT_THRESHOLD}’ini temsil eden baskın din yok.`), inline: true },
       { name: "🛡️ Özel Birlik Erişimi", value: spacedSection((document.specialUnitUnlocks ?? []).length ? (document.specialUnitUnlocks ?? []).map((unitType) => `• **${SPECIAL_UNITS[unitType].name}**`).join("\n") : "Özel birlik erişimi bulunmuyor.") },
       ...(formable && document.country.active_formable_key ? [{ name: `${formable.emoji} Kurulabilir Ülke • Tier ${formableTier(document.country.active_formable_key)}`, value: spacedSection(formableEffectLines(document.country.active_formable_key).map((buff) => `• ${buff}`).join("\n")) }] : []),
       {
@@ -168,6 +171,11 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
     const occupiedSlots = settlement.buildings.filter((building) => building.level > 0 || building.status === "BUILDING").length;
     const activeConstruction = settlement.buildings.filter((building) => building.status === "BUILDING").length;
     const culture = CULTURE_GROUPS[settlement.culture_group]?.label ?? settlement.culture_group;
+    const religion = RELIGIONS[settlement.religion_key] ?? { label: "Belirtilmemiş", localEffect: "Yerel etki yok", nationalEffect: "Ülke etkisi yok" };
+    const religionScale = religionEffectScale(Number(settlement.religion_adherence_percent ?? 0));
+    const secondaryReligion = SECONDARY_RELIGIONS[settlement.religion_key] ?? { label: "Belirtilmemiş", effect: "Mezhep etkisi yok" };
+    const secondaryReligionPercent = 100 - Number(settlement.religion_adherence_percent ?? 0);
+    const secondaryReligionScale = secondaryReligionEffectScale(secondaryReligionPercent);
     const producedResource = RESOURCES[settlement.resource_type].label;
     const fixedGarrison = renderLandForces(settlement, "GARRISON", document.country.mobilization, document.manpowerPenaltyActive);
     const army = renderLandForces(settlement, "ARMY", document.country.mobilization, document.manpowerPenaltyActive);
@@ -216,6 +224,13 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
       ].join("\n"))
       .addFields(
         { name: "🏺 Kültür", value: spacedSection(`**${culture}**`), inline: true },
+        { name: "⛩️ Din ve Bağlılık", value: spacedSection([
+          `Ana din: **${religion.label} • %${number(settlement.religion_adherence_percent)}**`,
+          `İkinci mezhep: **${secondaryReligion.label} • %${number(secondaryReligionPercent)}**`,
+          `Yerel: ${religion.localEffect}${religionScale === 1 ? "" : religionScale === 0.5 ? " • yarım etki" : " • pasif"}`,
+          `Mezhep: ${secondaryReligion.effect}${secondaryReligionScale === 1 ? "" : secondaryReligionScale === 0.5 ? " • yarım etki" : " • pasif"}`,
+          document.dominantReligion ? `Ülke: ${RELIGIONS[document.dominantReligion.key].nationalEffect}` : "Ülke: baskın din etkisi yok"
+        ].join("\n")), inline: true },
         {
           name: "📦 Yerel Hammadde",
           value: spacedSection([
@@ -276,7 +291,7 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
       const garrisonText = `${fixedGarrison}${settlement.temporaryMilitia ? `\n• **${number(settlement.temporaryMilitia)}** Geçici Savunma Milisi` : ""}`;
       embed.addFields({ name: "🛡️ Garnizon", value: spacedSection(garrisonText), inline: true });
     }
-    if (army) embed.addFields({ name: "⚔️ Ordu", value: spacedSection(army), inline: true });
+    if (army) embed.addFields({ name: "⚔️ Eğitilmiş Askerler", value: spacedSection(army), inline: true });
 
     if ((settlement.mercenaries ?? []).length) {
       embed.addFields({
@@ -325,9 +340,8 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
     return embed;
   });
 
-  const armyEmbeds = (document.armies ?? []).map(renderArmyEmbed);
   const fleetEmbeds = (document.fleets ?? []).map(renderFleetEmbed);
   const repairFleetEmbeds=(document.repairFleets??[]).map(renderRepairFleetEmbed);
 
-  return [summary, ...settlementEmbeds, ...armyEmbeds, ...fleetEmbeds,...repairFleetEmbeds];
+  return [summary, ...settlementEmbeds, ...fleetEmbeds,...repairFleetEmbeds];
 }

@@ -1,6 +1,8 @@
 import { randomInt } from "node:crypto";
 import type { DbClient } from "../db/pool.js";
 import { BUILDINGS, SHIPS, SIEGE_ASSETS, UNITS, buildingBaseCost } from "../domain/catalog.js";
+import type { NavalUnitType } from "../domain/battle.js";
+import { NAVAL_HULL_STATS } from "../domain/naval-hulls.js";
 import type { EspionageSeverity, EspionageTarget } from "../domain/espionage.js";
 import { markCharacterDead } from "./character-death-service.js";
 
@@ -310,15 +312,109 @@ export async function applyEspionageEffect(
     return "Kuşatma açlık dayanıklılığı "+reduction+" tur azaltıldı.";
   }
   if (operation.target_type === "SABOTAGE_FLEET") {
-    const ships = (await client.query<{ id: string; quantity: number }>("SELECT id,quantity FROM naval_units WHERE settlement_id=$1 AND quantity>0 FOR UPDATE",[operation.target_settlement_id])).rows;
-    const total = ships.reduce((sum,row)=>sum+Number(row.quantity),0);
-    const destroyRate = severity === "LIGHT" ? 0 : severity === "MEDIUM" ? 5 : 10;
-    const disableRate = severity === "LIGHT" ? 10 : severity === "HEAVY" ? 10 : 0;
-    for (const ship of ships) {
-      const destroyed = Math.floor(Number(ship.quantity)*destroyRate/100);
-      await client.query("UPDATE naval_units SET quantity=quantity-$1,disabled_until_turn=CASE WHEN $2>0 THEN $3 ELSE disabled_until_turn END WHERE id=$4",[destroyed,disableRate,turn+2,ship.id]);
+    const settlement = (await client.query<{ name: string; guild_id: string; country_id: string }>(
+      "SELECT name,guild_id,country_id FROM settlements WHERE id=$1 FOR UPDATE",
+      [operation.target_settlement_id],
+    )).rows[0];
+    if (!settlement) return "Hedef yerleşke bulunamadığı için filo sabotajı uygulanamadı.";
+
+    const stockRows = (await client.query<{ ship_type: NavalUnitType; quantity: number }>(
+      `SELECT ship_type,quantity FROM naval_units
+        WHERE settlement_id=$1 AND quantity>0 ORDER BY ship_type,id FOR UPDATE`,
+      [operation.target_settlement_id],
+    )).rows;
+    const stockByType = new Map<NavalUnitType, number>();
+    for (const row of stockRows) stockByType.set(row.ship_type, (stockByType.get(row.ship_type) ?? 0) + Number(row.quantity));
+    const stocks = [...stockByType].map(([ship_type, quantity]) => ({ ship_type, quantity }));
+    if (!stocks.length) return "Hedef yerleşkede sabote edilebilecek gemi bulunamadı.";
+
+    const allocations = (await client.query<{
+      fleet_id: string; ship_type: NavalUnitType; quantity: number; damaged: number;
+    }>(
+      `SELECT ships.fleet_id,ships.ship_type,ships.quantity,
+              COALESCE((SELECT COUNT(*) FROM naval_ship_damage damage
+                         WHERE damage.fleet_id=ships.fleet_id
+                           AND damage.settlement_id=ships.settlement_id
+                           AND damage.ship_type=ships.ship_type
+                           AND damage.status IN ('DAMAGED','DISABLED')),0)::integer AS damaged
+         FROM fleet_ships ships JOIN fleets fleet ON fleet.id=ships.fleet_id
+        WHERE ships.settlement_id=$1 AND fleet.country_id=$2
+        ORDER BY ships.ship_type,fleet.created_at,ships.fleet_id
+        FOR UPDATE OF ships`,
+      [operation.target_settlement_id, settlement.country_id],
+    )).rows;
+    const detachedDamage = (await client.query<{ ship_type: NavalUnitType; quantity: number }>(
+      `SELECT ship_type,COUNT(*)::integer AS quantity FROM naval_ship_damage
+        WHERE settlement_id=$1 AND fleet_id IS NULL
+        GROUP BY ship_type`,
+      [operation.target_settlement_id],
+    )).rows;
+    const detachedByType = new Map(detachedDamage.map((row) => [row.ship_type, Number(row.quantity)]));
+    let sabotageFleetId: string | null = null;
+    const disabledByType: Array<{ shipType: NavalUnitType; quantity: number }> = [];
+
+    const ensureSabotageFleet = async (): Promise<string> => {
+      if (sabotageFleetId) return sabotageFleetId;
+      const name = `İş Göremez Gemiler • ${settlement.name}`.slice(0, 60);
+      sabotageFleetId = (await client.query<{ id: string }>(
+        "SELECT id FROM fleets WHERE guild_id=$1 AND country_id=$2 AND name=$3 FOR UPDATE",
+        [settlement.guild_id, settlement.country_id, name],
+      )).rows[0]?.id ?? null;
+      if (!sabotageFleetId) {
+        sabotageFleetId = (await client.query<{ id: string }>(
+          "INSERT INTO fleets(guild_id,country_id,name,created_turn,created_by) VALUES($1,$2,$3,$4,'ESPIONAGE') RETURNING id",
+          [settlement.guild_id, settlement.country_id, name, turn],
+        )).rows[0]!.id;
+      }
+      return sabotageFleetId;
+    };
+
+    const insertDisabledShips = async (fleetId: string, shipType: NavalUnitType, quantity: number): Promise<void> => {
+      if (quantity <= 0) return;
+      const hull = NAVAL_HULL_STATS[shipType];
+      await client.query(
+        `INSERT INTO naval_ship_damage(guild_id,country_id,settlement_id,fleet_id,ship_type,max_hp,current_hp,status)
+         SELECT $1,$2,$3,$4,$5,$6,$7,'DISABLED' FROM generate_series(1,$8)`,
+        [settlement.guild_id, settlement.country_id, operation.target_settlement_id, fleetId, shipType, hull.maxHp, hull.disabledAtHp, quantity],
+      );
+    };
+
+    for (const stock of stocks) {
+      const shipType = stock.ship_type;
+      const total = Number(stock.quantity);
+      const typeAllocations = allocations.filter((row) => row.ship_type === shipType);
+      const allocatedTotal = typeAllocations.reduce((sum, row) => sum + Number(row.quantity), 0);
+      const detached = detachedByType.get(shipType) ?? 0;
+      const healthyInFleets = typeAllocations.reduce((sum, row) => sum + Math.max(0, Number(row.quantity) - Number(row.damaged)), 0);
+      const healthyReserve = Math.max(0, total - allocatedTotal - detached);
+      let remaining = Math.min(Math.ceil(total * 0.10), healthyInFleets + healthyReserve);
+      const requested = remaining;
+
+      for (const allocation of typeAllocations) {
+        if (remaining <= 0) break;
+        const healthy = Math.max(0, Number(allocation.quantity) - Number(allocation.damaged));
+        const disabled = Math.min(remaining, healthy);
+        await insertDisabledShips(allocation.fleet_id, shipType, disabled);
+        remaining -= disabled;
+      }
+
+      if (remaining > 0) {
+        const fleetId = await ensureSabotageFleet();
+        await client.query(
+          `INSERT INTO fleet_ships(fleet_id,settlement_id,ship_type,quantity) VALUES($1,$2,$3,$4)
+           ON CONFLICT(fleet_id,settlement_id,ship_type)
+           DO UPDATE SET quantity=fleet_ships.quantity+EXCLUDED.quantity`,
+          [fleetId, operation.target_settlement_id, shipType, remaining],
+        );
+        await insertDisabledShips(fleetId, shipType, remaining);
+        remaining = 0;
+      }
+      if (requested > 0) disabledByType.push({ shipType, quantity: requested });
     }
-    return Math.floor(total*destroyRate/100).toLocaleString("tr-TR")+" gemi birimi yok edildi; filonun %"+disableRate+" kadarı 2 tur kullanılamaz.";
+
+    if (!disabledByType.length) return "Hedef yerleşkedeki bütün gemiler zaten hasarlı, iş göremez veya tamirdedir.";
+    const details = disabledByType.map(({ shipType, quantity }) => `${SHIPS[shipType].name}: ${quantity.toLocaleString("tr-TR")}`).join(" • ");
+    return `Her gemi türünün %10'u yukarı yuvarlanarak iş göremez hâle getirildi: ${details}. Gemiler süre sonunda otomatik dönmez; oyuncu tarafından tamire gönderilmelidir.`;
   }
   if (["DISCREDIT","KIDNAP","ASSASSINATE"].includes(operation.target_type) && operation.target_character_id) {
     const duration = operation.target_type === "DISCREDIT" ? percent(severity,2,4,6)

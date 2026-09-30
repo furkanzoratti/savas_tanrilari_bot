@@ -12,7 +12,7 @@ describe("kültür ve yerleşke kartı", () => {
     expect(admin?.options?.some((option) => option.name === "kultur-ayarla")).toBe(true);
   });
 
-  it("sabit garnizon ile seferberlik ordusunu ayrı ve açık başlıklarla gösterir", () => {
+  it("garnizon ve eğitilmiş askerleri gösterir fakat kurulu ordu kartlarını belgeye eklemez", () => {
     const emptyIncome = { building: 0, tax: 0, landTrade: 0, seaTrade: 0 };
     const document = {
       guild: { current_turn: 3, turn_phase: "OPEN" },
@@ -27,6 +27,8 @@ describe("kültür ve yerleşke kartı", () => {
       totalUpkeep: 100, netIncome: 900, tradeAgreements: [],
       allies: [{ id: "kartaca", name: "Kartaca" }],
       pacts: [{ id: "pakt", name: "Akdeniz Birliği", purpose: "Ticaret güvenliği", founder_name: "Roma" }],
+      armies: [{ id: "army", name: "Roma Merkez Ordusu" }],
+      fleets: [], repairFleets: [], mercenaries: [],
       settlements: [{
         id: "city", country_id: "country", name: "Roma", population: 100_000, slave_population: 0,
         base_income: 1_000, tax_income: 0, land_trade_income: 0, sea_trade_income: 0,
@@ -56,11 +58,11 @@ describe("kültür ve yerleşke kartı", () => {
     expect(embeds).toHaveLength(2);
     const fields = embeds[1]!.data.fields ?? [];
     const countryFields = embeds[0]!.data.fields ?? [];
-    expect(fields.map((field) => field.name)).toEqual(expect.arrayContaining(["🏺 Kültür", "🚨 Aktif Yerleşke Olayları", "🛡️ Garnizon", "⚔️ Ordu"]));
+    expect(fields.map((field) => field.name)).toEqual(expect.arrayContaining(["🏺 Kültür", "🚨 Aktif Yerleşke Olayları", "🛡️ Garnizon", "⚔️ Eğitilmiş Askerler"]));
+    expect(fields.find((field) => field.name === "⚔️ Eğitilmiş Askerler")?.value).toContain("**1.000** Ağır Piyade");
     expect(fields.find((field) => field.name === "🚨 Aktif Yerleşke Olayları")?.value).toContain("Karaborsa");
     expect(fields.find((field) => field.name === "🚨 Aktif Yerleşke Olayları")?.value).toContain("Salgın");
     expect(fields.find((field) => field.name === "🏺 Kültür")?.value).toContain("İtalik");
-    expect(fields.find((field) => field.name === "⚔️ Ordu")?.value).not.toContain("Yerleşkede");
     expect(fields.find((field) => field.name === "🛡️ Garnizon")?.value).toContain("**200** Ağır Piyade");
     expect(fields.find((field) => field.name === "🏗️ Binalar ve İnşaatlar")?.value).toContain("Akademi Sv1");
     expect(fields.find((field) => field.name === "🏗️ Binalar ve İnşaatlar")?.value).not.toContain("Kamu ve Altyapı");

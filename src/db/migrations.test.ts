@@ -325,3 +325,47 @@ describe("doksan sekizinci migration", () => {
     expect(migration?.sql).toContain("review_note TEXT");
   });
 });
+
+describe("yüzüncü migration", () => {
+  const migration = migrations.find((item) => item.version === 100);
+
+  it("oyuncu otomatik alım önizlemelerini süreli ve tek kullanımlık saklar", () => {
+    expect(migration?.name).toBe("player_auto_purchase_previews");
+    expect(migration?.sql).toContain("CREATE TABLE IF NOT EXISTS player_auto_purchase_previews");
+    expect(migration?.sql).toContain("INTERVAL '15 minutes'");
+    expect(migration?.sql).toContain("'SHIPS','QUALITY','GENERAL'");
+    expect(migration?.sql).toContain("'PROCESSING'");
+    expect(migration?.sql).toContain("'STALE'");
+  });
+});
+
+describe("yüz birinci migration", () => {
+  const migration = migrations.find((item) => item.version === 101);
+
+  it("yerleşkelere ana din ve yüzde 75 başlangıç bağlılığı atar", () => {
+    expect(migration?.name).toBe("settlement_religions_and_initial_assignments");
+    expect(migration?.sql).toContain("religion_key TEXT");
+    expect(migration?.sql).toContain("religion_adherence_percent=75");
+    expect(migration?.sql).toContain("settlements_country_religion_idx");
+  });
+});
+
+describe("yüz ikinci migration", () => {
+  const migration = migrations.find((item) => item.version === 102);
+
+  it("yerleşkelerin kalan din payını yerel ve senkretik kültlere bağlar", () => {
+    expect(migration?.name).toBe("settlement_local_syncretic_minority_religion");
+    expect(migration?.sql).toContain("minority_religion_key");
+    expect(migration?.sql).toContain("LOCAL_SYNCRETIC_CULTS");
+  });
+});
+
+describe("yüz üçüncü migration", () => {
+  const migration = migrations.find((item) => item.version === 103);
+
+  it("her ana din için ikincil mezhebi otomatik eşler", () => {
+    expect(migration?.name).toBe("religion_specific_secondary_traditions");
+    expect(migration?.sql).toContain("secondary_religion_for");
+    expect(migration?.sql).toContain("settlements_secondary_religion_sync");
+  });
+});

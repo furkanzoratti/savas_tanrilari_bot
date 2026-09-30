@@ -10,6 +10,7 @@ import { BATTLE_UNIT_STATS, type BattleSideKey, type BattleUnitType, type NavalU
 import { BUILDING_CATEGORIES, BUILDINGS, CITY_POLICIES, MOBILIZATION_RULES, SHIPS, SIEGE_ASSETS, UNITS } from "../domain/catalog.js";
 import { gold, number } from "../domain/format.js";
 import { CULTURE_GROUPS, type CultureGroup } from "../domain/cultures.js";
+import { RELIGIONS, isReligionKey } from "../domain/religions.js";
 import { garrisonComposition } from "../domain/garrison.js";
 import { currentLocalDate } from "../domain/great-power.js";
 import { isAcquisitionTurn } from "../domain/mobilization.js";
@@ -50,7 +51,7 @@ import { batchDocumentEmbeds, renderDocument } from "./document.js";
 import { publishGreatPowerRanking } from "./great-power-ui.js";
 import { BRAND_BANNER_PATH, BRAND_BANNER_NAME, TEMPLE_BANNER_PATH, TEMPLE_BANNER_NAME, TURN_BANNER_PATH, TURN_BANNER_NAME } from "./assets.js";
 import { turnAnnouncement } from "./turn-announcements.js";
-import { handleBattleButton, handleBattleCommand, handleBattleSelect, refreshActiveBattleCards } from "./battle-ui.js";
+import { handleBattleButton, handleBattleCommand, handleBattleModal, handleBattleSelect, refreshActiveBattleCards } from "./battle-ui.js";
 import { handleNavalOperationsAutocomplete,handleNavalOperationsButton,handleNavalOperationsCommand } from "./naval-operations-ui.js";
 import { handleLandRaidsAutocomplete,handleLandRaidsButton,handleLandRaidsCommand } from "./land-raids-ui.js";
 import { handleArmyCommand } from "./army-ui.js";
@@ -65,6 +66,7 @@ import { espionageService, resolveDueEspionageOperations } from "../services/esp
 import { handleCharacterAutocomplete, handleCharacterCommand, publishCharacterTurnLogs } from "./character-ui.js";
 import { characterService, processCharacterTurn } from "../services/character-service.js";
 import { handleDiplomacyButton, handleDiplomacyCommand } from "./diplomacy-ui.js";
+import { handlePlayerAutoPurchaseButton, handlePlayerAutoPurchaseCommand } from "./player-auto-purchase-ui.js";
 import { handleWarDeclarationButton, handleWarDeclarationCommand, handleWarDeclarationModal } from "./war-declaration-ui.js";
 import { mercenaryCompanyAutocompleteAllowed, mercenarySubcommandRequiresGameMaster } from "./mercenary-access.js";
 import { handleGreatGamesButton, handleGreatGamesCommand, handleGreatGamesModal, handleGreatGamesSelect } from "./great-games-ui-v2.js";
@@ -177,7 +179,7 @@ async function handleCharacterTurnRecovery(interaction: ChatInputCommandInteract
 }
 async function sendDocument(interaction: ChatInputCommandInteraction, countryId: string): Promise<void> {
   if (!interaction.deferred && !interaction.replied) await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const embeds = renderDocument(await gameService.document(countryId));
+  const embeds = renderDocument(await gameService.document(countryId, { includeArmies: false }));
   const batches = batchDocumentEmbeds(embeds);
   await interaction.editReply({ embeds: batches[0] ?? [], files: [new AttachmentBuilder(TEMPLE_BANNER_PATH, { name: TEMPLE_BANNER_NAME })] });
   for (const batch of batches.slice(1)) await interaction.followUp({ embeds: batch, files: [new AttachmentBuilder(TEMPLE_BANNER_PATH, { name: TEMPLE_BANNER_NAME })], flags: MessageFlags.Ephemeral });
@@ -759,7 +761,7 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
     } else {
       let firstBatch = true;
       for (const country of countries) {
-        const embeds = renderDocument(await gameService.document(country.id));
+        const embeds = renderDocument(await gameService.document(country.id, { includeArmies: false }));
         for (let index = 0; index < embeds.length; index += 10) {
           const payload = { embeds: embeds.slice(index, index + 10), files: [new AttachmentBuilder(TEMPLE_BANNER_PATH, { name: TEMPLE_BANNER_NAME })] };
           if (firstBatch) { await interaction.editReply(payload); firstBatch = false; }
@@ -847,18 +849,20 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
     if (!country) throw new GameError("Ülke bulunamadı.");
     const cultureGroup = interaction.options.getString("kultur", true) as CultureGroup;
     if (!CULTURE_GROUPS[cultureGroup] || cultureGroup === "UNASSIGNED") throw new GameError("Geçerli bir kültür grubu seçmelisiniz.");
+    const religionKey = interaction.options.getString("din", true);
+    if (!isReligionKey(religionKey)) throw new GameError("Geçerli bir din seçmelisiniz.");
     const settlement = await gameService.createSettlement({
       guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id,
       name: interaction.options.getString("ad", true), population: interaction.options.getInteger("nufus", true),
       slaves: interaction.options.getInteger("kole", true),
       landTradeIncome: interaction.options.getInteger("kara-ticareti", true),
       resourceType: interaction.options.getString("hammadde", true) as ResourceType,
-      cultureGroup,
+      cultureGroup, religionKey,
       isCoastal: interaction.options.getBoolean("kiyi") ?? false
     });
     const garrison = garrisonComposition(settlement.population);
     await interaction.editReply(`✅ **${settlement.name}**, **${country.name}** ülkesine eklendi.
-🏺 Kültür: **${CULTURE_GROUPS[settlement.culture_group].label}** • 📦 Hammadde: **${RESOURCES[settlement.resource_type].label}**
+🏺 Kültür: **${CULTURE_GROUPS[settlement.culture_group].label}** • ⛩️ Din: **${RELIGIONS[settlement.religion_key].label} (%${number(settlement.religion_adherence_percent)})** • 📦 Hammadde: **${RESOURCES[settlement.resource_type].label}**
 💰 Başlangıç geliri: **${gold(settlement.base_land_trade_income + Math.floor(settlement.population * 0.03))}** • Halk Vergisi: **${gold(Math.floor(settlement.population * 0.03))}** • Kara Ticareti: **${gold(settlement.base_land_trade_income)}**
 🛡️ Sabit garnizon: **${number(garrison.lightInfantry)} Hafif Piyade, ${number(garrison.spears)} Mızraklı, ${number(garrison.archers)} Okçu**`);
   } else if (sub === "kiyi-ayarla") {
@@ -1388,6 +1392,8 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     await interaction.editReply(`🏚️ **${settlement.name}** yerleşkesindeki **${result.buildingName}${result.level>0?` Sv${result.level}`:" inşaatı"}** anında yıkıldı. Bina etkileri kaldırıldı ve altın iadesi yapılmadı.${notes.length?"\n"+notes.join("\n"):""}`);
   } else if (interaction.commandName === "asker-alimi") {
     await startPurchase(interaction, "unit");
+  } else if (interaction.commandName === "otomatik-alim") {
+    await handlePlayerAutoPurchaseCommand(interaction);
   } else if (interaction.commandName === "asker-terhis") {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
@@ -1564,7 +1570,7 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
       if (building.key === "port" && !settlement.is_coastal) return [];
       if (building.key === "shipyard" && !hasPort) return [];
       if (building.key === "customs_house" && !hasPort) return [];
-      const terms = buildingPurchaseTerms(building.key, next, settlement.effectiveResources, activePolicies, doc.country.active_formable_key);
+      const terms = buildingPurchaseTerms(building.key, next, settlement.effectiveResources, activePolicies, doc.country.active_formable_key, settlement.religionModifiers);
       return [{
         label: `${building.name} Sv${next}`.slice(0, 100),
         description: `${BUILDING_CATEGORIES[building.category].label} • ${gold(terms.cost)} • ${terms.duration} tur`.slice(0, 100),
@@ -1594,7 +1600,7 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
           .setPlaceholder(menuCount > 1 ? `Birim seç • ${index + 1}/${menuCount}` : "Birim seç")
           .addOptions(chunk.map(([key, unit]) => ({
             label: unit.name,
-            description: `${gold(unitPurchaseCost(key as keyof typeof UNITS, 1_000, settlement.effectiveResources, settlement.policies.filter((policy) => policy.status === "ACTIVE").map((policy) => policy.policy_key), document.country.active_formable_key))} / 1.000${isSpecialUnitType(key) ? " • Özel Birlik" : ""}`,
+            description: `${gold(unitPurchaseCost(key as keyof typeof UNITS, 1_000, settlement.effectiveResources, settlement.policies.filter((policy) => policy.status === "ACTIVE").map((policy) => policy.policy_key), document.country.active_formable_key, settlement.religionModifiers))} / 1.000${isSpecialUnitType(key) ? " • Özel Birlik" : ""}`,
             value: key
           })))
       );
@@ -1605,11 +1611,12 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
     const document = await gameService.document(countryId);
     const settlement = document.settlements.find((item) => item.id === settlementId);
     if (!settlement) throw new GameError("Yerleşke bulunamadı.");
-    await interaction.editReply({ content: "Üretilecek gemi türünü seç:", components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder().setCustomId(`sc|${countryId}|${settlementId}`).setPlaceholder("Gemi seç").addOptions(shipChoices.map(([key, ship]) => ({ label: ship.name, description: `${gold(Math.ceil(ship.price * Math.max(0.5, shipCostMultiplier(settlement.effectiveResources) - (formableModifiers(document.country.active_formable_key).shipDiscount ?? 0))))} • ${ship.manpower} mürettebat • ${ship.transportCapacity} taşıma • ${ship.productionPoints}/${ship.harborPoints} üretim/rıhtım`, value: key }))))] });
+    await interaction.editReply({ content: "Üretilecek gemi türünü seç:", components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder().setCustomId(`sc|${countryId}|${settlementId}`).setPlaceholder("Gemi seç").addOptions(shipChoices.map(([key, ship]) => ({ label: ship.name, description: `${gold(Math.ceil(ship.price * Math.max(0.5, shipCostMultiplier(settlement.effectiveResources) - (formableModifiers(document.country.active_formable_key).shipDiscount ?? 0) - settlement.religionModifiers.shipPurchaseDiscount)))} • ${ship.manpower} mürettebat • ${ship.transportCapacity} taşıma • ${ship.productionPoints}/${ship.harborPoints} üretim/rıhtım`, value: key }))))] });
   }
 }
 
 async function handleButton(interaction: ButtonInteraction): Promise<void> {
+  if (await handlePlayerAutoPurchaseButton(interaction)) return;
   if (await handleMovementButton(interaction)) return;
   if (await handleNavalOperationsButton(interaction)) return;
   if (await handleLandRaidsButton(interaction)) return;
@@ -1651,6 +1658,7 @@ async function handleButton(interaction: ButtonInteraction): Promise<void> {
 }
 
 async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
+  if (await handleBattleModal(interaction)) return;
   if (await handleMovementModal(interaction)) return;
   if (await handleGreatGamesModal(interaction)) return;
   if (await handleWarDeclarationModal(interaction)) return;
@@ -2159,6 +2167,14 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
       return { name: `${username} • ${userId}`.slice(0, 100), value: userId, search: `${username} ${user?.username ?? ""} ${userId}`.toLocaleLowerCase("tr-TR") };
     }));
     await interaction.respond(choices.filter((choice) => !query || choice.search.includes(query)).map(({ name, value }) => ({ name, value })));
+    return;
+  }
+  if (interaction.commandName === "yonetim" && focused.name === "din") {
+    const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
+    await interaction.respond(Object.entries(RELIGIONS)
+      .filter(([key, value]) => !query || key.toLocaleLowerCase("tr-TR").includes(query) || value.label.toLocaleLowerCase("tr-TR").includes(query))
+      .slice(0, 25)
+      .map(([value, religion]) => ({ name: religion.label, value })));
     return;
   }
   if (interaction.commandName !== "yonetim" || focused.name !== "kultur") {

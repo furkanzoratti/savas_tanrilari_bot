@@ -29,6 +29,10 @@ import { adminPanelLoginMigration } from "./admin-panel-login-migration.js";
 import { adminPanelControlsMigration } from "./admin-panel-controls-migration.js";
 import { aiCountryGovernanceMigration } from "./ai-country-governance-migration.js";
 import { regionalSpecialUnitsMigration } from "./regional-special-units-migration.js";
+import { playerAutoPurchaseMigration } from "./player-auto-purchase-migration.js";
+import { religionsMigration } from "./religions-migration.js";
+import { religionMinorityMigration } from "./religion-minority-migration.js";
+import { secondaryReligionsMigration } from "./secondary-religions-migration.js";
 
 export const migrations = [
   {
@@ -2275,5 +2279,9 @@ export const migrations = [
   adminPanelLoginMigration,
   adminPanelControlsMigration,
   aiCountryGovernanceMigration,
-  regionalSpecialUnitsMigration
+  regionalSpecialUnitsMigration,
+  playerAutoPurchaseMigration,
+  religionsMigration,
+  religionMinorityMigration,
+  secondaryReligionsMigration
 ] as const;

@@ -9,6 +9,7 @@ import {
 import { isResourceType, type ResourceType } from "../domain/resources.js";
 import { GameError } from "./game-service.js";
 import { formableModifiers, type FormableCountryKey } from "../domain/formable-countries.js";
+import { dominantReligion, religionModifiers, type ReligionKey } from "../domain/religions.js";
 
 interface EventSettlementRow extends SettlementEventState {
   id: string;
@@ -22,6 +23,8 @@ interface EventSettlementRow extends SettlementEventState {
   resource_type: string;
   besieged: boolean;
   active_formable_key: FormableCountryKey | null;
+  religion_key: ReligionKey;
+  religion_adherence_percent: number;
 }
 
 
@@ -136,7 +139,7 @@ async function riskReport(client: DbClient, guildId: string, type: SettlementEve
     `SELECT s.id,s.country_id,c.name AS country_name,s.name,s.population,s.slave_population,s.ruin_stage,
             s.is_conquered,s.resource_type,s.black_market_active,s.epidemic_active,s.unrest_active,s.rebellion_active,
             s.drought_active,s.famine_active,s.bountiful_harvest_active,s.trade_boom_active,s.migration_wave_active,
-            s.master_craftsmen_active,s.local_volunteers_active,c.active_formable_key,
+            s.master_craftsmen_active,s.local_volunteers_active,c.active_formable_key,s.religion_key,s.religion_adherence_percent,
             EXISTS(SELECT 1 FROM battles b WHERE b.defender_settlement_id=s.id AND b.terrain='SIEGE'
                        AND b.status NOT IN ('FINISHED','CANCELLED')) AS besieged
        FROM settlements s JOIN countries c ON c.id=s.country_id
@@ -197,8 +200,14 @@ async function riskReport(client: DbClient, guildId: string, type: SettlementEve
   }
   const merchants = new Set(merchantRows.map((merchant) => merchant.assigned_settlement_id));
   const lastTurns = new Map(historyRows.map((row) => [row.settlement_id, row.last_turn]));
+  const dominantReligions = new Map<string, ReligionKey>();
+  for (const countryId of new Set(rows.map((row) => row.country_id))) {
+    const dominant = dominantReligion(rows.filter((row) => row.country_id === countryId));
+    if (dominant) dominantReligions.set(countryId, dominant.key);
+  }
 
   const candidates = rows.map((settlement): SettlementEventCandidate => {
+    const religion = religionModifiers(settlement.religion_key, Number(settlement.religion_adherence_percent), dominantReligions.get(settlement.country_id) ?? null);
     const assessment = assessSettlementEventRisk(type, {
       population: settlement.population,
       slavePopulation: settlement.slave_population,
@@ -212,7 +221,8 @@ async function riskReport(client: DbClient, guildId: string, type: SettlementEve
       state: settlement,
       currentTurn: guild.current_turn,
       lastTriggeredTurn: lastTurns.get(settlement.id) ?? null,
-      stabilityRiskReduction: formableModifiers(settlement.active_formable_key).stabilityRiskReduction ?? 0
+      stabilityRiskReduction: (formableModifiers(settlement.active_formable_key).stabilityRiskReduction ?? 0) + religion.unrestReduction,
+      negativeEventRiskReduction: religion.negativeEventRiskReduction
     });
     return { ...assessment, settlementId: settlement.id, settlementName: settlement.name,
       countryId: settlement.country_id, countryName: settlement.country_name };

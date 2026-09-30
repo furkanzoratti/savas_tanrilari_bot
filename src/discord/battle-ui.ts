@@ -1,6 +1,7 @@
-import { ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, StringSelectMenuBuilder, type ButtonInteraction, type ChatInputCommandInteraction, type Client, type StringSelectMenuInteraction } from "discord.js";
+import { ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, ModalBuilder, StringSelectMenuBuilder, TextInputBuilder, TextInputStyle, type ButtonInteraction, type ChatInputCommandInteraction, type Client, type ModalSubmitInteraction, type StringSelectMenuInteraction } from "discord.js";
 import { BATTLE_TERRAINS, BATTLE_UNIT_STATS, FIELD_BATTLE_PRESSURE_LIMIT, LADDER_GROUP_ASSAULT_CAPACITY, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, SIEGE_ASSET_BATTLE_STATS, SIEGE_ASSAULT_FRONTAGE, SIEGE_ATTACKER_DISMOUNT_MAP, SIEGE_GATE_BREACH_FRONTAGE, SIEGE_GATE_BREACH_TOTAL_FRONTAGE, SIEGE_PRESSURE_LIMIT, SIEGE_RANGED_SUPPORT_FRONTAGE, SIEGE_TOTAL_ASSAULT_FRONTAGE, SIEGE_TOWER_ASSAULT_CAPACITY, assessArmyComposition, orderState, remainingBombardments, siegeAssaultAccess, siegeAttackerDismountedComposition, siegeDefenderComposition, siegeDefenseModifiers, siegeOrderState, type ArmyCompositionContext, type BattleComposition, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain, type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeDismountUnitType, type SiegeTarget } from "../domain/battle.js";
 import { NAVAL_BATTLE_ORDERS, isNavalRetreatOrder, navalFleetCondition, type NavalBattleOrder } from "../domain/naval-tactics.js";
+import { SPECIAL_UNITS } from "../domain/special-units.js";
 import { number } from "../domain/format.js";
 import { battleService, type BattleRoundResult, type BattleView, type PlayerBattleFleetStatus, type SiegePhase } from "../services/battle-service.js";
 import { gameService, GameError } from "../services/game-service.js";
@@ -383,6 +384,7 @@ function casualtyReportEmbed(view: BattleView, rows: Array<{ side_key: BattleSid
     .setDescription(`${text}\n\n${shortfall ? "⚠️ Mutabakat açığı bulunan miktarlar belgede mevcut olmadığı için otomatik düşülemedi." : "✅ Hesaplanan bütün kayıplar ülke belgelerine otomatik işlendi."}`)
     .setFooter({ text: "Bu rapor yalnızca oyun yöneticilerine gösterilir." });
 }
+
 export async function handleBattleCommand(interaction: ChatInputCommandInteraction): Promise<void> {
   if (!interaction.guildId || !interaction.channelId) throw new GameError("Savaş komutları yalnızca bir sunucu kanalında kullanılabilir.");
   const sub = interaction.options.getSubcommand();
@@ -447,20 +449,12 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
     requireGameMaster(interaction);
     const countryName = interaction.options.getString("ulke", true);
     const sourceSettlement = interaction.options.getString("yerleske");
-    const view = await battleService.setRoster({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id, naval: false, countryName, sourceSettlement,
+    const view = await battleService.setRoster({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id, naval: false, countryName, sourceSettlement, preserveSpecialUnits: true,
       composition: {
         light_infantry: interaction.options.getInteger("hafif-piyade", true), slinger: interaction.options.getInteger("sapanci", true),
         spear: interaction.options.getInteger("mizrakli", true), archer: interaction.options.getInteger("okcu", true),
         heavy_infantry: interaction.options.getInteger("agir-piyade", true), light_cavalry: interaction.options.getInteger("hafif-suvari", true),
-        heavy_cavalry: interaction.options.getInteger("agir-suvari", true), militia: interaction.options.getInteger("milis") ?? 0,
-        legionary: interaction.options.getInteger("lejyoner") ?? 0, hoplite: interaction.options.getInteger("hoplit") ?? 0,
-        horse_archer: interaction.options.getInteger("atli-okcu") ?? 0, camel_cavalry: interaction.options.getInteger("deve-suvarisi") ?? 0,
-        briton_longbow: interaction.options.getInteger("briton-uzun-yayci") ?? 0,
-        persian_immortal: interaction.options.getInteger("pers-olumsuzleri") ?? 0,
-        carthaginian_war_elephant: interaction.options.getInteger("kartaca-savas-fili") ?? 0,
-        iberian_caetrati: interaction.options.getInteger("iber-caetratileri") ?? 0,
-        germanic_shock_warrior: interaction.options.getInteger("cermen-sok-savascisi") ?? 0,
-        anatolian_thureophoroi: interaction.options.getInteger("anadolu-kalkanlilari") ?? 0
+        heavy_cavalry: interaction.options.getInteger("agir-suvari", true), militia: interaction.options.getInteger("milis") ?? 0
       } });
     const side = (["A","B"] as const).find((sideKey) => view.sides[sideKey].participants
       .some((item) => item.country_name.toLocaleLowerCase("tr-TR") === countryName.trim().toLocaleLowerCase("tr-TR")));
@@ -468,10 +462,28 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
     const participant = countryName?.trim()
       ? view.sides[side].participants.find((item) => item.country_name.toLocaleLowerCase("tr-TR") === countryName.trim().toLocaleLowerCase("tr-TR"))
       : view.sides[side].participants.find((item) => item.is_primary);
+    const participantIndex = participant ? view.sides[side].participants.indexOf(participant) : -1;
+    if (!participant || participantIndex < 0) throw new GameError("Kadro ülkesi savaş tarafında bulunamadı.");
     const lossSource = participant?.source_settlement_name
       ? `**${participant.source_settlement_name}**; kayıplar yalnızca bu yerleşkeden düşülecek.`
       : "**Ülke geneli**; kayıplar mevcut oransal dağıtımla düşülecek.";
-    await interaction.editReply({ content: `✅ **${countryName}** ülkesinin bütün kara kadrosu tek işlemde kaydedildi. Açık toplam: **${number(view.sides[side].initial_total)}**\n📍 Kayıp kaynağı: ${lossSource}` });
+    const availableSpecialUnits = await battleService.listParticipantSpecialUnits({ guildId: interaction.guildId, channelId: interaction.channelId, side, countryName });
+    const specialComponents = availableSpecialUnits.length
+      ? [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+          new StringSelectMenuBuilder()
+            .setCustomId(`battle_roster_special|${side}|${participantIndex}`)
+            .setPlaceholder("Bu ülkenin özel birimlerinden seç")
+            .addOptions(availableSpecialUnits.map(({ unitType, available, selected }) => ({
+              label: SPECIAL_UNITS[unitType as keyof typeof SPECIAL_UNITS].name.slice(0, 100),
+              value: unitType,
+              description: `Kullanılabilir ${number(available)} • Kadroda ${number(selected)}`.slice(0, 100),
+            }))),
+        )]
+      : [];
+    await interaction.editReply({
+      content: `✅ **${countryName}** ülkesinin bütün kara kadrosu tek işlemde kaydedildi. Açık toplam: **${number(view.sides[side].initial_total)}**\n📍 Kayıp kaynağı: ${lossSource}\n\n${availableSpecialUnits.length ? "⚔️ Bu ülkenin sahip olduğu özel birlikleri aşağıdaki menüden aynı kadro ekranında düzenleyebilirsin." : "ℹ️ Seçilen kaynakta kullanılabilir özel birlik bulunmuyor."}`,
+      components: specialComponents,
+    });
   } else if (sub === "gemi-ayarla") {
     requireGameMaster(interaction);
     const side = interaction.options.getString("taraf", true) as BattleSideKey;
@@ -490,6 +502,20 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
     const view = await battleService.setSupport({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id,
       side, assetType: interaction.options.getString("alet", true) as SiegeAssetType, target: interaction.options.getString("hedef", true) as SiegeTarget, quantity: interaction.options.getInteger("miktar", true) });
     await interaction.editReply({ content: `✅ ${side} tarafının gizli kuşatma desteği güncellendi. Hedef: **${interaction.options.getString("hedef", true)}**` });
+  } else if (sub === "kusatma-aleti-hedefle") {
+    requireGameMaster(interaction);
+    const side = interaction.options.getString("taraf", true) as BattleSideKey;
+    const assetType = interaction.options.getString("alet", true) as SiegeAssetType;
+    const target = interaction.options.getString("hedef", true) as SiegeTarget;
+    const view = await battleService.setSupportTarget({
+      guildId: interaction.guildId,
+      channelId: interaction.channelId,
+      actorId: interaction.user.id,
+      side,
+      assetType,
+      target,
+    });
+    await interaction.editReply({ content: `✅ **${SIEGE_ASSET_BATTLE_STATS[assetType].label}** hedefi **${target === "WALL" ? "Sur" : target === "GATE" ? "Kapı" : target === "ARMY" ? "Düşman Ordusu" : "Hücum Desteği"}** olarak ayarlandı. Miktar değişmedi: **${number(view.sides[side].support_assets[assetType] ?? 0)}**` });
   } else if (sub === "parali-asker-ayarla") {
     requireGameMaster(interaction);
     const countryName = interaction.options.getString("ulke", true);
@@ -679,6 +705,31 @@ export async function handleBattleButton(interaction: ButtonInteraction): Promis
 }
 
 export async function handleBattleSelect(interaction:StringSelectMenuInteraction):Promise<boolean>{
+  if(interaction.customId.startsWith("battle_roster_special|")){
+    if(!interaction.guildId||!interaction.channelId)throw new GameError("Sunucu veya kanal bulunamadı.");
+    if(!isGameMaster(interaction))throw new GameError("Savaş kadrosunu yalnızca oyun yöneticisi düzenleyebilir.");
+    const [,sideRaw,indexRaw]=interaction.customId.split("|");
+    const unitType=interaction.values[0] as BattleUnitType|undefined;
+    const participantIndex=Number(indexRaw);
+    if(!["A","B"].includes(sideRaw??"")||!Number.isSafeInteger(participantIndex)||participantIndex<0||!unitType||!(unitType in SPECIAL_UNITS)){
+      throw new GameError("Özel birlik seçimi bozuk; `/savas kadro-ayarla` komutunu yeniden kullanın.");
+    }
+    const unit=SPECIAL_UNITS[unitType as keyof typeof SPECIAL_UNITS];
+    const modal=new ModalBuilder()
+      .setCustomId(`battle_roster_amount|${sideRaw}|${participantIndex}|${unitType}`)
+      .setTitle(`${unit.name} miktarı`.slice(0,45));
+    modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("quantity")
+        .setLabel("Savaş kadrosundaki asker sayısı")
+        .setPlaceholder("Örn. 2500 — kadrodan çıkarmak için 0")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(9),
+    ));
+    await interaction.showModal(modal);
+    return true;
+  }
   if(!interaction.customId.startsWith("battle_naval_order|"))return false;
   if(!interaction.guildId||!interaction.channelId)throw new GameError("Sunucu veya kanal bulunamadı.");
   const battleId=interaction.customId.split("|")[1];
@@ -695,5 +746,36 @@ export async function handleBattleSelect(interaction:StringSelectMenuInteraction
   });
   await refreshBattleCard(interaction.client,view);
   await interaction.editReply(`⚓ **${view.sides[side].country_name}** için **${NAVAL_BATTLE_ORDERS[order].label}** seçildi. Emir henüz kilitli değil; kilitlenene kadar değiştirilebilir.`);
+  return true;
+}
+
+export async function handleBattleModal(interaction:ModalSubmitInteraction):Promise<boolean>{
+  if(!interaction.customId.startsWith("battle_roster_amount|"))return false;
+  if(!interaction.guildId||!interaction.channelId)throw new GameError("Sunucu veya kanal bulunamadı.");
+  if(!isGameMaster(interaction))throw new GameError("Savaş kadrosunu yalnızca oyun yöneticisi düzenleyebilir.");
+  const [,sideRaw,indexRaw,unitRaw]=interaction.customId.split("|");
+  const participantIndex=Number(indexRaw);
+  const unitType=unitRaw as BattleUnitType;
+  if(!["A","B"].includes(sideRaw??"")||!Number.isSafeInteger(participantIndex)||participantIndex<0||!(unitType in SPECIAL_UNITS)){
+    throw new GameError("Özel birlik miktarı kaydı bozuk; `/savas kadro-ayarla` komutunu yeniden kullanın.");
+  }
+  const quantity=Number(interaction.fields.getTextInputValue("quantity").trim());
+  if(!Number.isSafeInteger(quantity)||quantity<0)throw new GameError("Asker sayısı sıfır veya pozitif bir tam sayı olmalıdır.");
+  const side=sideRaw as BattleSideKey;
+  const active=await battleService.active(interaction.guildId,interaction.channelId);
+  if(!active)throw new GameError("Bu kanalda düzenlenebilecek aktif savaş bulunamadı.");
+  const participant=active.sides[side].participants[participantIndex];
+  if(!participant)throw new GameError("Savaş tarafı değişmiş; `/savas kadro-ayarla` komutunu yeniden kullanın.");
+  await interaction.deferReply({flags:MessageFlags.Ephemeral});
+  const view=await battleService.setUnit({
+    guildId:interaction.guildId,
+    channelId:interaction.channelId,
+    actorId:interaction.user.id,
+    side,
+    unitType,
+    quantity,
+    countryName:participant.country_name,
+  });
+  await interaction.editReply(`✅ **${participant.country_name} • ${SPECIAL_UNITS[unitType as keyof typeof SPECIAL_UNITS].name}** savaş kadrosu **${number(quantity)}** olarak ayarlandı. Tarafın açık toplamı: **${number(view.sides[side].initial_total)}**\nBaşka bir özel birlik için önceki kadro mesajındaki menüyü tekrar kullanabilirsin.`);
   return true;
 }

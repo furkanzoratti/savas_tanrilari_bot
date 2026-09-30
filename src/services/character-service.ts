@@ -11,6 +11,8 @@ import { CHARACTER_ROLES, caravanseraiForeignConcessionBonus } from "../domain/c
 import { greatPowerService } from "./great-power-service.js";
 import { GameError } from "./game-service.js";
 import { awardCharacterSpecializationProgress, chooseCharacterSpecialization } from "./character-specialization-progress.js";
+import { RELIGIONS } from "../domain/religions.js";
+import { loadCountryReligionProfile } from "./religion-service.js";
 
 export interface CharacterView {
   id: string;
@@ -854,6 +856,16 @@ export async function processCharacterTurn(
   return withTransaction(async (client) => {
     await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", ["character-turn:"+guildId+":"+turn]);
     const logs: string[] = [];
+    const religionBonusCache = new Map<string,{merchant:number;diplomat:number}>();
+    const countryReligionBonuses = async (countryId:string) => {
+      const cached=religionBonusCache.get(countryId);
+      if(cached)return cached;
+      const profile=await loadCountryReligionProfile(client,countryId);
+      const national=profile.dominant?RELIGIONS[profile.dominant.key].national:null;
+      const bonuses={merchant:national?.merchantTaskBonus??0,diplomat:national?.diplomatTaskBonus??0};
+      religionBonusCache.set(countryId,bonuses);
+      return bonuses;
+    };
     await client.query(
       "UPDATE country_characters SET unavailable_until_turn=NULL,assignment='NONE',assigned_settlement_id=NULL,assignment_ready_turn=NULL WHERE unavailable_until_turn IS NOT NULL AND unavailable_until_turn<=$1",
       [turn]
@@ -1033,9 +1045,10 @@ export async function processCharacterTurn(
         const roll = randomInt(1,11);
         const skillBonus = Number(operation.skill_bonus);
         const specializationBonus = operation.specialization === "CARAVAN_MASTER" ? 1 : 0;
+        const religionBonus = (await countryReligionBonuses(operation.country_id)).merchant;
         const effectivePercent = Math.min(
           10,
-          roll + skillBonus + specializationBonus
+          roll + skillBonus + specializationBonus + religionBonus
         );
         const tradeIncome = merchantTradeIncomeBase({
           acquisitionLandTradeIncome:operation.acquisition_land_trade_income,
@@ -1150,6 +1163,7 @@ export async function processCharacterTurn(
       const specializationBonus = operation.specialization === expectedSpecialization
         ? specializationLevel(Number(operation.specialization_progress)) : 0;
       let attackBonus = Number(operation.skill_bonus)+specializationBonus;
+      attackBonus += (await countryReligionBonuses(operation.country_id)).diplomat;
       let defenseBonus = 0;
       let delta = 0;
       let failed = false;

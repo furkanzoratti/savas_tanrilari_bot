@@ -11,6 +11,8 @@ import { GameError } from "./game-service.js";
 import { awardCharacterSpecializationProgress } from "./character-specialization-progress.js";
 import type { CharacterSpecialization } from "../domain/characters.js";
 import { markCharacterDead } from "./character-death-service.js";
+import { RELIGIONS } from "../domain/religions.js";
+import { loadCountryReligionProfile } from "./religion-service.js";
 
 export const SPY_DEFENSE_ASSIGNMENTS = [
   "COUNTERINTELLIGENCE_TRAVELING_COUNTRY", "COUNTERINTELLIGENCE_TRAVELING_SETTLEMENT",
@@ -257,9 +259,11 @@ export async function resolveDueEspionageOperations(guildId: string, turn: numbe
       const specialization = espionageSpecialization(operation.target_type);
       const specializationBonus = operation.spy_specialization === specialization ? Number(operation.spy_specialization_level) : 0;
       const attackTotal = attackRoll + Number(operation.spy_skill_bonus) + preparation.attackBonus + specializationBonus;
-      const counterDefense = counter ? Number(counter.skill_bonus)
+      const targetReligion = await loadCountryReligionProfile(client, operation.target_country_id);
+      const religionDefense = targetReligion.dominant ? RELIGIONS[targetReligion.dominant.key].national.spyDefenseBonus ?? 0 : 0;
+      const counterDefense = (counter ? Number(counter.skill_bonus)
         + (counter.assignment === "PERSONAL_GUARD" ? 4 : counter.assignment === "COUNTERINTELLIGENCE_SETTLEMENT" ? 3 : 1)
-        + (counter.specialization === "COUNTER_SPY" ? Number(counter.specialization_level) : 0) : 0;
+        + (counter.specialization === "COUNTER_SPY" ? Number(counter.specialization_level) : 0) : 0) + religionDefense;
       const defenseTotal = defenseRoll + counterDefense + defenseBuildingBonus(allActive, operation.target_type);
       const margin = attackTotal - defenseTotal;
       const effectOperation: EspionageEffectOperation = operation;

@@ -51,13 +51,14 @@ export function calculateUnitUpkeep(
   status: UnitStatus,
   mobilization: Mobilization,
   resources: readonly ResourceType[] = [],
-  overLimitPenalty = false
+  overLimitPenalty = false,
+  religionDiscount = 0
 ): number {
   void status; // Konum bazlı bakım çarpanları şimdilik pasiftir.
   const unit = UNITS[unitType];
   const multiplier = (1 + MOBILIZATION_RULES[mobilization].upkeepExtra) * (overLimitPenalty ? 1.25 : 1);
   const detachments = unitType === "observer" ? (quantity > 0 ? 1 : 0) : quantity / 1_000;
-  return Math.ceil(detachments * unit.upkeep * multiplier * armyUpkeepMultiplier(resources));
+  return Math.ceil(detachments * unit.upkeep * multiplier * armyUpkeepMultiplier(resources) * (1 - Math.max(0, Math.min(0.5, religionDiscount))));
 }
 
 export function calculateShipUpkeep(
@@ -65,12 +66,13 @@ export function calculateShipUpkeep(
   quantity: number,
   status: ShipStatus,
   mobilization: Mobilization,
-  overLimitPenalty = false
+  overLimitPenalty = false,
+  religionDiscount = 0
 ): number {
   void status; // Konum bazlı bakım çarpanları şimdilik pasiftir.
   const ship = SHIPS[shipType];
   const multiplier = (1 + MOBILIZATION_RULES[mobilization].upkeepExtra) * (overLimitPenalty ? 1.25 : 1);
-  return Math.ceil(quantity * ship.upkeep * multiplier);
+  return Math.ceil(quantity * ship.upkeep * multiplier * (1 - Math.max(0, Math.min(0.5, religionDiscount))));
 }
 
 export function buildingSlotLimit(population: number, hasActivePort = false): number {
@@ -94,6 +96,7 @@ export function calculatePopulationGain(input: {
   mobilization: Mobilization;
   resources?: readonly ResourceType[];
   marshalPartial?: boolean;
+  religionPopulationGrowthPercent?: number;
 }): number {
   let healerGrowth = 0;
   let growthPercent = 0;
@@ -113,6 +116,7 @@ export function calculatePopulationGain(input: {
 
   let rawGrowth = Math.max(0, input.population) * naturalPopulationGrowthRate(input.population) + healerGrowth;
   rawGrowth *= 1 + growthPercent;
+  rawGrowth *= 1 + Math.max(0, input.religionPopulationGrowthPercent ?? 0);
   if (input.resources?.includes("GRAIN")) rawGrowth *= 1.10;
   if (input.resources?.includes("SPICES")) rawGrowth *= 1.05;
   rawGrowth *= ruinIncomeMultiplier(input.ruinStage);

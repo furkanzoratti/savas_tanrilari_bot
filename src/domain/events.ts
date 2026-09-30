@@ -47,6 +47,7 @@ export interface EventRiskInput {
   currentTurn: number;
   lastTriggeredTurn: number | null;
   stabilityRiskReduction?: number;
+  negativeEventRiskReduction?: number;
 }
 
 export interface EventRiskFactor {
@@ -234,6 +235,9 @@ export function assessSettlementEventRisk(type: SettlementEventType, input: Even
 
   if (["UNREST", "REBELLION"].includes(type)) {
     addFactor(factors, "Birleşik Taç", -Math.max(0, Math.floor(input.stabilityRiskReduction ?? 0)));
+  }
+  if (definition.kind === "BAD") {
+    addFactor(factors, "Yerel din etkisi", -Math.max(0, Math.floor(input.negativeEventRiskReduction ?? 0)));
   }
 
   const weight = Math.max(0, Math.min(100, factors.reduce((sum, factor) => sum + factor.adjustment, 0)));

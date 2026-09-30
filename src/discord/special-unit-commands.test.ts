@@ -15,7 +15,7 @@ describe("özel birlik Discord komutları", () => {
     ]);
   });
 
-  it("özel birlikleri asker alımı ve tek mesajlık savaş kadrosuna ekler", () => {
+  it("özel birlikleri asker alımına ekler ve savaş kadrosunda dinamik seçime bırakır", () => {
     expect(unitChoices.map(([key]) => key)).toEqual(expect.arrayContaining([
       "legionary", "hoplite", "horse_archer", "camel_cavalry", "briton_longbow",
       "persian_immortal", "carthaginian_war_elephant", "iberian_caetrati", "germanic_shock_warrior", "anatolian_thureophoroi"
@@ -27,9 +27,7 @@ describe("özel birlik Discord komutları", () => {
     const singleUnit = battle?.options?.find((option) => option.name === "birlik-ayarla");
     expect(singleUnit?.options?.find((option) => option.name === "birim")?.autocomplete).toBe(true);
     const roster = battle?.options?.find((option) => option.name === "kadro-ayarla");
-    expect(roster?.options?.map((option) => option.name)).toEqual(expect.arrayContaining([
-      "lejyoner", "hoplit", "atli-okcu", "deve-suvarisi", "briton-uzun-yayci", "pers-olumsuzleri",
-      "kartaca-savas-fili", "iber-caetratileri", "cermen-sok-savascisi", "anadolu-kalkanlilari"
-    ]));
+    expect(roster?.options?.map((option) => option.name)).not.toEqual(expect.arrayContaining(["lejyoner", "hoplit"]));
+    expect(roster?.description).toContain("özel birlik");
   });
 });

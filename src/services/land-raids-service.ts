@@ -3,6 +3,8 @@ import type { DbClient } from "../db/pool.js";
 import { pool,withTransaction } from "../db/pool.js";
 import { landRaidResult,landRaidRewards,landRaidSizeModifier,type LandRaidTier,type LandRaidType } from "../domain/land-raids.js";
 import { GameError } from "./game-service.js";
+import { RELIGIONS } from "../domain/religions.js";
+import { loadCountryReligionProfile } from "./religion-service.js";
 
 export interface LandRaidView {
   id:string;guild_id:string;raid_type:LandRaidType;war_id:string|null;
@@ -111,7 +113,10 @@ export const landRaidsService={
       if(!target||!payout)throw new GameError("Yağmanın hedef veya kazanç yerleşkesi artık geçerli değil.");
       const sides=raid.raid_type==="REGIONAL"?20:100;
       const roll=randomInt(1,sides+1),outcome=landRaidResult(raid.raid_type,roll,Number(raid.size_modifier));
-      const rewards=landRaidRewards({type:raid.raid_type,armyStrength:Number(raid.army_strength),targetPopulation:Number(target.population),targetIncome:Number(raid.income_basis),outcome});
+      const baseRewards=landRaidRewards({type:raid.raid_type,armyStrength:Number(raid.army_strength),targetPopulation:Number(target.population),targetIncome:Number(raid.income_basis),outcome});
+      const religionProfile=await loadCountryReligionProfile(client,raid.raider_country_id);
+      const raidBonus=religionProfile.dominant?RELIGIONS[religionProfile.dominant.key].national.landRaidIncomePercent??0:0;
+      const rewards={...baseRewards,loot:Math.floor(baseRewards.loot*(1+raidBonus))};
       await client.query("UPDATE settlements SET population=GREATEST(0,population-$1) WHERE id=$2",[rewards.populationLoss,raid.target_settlement_id]);
       await client.query("UPDATE settlements SET local_treasury=local_treasury+$1,slave_population=slave_population+$2 WHERE id=$3",[rewards.loot,rewards.slaves,raid.payout_settlement_id]);
       if(rewards.loot>0){

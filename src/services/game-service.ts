@@ -26,6 +26,8 @@ import { awardCharacterSpecializationProgress } from "./character-specialization
 import { conquestArmyPopulationDeparture, loadDisplacedArmySupport, supportedPersonnel } from "./displaced-army-support.js";
 import { grantFormableFoundingReward } from "./formable-country-reward-service.js";
 import { siegeStarvationBonus } from "../domain/siege-starvation.js";
+import { dominantReligion, religionModifiers, religionUnitDiscount, type ReligionKey, type ReligionModifiers } from "../domain/religions.js";
+import { loadSettlementReligionModifiers } from "./religion-service.js";
 
 export class GameError extends Error {}
 
@@ -42,6 +44,7 @@ interface SettlementRow {
   drought_active: boolean; famine_active: boolean; bountiful_harvest_active: boolean; trade_boom_active: boolean;
   migration_wave_active: boolean; master_craftsmen_active: boolean; local_volunteers_active: boolean;
   tax_rate_percent: number;
+  religion_key: ReligionKey; religion_adherence_percent: number; minority_religion_key: string;
 }
 interface BuildingRow { settlement_id: string; building_type: string; level: number; target_level: number | null; status: "ACTIVE" | "BUILDING" | "SABOTAGED"; started_turn: number | null; completion_turn: number | null; sabotaged_until_turn: number | null; sabotage_repair_cost:number }
 interface SettlementIncomePenaltyRow {
@@ -94,7 +97,7 @@ function activePolicyKeys(policies: readonly SettlementPolicyRow[], currentTurn:
   return policies.filter((policy) => policy.status === "ACTIVE" && (policy.suspended_until_turn === null || policy.suspended_until_turn <= currentTurn)).map((policy) => policy.policy_key);
 }
 
-function settlementStarvationBonus(buildings: Array<{ buildingType: string; level: number }>, policies: readonly CityPolicyKey[], formableKey?: FormableCountryKey | null): number {
+function settlementStarvationBonus(buildings: Array<{ buildingType: string; level: number }>, policies: readonly CityPolicyKey[], formableKey?: FormableCountryKey | null, religionBonus = 0): number {
   const farm = buildings.find((building) => building.buildingType === "farm")?.level ?? 0;
   const aqueduct = buildings.find((building) => building.buildingType === "aqueduct")?.level ?? 0;
   return siegeStarvationBonus({
@@ -102,10 +105,10 @@ function settlementStarvationBonus(buildings: Array<{ buildingType: string; leve
     aqueductLevel: aqueduct,
     garrisonReinforcement: policies.includes("GARRISON_REINFORCEMENT"),
     formableBonus: formableModifiers(formableKey).starvationBonus
-  });
+  }) + religionBonus;
 }
 
-function settlementUnrestChance(buildings: Array<{ buildingType: string; level: number }>, resources: readonly ResourceType[], policies: readonly CityPolicyKey[], formableKey?: FormableCountryKey | null): number {
+function settlementUnrestChance(buildings: Array<{ buildingType: string; level: number }>, resources: readonly ResourceType[], policies: readonly CityPolicyKey[], formableKey?: FormableCountryKey | null, religionReduction = 0): number {
   const slaveCamp = buildings.find((building) => building.buildingType === "slave_camp")?.level ?? 0;
   const pantheon = buildings.find((building) => building.buildingType === "pantheon")?.level ?? 0;
   const inns = buildings.find((building) => building.buildingType === "inns_baths")?.level ?? 0;
@@ -118,7 +121,8 @@ function settlementUnrestChance(buildings: Array<{ buildingType: string; level: 
     - (pantheon > 0 ? 10 : 0)
     - (resources.includes("WINE") ? 10 : 0)
     - (resources.includes("AMBER") ? 10 : 0)
-    - (formableModifiers(formableKey).stabilityRiskReduction ?? 0)));
+    - (formableModifiers(formableKey).stabilityRiskReduction ?? 0)
+    - religionReduction));
 }
 
 function policyRecruitmentDiscount(policies: readonly CityPolicyKey[]): number {
@@ -160,20 +164,21 @@ async function hasActiveMarshalPartialMobilization(
   return Boolean(result.rows[0]?.active);
 }
 
-export function unitPurchaseCost(unitType: keyof typeof UNITS, quantity: number, resources: readonly ResourceType[], policies: readonly CityPolicyKey[], formableKey?: FormableCountryKey | null): number {
+export function unitPurchaseCost(unitType: keyof typeof UNITS, quantity: number, resources: readonly ResourceType[], policies: readonly CityPolicyKey[], formableKey?: FormableCountryKey | null, religion?: ReligionModifiers): number {
   const unit = UNITS[unitType];
   if (!unit) throw new GameError("Birim türü bulunamadı.");
-  const combinedMultiplier = Math.max(0.50, unitCostMultiplier(unitType, resources) - policyRecruitmentDiscount(policies) - formableUnitDiscount(formableKey, unitType));
+  const combinedMultiplier = Math.max(0.50, unitCostMultiplier(unitType, resources) - policyRecruitmentDiscount(policies) - formableUnitDiscount(formableKey, unitType) - religionUnitDiscount(religion?.unitPurchaseDiscounts ?? [], unitType));
   return Math.ceil((quantity / 1_000) * unit.price * combinedMultiplier);
 }
 
-export function buildingPurchaseTerms(buildingType: string, targetLevel: number, resources: readonly ResourceType[], policies: readonly CityPolicyKey[], formableKey?: FormableCountryKey | null): { cost: number; duration: number } {
+export function buildingPurchaseTerms(buildingType: string, targetLevel: number, resources: readonly ResourceType[], policies: readonly CityPolicyKey[], formableKey?: FormableCountryKey | null, religion?: ReligionModifiers): { cost: number; duration: number } {
   const master = policies.includes("MASTER_ARCHITECTURE");
   const accelerated = policies.includes("ACCELERATED_CONSTRUCTION");
   const policyDiscount = master ? 0.10 : accelerated ? 0.05 : 0;
   const resourceDiscount = 1 - buildingCostMultiplier(buildingType, resources);
   const formableDiscount = formableBuildingDiscount(formableKey, buildingType);
-  const multiplier = 1 - Math.min(MAX_BUILDING_COST_DISCOUNT, resourceDiscount + policyDiscount + formableDiscount);
+  const religionDiscount = (religion?.buildingCostDiscount ?? 0) + (buildingType === "academy" ? religion?.academyBuildingCostDiscount ?? 0 : 0);
+  const multiplier = 1 - Math.min(MAX_BUILDING_COST_DISCOUNT, resourceDiscount + policyDiscount + formableDiscount + religionDiscount);
   const durationReduction = buildingDurationReduction(buildingType, resources)
     + (master && targetLevel >= 2 ? 3 : accelerated ? 1 : 0)
     + (formableModifiers(formableKey).buildingDurationReduction ?? 0);
@@ -215,6 +220,7 @@ export interface CountryDocument {
   totalIncomeBreakdown: IncomeBreakdown;
   totalUpkeep: number;
   netIncome: number;
+  dominantReligion: { key: ReligionKey; sharePercent: number } | null;
   tradeAgreements: Array<{ id: string; route: "LAND" | "SEA"; status: "PENDING" | "ACTIVE"; partner_name: string; proposer_settlement_name: string; receiver_settlement_name: string; proposer_resource: ResourceType; receiver_resource: ResourceType }>;
   settlements: Array<SettlementRow & {
     grossIncome: number;
@@ -240,6 +246,7 @@ export interface CountryDocument {
     incomePenalty?: SettlementIncomePenaltyRow | null;
     unrestRisk: number;
     starvationBonus: number;
+    religionModifiers: ReligionModifiers;
     temporaryMilitia: number;
     assignedMerchant: boolean;
     merchantSkillBonus: number;
@@ -411,11 +418,12 @@ async function settlementTransferMaintenanceReserve(
     [settlement.id]
   )).rows.map((building) => ({ buildingType: building.building_type, level: building.level }));
   const effectiveResources = (await settlementResourceAccess(client, country.id)).get(settlement.id) ?? [];
+  const religion = (await loadSettlementReligionModifiers(client, settlement)).modifiers;
   const buildingUpkeep = calculateCategorizedIncome({
     settlementIncome: 0, taxIncome: 0, landTradeIncome: 0, seaTradeIncome: 0,
     manualFlatIncome: 0, manualIncomePercent: 0, buildings: activeBuildings,
     ruinStage: settlement.ruin_stage, resources: effectiveResources,
-    slavePopulation: settlement.slave_population, formableKey: country.active_formable_key
+    slavePopulation: settlement.slave_population, formableKey: country.active_formable_key, religion
   }).buildingUpkeep;
   const units = (await client.query<{ unit_type: keyof typeof UNITS; quantity: number; status: UnitStatus }>(
     "SELECT unit_type,quantity,status FROM unit_stacks WHERE settlement_id=$1", [settlement.id]
@@ -429,10 +437,11 @@ async function settlementTransferMaintenanceReserve(
     [settlement.id]
   )).rows[0]?.total ?? 0;
   const unitUpkeep = [...units,...displacedUnits.map((unit)=>({...unit,status:"FIELD_FRIENDLY" as UnitStatus}))].reduce((sum, unit) => sum + calculateUnitUpkeep(
-    unit.unit_type, unit.quantity, unit.status, country.mobilization, effectiveResources, country.manpower_penalty_active
+    unit.unit_type, unit.quantity, unit.status, country.mobilization, effectiveResources, country.manpower_penalty_active,
+    religionUnitDiscount(religion.unitUpkeepDiscounts, unit.unit_type)
   ), 0);
   const shipUpkeep = applyFormableShipUpkeepDiscount(ships.reduce((sum, ship) => sum + calculateShipUpkeep(
-    ship.ship_type, ship.quantity, ship.status, country.mobilization, country.manpower_penalty_active
+    ship.ship_type, ship.quantity, ship.status, country.mobilization, country.manpower_penalty_active, religion.shipUpkeepDiscount
   ), 0), country.active_formable_key);
   return buildingUpkeep + unitUpkeep + shipUpkeep + Number(mercenary);
 }
@@ -959,7 +968,7 @@ export const gameService = {
   async createSettlement(input: {
     guildId: string; actorId: string; countryId: string; name: string; population: number;
     slaves: number; landTradeIncome: number;
-    resourceType: ResourceType; cultureGroup: CultureGroup; isCoastal?: boolean;
+    resourceType: ResourceType; cultureGroup: CultureGroup; religionKey: ReligionKey; isCoastal?: boolean;
   }): Promise<SettlementRow> {
     return withTransaction(async (client) => {
       const country = await getCountry(client, input.countryId);
@@ -968,9 +977,9 @@ export const gameService = {
       const startingLocalTreasury = existingSettlementCount === 0 ? country.treasury : 0;
       const result = await client.query<SettlementRow>(
         `INSERT INTO settlements(
-          country_id,name,population,slave_population,base_income,tax_income,land_trade_income,sea_trade_income,base_land_trade_income,base_population_growth,resource_type,culture_group,local_treasury,is_coastal
-        ) VALUES ($1,$2,$3,$4,0,0,0,0,$5,0,$6,$7,$8,$9) RETURNING *`,
-        [input.countryId, input.name.trim(), input.population, input.slaves, input.landTradeIncome, input.resourceType, input.cultureGroup, startingLocalTreasury, input.isCoastal ?? false]
+          country_id,name,population,slave_population,base_income,tax_income,land_trade_income,sea_trade_income,base_land_trade_income,base_population_growth,resource_type,culture_group,religion_key,religion_adherence_percent,local_treasury,is_coastal
+        ) VALUES ($1,$2,$3,$4,0,0,0,0,$5,0,$6,$7,$8,75,$9,$10) RETURNING *`,
+        [input.countryId, input.name.trim(), input.population, input.slaves, input.landTradeIncome, input.resourceType, input.cultureGroup, input.religionKey, startingLocalTreasury, input.isCoastal ?? false]
       );
       const settlement = result.rows[0]!;
       await ensureStandardGarrison(client, settlement.id, settlement.population, settlement.garrison_level, true);
@@ -987,6 +996,17 @@ export const gameService = {
       const changed = await client.query("UPDATE settlements SET culture_group=$1 WHERE id=$2 AND country_id=$3 RETURNING id", [input.cultureGroup, input.settlementId, country.id]);
       if (!changed.rowCount) throw new GameError("Yerleşke bulunamadı.");
       await audit(client, input.guildId, input.actorId, "SETTLEMENT_CULTURE_SET", "settlement", input.settlementId, { cultureGroup: input.cultureGroup });
+    });
+  },
+
+  async setSettlementReligion(input: { guildId: string; actorId: string; countryId: string; settlementId: string; religionKey: ReligionKey; adherencePercent: number }): Promise<void> {
+    if (!Number.isFinite(input.adherencePercent) || input.adherencePercent < 0 || input.adherencePercent > 100) throw new GameError("Din bağlılığı 0–100 arasında olmalıdır.");
+    await withTransaction(async (client) => {
+      const country = await getCountry(client, input.countryId);
+      if (country.guild_id !== input.guildId) throw new GameError("Ülke bu sunucuya ait değil.");
+      const changed = await client.query("UPDATE settlements SET religion_key=$1,religion_adherence_percent=$2 WHERE id=$3 AND country_id=$4 RETURNING id", [input.religionKey, input.adherencePercent, input.settlementId, country.id]);
+      if (!changed.rowCount) throw new GameError("Yerleşke bulunamadı.");
+      await audit(client, input.guildId, input.actorId, "SETTLEMENT_RELIGION_SET", "settlement", input.settlementId, { religionKey: input.religionKey, adherencePercent: input.adherencePercent });
     });
   },
 
@@ -1521,7 +1541,7 @@ export const gameService = {
       };
     });
   },
-  async document(countryId: string): Promise<CountryDocument> {
+  async document(countryId: string, options: { includeArmies?: boolean } = {}): Promise<CountryDocument> {
     const client = await pool.connect();
     try {
       const country = await getCountry(client, countryId);
@@ -1529,6 +1549,7 @@ export const gameService = {
       const playerIds = (await client.query<{ discord_user_id: string }>("SELECT discord_user_id FROM country_members WHERE country_id=$1 ORDER BY discord_user_id", [countryId])).rows.map((row) => row.discord_user_id);
       const specialUnitUnlocks = (await client.query<{ unit_type: SpecialUnitType }>("SELECT unit_type FROM country_special_unit_unlocks WHERE country_id=$1 ORDER BY unit_type", [countryId])).rows.map((row) => row.unit_type);
       const settlements = (await client.query<SettlementRow>("SELECT * FROM settlements WHERE country_id = $1 ORDER BY name", [countryId])).rows;
+      const dominantReligionProfile = dominantReligion(settlements);
       const displayedCountry = { ...country, treasury: settlements.length ? settlements.reduce((sum, settlement) => sum + Number(settlement.local_treasury), 0) : country.treasury };
       const settlementIds = settlements.map((settlement) => settlement.id);
       const besiegedSettlementIds = new Set(settlementIds.length ? (await client.query<{ settlement_id: string }>(
@@ -1552,7 +1573,11 @@ export const gameService = {
            LEFT JOIN fleets fleet ON fleet.commander_character_id=cc.id
           WHERE cc.country_id=$1 ORDER BY cc.role,cc.name`, [countryId]
       )).rows;
-      const armyRows = (await client.query<{
+      const armyRows: Array<{
+        id: string; guild_id: string; country_id: string; country_name: string; name: string;
+        commander_character_id: string | null; commander_name: string | null; commander_skill_bonus: number;
+        created_turn: number; active_battle_id: string | null; current_hex: string | null;
+      }> = options.includeArmies === false ? [] : (await client.query<{
         id: string; guild_id: string; country_id: string; country_name: string; name: string;
         commander_character_id: string | null; commander_name: string | null; commander_skill_bonus: number;
         created_turn: number; active_battle_id: string | null; current_hex: string | null;
@@ -1572,18 +1597,18 @@ export const gameService = {
              LEFT JOIN fleet_map_positions cargo_position ON cargo_position.fleet_id=cargo.fleet_id
              LEFT JOIN map_hexes fleet_hex ON fleet_hex.id=cargo_position.hex_id
             WHERE a.country_id=$1 ORDER BY a.created_at,a.name`, [countryId])).rows;
-      const armyUnitRows = (await client.query<{
+      const armyUnitRows = armyRows.length ? (await client.query<{
         army_id: string; settlement_id: string; settlement_name: string; unit_type: BattleUnitType; quantity: number;
       }>(`SELECT au.army_id,au.settlement_id,COALESCE(au.origin_settlement_name,s.name,'Bilinmeyen') AS settlement_name,
                  au.unit_type,au.quantity
              FROM army_units au LEFT JOIN settlements s ON s.id=au.settlement_id
             WHERE au.army_id=ANY($1::uuid[])
-            ORDER BY COALESCE(au.origin_settlement_name,s.name),au.unit_type`, [armyRows.map((army) => army.id)])).rows;
-      const armySiegeAssetRows = (await client.query<ArmyView["siegeAssets"][number] & { army_id: string }>(
+            ORDER BY COALESCE(au.origin_settlement_name,s.name),au.unit_type`, [armyRows.map((army) => army.id)])).rows : [];
+      const armySiegeAssetRows = armyRows.length ? (await client.query<ArmyView["siegeAssets"][number] & { army_id: string }>(
         `SELECT asset.army_id,asset.settlement_id,s.name AS settlement_name,asset.asset_type,asset.quantity,asset.enhanced_quantity
            FROM army_siege_assets asset JOIN settlements s ON s.id=asset.settlement_id
           WHERE asset.army_id=ANY($1::uuid[]) ORDER BY s.name,asset.asset_type`, [armyRows.map((army) => army.id)]
-      )).rows;
+      )).rows : [];
       const armies: ArmyView[] = armyRows.map((army) => {
         const armyUnits = armyUnitRows.filter((unit) => unit.army_id === army.id).map(({ army_id: _armyId, ...unit }) => ({ ...unit, quantity: Number(unit.quantity) }));
         const siegeAssets = armySiegeAssetRows.filter((asset) => asset.army_id === army.id).map(({ army_id: _armyId, ...asset }) => ({
@@ -1727,6 +1752,7 @@ export const gameService = {
       let totalPayableBreakdown: IncomeBreakdown = { building: 0, tax: 0, landTrade: 0, seaTrade: 0 };
       let totalUpkeep = 0;
       const enriched = settlements.map((settlement) => {
+        const religion = religionModifiers(settlement.religion_key, Number(settlement.religion_adherence_percent), dominantReligionProfile?.key ?? null);
         const settlementBuildings = buildings.filter((building) => building.settlement_id === settlement.id);
         const activeBuildings = settlementBuildings
           .filter((building) => (building.status === "ACTIVE" || building.status === "BUILDING") && building.level > 0)
@@ -1756,7 +1782,8 @@ export const gameService = {
           assignedMerchant: Boolean(assignedMerchant),
           merchantSkillBonus: assignedMerchant?.skill_bonus ?? 0,
           merchantAgoraMaster: assignedMerchant?.specialization === "AGORA_MASTER",
-          formableKey: country.active_formable_key
+          formableKey: country.active_formable_key,
+          religion
         });
         const incomePenalty = incomePenalties.find((penalty) => penalty.settlement_id === settlement.id) ?? null;
         const mobilizedIncome = scaleIncome(economy.payable, marshalPartial ? 1 : MOBILIZATION_RULES[country.mobilization].incomeMultiplier);
@@ -1767,7 +1794,8 @@ export const gameService = {
           ruinStage: settlement.ruin_stage,
           mobilization: country.mobilization,
           resources: effectiveResources,
-          marshalPartial
+          marshalPartial,
+          religionPopulationGrowthPercent: religion.populationGrowthPercent
         }), settlement.ruin_stage, country.active_formable_key);
         const settlementUnits = units.filter((unit) => unit.settlement_id === settlement.id);
         const displacedUnits = displacedSupport.get(settlement.id) ?? [];
@@ -1776,12 +1804,12 @@ export const gameService = {
         const settlementMercenaries = mercenaries.filter((contract) => contract.settlement_id === settlement.id);
         const activeSettlementMercenaries = settlementMercenaries.filter((contract) => contract.status === "ACTIVE" || contract.status === "UNPAID");
         const localUnitUpkeep = settlementUnits
-          .reduce((sum, unit) => sum + calculateUnitUpkeep(unit.unit_type, unit.quantity, unit.status, country.mobilization, effectiveResources, country.manpower_penalty_active), 0);
+          .reduce((sum, unit) => sum + calculateUnitUpkeep(unit.unit_type, unit.quantity, unit.status, country.mobilization, effectiveResources, country.manpower_penalty_active, religionUnitDiscount(religion.unitUpkeepDiscounts, unit.unit_type)), 0);
         const displacedArmyUpkeep = displacedUnits
-          .reduce((sum, unit) => sum + calculateUnitUpkeep(unit.unit_type, unit.quantity, "FIELD_FRIENDLY", country.mobilization, effectiveResources, country.manpower_penalty_active), 0);
+          .reduce((sum, unit) => sum + calculateUnitUpkeep(unit.unit_type, unit.quantity, "FIELD_FRIENDLY", country.mobilization, effectiveResources, country.manpower_penalty_active, religionUnitDiscount(religion.unitUpkeepDiscounts, unit.unit_type)), 0);
         const unitUpkeep = localUnitUpkeep + displacedArmyUpkeep;
         const shipUpkeep = applyFormableShipUpkeepDiscount(
-          settlementShips.reduce((sum, ship) => sum + calculateShipUpkeep(ship.ship_type, ship.quantity, ship.status, country.mobilization, country.manpower_penalty_active), 0),
+          settlementShips.reduce((sum, ship) => sum + calculateShipUpkeep(ship.ship_type, ship.quantity, ship.status, country.mobilization, country.manpower_penalty_active, religion.shipUpkeepDiscount), 0),
           country.active_formable_key
         );
         const mercenaryUpkeep = activeSettlementMercenaries.reduce((sum, contract) => sum + contract.turn_upkeep, 0);
@@ -1819,8 +1847,9 @@ export const gameService = {
           constructionLimit: activePolicies.includes("MASTER_ARCHITECTURE") ? 3 : 2,
           isBesieged: besiegedSettlementIds.has(settlement.id),
           incomePenalty,
-          unrestRisk: settlementUnrestChance(activeBuildings, effectiveResources, activePolicies, country.active_formable_key),
-          starvationBonus: settlementStarvationBonus(activeBuildings, activePolicies, country.active_formable_key),
+          unrestRisk: settlementUnrestChance(activeBuildings, effectiveResources, activePolicies, country.active_formable_key, religion.unrestReduction),
+          starvationBonus: settlementStarvationBonus(activeBuildings, activePolicies, country.active_formable_key, religion.starvationBonus),
+          religionModifiers: religion,
           temporaryMilitia: activePolicies.includes("WAR_PREPARATION") ? (formableModifiers(country.active_formable_key).warPreparationMilitia ?? Math.floor(500 * (formableModifiers(country.active_formable_key).policyMilitiaMultiplier ?? 1))) : 0,
           assignedMerchant: Boolean(assignedMerchant),
           merchantSkillBonus: assignedMerchant?.skill_bonus ?? 0,
@@ -1864,6 +1893,7 @@ export const gameService = {
         totalIncomeBreakdown: totalPayableBreakdown,
         totalUpkeep,
         netIncome: totalPayableIncome - totalUpkeep,
+        dominantReligion: dominantReligionProfile,
         tradeAgreements,
         settlements: enriched
       };
@@ -2283,7 +2313,8 @@ export const gameService = {
         if ((slots.rows[0]?.count ?? 0) >= buildingSlotLimit(settlement.population, hasActivePort)) throw new GameError("Yerleşkenin boş bina slotu yok.");
       }
       const effectiveResources = (await settlementResourceAccess(client, country.id)).get(settlement.id) ?? [];
-      const terms = buildingPurchaseTerms(input.buildingType, targetLevel, effectiveResources, activePolicies, country.active_formable_key);
+      const religion = (await loadSettlementReligionModifiers(client, settlement)).modifiers;
+      const terms = buildingPurchaseTerms(input.buildingType, targetLevel, effectiveResources, activePolicies, country.active_formable_key, religion);
       const cost = await applyPurchaseAgentDiscount(client,{
         countryId:country.id,settlementId:settlement.id,category:"BUILDING",currentTurn:guild.current_turn,cost:terms.cost
       });
@@ -2366,7 +2397,8 @@ export const gameService = {
 
       const effectiveResources = (await settlementResourceAccess(client, country.id)).get(settlement.id) ?? [];
       const activePolicies = activePolicyKeys((await client.query<SettlementPolicyRow>("SELECT * FROM settlement_policies WHERE settlement_id=$1 AND status='ACTIVE'", [settlement.id])).rows,guild.current_turn);
-      const baseCost = unitPurchaseCost(input.unitType, input.quantity, effectiveResources, activePolicies, country.active_formable_key);
+      const religion = (await loadSettlementReligionModifiers(client, settlement)).modifiers;
+      const baseCost = unitPurchaseCost(input.unitType, input.quantity, effectiveResources, activePolicies, country.active_formable_key, religion);
       const cost = await applyPurchaseAgentDiscount(client,{
         countryId:country.id,settlementId:settlement.id,category:"UNITS",currentTurn:guild.current_turn,cost:baseCost
       });
@@ -2485,7 +2517,8 @@ export const gameService = {
       }
 
       const resources = (await settlementResourceAccess(client, country.id)).get(settlement.id) ?? [];
-      const baseCost = Math.ceil(asset.price * input.quantity * Math.max(0.5, siegeCostMultiplier(input.assetType, resources) - (formableModifiers(country.active_formable_key).siegeAssetDiscount ?? 0)));
+      const religion = (await loadSettlementReligionModifiers(client, settlement)).modifiers;
+      const baseCost = Math.ceil(asset.price * input.quantity * Math.max(0.5, siegeCostMultiplier(input.assetType, resources) - (formableModifiers(country.active_formable_key).siegeAssetDiscount ?? 0) - religion.siegeAssetCostDiscount));
       const cost = await applyPurchaseAgentDiscount(client,{
         countryId:country.id,settlementId:settlement.id,category:"SIEGE",currentTurn:guild.current_turn,cost:baseCost
       });
@@ -2581,7 +2614,8 @@ export const gameService = {
       if (manpower.used > limit) throw new GameError("Devlet askerî personel sınırının üzerindeyken yeni gemi üretemez.");
       if (manpower.used + personNeed > limit) throw new GameError("Gemi mürettebatı askerî personel sınırını aşıyor.");
       const effectiveResources = (await settlementResourceAccess(client, country.id)).get(settlement.id) ?? [];
-      const baseCost = Math.ceil(ship.price * input.quantity * Math.max(0.5, shipCostMultiplier(effectiveResources) - (formableModifiers(country.active_formable_key).shipDiscount ?? 0)));
+      const religion = (await loadSettlementReligionModifiers(client, settlement)).modifiers;
+      const baseCost = Math.ceil(ship.price * input.quantity * Math.max(0.5, shipCostMultiplier(effectiveResources) - (formableModifiers(country.active_formable_key).shipDiscount ?? 0) - religion.shipPurchaseDiscount));
       const cost = await applyPurchaseAgentDiscount(client,{
         countryId:country.id,settlementId:settlement.id,category:"SHIPS",currentTurn:guild.current_turn,cost:baseCost
       });
@@ -2908,12 +2942,14 @@ export const gameService = {
         for (const country of countries) {
           const marshalPartial = await hasActiveMarshalPartialMobilization(client, country.id, country.mobilization);
           const settlements = (await client.query<SettlementRow>("SELECT * FROM settlements WHERE country_id=$1 FOR UPDATE", [country.id])).rows;
+          const dominantReligionProfile = dominantReligion(settlements);
           const tradeBonuses = await activeTradeBonuses(client, country.id);
           const resourceAccess = await settlementResourceAccess(client, country.id);
           const displacedSupport = await loadDisplacedArmySupport(client,country.id);
           let incomeBreakdown: IncomeBreakdown = { building: 0, tax: 0, landTrade: 0, seaTrade: 0 };
           let upkeep = 0;
           for (const settlement of settlements) {
+            const religion = religionModifiers(settlement.religion_key, Number(settlement.religion_adherence_percent), dominantReligionProfile?.key ?? null);
             const buildings = (await client.query<BuildingRow>("SELECT * FROM buildings WHERE settlement_id=$1 AND building_type<>'lupanar'", [settlement.id])).rows;
             const active = buildings.filter((b) => (b.status === "ACTIVE" || b.status === "BUILDING") && b.level > 0).map((b) => ({ buildingType: b.building_type, level: b.level }));
             const activePolicies = activePolicyKeys((await client.query<SettlementPolicyRow>("SELECT * FROM settlement_policies WHERE settlement_id=$1 AND status='ACTIVE'", [settlement.id])).rows,newTurn);
@@ -2939,9 +2975,10 @@ export const gameService = {
               assignedMerchant: Boolean(assignedMerchant),
               merchantSkillBonus: assignedMerchant?.skill_bonus ?? 0,
               merchantAgoraMaster: assignedMerchant?.specialization === "AGORA_MASTER",
-              formableKey: country.active_formable_key
+              formableKey: country.active_formable_key,
+              religion
             });
-            const popGain = applyFormablePopulationModifiers(calculatePopulationGain({ population: settlement.population, buildings: active, ruinStage: settlement.ruin_stage, mobilization: country.mobilization, resources: effectiveResources, marshalPartial }), settlement.ruin_stage, country.active_formable_key);
+            const popGain = applyFormablePopulationModifiers(calculatePopulationGain({ population: settlement.population, buildings: active, ruinStage: settlement.ruin_stage, mobilization: country.mobilization, resources: effectiveResources, marshalPartial, religionPopulationGrowthPercent: religion.populationGrowthPercent }), settlement.ruin_stage, country.active_formable_key);
             const incomePenalty = (await client.query<SettlementIncomePenaltyRow>(
               "SELECT settlement_id,penalty_percent,remaining_acquisition_turns,reason,created_turn FROM settlement_income_penalties WHERE settlement_id=$1 FOR UPDATE",
               [settlement.id]
@@ -2976,12 +3013,12 @@ export const gameService = {
             const displacedUnits = displacedSupport.get(settlement.id) ?? [];
             const settlementShips = (await client.query<{ ship_type: keyof typeof SHIPS; quantity: number; status: ShipStatus }>("SELECT ship_type,quantity,status FROM naval_units WHERE settlement_id=$1", [settlement.id])).rows;
             const localUnitUpkeep = settlementUnits
-              .reduce((sum, unit) => sum + calculateUnitUpkeep(unit.unit_type, unit.quantity, unit.status, country.mobilization, effectiveResources, country.manpower_penalty_active), 0);
+              .reduce((sum, unit) => sum + calculateUnitUpkeep(unit.unit_type, unit.quantity, unit.status, country.mobilization, effectiveResources, country.manpower_penalty_active, religionUnitDiscount(religion.unitUpkeepDiscounts, unit.unit_type)), 0);
             const displacedArmyUpkeep = displacedUnits
-              .reduce((sum, unit) => sum + calculateUnitUpkeep(unit.unit_type, unit.quantity, "FIELD_FRIENDLY", country.mobilization, effectiveResources, country.manpower_penalty_active), 0);
+              .reduce((sum, unit) => sum + calculateUnitUpkeep(unit.unit_type, unit.quantity, "FIELD_FRIENDLY", country.mobilization, effectiveResources, country.manpower_penalty_active, religionUnitDiscount(religion.unitUpkeepDiscounts, unit.unit_type)), 0);
             const unitUpkeep = localUnitUpkeep + displacedArmyUpkeep;
             const shipUpkeep = applyFormableShipUpkeepDiscount(
-                settlementShips.reduce((sum, ship) => sum + calculateShipUpkeep(ship.ship_type, ship.quantity, ship.status, country.mobilization, country.manpower_penalty_active), 0),
+                settlementShips.reduce((sum, ship) => sum + calculateShipUpkeep(ship.ship_type, ship.quantity, ship.status, country.mobilization, country.manpower_penalty_active, religion.shipUpkeepDiscount), 0),
                 country.active_formable_key
               );
             const settlementUpkeep = economy.buildingUpkeep + unitUpkeep + shipUpkeep;

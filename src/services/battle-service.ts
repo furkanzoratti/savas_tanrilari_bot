@@ -7,6 +7,7 @@ import {
   type BattleComposition, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain,
   type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeComposition, type SiegeDismountUnitType, type SiegeTarget, type SiegeTargets
 } from "../domain/battle.js";
+import { SPECIAL_UNIT_TYPES } from "../domain/special-units.js";
 import {
   NAVAL_BATTLE_ORDERS,applyNavalOrderToRoll,awardNavalManeuverPoint,isNavalRetreatOrder,
   navalFleetCondition,navalFleetMustWithdraw,navalIncomingDamageMultiplier,
@@ -27,6 +28,8 @@ import {
 import { deductPopulationForCasualties } from "./population-loss.js";
 import { applyBattleHullDamage,applyBattleRetreatLoss,battleHullComposition,battleHullMetrics,initializeBattleShipHulls,persistBattleHullDamage } from "./naval-battle-hull-service.js";
 import { siegeStarvationBonus } from "../domain/siege-starvation.js";
+import type { ReligionKey } from "../domain/religions.js";
+import { loadSettlementReligionModifiers } from "./religion-service.js";
 
 export type BattleStatus = "DRAFT" | "WAITING_FIRST_ROLL" | "WAITING_SECOND_ROLL" | "READY_TO_RESOLVE" | "FINISHED" | "CANCELLED";
 
@@ -1161,12 +1164,14 @@ export const battleService = {
         const reinforced = Boolean((await client.query(
           "SELECT 1 FROM settlement_policies WHERE settlement_id=$1 AND policy_key='GARRISON_REINFORCEMENT' AND status='ACTIVE' AND (suspended_until_turn IS NULL OR suspended_until_turn<=$2)", [defenderSettlementId,currentTurn]
         )).rowCount);
-        const defenderFormable = (await client.query<{ active_formable_key: FormableCountryKey | null }>("SELECT c.active_formable_key FROM settlements s JOIN countries c ON c.id=s.country_id WHERE s.id=$1", [defenderSettlementId])).rows[0]?.active_formable_key;
+        const defenderSettlement = (await client.query<{ country_id:string; religion_key:ReligionKey; religion_adherence_percent:number; active_formable_key: FormableCountryKey | null }>("SELECT s.country_id,s.religion_key,s.religion_adherence_percent,c.active_formable_key FROM settlements s JOIN countries c ON c.id=s.country_id WHERE s.id=$1", [defenderSettlementId])).rows[0]!;
+        const defenderFormable = defenderSettlement.active_formable_key;
+        const defenderReligion = (await loadSettlementReligionModifiers(client, defenderSettlement)).modifiers;
         const bonus = siegeStarvationBonus({
           farmLevel,
           aqueductLevel,
           garrisonReinforcement: reinforced,
-          formableBonus: formableModifiers(defenderFormable).starvationBonus
+          formableBonus: (formableModifiers(defenderFormable).starvationBonus ?? 0) + defenderReligion.starvationBonus
         });
         starvationCapacity = BASE_SIEGE_STARVATION_TURNS + bonus;
         starvationRemaining = starvationCapacity;
@@ -1613,7 +1618,38 @@ export const battleService = {
     )).rows;
   },
 
-  async setRoster(input: { guildId: string; channelId: string; actorId: string; side?: BattleSideKey; composition: BattleComposition; naval: boolean; countryName?: string | null; sourceSettlement?: string | null }): Promise<BattleView> {
+  async listParticipantSpecialUnits(input: { guildId: string; channelId: string; side: BattleSideKey; countryName?: string | null }): Promise<Array<{ unitType: BattleUnitType; available: number; selected: number }>> {
+    return withTransaction(async (client) => {
+      const battle = await activeInChannel(client, input.guildId, input.channelId);
+      if (!battle || battle.status !== "DRAFT") throw new GameError("Bu kanalda düzenlenebilir bir savaş taslağı yok.");
+      const participant = await resolveParticipant(client, battle.id, input.side, input.countryName);
+      const stocks = (await client.query<{ unit_type: string; quantity: number }>(
+        `SELECT u.unit_type,COALESCE(SUM(u.quantity),0)::integer AS quantity
+           FROM unit_stacks u JOIN settlements s ON s.id=u.settlement_id
+          WHERE s.country_id=$1
+            AND ($2::uuid IS NULL OR u.settlement_id=$2)
+            AND u.force_type='ARMY'
+          GROUP BY u.unit_type`,
+        [participant.country_id, participant.source_settlement_id],
+      )).rows;
+      const allocations = (await client.query<{ unit_type: string; quantity: number }>(
+        `SELECT au.unit_type,COALESCE(SUM(au.quantity),0)::integer AS quantity
+           FROM army_units au JOIN armies army ON army.id=au.army_id
+          WHERE army.country_id=$1 AND ($2::uuid IS NULL OR au.settlement_id=$2)
+          GROUP BY au.unit_type`,
+        [participant.country_id, participant.source_settlement_id],
+      )).rows;
+      const stock = new Map(stocks.map((row) => [row.unit_type, Number(row.quantity)]));
+      const allocated = new Map(allocations.map((row) => [row.unit_type, Number(row.quantity)]));
+      return SPECIAL_UNIT_TYPES.map((unitType) => ({
+        unitType,
+        available: Math.max(0, (stock.get(unitType) ?? 0) - (allocated.get(unitType) ?? 0)),
+        selected: participant.composition[unitType] ?? 0,
+      })).filter((item) => item.available > 0 || item.selected > 0);
+    });
+  },
+
+  async setRoster(input: { guildId: string; channelId: string; actorId: string; side?: BattleSideKey; composition: BattleComposition; naval: boolean; countryName?: string | null; sourceSettlement?: string | null; preserveSpecialUnits?: boolean }): Promise<BattleView> {
     return withTransaction(async (client) => {
       const battle = await activeInChannel(client, input.guildId, input.channelId);
       if (!battle || battle.status !== "DRAFT") throw new GameError("Bu kanalda düzenlenebilir bir savaş taslağı yok.");
@@ -1625,8 +1661,15 @@ export const battleService = {
         if (!Number.isSafeInteger(quantity) || quantity < 0) throw new GameError("Kadro miktarları negatif olmayan tam sayı olmalıdır.");
         if (quantity > 0) clean[key as BattleForceType] = quantity;
       }
-      if (!compositionTotal(clean)) throw new GameError("Kadroda en az bir birlik veya gemi bulunmalıdır.");
       const participant = await resolveParticipant(client, battle.id, input.side ?? null, input.countryName);
+      if (!input.naval && input.preserveSpecialUnits) {
+        for (const unitType of SPECIAL_UNIT_TYPES) {
+          if (clean[unitType] !== undefined) continue;
+          const quantity = participant.composition[unitType] ?? 0;
+          if (quantity > 0) clean[unitType] = quantity;
+        }
+      }
+      if (!compositionTotal(clean)) throw new GameError("Kadroda en az bir birlik veya gemi bulunmalıdır.");
       const participantSide = participant.side_key;
       if (await participantUsesArmies(client, battle.id, participant.country_id)) throw new GameError("Bu ülke savaşa kalıcı orduyla eklenmiş. Manuel kadro düzenlemek için önce orduları taslaktan çıkarın.");
       if (await participantUsesFleets(client, battle.id, participant.country_id)) throw new GameError("Bu ülke savaşa kalıcı filoyla eklenmiş. Manuel kadro düzenlemek için önce filoları taslaktan çıkarın.");
@@ -1676,6 +1719,28 @@ export const battleService = {
     });
   },
 
+  async setSupportTarget(input: { guildId: string; channelId: string; actorId: string; side: BattleSideKey; assetType: SiegeAssetType; target: SiegeTarget }): Promise<BattleView> {
+    return withTransaction(async (client) => {
+      const battle = await activeInChannel(client, input.guildId, input.channelId);
+      if (!battle || battle.status !== "DRAFT") throw new GameError("Bu kanalda düzenlenebilir bir savaş taslağı yok.");
+      if (battle.terrain !== "SIEGE") throw new GameError("Kuşatma aleti hedefi yalnızca kuşatma savaşında değiştirilebilir.");
+      validateSiegeTarget(input.side, input.assetType, input.target);
+      const view = await loadView(client, battle.id, true);
+      const quantity = view.sides[input.side].support_assets[input.assetType] ?? 0;
+      if (quantity <= 0) throw new GameError(`Seçilen tarafta ${SIEGE_ASSETS[input.assetType].name} bulunmuyor.`);
+      const targets = { ...view.sides[input.side].support_targets, [input.assetType]: input.target };
+      await client.query(
+        "UPDATE battle_sides SET support_targets=$1::jsonb WHERE battle_id=$2 AND side_key=$3",
+        [JSON.stringify(targets), battle.id, input.side],
+      );
+      await client.query(
+        "INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'battle.siege_target','battle',$3,$4::jsonb)",
+        [input.guildId, input.actorId, battle.id, JSON.stringify({ side: input.side, assetType: input.assetType, target: input.target, quantity })],
+      );
+      return loadView(client, battle.id);
+    });
+  },
+
   async purchaseFieldSiegeAsset(input: { guildId: string; channelId: string; actorId: string; isGameMaster: boolean; settlementName: string; assetType: "ladder_group" | "ram"; quantity: number }): Promise<{ view: BattleView; cost: number; settlementName: string }> {
     if (!Number.isSafeInteger(input.quantity) || input.quantity < 1) throw new GameError("Miktar pozitif bir tam sayı olmalıdır.");
     return withTransaction(async (client) => {
@@ -1691,8 +1756,8 @@ export const battleService = {
         throw new GameError("Her kuşatma savaşında en fazla 1 Koçbaşı alınabilir; Koçbaşılar üst üste birikmez.");
       }
 
-      const settlement = (await client.query<{ id: string; name: string; country_id: string; local_treasury: number; resource_type: ResourceType; is_conquered: boolean }>(
-        "SELECT id,name,country_id,local_treasury,resource_type,is_conquered FROM settlements WHERE country_id=ANY($1::uuid[]) AND lower(name)=lower($2) FOR UPDATE",
+      const settlement = (await client.query<{ id: string; name: string; country_id: string; local_treasury: number; resource_type: ResourceType; is_conquered: boolean; religion_key: ReligionKey; religion_adherence_percent: number }>(
+        "SELECT id,name,country_id,local_treasury,resource_type,is_conquered,religion_key,religion_adherence_percent FROM settlements WHERE country_id=ANY($1::uuid[]) AND lower(name)=lower($2) FOR UPDATE",
         [attacker.country_ids, input.settlementName]
       )).rows[0];
       if (!settlement) throw new GameError("Ödeme yapılacak saldırgan yerleşkesi bulunamadı.");
@@ -1705,7 +1770,8 @@ export const battleService = {
       const resources = (await settlementResourceAccess(client, settlement.country_id)).get(settlement.id) ?? [];
       const asset = SIEGE_ASSETS[input.assetType];
       const formableKey = (await client.query<{ active_formable_key: FormableCountryKey | null }>("SELECT active_formable_key FROM countries WHERE id=$1", [settlement.country_id])).rows[0]?.active_formable_key;
-      const cost = Math.ceil(asset.price * input.quantity * Math.max(0.5, siegeCostMultiplier(input.assetType, resources) - (formableModifiers(formableKey).siegeAssetDiscount ?? 0)));
+      const religion = (await loadSettlementReligionModifiers(client, settlement)).modifiers;
+      const cost = Math.ceil(asset.price * input.quantity * Math.max(0.5, siegeCostMultiplier(input.assetType, resources) - (formableModifiers(formableKey).siegeAssetDiscount ?? 0) - religion.siegeAssetCostDiscount));
       if (settlement.local_treasury < cost) throw new GameError("Ödeme yerleşkesinin hazinesinde yeterli altın yok.");
 
       const support = { ...attacker.support_assets, [input.assetType]: (attacker.support_assets[input.assetType] ?? 0) + input.quantity };

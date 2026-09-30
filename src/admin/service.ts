@@ -9,6 +9,7 @@ import {
 } from "../domain/characters.js";
 import { CULTURE_GROUPS, type CultureGroup } from "../domain/cultures.js";
 import { RESOURCES, type ResourceType } from "../domain/resources.js";
+import { RELIGIONS, isReligionKey, secondaryReligionFor, type ReligionKey } from "../domain/religions.js";
 import { adminConfig } from "./config.js";
 import { adminPool, withAdminTransaction, type AdminDbClient } from "./db.js";
 import { signValue, verifySignedValue } from "../security/signed-value.js";
@@ -41,7 +42,9 @@ const settlementUpdateSchema = z.object({
   baseLandTradeIncome: z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
   ruinStage: z.coerce.number().int().min(0).max(2),
   isCoastal: z.boolean(),
-  isConquered: z.boolean()
+  isConquered: z.boolean(),
+  religionKey: z.string().refine(isReligionKey, "Geçersiz din."),
+  religionAdherencePercent: z.coerce.number().min(0).max(100)
 });
 
 const characterUpdateSchema = z.object({
@@ -237,6 +240,13 @@ export const adminPanelService = {
     };
   },
 
+  religionCatalog() {
+    return Object.entries(RELIGIONS).map(([value, item]) => {
+      const secondary = secondaryReligionFor(value as ReligionKey);
+      return { value, label: item.label, localEffect: item.localEffect, nationalEffect: item.nationalEffect, secondaryLabel: secondary.label, secondaryEffect: secondary.effect };
+    });
+  },
+
   async overview() {
     const guild = (await adminPool.query<{ current_turn: number; turn_phase: string }>(
       "SELECT current_turn,turn_phase FROM guilds WHERE discord_id=$1",
@@ -288,6 +298,7 @@ export const adminPanelService = {
       `SELECT settlement.id,settlement.country_id,settlement.name,country.name AS country_name,
               country.status AS country_status,settlement.population,settlement.slave_population,
               settlement.local_treasury,settlement.resource_type,settlement.culture_group,
+              settlement.religion_key,settlement.religion_adherence_percent,
               settlement.tax_rate_percent,
               settlement.ruin_stage,settlement.is_conquered,settlement.is_coastal,
               settlement.base_land_trade_income,settlement.land_trade_income,
@@ -303,11 +314,15 @@ export const adminPanelService = {
         WHERE country.guild_id=$1
         ORDER BY CASE WHEN country.status='ACTIVE' THEN 0 ELSE 1 END,country.name,settlement.name`,
       [adminConfig.guildId]
-    )).rows as Array<Record<string, unknown> & { resource_type: ResourceType; culture_group: CultureGroup }>;
+    )).rows as Array<Record<string, unknown> & { resource_type: ResourceType; culture_group: CultureGroup; religion_key: ReligionKey }>;
     return rows.map((row) => ({
       ...row,
       resource_label: RESOURCES[row.resource_type]?.label ?? row.resource_type,
-      culture_label: CULTURE_GROUPS[row.culture_group]?.label ?? row.culture_group
+      culture_label: CULTURE_GROUPS[row.culture_group]?.label ?? row.culture_group,
+      religion_label: RELIGIONS[row.religion_key]?.label ?? row.religion_key,
+      minority_religion_label: secondaryReligionFor(row.religion_key).label,
+      minority_religion_effect: secondaryReligionFor(row.religion_key).effect,
+      minority_religion_percent: 100 - Number(row.religion_adherence_percent)
     }));
   },
 
@@ -452,16 +467,21 @@ export const adminPanelService = {
       `SELECT settlement.id,settlement.name,settlement.population,settlement.slave_population,
               settlement.local_treasury,settlement.resource_type,settlement.ruin_stage,
               settlement.tax_rate_percent,settlement.culture_group,settlement.is_coastal,
+              settlement.religion_key,settlement.religion_adherence_percent,
               settlement.is_conquered,settlement.base_land_trade_income,
               (SELECT COALESCE(SUM(quantity),0)::integer FROM unit_stacks WHERE settlement_id=settlement.id AND force_type='ARMY') AS army_stock,
               (SELECT COALESCE(SUM(quantity),0)::integer FROM naval_units WHERE settlement_id=settlement.id) AS ships
          FROM settlements settlement WHERE settlement.country_id=$1 ORDER BY settlement.name`,
       [countryId]
-    )).rows as Array<Record<string, unknown> & { resource_type: ResourceType; culture_group: CultureGroup }>;
+    )).rows as Array<Record<string, unknown> & { resource_type: ResourceType; culture_group: CultureGroup; religion_key: ReligionKey }>;
     const settlements = settlementRows.map((row) => ({
       ...row,
       resource_label: RESOURCES[row.resource_type]?.label ?? row.resource_type,
-      culture_label: CULTURE_GROUPS[row.culture_group]?.label ?? row.culture_group
+      culture_label: CULTURE_GROUPS[row.culture_group]?.label ?? row.culture_group,
+      religion_label: RELIGIONS[row.religion_key]?.label ?? row.religion_key,
+      minority_religion_label: secondaryReligionFor(row.religion_key).label,
+      minority_religion_effect: secondaryReligionFor(row.religion_key).effect,
+      minority_religion_percent: 100 - Number(row.religion_adherence_percent)
     }));
     const armies = (await adminPool.query(
       `SELECT army.id,army.name,army.created_turn,character.name AS commander_name,
@@ -611,12 +631,14 @@ export const adminPanelService = {
       if (!previous) throw new Error("Aktif yerleşke bulunamadı.");
       const updated = (await client.query(
         `UPDATE settlements SET name=$1,population=$2,slave_population=$3,local_treasury=$4,
-                tax_rate_percent=$5,base_land_trade_income=$6,ruin_stage=$7,is_coastal=$8,is_conquered=$9
-          WHERE id=$10
+                tax_rate_percent=$5,base_land_trade_income=$6,ruin_stage=$7,is_coastal=$8,is_conquered=$9,
+                religion_key=$10,religion_adherence_percent=$11
+          WHERE id=$12
           RETURNING id,country_id,name,population,slave_population,local_treasury,tax_rate_percent,
-                    base_land_trade_income,ruin_stage,is_coastal,is_conquered`,
+                    base_land_trade_income,ruin_stage,is_coastal,is_conquered,religion_key,religion_adherence_percent`,
         [input.name, input.population, input.slavePopulation, input.localTreasury, input.taxRatePercent,
-          input.baseLandTradeIncome, input.ruinStage, input.isCoastal, input.isConquered, settlementId]
+          input.baseLandTradeIncome, input.ruinStage, input.isCoastal, input.isConquered,
+          input.religionKey, input.religionAdherencePercent, settlementId]
       )).rows[0];
       await writeAdminAudit(client, actorId, "admin.panel.settlement.update", "settlement", settlementId, { previous, updated });
       return updated;

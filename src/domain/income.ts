@@ -2,6 +2,7 @@ import { BUILDINGS, MAX_SETTLEMENT_PERCENT_BONUS, type CityPolicyKey } from "./c
 import { ruinIncomeMultiplier, type ActiveBuilding } from "./economy.js";
 import type { ResourceType } from "./resources.js";
 import { formableModifiers, type FormableCountryKey } from "./formable-countries.js";
+import type { ReligionModifiers } from "./religions.js";
 
 export type IncomeCategory = "building" | "tax" | "landTrade" | "seaTrade";
 
@@ -63,20 +64,22 @@ export function calculateCategorizedIncome(input: {
   merchantSkillBonus?: number;
   merchantAgoraMaster?: boolean;
   formableKey?: FormableCountryKey | null;
+  religion?: Pick<ReligionModifiers, "taxIncomePercent" | "landTradeIncomePercent" | "seaTradeIncomePercent" | "foreignTradeIncomePercent">;
 }): { gross: IncomeBreakdown; payable: IncomeBreakdown; buildingUpkeep: number; buildingBonuses: IncomeBreakdown } {
   const resources = input.resources ?? [];
   const policies = new Set(input.activePolicies ?? []);
   const formable = formableModifiers(input.formableKey);
+  const foreignTradeMultiplier = 1 + Math.max(0, input.religion?.foreignTradeIncomePercent ?? 0);
   const gross: IncomeBreakdown = {
     building: Math.max(0, input.manualFlatIncome),
     tax: Math.max(0, Math.floor(input.taxIncome * (policies.has("STRICT_TAXATION") ? 1.20 : 1))),
-    landTrade: Math.max(0, input.settlementIncome + input.landTradeIncome + (input.agreementLandIncome ?? 0)),
-    seaTrade: Math.max(0, input.seaTradeIncome + (input.agreementSeaIncome ?? 0))
+    landTrade: Math.max(0, input.settlementIncome + input.landTradeIncome + Math.floor((input.agreementLandIncome ?? 0) * foreignTradeMultiplier)),
+    seaTrade: Math.max(0, input.seaTradeIncome + Math.floor((input.agreementSeaIncome ?? 0) * foreignTradeMultiplier))
   };
   let globalIncomePercent = input.manualIncomePercent;
-  let landTradeIncomePercent = 0;
-  let taxIncomePercent = 0;
-  let seaIncomePercent = 0;
+  let landTradeIncomePercent = input.religion?.landTradeIncomePercent ?? 0;
+  let taxIncomePercent = input.religion?.taxIncomePercent ?? 0;
+  let seaIncomePercent = input.religion?.seaTradeIncomePercent ?? 0;
   let buildingUpkeep = 0;
   const hasActivePort = input.buildings.some((building) => building.buildingType === "port" && building.level > 0);
   if (policies.has("MARKET_FAIRS")) gross.building += 250;
