@@ -1,7 +1,7 @@
 import { EmbedBuilder } from "discord.js";
 import { BUILDINGS, CITY_POLICIES, MOBILIZATION_RULES, SHIPS, SIEGE_ASSETS, UNITS, fleetTransportCapacity, portShipCapacity, shipHarborRequirement } from "../domain/catalog.js";
 import { CULTURE_GROUPS } from "../domain/cultures.js";
-import { NATIONAL_RELIGION_EFFECT_THRESHOLD, RELIGIONS, SECONDARY_RELIGIONS, religionEffectScale, religionUnitDiscount, secondaryReligionEffectScale } from "../domain/religions.js";
+import { NATIONAL_RELIGION_EFFECT_THRESHOLD, RELIGIONS, religionUnitDiscount } from "../domain/religions.js";
 import { calculateShipUpkeep, calculateUnitUpkeep } from "../domain/economy.js";
 import { SETTLEMENT_EVENT_TYPES, type SettlementEventType } from "../domain/events.js";
 import { gold, number } from "../domain/format.js";
@@ -171,11 +171,10 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
     const occupiedSlots = settlement.buildings.filter((building) => building.level > 0 || building.status === "BUILDING").length;
     const activeConstruction = settlement.buildings.filter((building) => building.status === "BUILDING").length;
     const culture = CULTURE_GROUPS[settlement.culture_group]?.label ?? settlement.culture_group;
-    const religion = RELIGIONS[settlement.religion_key] ?? { label: "Belirtilmemiş", localEffect: "Yerel etki yok", nationalEffect: "Ülke etkisi yok" };
-    const religionScale = religionEffectScale(Number(settlement.religion_adherence_percent ?? 0));
-    const secondaryReligion = SECONDARY_RELIGIONS[settlement.religion_key] ?? { label: "Belirtilmemiş", effect: "Mezhep etkisi yok" };
-    const secondaryReligionPercent = 100 - Number(settlement.religion_adherence_percent ?? 0);
-    const secondaryReligionScale = secondaryReligionEffectScale(secondaryReligionPercent);
+    const religionLines=(settlement.religionDistribution??[]).flatMap((share)=>[
+      `${share.active?"Ana din":"Din"}: **${share.religionLabel} • %${number(share.primaryPercent)}**`,
+      `${share.active?"İkinci mezhep":"Mezhep"}: **${share.secondaryLabel} • %${number(share.secondaryPercent)}**`
+    ]);
     const producedResource = RESOURCES[settlement.resource_type].label;
     const fixedGarrison = renderLandForces(settlement, "GARRISON", document.country.mobilization, document.manpowerPenaltyActive);
     const army = renderLandForces(settlement, "ARMY", document.country.mobilization, document.manpowerPenaltyActive);
@@ -224,13 +223,7 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
       ].join("\n"))
       .addFields(
         { name: "🏺 Kültür", value: spacedSection(`**${culture}**`), inline: true },
-        { name: "⛩️ Din ve Bağlılık", value: spacedSection([
-          `Ana din: **${religion.label} • %${number(settlement.religion_adherence_percent)}**`,
-          `İkinci mezhep: **${secondaryReligion.label} • %${number(secondaryReligionPercent)}**`,
-          `Yerel: ${religion.localEffect}${religionScale === 1 ? "" : religionScale === 0.5 ? " • yarım etki" : " • pasif"}`,
-          `Mezhep: ${secondaryReligion.effect}${secondaryReligionScale === 1 ? "" : secondaryReligionScale === 0.5 ? " • yarım etki" : " • pasif"}`,
-          document.dominantReligion ? `Ülke: ${RELIGIONS[document.dominantReligion.key].nationalEffect}` : "Ülke: baskın din etkisi yok"
-        ].join("\n")), inline: true },
+        { name: "⛩️ Din ve Mezhep", value: spacedSection(religionLines.join("\n")||"Din dağılımı bulunmuyor."), inline: true },
         {
           name: "📦 Yerel Hammadde",
           value: spacedSection([

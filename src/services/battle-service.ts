@@ -1164,7 +1164,7 @@ export const battleService = {
         const reinforced = Boolean((await client.query(
           "SELECT 1 FROM settlement_policies WHERE settlement_id=$1 AND policy_key='GARRISON_REINFORCEMENT' AND status='ACTIVE' AND (suspended_until_turn IS NULL OR suspended_until_turn<=$2)", [defenderSettlementId,currentTurn]
         )).rowCount);
-        const defenderSettlement = (await client.query<{ country_id:string; religion_key:ReligionKey; religion_adherence_percent:number; active_formable_key: FormableCountryKey | null }>("SELECT s.country_id,s.religion_key,s.religion_adherence_percent,c.active_formable_key FROM settlements s JOIN countries c ON c.id=s.country_id WHERE s.id=$1", [defenderSettlementId])).rows[0]!;
+        const defenderSettlement = (await client.query<{ id:string; country_id:string; religion_key:ReligionKey; religion_adherence_percent:number; active_formable_key: FormableCountryKey | null }>("SELECT s.id,s.country_id,s.religion_key,s.religion_adherence_percent,c.active_formable_key FROM settlements s JOIN countries c ON c.id=s.country_id WHERE s.id=$1", [defenderSettlementId])).rows[0]!;
         const defenderFormable = defenderSettlement.active_formable_key;
         const defenderReligion = (await loadSettlementReligionModifiers(client, defenderSettlement)).modifiers;
         const bonus = siegeStarvationBonus({

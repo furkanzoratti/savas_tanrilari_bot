@@ -62,6 +62,14 @@ describe("yönetim komutları", () => {
     expect(command?.description).toContain("eksik devlet rollerini");
   });
 
+  it("devlet detayında hazine, yerleşke, din ve kültür özetini açar",()=>{
+    const command=commandBuilders.find((item)=>item.name==="devlet");
+    const detail=command?.options?.find((option)=>option.name==="detay");
+    expect(command?.description).toContain("hazine");
+    expect(detail?.description).toContain("din, mezhep ve kültür");
+    expect(detail?.options?.find((option)=>option.name==="ulke")).toMatchObject({required:false});
+  });
+
   it("Olay Yöneticisi rolünü üyeye verip kaldıran ayrı komutu kaydeder", () => {
     const command = commandBuilders.find((item) => item.name === "olay-yoneticisi");
     expect(command?.description).toContain("Yalnızca yönetici");

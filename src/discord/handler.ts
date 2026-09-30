@@ -22,7 +22,7 @@ import { SPECIAL_UNITS, isSpecialUnitType, type SpecialUnitType } from "../domai
 import { FORMABLE_COUNTRIES, FORMABLE_TIER_LABELS, formableModifiers, formableTier, type FormableTier } from "../domain/formable-countries.js";
 import { ESPIONAGE_TARGETS } from "../domain/espionage.js";
 import { RESOURCES, shipCostMultiplier, type ResourceType } from "../domain/resources.js";
-import { buildingPurchaseTerms, unitPurchaseCost, gameService, GameError } from "../services/game-service.js";
+import { buildingPurchaseTerms, unitPurchaseCost, gameService, GameError, type CountryDetailView } from "../services/game-service.js";
 import { battleService } from "../services/battle-service.js";
 import { armyService, type MobileSiegeAssetType } from "../services/army-service.js";
 import { armyMusterService } from "../services/army-muster-service.js";
@@ -47,7 +47,7 @@ import { tradeService } from "../services/trade-service.js";
 import { treasuryLedgerService, type TreasuryMovement } from "../services/treasury-ledger-service.js";
 import { assertCountryAccess, isGameMaster, requireGameMaster, resolveCountry } from "./auth.js";
 import { buildingChoices, shipChoices, unitChoices } from "./commands.js";
-import { batchDocumentEmbeds, renderDocument } from "./document.js";
+import { batchDocumentEmbeds, embedTextLength, renderDocument } from "./document.js";
 import { publishGreatPowerRanking } from "./great-power-ui.js";
 import { BRAND_BANNER_PATH, BRAND_BANNER_NAME, TEMPLE_BANNER_PATH, TEMPLE_BANNER_NAME, TURN_BANNER_PATH, TURN_BANNER_NAME } from "./assets.js";
 import { turnAnnouncement } from "./turn-announcements.js";
@@ -200,6 +200,64 @@ async function findSettlement(countryId: string, name: string) {
   const settlement = settlements.find((item) => item.id===value || item.name.toLocaleLowerCase("tr-TR") === value.toLocaleLowerCase("tr-TR"));
   if (!settlement) throw new GameError("Yerleşke bulunamadı. Adı belgede göründüğü biçimde yazın.");
   return settlement;
+}
+
+const detailPercent=(value:number)=>new Intl.NumberFormat("tr-TR",{maximumFractionDigits:2}).format(value);
+
+function detailChunks(blocks:string[],limit=980):string[] {
+  const chunks:string[]=[];
+  let current="";
+  for (const block of blocks) {
+    if (current && current.length+block.length+2>limit) {
+      chunks.push(current);
+      current=block;
+    } else current=current?`${current}\n\n${block}`:block;
+  }
+  if (current) chunks.push(current);
+  return chunks;
+}
+
+function renderCountryDetail(detail:CountryDetailView):EmbedBuilder[] {
+  const settlementBlocks=detail.settlements.map((settlement)=>{
+    const beliefs=settlement.religionDistribution.flatMap((share)=>[
+      ...(share.primaryPercent>0?[`${share.religionLabel} **%${detailPercent(share.primaryPercent)}**`]:[]),
+      ...(share.secondaryPercent>0?[`${share.secondaryLabel} **%${detailPercent(share.secondaryPercent)}**`]:[])
+    ]);
+    return [
+      `🏛️ **${settlement.name}** • ${gold(settlement.localTreasury)}`,
+      `↳ Kültür: **${CULTURE_GROUPS[settlement.cultureGroup]?.label??settlement.cultureGroup}** • Özgür nüfus: **${number(settlement.population)}**`,
+      `↳ Din: ${beliefs.join(" • ")||"Kayıt yok"}`
+    ].join("\n");
+  });
+  const settlementChunks=detailChunks(settlementBlocks.length?settlementBlocks:["Bu devlete bağlı yerleşke bulunmuyor."]);
+  const embeds=settlementChunks.map((chunk,index)=>new EmbedBuilder()
+    .setColor(0xc59b45)
+    .setTitle(`🏛️ ${detail.country.name} • Devlet Detayı${settlementChunks.length>1?` • ${index+1}/${settlementChunks.length}`:""}`)
+    .setDescription(index===0?[
+      `💰 **Devlet Toplam Hazinesi:** ${gold(detail.totalTreasury)}`,
+      `🏘️ **Toplam Yerleşke:** ${number(detail.settlementCount)}`,
+      `👥 **Toplam Özgür Nüfus:** ${number(detail.totalPopulation)}`
+    ].join("\n"):null)
+    .addFields({name:`Yerleşkeler${settlementChunks.length>1?` • ${index+1}`:""}`,value:chunk}));
+  const summaryFields:Array<{name:string;lines:string[]}>= [
+    {name:"⛩️ Devlet İçindeki Dinler",lines:detail.religions.map((entry)=>`• **${entry.label}: %${detailPercent(entry.percent)}** • Ana inanç %${detailPercent(entry.primaryPercent)} • ${number(Math.round(entry.population))} nüfus`)},
+    {name:"📿 Devlet İçindeki Mezhepler",lines:detail.sects.map((entry)=>`• **${entry.label}: %${detailPercent(entry.percent)}** • ${number(Math.round(entry.population))} nüfus`)},
+    {name:"🏺 Kültür Dağılımı",lines:detail.cultures.map((entry)=>`• **${CULTURE_GROUPS[entry.key]?.label??entry.key}: %${detailPercent(entry.percent)}** • ${number(Math.round(entry.population))} nüfus`)}
+  ];
+  let summaryEmbed=embeds[embeds.length-1]!;
+  for (const field of summaryFields) {
+    const chunks=detailChunks(field.lines.length?field.lines:["Kayıt bulunmuyor."]);
+    chunks.forEach((value,index)=>{
+      const name=index===0?field.name:`${field.name} • Devam`;
+      if (embedTextLength(summaryEmbed)+name.length+value.length>5_500) {
+        summaryEmbed=new EmbedBuilder().setColor(0xc59b45).setTitle(`🏛️ ${detail.country.name} • Devlet Dağılımları`);
+        embeds.push(summaryEmbed);
+      }
+      summaryEmbed.addFields({name,value});
+    });
+  }
+  summaryEmbed.setFooter({text:"Din yüzdesi bağlı mezhebi de kapsar; ana inanç ayrıca gösterilir. Bütün oranlar toplam özgür nüfus üzerinden hesaplanır."});
+  return embeds;
 }
 
 async function handleMercenaryCommand(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -1302,6 +1360,13 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
       }
     }
     await interaction.editReply(`✅ **${result.previousName}**, **${result.formedName}** olarak **${FORMABLE_TIER_LABELS[result.tier]}** seviyesinde formlandı.\n${roleText}${result.foundingRewards.length ? `\n\n🎁 **Kuruluş ödülleri**\n${result.foundingRewards.map((reward) => `• ${reward}`).join("\n")}` : ""}\n\n✨ **Etkin ülke bonusları**\n${result.buffs.map((buff) => `• ${buff}`).join("\n")}`);
+  } else if (interaction.commandName === "devlet") {
+    if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
+    await interaction.deferReply({flags:MessageFlags.Ephemeral});
+    const country=await resolveCountry(interaction,interaction.options.getString("ulke"));
+    const embeds=renderCountryDetail(await gameService.countryDetail(country.id));
+    await interaction.editReply({embeds:[embeds[0]!]});
+    for (const embed of embeds.slice(1)) await interaction.followUp({embeds:[embed],flags:MessageFlags.Ephemeral});
   } else if (interaction.commandName === "belge") {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const country = await resolveCountry(interaction, interaction.options.getString("ulke"));

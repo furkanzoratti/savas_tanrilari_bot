@@ -26,8 +26,8 @@ import { awardCharacterSpecializationProgress } from "./character-specialization
 import { conquestArmyPopulationDeparture, loadDisplacedArmySupport, supportedPersonnel } from "./displaced-army-support.js";
 import { grantFormableFoundingReward } from "./formable-country-reward-service.js";
 import { siegeStarvationBonus } from "../domain/siege-starvation.js";
-import { dominantReligion, religionModifiers, religionUnitDiscount, type ReligionKey, type ReligionModifiers } from "../domain/religions.js";
-import { loadSettlementReligionModifiers } from "./religion-service.js";
+import { dominantReligionFromDistributions, religionBeliefShares, religionDistributionModifiers, religionUnitDiscount, RELIGIONS, SECONDARY_RELIGIONS, type ReligionBeliefShare, type ReligionKey, type ReligionModifiers } from "../domain/religions.js";
+import { fallbackReligionDistribution, loadReligionDistributions, loadSettlementReligionModifiers, resetSettlementReligionDistribution } from "./religion-service.js";
 
 export class GameError extends Error {}
 
@@ -247,6 +247,7 @@ export interface CountryDocument {
     unrestRisk: number;
     starvationBonus: number;
     religionModifiers: ReligionModifiers;
+    religionDistribution: ReligionBeliefShare[];
     temporaryMilitia: number;
     assignedMerchant: boolean;
     merchantSkillBonus: number;
@@ -266,6 +267,20 @@ export interface CountryDocument {
     pendingSiege: Array<{ asset_type: keyof typeof SIEGE_ASSETS; quantity: number; completion_turn: number }>;
     pendingGarrison?: Array<{ personnel_reserved: number; paid_amount: number; ordered_turn: number; completion_turn: number; reason: GarrisonReplenishmentReason }>;
   }>;
+}
+
+export interface CountryDetailView {
+  country:{id:string;name:string};
+  totalTreasury:number;
+  totalPopulation:number;
+  settlementCount:number;
+  settlements:Array<{
+    id:string;name:string;localTreasury:number;population:number;cultureGroup:CultureGroup;
+    religionDistribution:ReligionBeliefShare[];
+  }>;
+  religions:Array<{key:ReligionKey;label:string;population:number;percent:number;primaryPopulation:number;primaryPercent:number}>;
+  sects:Array<{key:string;label:string;parentReligionKey:ReligionKey;population:number;percent:number}>;
+  cultures:Array<{key:CultureGroup;population:number;percent:number}>;
 }
 
 export interface TurnAdvanceResult {
@@ -796,6 +811,55 @@ export const gameService = {
     return result.rows;
   },
 
+  async countryDetail(countryId:string):Promise<CountryDetailView> {
+    const client=await pool.connect();
+    try {
+      const country=await getCountry(client,countryId);
+      const settlements=(await client.query<SettlementRow>(
+        "SELECT * FROM settlements WHERE country_id=$1 ORDER BY name",
+        [countryId]
+      )).rows;
+      const distributions=await loadReligionDistributions(client,settlements.map((settlement)=>settlement.id));
+      const totalPopulation=settlements.reduce((sum,settlement)=>sum+Math.max(0,Number(settlement.population)),0);
+      const religionPopulations=new Map<ReligionKey,number>();
+      const primaryReligionPopulations=new Map<ReligionKey,number>();
+      const sectPopulations=new Map<ReligionKey,number>();
+      const culturePopulations=new Map<CultureGroup,number>();
+      const detailedSettlements=settlements.map((settlement)=>{
+        const population=Math.max(0,Number(settlement.population));
+        const distribution=distributions.get(settlement.id)??fallbackReligionDistribution(settlement);
+        for (const share of distribution) {
+          religionPopulations.set(share.religionKey,(religionPopulations.get(share.religionKey)??0)+population*(share.primaryPercent+share.secondaryPercent)/100);
+          primaryReligionPopulations.set(share.religionKey,(primaryReligionPopulations.get(share.religionKey)??0)+population*share.primaryPercent/100);
+          sectPopulations.set(share.religionKey,(sectPopulations.get(share.religionKey)??0)+population*share.secondaryPercent/100);
+        }
+        culturePopulations.set(settlement.culture_group,(culturePopulations.get(settlement.culture_group)??0)+population);
+        return {
+          id:settlement.id,name:settlement.name,localTreasury:Number(settlement.local_treasury),population,
+          cultureGroup:settlement.culture_group,
+          religionDistribution:religionBeliefShares(distribution,settlement.religion_key)
+        };
+      });
+      const percent=(population:number)=>totalPopulation>0?population/totalPopulation*100:0;
+      return {
+        country:{id:country.id,name:country.name},
+        totalTreasury:settlements.reduce((sum,settlement)=>sum+Number(settlement.local_treasury),0),
+        totalPopulation,settlementCount:settlements.length,settlements:detailedSettlements,
+        religions:[...religionPopulations.entries()].map(([key,population])=>{
+          const primaryPopulation=primaryReligionPopulations.get(key)??0;
+          return {key,label:RELIGIONS[key].label,population,percent:percent(population),primaryPopulation,primaryPercent:percent(primaryPopulation)};
+        })
+          .filter((entry)=>entry.population>0).sort((left,right)=>right.percent-left.percent||left.label.localeCompare(right.label,"tr")),
+        sects:[...sectPopulations.entries()].map(([parentReligionKey,population])=>({
+          key:SECONDARY_RELIGIONS[parentReligionKey].key,label:SECONDARY_RELIGIONS[parentReligionKey].label,
+          parentReligionKey,population,percent:percent(population)
+        })).filter((entry)=>entry.population>0).sort((left,right)=>right.percent-left.percent||left.label.localeCompare(right.label,"tr")),
+        cultures:[...culturePopulations.entries()].map(([key,population])=>({key,population,percent:percent(population)}))
+          .filter((entry)=>entry.population>0).sort((left,right)=>right.percent-left.percent||left.key.localeCompare(right.key))
+      };
+    } finally { client.release(); }
+  },
+
   async transferSettlementTreasury(input: {
     guildId: string; actorId: string; countryId: string;
     sourceSettlementId: string; targetSettlementId: string; amount: number;
@@ -1004,8 +1068,9 @@ export const gameService = {
     await withTransaction(async (client) => {
       const country = await getCountry(client, input.countryId);
       if (country.guild_id !== input.guildId) throw new GameError("Ülke bu sunucuya ait değil.");
-      const changed = await client.query("UPDATE settlements SET religion_key=$1,religion_adherence_percent=$2 WHERE id=$3 AND country_id=$4 RETURNING id", [input.religionKey, input.adherencePercent, input.settlementId, country.id]);
+      const changed = await client.query("SELECT id FROM settlements WHERE id=$1 AND country_id=$2 FOR UPDATE", [input.settlementId, country.id]);
       if (!changed.rowCount) throw new GameError("Yerleşke bulunamadı.");
+      await resetSettlementReligionDistribution(client,input.settlementId,input.religionKey,input.adherencePercent);
       await audit(client, input.guildId, input.actorId, "SETTLEMENT_RELIGION_SET", "settlement", input.settlementId, { religionKey: input.religionKey, adherencePercent: input.adherencePercent });
     });
   },
@@ -1549,7 +1614,11 @@ export const gameService = {
       const playerIds = (await client.query<{ discord_user_id: string }>("SELECT discord_user_id FROM country_members WHERE country_id=$1 ORDER BY discord_user_id", [countryId])).rows.map((row) => row.discord_user_id);
       const specialUnitUnlocks = (await client.query<{ unit_type: SpecialUnitType }>("SELECT unit_type FROM country_special_unit_unlocks WHERE country_id=$1 ORDER BY unit_type", [countryId])).rows.map((row) => row.unit_type);
       const settlements = (await client.query<SettlementRow>("SELECT * FROM settlements WHERE country_id = $1 ORDER BY name", [countryId])).rows;
-      const dominantReligionProfile = dominantReligion(settlements);
+      const religionDistributions=await loadReligionDistributions(client,settlements.map((settlement)=>settlement.id));
+      const dominantReligionProfile=dominantReligionFromDistributions(settlements.map((settlement)=>({
+        population:Number(settlement.population),
+        shares:religionDistributions.get(settlement.id)??fallbackReligionDistribution(settlement)
+      })));
       const displayedCountry = { ...country, treasury: settlements.length ? settlements.reduce((sum, settlement) => sum + Number(settlement.local_treasury), 0) : country.treasury };
       const settlementIds = settlements.map((settlement) => settlement.id);
       const besiegedSettlementIds = new Set(settlementIds.length ? (await client.query<{ settlement_id: string }>(
@@ -1752,7 +1821,8 @@ export const gameService = {
       let totalPayableBreakdown: IncomeBreakdown = { building: 0, tax: 0, landTrade: 0, seaTrade: 0 };
       let totalUpkeep = 0;
       const enriched = settlements.map((settlement) => {
-        const religion = religionModifiers(settlement.religion_key, Number(settlement.religion_adherence_percent), dominantReligionProfile?.key ?? null);
+        const religionDistribution=religionDistributions.get(settlement.id)??fallbackReligionDistribution(settlement);
+        const religion=religionDistributionModifiers(religionDistribution,dominantReligionProfile?.key??null,settlement.religion_key);
         const settlementBuildings = buildings.filter((building) => building.settlement_id === settlement.id);
         const activeBuildings = settlementBuildings
           .filter((building) => (building.status === "ACTIVE" || building.status === "BUILDING") && building.level > 0)
@@ -1850,6 +1920,7 @@ export const gameService = {
           unrestRisk: settlementUnrestChance(activeBuildings, effectiveResources, activePolicies, country.active_formable_key, religion.unrestReduction),
           starvationBonus: settlementStarvationBonus(activeBuildings, activePolicies, country.active_formable_key, religion.starvationBonus),
           religionModifiers: religion,
+          religionDistribution:religionBeliefShares(religionDistribution,settlement.religion_key),
           temporaryMilitia: activePolicies.includes("WAR_PREPARATION") ? (formableModifiers(country.active_formable_key).warPreparationMilitia ?? Math.floor(500 * (formableModifiers(country.active_formable_key).policyMilitiaMultiplier ?? 1))) : 0,
           assignedMerchant: Boolean(assignedMerchant),
           merchantSkillBonus: assignedMerchant?.skill_bonus ?? 0,
@@ -2942,14 +3013,22 @@ export const gameService = {
         for (const country of countries) {
           const marshalPartial = await hasActiveMarshalPartialMobilization(client, country.id, country.mobilization);
           const settlements = (await client.query<SettlementRow>("SELECT * FROM settlements WHERE country_id=$1 FOR UPDATE", [country.id])).rows;
-          const dominantReligionProfile = dominantReligion(settlements);
+          const religionDistributions=await loadReligionDistributions(client,settlements.map((settlement)=>settlement.id));
+          const dominantReligionProfile=dominantReligionFromDistributions(settlements.map((settlement)=>({
+            population:Number(settlement.population),
+            shares:religionDistributions.get(settlement.id)??fallbackReligionDistribution(settlement)
+          })));
           const tradeBonuses = await activeTradeBonuses(client, country.id);
           const resourceAccess = await settlementResourceAccess(client, country.id);
           const displacedSupport = await loadDisplacedArmySupport(client,country.id);
           let incomeBreakdown: IncomeBreakdown = { building: 0, tax: 0, landTrade: 0, seaTrade: 0 };
           let upkeep = 0;
           for (const settlement of settlements) {
-            const religion = religionModifiers(settlement.religion_key, Number(settlement.religion_adherence_percent), dominantReligionProfile?.key ?? null);
+            const religion=religionDistributionModifiers(
+              religionDistributions.get(settlement.id)??fallbackReligionDistribution(settlement),
+              dominantReligionProfile?.key??null,
+              settlement.religion_key
+            );
             const buildings = (await client.query<BuildingRow>("SELECT * FROM buildings WHERE settlement_id=$1 AND building_type<>'lupanar'", [settlement.id])).rows;
             const active = buildings.filter((b) => (b.status === "ACTIVE" || b.status === "BUILDING") && b.level > 0).map((b) => ({ buildingType: b.building_type, level: b.level }));
             const activePolicies = activePolicyKeys((await client.query<SettlementPolicyRow>("SELECT * FROM settlement_policies WHERE settlement_id=$1 AND status='ACTIVE'", [settlement.id])).rows,newTurn);

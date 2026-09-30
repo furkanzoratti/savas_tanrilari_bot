@@ -86,6 +86,23 @@ export interface SecondaryReligionDefinition {
   modifiers: PartialModifiers;
 }
 
+export interface ReligionFamilyShare {
+  religionKey: ReligionKey;
+  primaryPercent: number;
+  secondaryPercent: number;
+}
+
+export interface ReligionBeliefShare {
+  religionKey: ReligionKey;
+  religionLabel: string;
+  primaryPercent: number;
+  secondaryKey: string;
+  secondaryLabel: string;
+  secondaryPercent: number;
+  familyPercent: number;
+  active: boolean;
+}
+
 export const RELIGIONS: Record<ReligionKey, ReligionDefinition> = {
   CELTIC_FAITH: { label:"Kelt İnancı",localEffect:"Nüfus artışı +%6",nationalEffect:"Hafif piyade, ciritçi ve mızraklı bakımı -%3",local:{populationGrowthPercent:.06},national:{unitUpkeepDiscounts:[{discount:.03,units:CELTIC_UNITS}]} },
   GERMANIC_FAITH: { label:"Cermen İnancı",localEffect:"Kara birimi alım maliyeti -%5",nationalEffect:"Kara ordusu bakımı -%3",local:{unitPurchaseDiscounts:[{discount:.05,units:ALL_LAND}]},national:{unitUpkeepDiscounts:[{discount:.03,units:ALL_LAND}]} },
@@ -187,6 +204,122 @@ export function religionModifiers(religionKey: ReligionKey, adherencePercent: nu
   addModifiers(modifiers,SECONDARY_RELIGIONS[religionKey].modifiers,secondaryReligionEffectScale(100-normalizedAdherence));
   if (dominantReligionKey) addModifiers(modifiers,RELIGIONS[dominantReligionKey].national,1);
   return modifiers;
+}
+
+const boundedPercent = (value: number): number => Math.max(0,Math.min(100,Number(value) || 0));
+
+export function leadingReligionFamily(
+  shares: ReadonlyArray<ReligionFamilyShare>,
+  preferredReligionKey: ReligionKey | null = null
+): ReligionFamilyShare | null {
+  return [...shares]
+    .map((share) => ({
+      ...share,
+      primaryPercent: boundedPercent(share.primaryPercent),
+      secondaryPercent: boundedPercent(share.secondaryPercent)
+    }))
+    .filter((share) => share.primaryPercent+share.secondaryPercent>0)
+    .sort((left,right) =>
+      (right.primaryPercent+right.secondaryPercent)-(left.primaryPercent+left.secondaryPercent)
+      || Number(right.religionKey===preferredReligionKey)-Number(left.religionKey===preferredReligionKey)
+      || left.religionKey.localeCompare(right.religionKey)
+    )[0] ?? null;
+}
+
+export function religionBeliefShares(
+  shares: ReadonlyArray<ReligionFamilyShare>,
+  preferredReligionKey: ReligionKey | null = null
+): ReligionBeliefShare[] {
+  const leading = leadingReligionFamily(shares,preferredReligionKey)?.religionKey ?? null;
+  return shares
+    .map((share) => {
+      const primaryPercent=boundedPercent(share.primaryPercent);
+      const secondaryPercent=boundedPercent(share.secondaryPercent);
+      const secondary=SECONDARY_RELIGIONS[share.religionKey];
+      return {
+        religionKey:share.religionKey,religionLabel:RELIGIONS[share.religionKey].label,
+        primaryPercent,secondaryKey:secondary.key,secondaryLabel:secondary.label,secondaryPercent,
+        familyPercent:primaryPercent+secondaryPercent,active:share.religionKey===leading
+      };
+    })
+    .filter((share)=>share.familyPercent>0)
+    .sort((left,right)=>right.familyPercent-left.familyPercent||Number(right.active)-Number(left.active)||left.religionLabel.localeCompare(right.religionLabel,"tr"));
+}
+
+export function religionDistributionModifiers(
+  shares: ReadonlyArray<ReligionFamilyShare>,
+  dominantReligionKey: ReligionKey | null,
+  preferredReligionKey: ReligionKey | null = null
+): ReligionModifiers {
+  const modifiers=emptyModifiers();
+  const leading=leadingReligionFamily(shares,preferredReligionKey);
+  if (leading) {
+    addModifiers(modifiers,RELIGIONS[leading.religionKey].local,religionEffectScale(leading.primaryPercent));
+    addModifiers(modifiers,SECONDARY_RELIGIONS[leading.religionKey].modifiers,secondaryReligionEffectScale(leading.secondaryPercent));
+  }
+  if (dominantReligionKey) addModifiers(modifiers,RELIGIONS[dominantReligionKey].national,1);
+  return modifiers;
+}
+
+export function dominantReligionFromDistributions(
+  settlements: ReadonlyArray<{population:number;shares:ReadonlyArray<ReligionFamilyShare>}>
+): {key:ReligionKey;sharePercent:number}|null {
+  const totalPopulation=settlements.reduce((sum,item)=>sum+Math.max(0,Number(item.population)),0);
+  if (totalPopulation<=0) return null;
+  const believers=new Map<ReligionKey,number>();
+  for (const settlement of settlements) {
+    const population=Math.max(0,Number(settlement.population));
+    for (const share of settlement.shares) {
+      const amount=population*boundedPercent(share.primaryPercent)/100;
+      believers.set(share.religionKey,(believers.get(share.religionKey)??0)+amount);
+    }
+  }
+  const first=[...believers.entries()].sort((left,right)=>right[1]-left[1]||left[0].localeCompare(right[0]))[0];
+  if (!first) return null;
+  const sharePercent=first[1]/totalPopulation*100;
+  return sharePercent>=NATIONAL_RELIGION_EFFECT_THRESHOLD?{key:first[0],sharePercent}:null;
+}
+
+export function religionConversionPercent(successMargin:number):number {
+  if (successMargin>=9) return 12;
+  if (successMargin>=5) return 8;
+  if (successMargin>=1) return 4;
+  return 0;
+}
+
+const roundReligionPercent=(value:number):number=>Math.round(value*100)/100;
+
+export function convertReligionDistribution(
+  shares:ReadonlyArray<ReligionFamilyShare>,
+  targetReligionKey:ReligionKey,
+  successMargin:number
+):ReligionFamilyShare[] {
+  const converted=shares.map((share)=>({
+    religionKey:share.religionKey,
+    primaryPercent:boundedPercent(share.primaryPercent),
+    secondaryPercent:boundedPercent(share.secondaryPercent)
+  }));
+  let target=converted.find((share)=>share.religionKey===targetReligionKey);
+  if (!target) {
+    target={religionKey:targetReligionKey,primaryPercent:0,secondaryPercent:0};
+    converted.push(target);
+  }
+  const requested=religionConversionPercent(successMargin);
+  const available=converted.filter((share)=>share!==target).reduce((sum,share)=>sum+share.primaryPercent+share.secondaryPercent,0);
+  let remaining=Math.min(requested,available);
+  const actual=remaining;
+  for (const source of converted.filter((share)=>share!==target).sort((left,right)=>(right.primaryPercent+right.secondaryPercent)-(left.primaryPercent+left.secondaryPercent))) {
+    if (remaining<=0) break;
+    const familyTotal=source.primaryPercent+source.secondaryPercent;
+    const deduction=Math.min(remaining,familyTotal);
+    const primaryDeduction=familyTotal>0?roundReligionPercent(deduction*source.primaryPercent/familyTotal):0;
+    source.primaryPercent=roundReligionPercent(Math.max(0,source.primaryPercent-primaryDeduction));
+    source.secondaryPercent=roundReligionPercent(Math.max(0,source.secondaryPercent-(deduction-primaryDeduction)));
+    remaining=roundReligionPercent(remaining-deduction);
+  }
+  target.primaryPercent=roundReligionPercent(target.primaryPercent+actual*.75);
+  target.secondaryPercent=roundReligionPercent(target.secondaryPercent+actual*.25);
+  return converted.filter((share)=>share.primaryPercent+share.secondaryPercent>0);
 }
 
 export function secondaryReligionFor(religionKey: ReligionKey): SecondaryReligionDefinition {

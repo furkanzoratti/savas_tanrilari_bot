@@ -9,7 +9,8 @@ import {
 import { isResourceType, type ResourceType } from "../domain/resources.js";
 import { GameError } from "./game-service.js";
 import { formableModifiers, type FormableCountryKey } from "../domain/formable-countries.js";
-import { dominantReligion, religionModifiers, type ReligionKey } from "../domain/religions.js";
+import { dominantReligionFromDistributions, religionDistributionModifiers, type ReligionKey } from "../domain/religions.js";
+import { fallbackReligionDistribution, loadReligionDistributions } from "./religion-service.js";
 
 interface EventSettlementRow extends SettlementEventState {
   id: string;
@@ -200,14 +201,21 @@ async function riskReport(client: DbClient, guildId: string, type: SettlementEve
   }
   const merchants = new Set(merchantRows.map((merchant) => merchant.assigned_settlement_id));
   const lastTurns = new Map(historyRows.map((row) => [row.settlement_id, row.last_turn]));
+  const religionDistributions=await loadReligionDistributions(client,rows.map((row)=>row.id));
   const dominantReligions = new Map<string, ReligionKey>();
   for (const countryId of new Set(rows.map((row) => row.country_id))) {
-    const dominant = dominantReligion(rows.filter((row) => row.country_id === countryId));
+    const dominant=dominantReligionFromDistributions(rows.filter((row)=>row.country_id===countryId).map((row)=>({
+      population:Number(row.population),shares:religionDistributions.get(row.id)??fallbackReligionDistribution(row)
+    })));
     if (dominant) dominantReligions.set(countryId, dominant.key);
   }
 
   const candidates = rows.map((settlement): SettlementEventCandidate => {
-    const religion = religionModifiers(settlement.religion_key, Number(settlement.religion_adherence_percent), dominantReligions.get(settlement.country_id) ?? null);
+    const religion=religionDistributionModifiers(
+      religionDistributions.get(settlement.id)??fallbackReligionDistribution(settlement),
+      dominantReligions.get(settlement.country_id)??null,
+      settlement.religion_key
+    );
     const assessment = assessSettlementEventRisk(type, {
       population: settlement.population,
       slavePopulation: settlement.slave_population,

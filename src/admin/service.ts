@@ -299,6 +299,12 @@ export const adminPanelService = {
               country.status AS country_status,settlement.population,settlement.slave_population,
               settlement.local_treasury,settlement.resource_type,settlement.culture_group,
               settlement.religion_key,settlement.religion_adherence_percent,
+              COALESCE((SELECT jsonb_agg(jsonb_build_object(
+                'religionKey',share.religion_key,'primaryPercent',share.primary_percent,
+                'secondaryPercent',share.secondary_percent
+              ) ORDER BY (share.primary_percent+share.secondary_percent) DESC,share.religion_key)
+                FROM settlement_religion_shares share
+                WHERE share.settlement_id=settlement.id),'[]'::jsonb) AS religion_distribution,
               settlement.tax_rate_percent,
               settlement.ruin_stage,settlement.is_conquered,settlement.is_coastal,
               settlement.base_land_trade_income,settlement.land_trade_income,
@@ -322,7 +328,12 @@ export const adminPanelService = {
       religion_label: RELIGIONS[row.religion_key]?.label ?? row.religion_key,
       minority_religion_label: secondaryReligionFor(row.religion_key).label,
       minority_religion_effect: secondaryReligionFor(row.religion_key).effect,
-      minority_religion_percent: 100 - Number(row.religion_adherence_percent)
+      minority_religion_percent: 100 - Number(row.religion_adherence_percent),
+      religion_distribution:((row.religion_distribution as Array<Record<string,unknown>>|undefined)??[]).map((share)=>({
+        ...share,
+        religionLabel:RELIGIONS[String(share.religionKey) as ReligionKey]?.label??String(share.religionKey),
+        secondaryLabel:secondaryReligionFor(String(share.religionKey) as ReligionKey).label
+      }))
     }));
   },
 
@@ -468,6 +479,12 @@ export const adminPanelService = {
               settlement.local_treasury,settlement.resource_type,settlement.ruin_stage,
               settlement.tax_rate_percent,settlement.culture_group,settlement.is_coastal,
               settlement.religion_key,settlement.religion_adherence_percent,
+              COALESCE((SELECT jsonb_agg(jsonb_build_object(
+                'religionKey',share.religion_key,'primaryPercent',share.primary_percent,
+                'secondaryPercent',share.secondary_percent)
+                ORDER BY (share.primary_percent+share.secondary_percent) DESC,share.religion_key)
+                FROM settlement_religion_shares share
+                WHERE share.settlement_id=settlement.id),'[]'::jsonb) AS religion_distribution,
               settlement.is_conquered,settlement.base_land_trade_income,
               (SELECT COALESCE(SUM(quantity),0)::integer FROM unit_stacks WHERE settlement_id=settlement.id AND force_type='ARMY') AS army_stock,
               (SELECT COALESCE(SUM(quantity),0)::integer FROM naval_units WHERE settlement_id=settlement.id) AS ships
@@ -481,7 +498,12 @@ export const adminPanelService = {
       religion_label: RELIGIONS[row.religion_key]?.label ?? row.religion_key,
       minority_religion_label: secondaryReligionFor(row.religion_key).label,
       minority_religion_effect: secondaryReligionFor(row.religion_key).effect,
-      minority_religion_percent: 100 - Number(row.religion_adherence_percent)
+      minority_religion_percent: 100 - Number(row.religion_adherence_percent),
+      religion_distribution:((row.religion_distribution as Array<Record<string,unknown>>|undefined)??[]).map((share)=>({
+        ...share,
+        religionLabel:RELIGIONS[String(share.religionKey) as ReligionKey]?.label??String(share.religionKey),
+        secondaryLabel:secondaryReligionFor(String(share.religionKey) as ReligionKey).label
+      }))
     }));
     const armies = (await adminPool.query(
       `SELECT army.id,army.name,army.created_turn,character.name AS commander_name,
@@ -640,6 +662,16 @@ export const adminPanelService = {
           input.baseLandTradeIncome, input.ruinStage, input.isCoastal, input.isConquered,
           input.religionKey, input.religionAdherencePercent, settlementId]
       )).rows[0];
+      const religionChanged=previous.religion_key!==input.religionKey
+        || Number(previous.religion_adherence_percent)!==Number(input.religionAdherencePercent);
+      if (religionChanged) {
+        await client.query("DELETE FROM settlement_religion_shares WHERE settlement_id=$1",[settlementId]);
+        await client.query(
+          `INSERT INTO settlement_religion_shares(settlement_id,religion_key,primary_percent,secondary_percent)
+           VALUES ($1,$2,$3,$4)`,
+          [settlementId,input.religionKey,input.religionAdherencePercent,100-input.religionAdherencePercent]
+        );
+      }
       await writeAdminAudit(client, actorId, "admin.panel.settlement.update", "settlement", settlementId, { previous, updated });
       return updated;
     });
