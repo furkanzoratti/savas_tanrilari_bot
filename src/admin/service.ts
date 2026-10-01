@@ -1,6 +1,11 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
-import { BATTLE_UNIT_STATS, type BattleUnitType } from "../domain/battle.js";
+import {
+  BATTLE_UNIT_STATS,
+  type BattleUnitType,
+  type SiegeAssetType,
+  type SiegeTarget
+} from "../domain/battle.js";
 import {
   ADMIRAL_DOCTRINES,
   ADMIRAL_SPECIALIZATIONS,
@@ -70,6 +75,18 @@ const armyUnitUpdateSchema = z.object({
   settlementId: z.string().uuid(),
   unitType: z.string().refine((value) => usableUnitTypeSet.has(value), "Geçersiz birlik türü."),
   quantity: z.coerce.number().int().min(0).max(10_000_000)
+});
+
+const siegeParticipantMutationSchema = z.object({
+  countryId: z.string().uuid(),
+  side: z.enum(["A", "B"]),
+  action: z.enum(["ADD", "REMOVE"])
+});
+
+const siegeArmyMutationSchema = z.object({
+  armyId: z.string().uuid(),
+  side: z.enum(["A", "B"]),
+  action: z.enum(["ADD", "REMOVE"])
 });
 
 const armyInputSchema = z.object({
@@ -185,6 +202,47 @@ function reduceComposition(raw: unknown, unitType: string, amount: number): Reco
   if (next === 0) delete composition[unitType];
   else composition[unitType] = next;
   return composition;
+}
+
+function numericComposition(raw: unknown): Record<string, number> {
+  if (!raw || typeof raw !== "object") return {};
+  return Object.fromEntries(Object.entries(raw as Record<string, unknown>)
+    .map(([key, value]) => [key, Math.max(0, Math.floor(Number(value) || 0))] as const)
+    .filter(([, value]) => value > 0));
+}
+
+export function addBattleComposition(base: unknown, addition: unknown): Record<string, number> {
+  const result = numericComposition(base);
+  for (const [key, value] of Object.entries(numericComposition(addition))) result[key] = (result[key] ?? 0) + value;
+  return result;
+}
+
+export function subtractBattleComposition(base: unknown, removal: unknown): Record<string, number> {
+  const result = numericComposition(base);
+  for (const [key, value] of Object.entries(numericComposition(removal))) {
+    const next = Math.max(0, (result[key] ?? 0) - value);
+    if (next) result[key] = next;
+    else delete result[key];
+  }
+  return result;
+}
+
+function compositionTotal(composition: unknown): number {
+  return Object.values(numericComposition(composition)).reduce((sum, value) => sum + value, 0);
+}
+
+function battleSeal(composition: unknown, support: unknown): string {
+  const combined = { ...numericComposition(composition), ...numericComposition(support) };
+  return createHash("sha256")
+    .update(JSON.stringify(Object.keys(combined).sort().map((key) => [key, combined[key] ?? 0])))
+    .digest("hex").slice(0, 12).toUpperCase();
+}
+
+function defaultSiegeTarget(asset: SiegeAssetType): SiegeTarget {
+  if (asset === "ram") return "GATE";
+  if (["ladder_group", "mantlet", "siege_tower"].includes(asset)) return "ASSAULT";
+  if (asset === "catapult") return "WALL";
+  return "ARMY";
 }
 
 async function armyContext(client: AdminDbClient, input: AdminArmyInput) {
@@ -584,44 +642,335 @@ export const adminPanelService = {
   },
 
   async activeSieges() {
-    const rows = (await adminPool.query(
-      `SELECT battle.id AS battle_id,battle.status,battle.round_number,battle.siege_phase,
-              settlement.name AS settlement_name,assignment.side_key,
-              army.id AS army_id,army.name AS army_name,country.name AS country_name,
-              unit.settlement_id,origin.name AS origin_name,unit.unit_type,unit.quantity
-         FROM battles battle
-         LEFT JOIN settlements settlement ON settlement.id=battle.defender_settlement_id
-         JOIN battle_army_assignments assignment ON assignment.battle_id=battle.id
-         JOIN armies army ON army.id=assignment.army_id
-         JOIN countries country ON country.id=army.country_id
-         LEFT JOIN army_units unit ON unit.army_id=army.id
-         LEFT JOIN settlements origin ON origin.id=unit.settlement_id
-        WHERE battle.guild_id=$1 AND battle.terrain='SIEGE'
-          AND battle.status NOT IN ('FINISHED','CANCELLED')
-        ORDER BY battle.updated_at DESC,assignment.side_key,country.name,army.name,origin.name,unit.unit_type`,
-      [adminConfig.guildId]
-    )).rows as Array<Record<string, unknown>>;
-    const battles = new Map<string, { id: string; status: unknown; roundNumber: unknown; siegePhase: unknown; settlementName: unknown; armies: Map<string, unknown> }>();
-    for (const row of rows) {
+    const [battleRows, participantRows, armyRows] = await Promise.all([
+      adminPool.query(
+        `SELECT battle.id,battle.status,battle.round_number,battle.siege_phase,battle.updated_at,
+                settlement.name AS settlement_name,
+                side_a.country_id AS country_a_id,country_a.name AS country_a_name,
+                side_b.country_id AS country_b_id,country_b.name AS country_b_name
+           FROM battles battle
+           LEFT JOIN settlements settlement ON settlement.id=battle.defender_settlement_id
+           JOIN battle_sides side_a ON side_a.battle_id=battle.id AND side_a.side_key='A'
+           JOIN countries country_a ON country_a.id=side_a.country_id
+           JOIN battle_sides side_b ON side_b.battle_id=battle.id AND side_b.side_key='B'
+           JOIN countries country_b ON country_b.id=side_b.country_id
+          WHERE battle.guild_id=$1 AND battle.terrain='SIEGE'
+            AND battle.status NOT IN ('FINISHED','CANCELLED')
+          ORDER BY battle.updated_at DESC`, [adminConfig.guildId]
+      ),
+      adminPool.query(
+        `SELECT participant.battle_id,participant.side_key,participant.country_id,participant.is_primary,
+                country.name AS country_name
+           FROM battle_side_participants participant
+           JOIN battles battle ON battle.id=participant.battle_id
+           JOIN countries country ON country.id=participant.country_id
+          WHERE battle.guild_id=$1 AND battle.terrain='SIEGE'
+            AND battle.status NOT IN ('FINISHED','CANCELLED')
+          ORDER BY participant.battle_id,participant.side_key,participant.is_primary DESC,country.name`, [adminConfig.guildId]
+      ),
+      adminPool.query(
+        `SELECT assignment.battle_id,assignment.side_key,army.id AS army_id,army.name AS army_name,
+                country.id AS country_id,country.name AS country_name,
+                unit.settlement_id,origin.name AS origin_name,unit.unit_type,unit.quantity
+           FROM battle_army_assignments assignment
+           JOIN battles battle ON battle.id=assignment.battle_id
+           JOIN armies army ON army.id=assignment.army_id
+           JOIN countries country ON country.id=army.country_id
+           LEFT JOIN army_units unit ON unit.army_id=army.id
+           LEFT JOIN settlements origin ON origin.id=unit.settlement_id
+          WHERE battle.guild_id=$1 AND battle.terrain='SIEGE'
+            AND battle.status NOT IN ('FINISHED','CANCELLED')
+          ORDER BY battle.updated_at DESC,assignment.side_key,country.name,army.name,origin.name,unit.unit_type`, [adminConfig.guildId]
+      )
+    ]);
+    const participantsByBattle = new Map<string, unknown[]>();
+    for (const row of participantRows.rows as Array<Record<string, unknown>>) {
       const battleId = String(row.battle_id);
-      let battle = battles.get(battleId);
-      if (!battle) {
-        battle = { id: battleId, status: row.status, roundNumber: row.round_number, siegePhase: row.siege_phase, settlementName: row.settlement_name, armies: new Map() };
-        battles.set(battleId, battle);
-      }
+      const participants = participantsByBattle.get(battleId) ?? [];
+      participants.push({ countryId:row.country_id,countryName:row.country_name,sideKey:row.side_key,isPrimary:row.is_primary });
+      participantsByBattle.set(battleId,participants);
+    }
+    const armiesByBattle = new Map<string, Map<string, { id:string;name:unknown;countryId:unknown;countryName:unknown;sideKey:unknown;total:number;units:unknown[] }>>();
+    for (const row of armyRows.rows as Array<Record<string, unknown>>) {
+      const battleId = String(row.battle_id);
+      const armies = armiesByBattle.get(battleId) ?? new Map();
       const armyId = String(row.army_id);
-      let army = battle.armies.get(armyId) as { id: string; name: unknown; countryName: unknown; sideKey: unknown; total: number; units: unknown[] } | undefined;
+      let army = armies.get(armyId);
       if (!army) {
-        army = { id: armyId, name: row.army_name, countryName: row.country_name, sideKey: row.side_key, total: 0, units: [] };
-        battle.armies.set(armyId, army);
+        army = { id:armyId,name:row.army_name,countryId:row.country_id,countryName:row.country_name,sideKey:row.side_key,total:0,units:[] };
+        armies.set(armyId,army);
       }
       if (row.unit_type) {
         const quantity = Number(row.quantity ?? 0);
         army.total += quantity;
-        army.units.push({ settlementId: row.settlement_id, originName: row.origin_name, unitType: row.unit_type, quantity });
+        army.units.push({ settlementId:row.settlement_id,originName:row.origin_name,unitType:row.unit_type,quantity });
       }
+      armiesByBattle.set(battleId,armies);
     }
-    return [...battles.values()].map((battle) => ({ ...battle, armies: [...battle.armies.values()] }));
+    return (battleRows.rows as Array<Record<string, unknown>>).map((battle) => {
+      const battleId = String(battle.id);
+      return {
+        id:battleId,status:battle.status,roundNumber:battle.round_number,siegePhase:battle.siege_phase,
+        settlementName:battle.settlement_name,countryAId:battle.country_a_id,countryAName:battle.country_a_name,
+        countryBId:battle.country_b_id,countryBName:battle.country_b_name,
+        participants:participantsByBattle.get(battleId) ?? [],armies:[...(armiesByBattle.get(battleId)?.values() ?? [])]
+      };
+    });
+  },
+
+  async activeSiegeRosterOptions(battleId: string) {
+    if (!z.string().uuid().safeParse(battleId).success) throw new Error("Geçersiz kuşatma kimliği.");
+    const battle = (await adminPool.query(
+      `SELECT id,status FROM battles WHERE id=$1 AND guild_id=$2 AND terrain='SIEGE'
+        AND status NOT IN ('FINISHED','CANCELLED')`, [battleId,adminConfig.guildId]
+    )).rows[0];
+    if (!battle) throw new Error("Aktif kuşatma bulunamadı.");
+    const [countries,armies] = await Promise.all([
+      adminPool.query(
+        `SELECT country.id,country.name,participant.side_key,COALESCE(participant.is_primary,FALSE) AS is_primary
+           FROM countries country
+           LEFT JOIN battle_side_participants participant ON participant.country_id=country.id AND participant.battle_id=$1
+          WHERE country.guild_id=$2 AND country.status='ACTIVE'
+          ORDER BY country.name`, [battleId,adminConfig.guildId]
+      ),
+      adminPool.query(
+        `SELECT army.id,army.name,army.country_id,country.name AS country_name,
+                COALESCE(SUM(unit.quantity),0)::integer AS total,
+                own.side_key AS assigned_side,
+                CASE
+                  WHEN EXISTS(
+                    SELECT 1 FROM battle_army_assignments other_assignment
+                    JOIN battles other_battle ON other_battle.id=other_assignment.battle_id
+                    WHERE other_assignment.army_id=army.id AND other_assignment.battle_id<>$1
+                      AND other_battle.status NOT IN ('FINISHED','CANCELLED')
+                  ) THEN 'Başka bir etkin savaşa bağlı'
+                  WHEN EXISTS(SELECT 1 FROM fleet_cargo_armies cargo WHERE cargo.army_id=army.id)
+                    OR EXISTS(
+                      SELECT 1 FROM battle_side_participants embarked
+                      JOIN battles embarked_battle ON embarked_battle.id=embarked.battle_id
+                      WHERE embarked.embarked_army_id=army.id AND embarked.battle_id<>$1
+                        AND embarked_battle.status NOT IN ('FINISHED','CANCELLED')
+                    ) THEN 'Bir filoda veya deniz savaşında taşınıyor'
+                  WHEN EXISTS(SELECT 1 FROM land_raids raid WHERE raid.army_id=army.id AND raid.status='WAITING_ROLL')
+                    THEN 'Yağma sonucu bekliyor'
+                  ELSE NULL
+                END AS blocking_reason
+           FROM armies army
+           JOIN countries country ON country.id=army.country_id
+           LEFT JOIN army_units unit ON unit.army_id=army.id
+           LEFT JOIN battle_army_assignments own ON own.army_id=army.id AND own.battle_id=$1
+          WHERE army.guild_id=$2 AND country.status='ACTIVE'
+          GROUP BY army.id,army.name,army.country_id,country.name,own.side_key
+          ORDER BY country.name,army.name`, [battleId,adminConfig.guildId]
+      )
+    ]);
+    return { battleId,status:battle.status,countries:countries.rows,armies:armies.rows };
+  },
+
+  async mutateActiveSiegeParticipant(actorId: string, battleId: string, rawInput: unknown) {
+    if (!z.string().uuid().safeParse(battleId).success) throw new Error("Geçersiz kuşatma kimliği.");
+    const input = siegeParticipantMutationSchema.parse(rawInput);
+    return withAdminTransaction(async (client) => {
+      const battle = (await client.query<{ id:string;status:string }>(
+        `SELECT id,status FROM battles WHERE id=$1 AND guild_id=$2 AND terrain='SIEGE'
+          AND status NOT IN ('FINISHED','CANCELLED') FOR UPDATE`, [battleId,adminConfig.guildId]
+      )).rows[0];
+      if (!battle) throw new Error("Aktif kuşatma bulunamadı.");
+      const country = (await client.query<{ id:string;name:string }>(
+        "SELECT id,name FROM countries WHERE id=$1 AND guild_id=$2 AND status='ACTIVE' FOR UPDATE",
+        [input.countryId,adminConfig.guildId]
+      )).rows[0];
+      if (!country) throw new Error("Aktif devlet bulunamadı.");
+      const existing = (await client.query<{ side_key:"A"|"B";is_primary:boolean;composition:unknown;initial_composition:unknown }>(
+        "SELECT side_key,is_primary,composition,initial_composition FROM battle_side_participants WHERE battle_id=$1 AND country_id=$2 FOR UPDATE",
+        [battle.id,country.id]
+      )).rows[0];
+      if (input.action === "ADD") {
+        if (existing) throw new Error(existing.side_key === input.side ? "Bu devlet zaten seçilen tarafta." : "Bu devlet karşı tarafta zaten bulunuyor.");
+        await client.query(
+          `INSERT INTO battle_side_participants(battle_id,side_key,country_id,is_primary,composition,initial_composition)
+           VALUES($1,$2,$3,FALSE,'{}'::jsonb,'{}'::jsonb)`, [battle.id,input.side,country.id]
+        );
+      } else {
+        if (!existing || existing.side_key !== input.side) throw new Error("Bu devlet seçilen kuşatma tarafında bulunmuyor.");
+        if (existing.is_primary) throw new Error("Kuşatmanın ana taraf devletleri çıkarılamaz.");
+        if (compositionTotal(existing.composition) || compositionTotal(existing.initial_composition)) {
+          throw new Error("Devletin savaş mevcudu boş değil. Önce bağlı orduları çıkarın.");
+        }
+        if ((await client.query("SELECT 1 FROM battle_army_assignments WHERE battle_id=$1 AND country_id=$2 LIMIT 1",[battle.id,country.id])).rowCount) {
+          throw new Error("Devleti çıkarmadan önce bağlı orduları çıkarın.");
+        }
+        if ((await client.query(
+          `SELECT 1 FROM battle_mercenary_assignments assignment JOIN mercenary_contracts contract ON contract.id=assignment.contract_id
+            WHERE assignment.battle_id=$1 AND assignment.side_key=$2 AND contract.country_id=$3 LIMIT 1`,
+          [battle.id,input.side,country.id]
+        )).rowCount) throw new Error("Devleti çıkarmadan önce bağlı paralı asker grubunu çıkarın.");
+        await client.query("DELETE FROM battle_side_participants WHERE battle_id=$1 AND country_id=$2",[battle.id,country.id]);
+      }
+      await client.query("UPDATE battles SET updated_at=NOW() WHERE id=$1",[battle.id]);
+      await writeAdminAudit(client,actorId,
+        input.action === "ADD" ? "admin.panel.battle.participant.add" : "admin.panel.battle.participant.remove",
+        "battle",battle.id,{ countryId:country.id,countryName:country.name,side:input.side,status:battle.status });
+      return { battleId:battle.id,countryId:country.id,countryName:country.name,side:input.side,action:input.action };
+    });
+  },
+
+  async mutateActiveSiegeArmy(actorId: string, battleId: string, rawInput: unknown) {
+    if (!z.string().uuid().safeParse(battleId).success) throw new Error("Geçersiz kuşatma kimliği.");
+    const input = siegeArmyMutationSchema.parse(rawInput);
+    return withAdminTransaction(async (client) => {
+      const battle = (await client.query<{ id:string;status:string }>(
+        `SELECT id,status FROM battles WHERE id=$1 AND guild_id=$2 AND terrain='SIEGE'
+          AND status NOT IN ('FINISHED','CANCELLED') FOR UPDATE`, [battleId,adminConfig.guildId]
+      )).rows[0];
+      if (!battle) throw new Error("Aktif kuşatma bulunamadı.");
+      const army = (await client.query<{ id:string;name:string;country_id:string;country_name:string }>(
+        `SELECT army.id,army.name,army.country_id,country.name AS country_name
+           FROM armies army JOIN countries country ON country.id=army.country_id
+          WHERE army.id=$1 AND army.guild_id=$2 AND country.status='ACTIVE' FOR UPDATE OF army`,
+        [input.armyId,adminConfig.guildId]
+      )).rows[0];
+      if (!army) throw new Error("Aktif ordu bulunamadı.");
+      const participant = (await client.query<{ side_key:"A"|"B";composition:unknown;initial_composition:unknown }>(
+        `SELECT side_key,composition,initial_composition FROM battle_side_participants
+          WHERE battle_id=$1 AND country_id=$2 FOR UPDATE`, [battle.id,army.country_id]
+      )).rows[0];
+      if (!participant || participant.side_key !== input.side) throw new Error("Ordunun devleti önce seçilen kuşatma tarafına eklenmelidir.");
+      const side = (await client.query<{
+        composition:unknown;initial_composition:unknown;support_assets:unknown;support_enhanced:unknown;support_targets:Record<string,SiegeTarget>;
+        initial_total:number;current_total:number;total_losses:number;
+      }>(
+        `SELECT composition,initial_composition,support_assets,support_enhanced,support_targets,
+                initial_total,current_total,total_losses
+           FROM battle_sides WHERE battle_id=$1 AND side_key=$2 FOR UPDATE`, [battle.id,input.side]
+      )).rows[0];
+      if (!side) throw new Error("Kuşatma tarafı bulunamadı.");
+      const assignment = (await client.query<{
+        initial_composition:unknown;initial_assets:unknown;initial_enhanced:unknown;created_at:Date;
+      }>(
+        `SELECT initial_composition,initial_assets,initial_enhanced,created_at
+           FROM battle_army_assignments WHERE battle_id=$1 AND army_id=$2 FOR UPDATE`, [battle.id,army.id]
+      )).rows[0];
+
+      if (input.action === "REMOVE") {
+        if (!assignment) throw new Error("Bu ordu kuşatmaya bağlı değil.");
+        const laterCombat = await client.query(
+          `SELECT 1 FROM battle_rounds WHERE battle_id=$1 AND created_at>=$2
+           UNION ALL
+           SELECT 1 FROM battle_rolls WHERE battle_id=$1 AND created_at>=$2 LIMIT 1`, [battle.id,assignment.created_at]
+        );
+        if (battle.status !== "DRAFT" && laterCombat.rowCount) {
+          throw new Error("Ordu kuşatmaya katıldıktan sonra savaş zarı veya değerlendirme işlendiği için güvenle çıkarılamaz.");
+        }
+        const nextParticipant = subtractBattleComposition(participant.composition,assignment.initial_composition);
+        const nextParticipantInitial = subtractBattleComposition(participant.initial_composition,assignment.initial_composition);
+        const nextSide = subtractBattleComposition(side.composition,assignment.initial_composition);
+        const nextSideInitial = subtractBattleComposition(side.initial_composition,assignment.initial_composition);
+        const nextSupport = subtractBattleComposition(side.support_assets,assignment.initial_assets);
+        const nextEnhanced = subtractBattleComposition(side.support_enhanced,assignment.initial_enhanced);
+        const nextTargets = { ...(side.support_targets ?? {}) };
+        for (const key of Object.keys(numericComposition(assignment.initial_assets))) if (!nextSupport[key]) delete nextTargets[key];
+        await client.query("DELETE FROM battle_army_assignments WHERE battle_id=$1 AND army_id=$2",[battle.id,army.id]);
+        await client.query(
+          `UPDATE battle_side_participants SET composition=$1::jsonb,initial_composition=$2::jsonb
+            WHERE battle_id=$3 AND country_id=$4`,
+          [JSON.stringify(nextParticipant),JSON.stringify(nextParticipantInitial),battle.id,army.country_id]
+        );
+        await client.query(
+          `UPDATE battle_sides SET composition=$1::jsonb,initial_composition=$2::jsonb,
+                  support_assets=$3::jsonb,support_enhanced=$4::jsonb,support_targets=$5::jsonb,
+                  initial_total=$6,current_total=$7,total_losses=$8,seal=$9
+            WHERE battle_id=$10 AND side_key=$11`,
+          [JSON.stringify(nextSide),JSON.stringify(nextSideInitial),JSON.stringify(nextSupport),JSON.stringify(nextEnhanced),
+            JSON.stringify(nextTargets),compositionTotal(nextSideInitial),compositionTotal(nextSide),
+            Math.max(0,compositionTotal(nextSideInitial)-compositionTotal(nextSide)),battleSeal(nextSide,nextSupport),battle.id,input.side]
+        );
+        await client.query("UPDATE battles SET updated_at=NOW() WHERE id=$1",[battle.id]);
+        await writeAdminAudit(client,actorId,"admin.panel.battle.army.remove","battle",battle.id,
+          { armyId:army.id,armyName:army.name,countryId:army.country_id,countryName:army.country_name,side:input.side,status:battle.status });
+        return { battleId:battle.id,armyId:army.id,armyName:army.name,countryName:army.country_name,side:input.side,action:input.action,total:compositionTotal(assignment.initial_composition) };
+      }
+
+      if (assignment) throw new Error("Bu ordu kuşatmaya zaten bağlı.");
+      if ((await client.query(
+        `SELECT 1 FROM battle_rolls roll
+          JOIN battles current_battle ON current_battle.id=roll.battle_id
+         WHERE roll.battle_id=$1 AND roll.round_number=current_battle.round_number LIMIT 1`,
+        [battle.id]
+      )).rowCount) {
+        throw new Error("Başlamış bir değerlendirmeye takviye eklenemez. Mevcut değerlendirmeyi sonuçlandırdıktan sonra tekrar deneyin.");
+      }
+      if ((await client.query(
+        `SELECT 1 FROM battle_army_assignments other JOIN battles active ON active.id=other.battle_id
+          WHERE other.army_id=$1 AND other.battle_id<>$2 AND active.status NOT IN ('FINISHED','CANCELLED') LIMIT 1`,
+        [army.id,battle.id]
+      )).rowCount) throw new Error("Bu ordu başka bir etkin savaşa bağlı.");
+      if ((await client.query("SELECT 1 FROM land_raids WHERE army_id=$1 AND status='WAITING_ROLL' LIMIT 1",[army.id])).rowCount) {
+        throw new Error("Yağma sonucu bekleyen ordu kuşatmaya eklenemez.");
+      }
+      if ((await client.query(
+        `SELECT 1 FROM fleet_cargo_armies WHERE army_id=$1
+         UNION ALL
+         SELECT 1 FROM battle_side_participants participant JOIN battles active ON active.id=participant.battle_id
+          WHERE participant.embarked_army_id=$1 AND active.id<>$2 AND active.status NOT IN ('FINISHED','CANCELLED') LIMIT 1`,
+        [army.id,battle.id]
+      )).rowCount) throw new Error("Gemide taşınan ordu karaya çıkmadan kuşatmaya eklenemez.");
+      const existingCountryAssignments = await client.query(
+        "SELECT 1 FROM battle_army_assignments WHERE battle_id=$1 AND country_id=$2 LIMIT 1",[battle.id,army.country_id]
+      );
+      if (!existingCountryAssignments.rowCount && (compositionTotal(participant.composition) || compositionTotal(participant.initial_composition))) {
+        throw new Error("Bu devletin manuel savaş kadrosu bulunuyor. Kalıcı ordu eklemeden önce manuel kadro temizlenmelidir.");
+      }
+      const composition = Object.fromEntries((await client.query<{ unit_type:string;quantity:number }>(
+        `SELECT unit_type,COALESCE(SUM(quantity),0)::integer AS quantity FROM army_units
+          WHERE army_id=$1 GROUP BY unit_type HAVING SUM(quantity)>0 ORDER BY unit_type`, [army.id]
+      )).rows.map((row) => [row.unit_type,Number(row.quantity)]));
+      const total = compositionTotal(composition);
+      if (!total) throw new Error("Orduda kuşatmaya sokulabilecek asker bulunmuyor.");
+      const assetRows = input.side === "A" ? (await client.query<{ asset_type:SiegeAssetType;quantity:number;enhanced:number }>(
+        `SELECT asset_type,COALESCE(SUM(quantity),0)::integer AS quantity,
+                COALESCE(SUM(enhanced_quantity),0)::integer AS enhanced
+           FROM army_siege_assets WHERE army_id=$1 GROUP BY asset_type HAVING SUM(quantity)>0`, [army.id]
+      )).rows : [];
+      const assets:Record<string,number> = {};
+      const armyEnhanced:Record<string,number> = {};
+      const nextTargets = { ...(side.support_targets ?? {}) };
+      for (const row of assetRows) {
+        if (row.asset_type === "wall_ballista") throw new Error("Hafif Sur Balistası saha ordusuyla kuşatmaya taşınamaz.");
+        assets[row.asset_type] = Number(row.quantity);
+        armyEnhanced[row.asset_type] = Math.min(Number(row.quantity),Number(row.enhanced));
+        nextTargets[row.asset_type] ??= defaultSiegeTarget(row.asset_type);
+      }
+      const nextSupport = addBattleComposition(side.support_assets,assets);
+      if ((nextSupport.ram ?? 0) > 1) throw new Error("Kuşatmada toplam Koçbaşı sayısı 1'i aşamaz.");
+      const nextEnhanced = addBattleComposition(side.support_enhanced,armyEnhanced);
+      const nextParticipant = addBattleComposition(participant.composition,composition);
+      const nextParticipantInitial = addBattleComposition(participant.initial_composition,composition);
+      const nextSide = addBattleComposition(side.composition,composition);
+      const nextSideInitial = addBattleComposition(side.initial_composition,composition);
+      await client.query(
+        `INSERT INTO battle_army_assignments(battle_id,side_key,army_id,country_id,initial_composition,initial_assets,initial_enhanced)
+         VALUES($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb)`,
+        [battle.id,input.side,army.id,army.country_id,JSON.stringify(composition),JSON.stringify(assets),JSON.stringify(armyEnhanced)]
+      );
+      await client.query(
+        `UPDATE battle_side_participants SET composition=$1::jsonb,initial_composition=$2::jsonb
+          WHERE battle_id=$3 AND country_id=$4`,
+        [JSON.stringify(nextParticipant),JSON.stringify(nextParticipantInitial),battle.id,army.country_id]
+      );
+      await client.query(
+        `UPDATE battle_sides SET composition=$1::jsonb,initial_composition=$2::jsonb,
+                support_assets=$3::jsonb,support_enhanced=$4::jsonb,support_targets=$5::jsonb,
+                initial_total=initial_total+$6,current_total=current_total+$6,seal=$7
+          WHERE battle_id=$8 AND side_key=$9`,
+        [JSON.stringify(nextSide),JSON.stringify(nextSideInitial),JSON.stringify(nextSupport),JSON.stringify(nextEnhanced),
+          JSON.stringify(nextTargets),total,battleSeal(nextSide,nextSupport),battle.id,input.side]
+      );
+      await client.query("UPDATE battles SET updated_at=NOW() WHERE id=$1",[battle.id]);
+      await writeAdminAudit(client,actorId,"admin.panel.battle.army.add","battle",battle.id,
+        { armyId:army.id,armyName:army.name,countryId:army.country_id,countryName:army.country_name,side:input.side,total,status:battle.status });
+      return { battleId:battle.id,armyId:army.id,armyName:army.name,countryName:army.country_name,side:input.side,action:input.action,total };
+    });
   },
 
   async updateCountry(actorId: string, countryId: string, rawInput: unknown) {

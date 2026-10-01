@@ -92,6 +92,49 @@ export interface EspionageResolutionResult {
 interface CountryRow { id: string; guild_id: string; name: string; status: string }
 interface GuildRow { current_turn: number; turn_phase: string; espionage_log_channel_id: string | null }
 
+interface DueEspionageOperation extends EspionageEffectOperation {
+  id: string;
+  spy_skill_bonus: number;
+  spy_specialization: string | null;
+  spy_specialization_level: number;
+  preparation: EspionagePreparation;
+  created_at: Date;
+}
+
+interface EspionageBuildingCandidate {
+  building_type: string;
+  level: number;
+  target_level: number | null;
+  construction_paid_amount: number;
+}
+
+interface PreparedEspionageResolution {
+  operation: DueEspionageOperation;
+  selected: EspionageBuildingCandidate | null;
+  counterId: string | null;
+  specialization: CharacterSpecialization;
+  validTarget: boolean;
+  attackRoll: number;
+  attackTotal: number;
+  defenseRoll: number;
+  defenseTotal: number;
+  margin: number;
+  severity: EspionageSeverity;
+  detectionRoll: number;
+  detectionTotal: number;
+  detectionLevel: number;
+  captured: boolean;
+}
+
+export interface SiegeSupplyCompetitionCandidate {
+  id: string;
+  validTarget: boolean;
+  severity: EspionageSeverity;
+  margin: number;
+  attackTotal: number;
+  createdAt: Date | string | number;
+}
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function requireUuid(value: string | null | undefined, label: string): void {
@@ -178,6 +221,120 @@ async function isActivelyCaptured(client: Pick<DbClient,"query">, characterId: s
   )).rowCount);
 }
 
+export function selectSiegeSupplyCompetitionWinner(
+  candidates: readonly SiegeSupplyCompetitionCandidate[]
+): string | null {
+  const successful = candidates.filter((candidate) => candidate.validTarget && candidate.severity !== "NONE");
+  successful.sort((left, right) => {
+    if (right.margin !== left.margin) return right.margin - left.margin;
+    if (right.attackTotal !== left.attackTotal) return right.attackTotal - left.attackTotal;
+    const createdDifference = new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime();
+    if (createdDifference !== 0) return createdDifference;
+    return left.id.localeCompare(right.id);
+  });
+  return successful[0]?.id ?? null;
+}
+
+async function prepareEspionageResolution(
+  client: DbClient,
+  operation: DueEspionageOperation,
+  turn: number
+): Promise<PreparedEspionageResolution> {
+  const buildingCategory = ["ECONOMIC","MILITARY","PUBLIC","NAVAL"].includes(operation.target_type);
+  const candidates = operation.target_type === "CONSTRUCTION"
+    ? (await client.query<EspionageBuildingCandidate>(
+        "SELECT building_type,level,target_level,construction_paid_amount FROM buildings WHERE settlement_id=$1 AND status='BUILDING' ORDER BY building_type",
+        [operation.target_settlement_id]
+      )).rows
+    : buildingCategory
+      ? (await client.query<EspionageBuildingCandidate>(
+          "SELECT building_type,level,target_level,construction_paid_amount FROM buildings WHERE settlement_id=$1 AND status='ACTIVE' AND building_type=ANY($2::text[]) ORDER BY building_type",
+          [operation.target_settlement_id, [...ESPIONAGE_TARGETS[operation.target_type].buildingTypes]]
+        )).rows
+      : [];
+  const allActive = (await client.query<{ building_type: string; level: number }>(
+    "SELECT building_type,level FROM buildings WHERE settlement_id=$1 AND status='ACTIVE'",
+    [operation.target_settlement_id]
+  )).rows;
+  const counter = (await client.query<{ id:string; skill_bonus: number; assignment: string; specialization:string|null; specialization_level:number }>(
+    `SELECT id,skill_bonus,assignment,specialization,specialization_level FROM country_characters
+      WHERE country_id=$1 AND role='SPY' AND character_status='ACTIVE' AND (
+        assignment='COUNTERINTELLIGENCE_COUNTRY' OR
+        (assignment='COUNTERINTELLIGENCE_SETTLEMENT' AND assigned_settlement_id=$2) OR
+        (assignment='PERSONAL_GUARD' AND protected_character_id=$3)
+      ) AND (assignment_ready_turn IS NULL OR assignment_ready_turn<=$4)
+      ORDER BY skill_bonus + CASE WHEN assignment='PERSONAL_GUARD' THEN 4 WHEN assignment='COUNTERINTELLIGENCE_SETTLEMENT' THEN 3 ELSE 1 END DESC LIMIT 1`,
+    [operation.target_country_id, operation.target_settlement_id,operation.target_character_id,turn]
+  )).rows[0];
+  const preparation = ESPIONAGE_PREPARATIONS[operation.preparation];
+  const attackRoll = randomInt(1, 21);
+  const defenseRoll = randomInt(1, 21);
+  const specialization = espionageSpecialization(operation.target_type) as CharacterSpecialization;
+  const specializationBonus = operation.spy_specialization === specialization ? Number(operation.spy_specialization_level) : 0;
+  const attackTotal = attackRoll + Number(operation.spy_skill_bonus) + preparation.attackBonus + specializationBonus;
+  const targetReligion = await loadCountryReligionProfile(client, operation.target_country_id);
+  const religionDefense = targetReligion.dominant ? RELIGIONS[targetReligion.dominant.key].national.spyDefenseBonus ?? 0 : 0;
+  const counterDefense = (counter ? Number(counter.skill_bonus)
+    + (counter.assignment === "PERSONAL_GUARD" ? 4 : counter.assignment === "COUNTERINTELLIGENCE_SETTLEMENT" ? 3 : 1)
+    + (counter.specialization === "COUNTER_SPY" ? Number(counter.specialization_level) : 0) : 0) + religionDefense;
+  const defenseTotal = defenseRoll + counterDefense + defenseBuildingBonus(allActive, operation.target_type);
+  const margin = attackTotal - defenseTotal;
+  const validTarget = buildingCategory || operation.target_type === "CONSTRUCTION"
+    ? candidates.length > 0
+    : await espionageTargetExists(client,operation);
+  const severity = validTarget ? espionageSeverity(margin) : "NONE";
+  const selected = randomEspionageCandidate(validTarget,candidates);
+  const detectionRoll = randomInt(1, 21);
+  const detectionTotal = detectionRoll + counterDefense + preparation.detectionPenalty;
+  const detectionThreshold = 10 + Number(operation.spy_skill_bonus);
+  const detectionMargin = detectionTotal - detectionThreshold;
+  const detectionLevel = detectionMargin < 0 ? 0 : detectionMargin <= 3 ? 1 : detectionMargin <= 7 ? 2 : 3;
+  return {
+    operation,selected,counterId:counter?.id ?? null,specialization,validTarget,
+    attackRoll,attackTotal,defenseRoll,defenseTotal,margin,severity,
+    detectionRoll,detectionTotal,detectionLevel,captured:detectionLevel >= 3
+  };
+}
+
+async function finalizeEspionageResolution(
+  client: DbClient,
+  prepared: PreparedEspionageResolution,
+  turn: number,
+  lostSupplyCompetition: boolean
+): Promise<void> {
+  const { operation } = prepared;
+  const severity: EspionageSeverity = lostSupplyCompetition ? "NONE" : prepared.severity;
+  const effectText = lostSupplyCompetition && prepared.severity !== "NONE"
+    ? "Aynı yerleşkeye yönelik erzak yakma girişimleri arasında daha başarılı bir operasyon bulundu; bu girişim başarısız sayıldı."
+    : prepared.validTarget
+      ? await applyEspionageEffect(client,operation,severity,turn,prepared.selected)
+      : "Uygun hedef bulunamadı; mekanik etki oluşmadı.";
+
+  await client.query(
+    `UPDATE espionage_operations SET status='RESOLVED',target_building_type=$2,valid_target=$3,
+      attack_roll=$4,attack_total=$5,defense_roll=$6,defense_total=$7,margin=$8,severity=$9,
+      detection_roll=$10,detection_total=$11,detection_level=$12,captured=$13,effect_text=$14,resolved_at=NOW()
+     WHERE id=$1`,
+    [operation.id, prepared.selected?.building_type ?? null, prepared.validTarget, prepared.attackRoll, prepared.attackTotal,
+      prepared.defenseRoll, prepared.defenseTotal, prepared.margin, severity, prepared.detectionRoll, prepared.detectionTotal,
+      prepared.detectionLevel, prepared.captured, effectText]
+  );
+  if (severity !== "NONE") await awardCharacterSpecializationProgress(client,operation.spy_character_id,prepared.specialization);
+  if (prepared.counterId && (severity === "NONE" || prepared.detectionLevel > 0)) {
+    await awardCharacterSpecializationProgress(client,prepared.counterId,"COUNTER_SPY");
+  }
+  if (prepared.captured && operation.target_type === "ASSASSINATE") {
+    await markCharacterDead({
+      client,characterId:operation.spy_character_id,deathSettlementId:operation.target_settlement_id,
+      reason:"Casus yakalandığı için görevi iptal edildi."
+    });
+  } else if (prepared.captured) {
+    await client.query("UPDATE country_characters SET assignment='CAPTURED',assigned_settlement_id=$1 WHERE id=$2", [operation.target_settlement_id, operation.spy_character_id]);
+  } else {
+    await client.query("UPDATE country_characters SET assignment='ESPIONAGE_RETURNING',assigned_settlement_id=$1 WHERE id=$2", [operation.target_settlement_id, operation.spy_character_id]);
+  }
+}
+
 export async function resolveDueEspionageOperations(guildId: string, turn: number): Promise<EspionageResolutionResult> {
   return withTransaction(async (client) => {
     await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`espionage:${guildId}:${turn}`]);
@@ -201,115 +358,78 @@ export async function resolveDueEspionageOperations(guildId: string, turn: numbe
           AND EXISTS (SELECT 1 FROM espionage_operations operation WHERE operation.spy_character_id=character.id AND operation.return_turn<=$2 AND operation.guild_id=$1)`,
       [guildId, turn]
     );
-    const due = (await client.query<{
-      id: string; attacker_country_id: string; target_country_id: string; target_settlement_id: string;
-      spy_character_id: string; spy_skill_bonus: number; spy_specialization: string | null; spy_specialization_level: number;
-      target_type: EspionageTarget; preparation: EspionagePreparation; target_character_id: string | null; target_army_id: string | null;
-    }>(
+    const due = (await client.query<DueEspionageOperation>(
       `SELECT operation.id,operation.attacker_country_id,operation.target_country_id,operation.target_settlement_id,
               operation.spy_character_id,spy.skill_bonus AS spy_skill_bonus,spy.specialization AS spy_specialization,
               spy.specialization_level AS spy_specialization_level,operation.target_type,operation.preparation,
-              operation.target_character_id,operation.target_army_id
+              operation.target_character_id,operation.target_army_id,operation.created_at
          FROM espionage_operations operation JOIN country_characters spy ON spy.id=operation.spy_character_id
         WHERE operation.guild_id=$1 AND operation.status='TRAVELING' AND operation.resolve_turn<=$2
           AND spy.character_status='ACTIVE'
-        ORDER BY operation.created_at FOR UPDATE OF operation`, [guildId, turn]
+        ORDER BY operation.created_at,operation.id FOR UPDATE OF operation`, [guildId, turn]
     )).rows;
 
     const failures:EspionageResolutionFailure[] = [];
+    const processedSupplyOperations = new Set<string>();
     for (const operation of due) {
-      await client.query("SAVEPOINT espionage_operation");
-      try {
-      const stillRunnable = await client.query(
-        `SELECT 1
-           FROM espionage_operations current_operation
-           JOIN country_characters current_spy ON current_spy.id=current_operation.spy_character_id
-          WHERE current_operation.id=$1 AND current_operation.status='TRAVELING'
-            AND current_spy.character_status='ACTIVE'
-          FOR UPDATE OF current_operation`,
-        [operation.id]
-      );
-      if (!stillRunnable.rowCount) {
-        await client.query("RELEASE SAVEPOINT espionage_operation");
-        continue;
-      }
-      const buildingCategory = ["ECONOMIC","MILITARY","PUBLIC","NAVAL"].includes(operation.target_type);
-      const candidates = operation.target_type === "CONSTRUCTION"
-        ? (await client.query<{ building_type: string; level: number; target_level: number|null; construction_paid_amount: number }>("SELECT building_type,level,target_level,construction_paid_amount FROM buildings WHERE settlement_id=$1 AND status='BUILDING' ORDER BY building_type", [operation.target_settlement_id])).rows
-        : buildingCategory ? (await client.query<{ building_type: string; level: number; target_level: number|null; construction_paid_amount: number }>(
-            "SELECT building_type,level,target_level,construction_paid_amount FROM buildings WHERE settlement_id=$1 AND status='ACTIVE' AND building_type=ANY($2::text[]) ORDER BY building_type",
-            [operation.target_settlement_id, [...ESPIONAGE_TARGETS[operation.target_type].buildingTypes]]
-          )).rows : [];
-      const allActive = (await client.query<{ building_type: string; level: number }>(
-        "SELECT building_type,level FROM buildings WHERE settlement_id=$1 AND status='ACTIVE'", [operation.target_settlement_id]
-      )).rows;
-      const counter = (await client.query<{ id:string; skill_bonus: number; assignment: string; specialization:string|null; specialization_level:number }>(
-        `SELECT id,skill_bonus,assignment,specialization,specialization_level FROM country_characters
-          WHERE country_id=$1 AND role='SPY' AND character_status='ACTIVE' AND (
-            assignment='COUNTERINTELLIGENCE_COUNTRY' OR
-            (assignment='COUNTERINTELLIGENCE_SETTLEMENT' AND assigned_settlement_id=$2) OR
-            (assignment='PERSONAL_GUARD' AND protected_character_id=$3)
-          ) AND (assignment_ready_turn IS NULL OR assignment_ready_turn<=$4)
-          ORDER BY skill_bonus + CASE WHEN assignment='PERSONAL_GUARD' THEN 4 WHEN assignment='COUNTERINTELLIGENCE_SETTLEMENT' THEN 3 ELSE 1 END DESC LIMIT 1`,
-        [operation.target_country_id, operation.target_settlement_id,operation.target_character_id,turn]
-      )).rows[0];
-      const preparation = ESPIONAGE_PREPARATIONS[operation.preparation];
-      const attackRoll = randomInt(1, 21);
-      const defenseRoll = randomInt(1, 21);
-      const specialization = espionageSpecialization(operation.target_type);
-      const specializationBonus = operation.spy_specialization === specialization ? Number(operation.spy_specialization_level) : 0;
-      const attackTotal = attackRoll + Number(operation.spy_skill_bonus) + preparation.attackBonus + specializationBonus;
-      const targetReligion = await loadCountryReligionProfile(client, operation.target_country_id);
-      const religionDefense = targetReligion.dominant ? RELIGIONS[targetReligion.dominant.key].national.spyDefenseBonus ?? 0 : 0;
-      const counterDefense = (counter ? Number(counter.skill_bonus)
-        + (counter.assignment === "PERSONAL_GUARD" ? 4 : counter.assignment === "COUNTERINTELLIGENCE_SETTLEMENT" ? 3 : 1)
-        + (counter.specialization === "COUNTER_SPY" ? Number(counter.specialization_level) : 0) : 0) + religionDefense;
-      const defenseTotal = defenseRoll + counterDefense + defenseBuildingBonus(allActive, operation.target_type);
-      const margin = attackTotal - defenseTotal;
-      const effectOperation: EspionageEffectOperation = operation;
-      const validTarget = buildingCategory || operation.target_type === "CONSTRUCTION"
-        ? candidates.length > 0 : await espionageTargetExists(client,effectOperation);
-      const severity = validTarget ? espionageSeverity(margin) : "NONE";
-      const selected = randomEspionageCandidate(validTarget,candidates);
-      const effectText = validTarget
-        ? await applyEspionageEffect(client,effectOperation,severity,turn,selected)
-        : "Uygun hedef bulunamadı; mekanik etki oluşmadı.";
+      if (processedSupplyOperations.has(operation.id)) continue;
+      const competitionGroup = operation.target_type === "DESTROY_SIEGE_SUPPLIES"
+        ? due.filter((candidate) => candidate.target_type === "DESTROY_SIEGE_SUPPLIES"
+            && candidate.target_settlement_id === operation.target_settlement_id)
+        : [operation];
+      competitionGroup.forEach((candidate) => {
+        if (candidate.target_type === "DESTROY_SIEGE_SUPPLIES") processedSupplyOperations.add(candidate.id);
+      });
 
-      const detectionRoll = randomInt(1, 21);
-      const detectionTotal = detectionRoll + counterDefense + preparation.detectionPenalty;
-      const detectionThreshold = 10 + Number(operation.spy_skill_bonus);
-      const detectionMargin = detectionTotal - detectionThreshold;
-      const detectionLevel = detectionMargin < 0 ? 0 : detectionMargin <= 3 ? 1 : detectionMargin <= 7 ? 2 : 3;
-      const captured = detectionLevel >= 3;
-      await client.query(
-        `UPDATE espionage_operations SET status='RESOLVED',target_building_type=$2,valid_target=$3,
-          attack_roll=$4,attack_total=$5,defense_roll=$6,defense_total=$7,margin=$8,severity=$9,
-          detection_roll=$10,detection_total=$11,detection_level=$12,captured=$13,effect_text=$14,resolved_at=NOW()
-         WHERE id=$1`,
-        [operation.id, selected?.building_type ?? null, validTarget, attackRoll, attackTotal, defenseRoll, defenseTotal, margin, severity,
-          detectionRoll, detectionTotal, detectionLevel, captured, effectText]
-      );
-      if (severity !== "NONE") await awardCharacterSpecializationProgress(client,operation.spy_character_id,specialization as CharacterSpecialization);
-      if (counter && (severity === "NONE" || detectionLevel > 0)) await awardCharacterSpecializationProgress(client,counter.id,"COUNTER_SPY");
-      if (captured && operation.target_type === "ASSASSINATE") {
-        await markCharacterDead({
-          client,characterId:operation.spy_character_id,deathSettlementId:operation.target_settlement_id,
-          reason:"Casus yakalandığı için görevi iptal edildi."
-        });
-      } else if (captured) {
-        await client.query("UPDATE country_characters SET assignment='CAPTURED',assigned_settlement_id=$1 WHERE id=$2", [operation.target_settlement_id, operation.spy_character_id]);
-      } else {
-        await client.query("UPDATE country_characters SET assignment='ESPIONAGE_RETURNING',assigned_settlement_id=$1 WHERE id=$2", [operation.target_settlement_id, operation.spy_character_id]);
+      const preparedGroup: PreparedEspionageResolution[] = [];
+      for (const candidate of competitionGroup) {
+        await client.query("SAVEPOINT espionage_operation");
+        try {
+          const stillRunnable = await client.query(
+            `SELECT 1
+               FROM espionage_operations current_operation
+               JOIN country_characters current_spy ON current_spy.id=current_operation.spy_character_id
+              WHERE current_operation.id=$1 AND current_operation.status='TRAVELING'
+                AND current_spy.character_status='ACTIVE'
+              FOR UPDATE OF current_operation`,
+            [candidate.id]
+          );
+          if (stillRunnable.rowCount) preparedGroup.push(await prepareEspionageResolution(client,candidate,turn));
+          await client.query("RELEASE SAVEPOINT espionage_operation");
+        } catch (error) {
+          await client.query("ROLLBACK TO SAVEPOINT espionage_operation");
+          await client.query("RELEASE SAVEPOINT espionage_operation");
+          failures.push({
+            operationId:candidate.id,targetType:candidate.target_type,
+            message:error instanceof Error ? error.message : String(error)
+          });
+          logger.error({error,guildId,turn,operationId:candidate.id,targetType:candidate.target_type},"Tek casusluk operasyonu hazırlanamadı; diğer operasyonlara devam ediliyor");
+        }
       }
-      await client.query("RELEASE SAVEPOINT espionage_operation");
-      } catch (error) {
-        await client.query("ROLLBACK TO SAVEPOINT espionage_operation");
-        await client.query("RELEASE SAVEPOINT espionage_operation");
-        failures.push({
-          operationId:operation.id,targetType:operation.target_type,
-          message:error instanceof Error ? error.message : String(error)
-        });
-        logger.error({error,guildId,turn,operationId:operation.id,targetType:operation.target_type},"Tek casusluk operasyonu çözümlenemedi; diğer operasyonlara devam ediliyor");
+
+      const supplyWinnerId = operation.target_type === "DESTROY_SIEGE_SUPPLIES"
+        ? selectSiegeSupplyCompetitionWinner(preparedGroup.map((prepared) => ({
+            id:prepared.operation.id,validTarget:prepared.validTarget,severity:prepared.severity,
+            margin:prepared.margin,attackTotal:prepared.attackTotal,createdAt:prepared.operation.created_at
+          })))
+        : null;
+
+      for (const prepared of preparedGroup) {
+        await client.query("SAVEPOINT espionage_operation");
+        try {
+          const lostSupplyCompetition = prepared.operation.target_type === "DESTROY_SIEGE_SUPPLIES"
+            && supplyWinnerId !== null && prepared.operation.id !== supplyWinnerId;
+          await finalizeEspionageResolution(client,prepared,turn,lostSupplyCompetition);
+          await client.query("RELEASE SAVEPOINT espionage_operation");
+        } catch (error) {
+          await client.query("ROLLBACK TO SAVEPOINT espionage_operation");
+          await client.query("RELEASE SAVEPOINT espionage_operation");
+          failures.push({
+            operationId:prepared.operation.id,targetType:prepared.operation.target_type,
+            message:error instanceof Error ? error.message : String(error)
+          });
+          logger.error({error,guildId,turn,operationId:prepared.operation.id,targetType:prepared.operation.target_type},"Tek casusluk operasyonu çözümlenemedi; diğer operasyonlara devam ediliyor");
+        }
       }
     }
     if (!due.length) return {resolved:[],failures};

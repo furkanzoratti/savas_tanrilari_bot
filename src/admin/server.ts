@@ -133,6 +133,11 @@ const server = createServer(async (request, response) => {
       if (!requireSession(request, response)) return;
       return json(response, 200, await adminPanelService.activeSieges());
     }
+    const siegeRosterOptionsMatch = request.method === "GET" ? url.pathname.match(/^\/api\/sieges\/([0-9a-f-]+)\/roster-options$/iu) : null;
+    if (siegeRosterOptionsMatch) {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await adminPanelService.activeSiegeRosterOptions(siegeRosterOptionsMatch[1]!));
+    }
     const armyDetailMatch = request.method === "GET" ? url.pathname.match(/^\/api\/armies\/([0-9a-f-]+)$/iu) : null;
     if (armyDetailMatch) {
       if (!requireSession(request, response)) return;
@@ -223,6 +228,18 @@ const server = createServer(async (request, response) => {
       const session = requireMutation(request, response);
       if (!session) return;
       return json(response, 200, await adminPanelService.cancelCharacterAssignment(session.sub, characterCancelMatch[1]!));
+    }
+    const siegeParticipantMatch = request.method === "POST" ? url.pathname.match(/^\/api\/admin\/sieges\/([0-9a-f-]+)\/participants$/iu) : null;
+    if (siegeParticipantMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.mutateActiveSiegeParticipant(session.sub, siegeParticipantMatch[1]!, await body(request)));
+    }
+    const siegeArmyMatch = request.method === "POST" ? url.pathname.match(/^\/api\/admin\/sieges\/([0-9a-f-]+)\/armies$/iu) : null;
+    if (siegeArmyMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.mutateActiveSiegeArmy(session.sub, siegeArmyMatch[1]!, await body(request)));
     }
     const armyUpdateMatch = request.method === "PATCH" ? url.pathname.match(/^\/api\/admin\/armies\/([0-9a-f-]+)$/iu) : null;
     if (armyUpdateMatch) {

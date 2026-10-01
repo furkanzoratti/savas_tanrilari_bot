@@ -5,6 +5,8 @@ describe("GM panel audit presenter", () => {
   it("eylem kodlarını anlaşılır Türkçe başlıklara çevirir", () => {
     expect(auditActionLabel("admin.panel.character.assignment.cancel")).toBe("Karakter görevi iptal edildi");
     expect(auditActionLabel("battle.army.add")).toBe("Savaşa ordu eklendi");
+    expect(auditActionLabel("admin.panel.battle.participant.add")).toBe("Aktif kuşatmaya devlet eklendi");
+    expect(auditActionLabel("admin.panel.battle.army.add")).toBe("Aktif kuşatmaya ordu eklendi");
   });
 
   it("iç içe ayrıntılardaki kimlikleri adlarla özetler", () => {

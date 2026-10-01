@@ -232,10 +232,92 @@ async function battlesPage() {
   state.catalog = catalog;
   const active = rows.filter((row) => !["FINISHED", "CANCELLED"].includes(row.status)).length;
   page.innerHTML = `<div class="page-head"><div><h1>Savaşlar</h1><p>Aktif kuşatma ordularına müdahale ve bütün savaş formlarının yönetici özeti</p></div><span class="pill">${number(active)} aktif savaş</span></div>
-    <div class="section-title"><h2>Aktif Kuşatmalar ve Ordular</h2><span>${number(sieges.length)} kuşatma</span></div><section class="siege-list">${sieges.map((siege) => `<article class="card"><div class="card-head"><div><h3>${escapeHtml(siege.settlementName || "Yerleşke belirtilmemiş")}</h3><p>${escapeHtml(battleStatusLabels[siege.status] || siege.status)} · Değerlendirme ${number(siege.roundNumber)} · ${escapeHtml(siegePhaseLabels[siege.siegePhase] || siege.siegePhase || "Hücum")}</p></div></div><div class="compact-grid">${siege.armies.map((army) => `<div class="record-card"><strong>${escapeHtml(army.countryName)} · ${escapeHtml(army.name)}</strong><span>${army.sideKey} Tarafı · ${number(army.total)} asker</span><small>${army.units.map((unit) => `${escapeHtml(unit.originName || "Köken yok")}: ${escapeHtml(state.catalog.find((item) => item.value === unit.unitType)?.label || unit.unitType)} ${number(unit.quantity)}`).join(" · ") || "Birlik yok"}</small><button class="button" data-edit-army="${army.id}">Askerleri düzenle</button></div>`).join("")}</div></article>`).join("") || '<div class="card empty">Aktif kuşatma bulunmuyor.</div>'}</section>
+    <div class="section-title"><h2>Aktif Kuşatmalar ve Ordular</h2><span>${number(sieges.length)} kuşatma</span></div><section class="siege-list">${sieges.map((siege) => `<article class="card"><div class="card-head"><div><h3>${escapeHtml(siege.settlementName || "Yerleşke belirtilmemiş")}</h3><p>${escapeHtml(siege.countryAName || "A Tarafı")} — ${escapeHtml(siege.countryBName || "B Tarafı")} · ${escapeHtml(battleStatusLabels[siege.status] || siege.status)} · Değerlendirme ${number(siege.roundNumber)} · ${escapeHtml(siegePhaseLabels[siege.siegePhase] || siege.siegePhase || "Hücum")}</p></div><button class="button primary" data-manage-siege="${siege.id}">Katılımcıları yönet</button></div><div class="compact-grid">${siege.armies.map((army) => `<div class="record-card"><strong>${escapeHtml(army.countryName)} · ${escapeHtml(army.name)}</strong><span>${army.sideKey} Tarafı · ${number(army.total)} asker</span><small>${army.units.map((unit) => `${escapeHtml(unit.originName || "Köken yok")}: ${escapeHtml(state.catalog.find((item) => item.value === unit.unitType)?.label || unit.unitType)} ${number(unit.quantity)}`).join(" · ") || "Birlik yok"}</small><button class="button" data-edit-army="${army.id}">Askerleri düzenle</button></div>`).join("") || '<div class="empty">Henüz kalıcı ordu eklenmemiş.</div>'}</div></article>`).join("") || '<div class="card empty">Aktif kuşatma bulunmuyor.</div>'}</section>
     <div class="section-title"><h2>Tüm Savaşlar</h2><span>${number(rows.length)} kayıt</span></div><section class="battle-grid">${rows.map((row) => `<article class="card battle-card"><div class="card-head"><div><h3>${escapeHtml(row.country_a_name || "A Tarafı")} — ${escapeHtml(row.country_b_name || "B Tarafı")}</h3><p>${escapeHtml(terrainLabels[row.terrain] || row.terrain)} · Tur ${number(row.round_number)}${row.defender_settlement_name ? ` · ${escapeHtml(row.defender_settlement_name)}` : ""}</p></div><span class="pill ${["FINISHED", "CANCELLED"].includes(row.status) ? "neutral" : ""}">${escapeHtml(battleStatusLabels[row.status] || row.status)}</span></div><div class="battle-sides"><div><strong>${escapeHtml(row.country_a_name || "A")}</strong><span>${number(row.current_a)} / ${number(row.initial_a)}</span><small>${number(row.losses_a)} kayıp · ${number(row.pressure_a)} baskı</small></div><div><strong>${escapeHtml(row.country_b_name || "B")}</strong><span>${number(row.current_b)} / ${number(row.initial_b)}</span><small>${number(row.losses_b)} kayıp · ${number(row.pressure_b)} baskı</small></div></div>${row.wall_max_hp ? `<div class="battle-structure">Sur ${number(row.wall_current_hp)}/${number(row.wall_max_hp)} · Kapı ${number(row.gate_current_hp)}/${number(row.gate_max_hp)}</div>` : ""}</article>`).join("") || '<div class="card empty">Savaş kaydı bulunmuyor.</div>'}</section>`;
   document.querySelectorAll("[data-edit-army]").forEach((button) => button.addEventListener("click", () => {
     openArmyEditor(button.dataset.editArmy).catch((error) => toast(error.message, "error"));
+  }));
+  document.querySelectorAll("[data-manage-siege]").forEach((button) => button.addEventListener("click", () => {
+    const siege = sieges.find((item) => item.id === button.dataset.manageSiege);
+    openSiegeRosterManager(siege).catch((error) => toast(error.message, "error"));
+  }));
+}
+
+async function openSiegeRosterManager(siege) {
+  if (!siege) return;
+  const data = await api(`/api/sieges/${siege.id}/roster-options`);
+  const sideName = (side) => side === "A" ? "A · Kuşatan" : "B · Savunan";
+  const participants = data.countries.filter((country) => country.side_key);
+  const unassignedCountries = data.countries.filter((country) => !country.side_key);
+  const assignedArmies = data.armies.filter((army) => army.assigned_side);
+  const participantCards = participants.map((country) => {
+    const armies = assignedArmies.filter((army) => army.country_id === country.id);
+    return `<div class="record-card"><strong>${escapeHtml(country.name)}</strong><span>${sideName(country.side_key)}${country.is_primary ? " · Ana devlet" : ""}</span><small>${armies.map((army) => `${escapeHtml(army.name)} (${number(army.total)})`).join(" · ") || "Bağlı kalıcı ordu yok"}</small>${country.is_primary ? "" : `<button type="button" class="button compact danger" data-siege-remove-country="${country.id}" data-side="${country.side_key}">Devleti çıkar</button>`}</div>`;
+  }).join("");
+  const armyCards = assignedArmies.map((army) => `<div class="army-unit-line"><div><strong>${escapeHtml(army.country_name)} · ${escapeHtml(army.name)}</strong><small>${sideName(army.assigned_side)} · ${number(army.total)} asker</small></div><button type="button" class="button compact danger" data-siege-remove-army="${army.id}" data-side="${army.assigned_side}">Çıkar</button></div>`).join("");
+  openEditor("Kuşatma katılımcılarını yönet", `${siege.settlementName || "Kuşatma"} · ${battleStatusLabels[data.status] || data.status}`, `
+    <div class="preview-warning"><strong>Aktif savaşa takviye işlemi</strong><span>Eklenen ordu mevcut ve başlangıç kuvvet havuzuna birlikte yazılır; önceki kayıplar değişmez. Ordu kuşatma aletleriyle birlikte eklenir. Değerlendirme zarı atılmaya başladıysa önce o değerlendirme sonuçlandırılmalıdır.</span></div>
+    <div class="section-title"><h2>Mevcut devletler</h2><span>${number(participants.length)} devlet</span></div><div class="compact-grid">${participantCards || '<div class="empty">Katılımcı bulunamadı.</div>'}</div>
+    <div class="section-title"><h2>Devlet ekle</h2><span>Önce tarafı seç</span></div><div class="form-grid"><label>Taraf<select id="siege-country-side"><option value="A">A · Kuşatan</option><option value="B">B · Savunan</option></select></label><label>Devlet<select id="siege-country-id">${unassignedCountries.map((country) => `<option value="${country.id}">${escapeHtml(country.name)}</option>`).join("")}</select></label></div><button type="button" class="button primary" id="siege-add-country" ${unassignedCountries.length ? "" : "disabled"}>Devleti kuşatmaya ekle</button>
+    <div class="section-title"><h2>Ordu ekle</h2><span>Yalnız uygun ordular</span></div><div class="form-grid"><label>Taraf<select id="siege-army-side"><option value="A">A · Kuşatan</option><option value="B">B · Savunan</option></select></label><label>Devlet<select id="siege-army-country"></select></label><label>Ordu<select id="siege-army-id"></select></label></div><button type="button" class="button primary" id="siege-add-army">Orduyu kuşatmaya sok</button>
+    <div class="section-title"><h2>Bağlı ordular</h2><span>${number(assignedArmies.length)} ordu</span></div><div class="army-unit-editor">${armyCards || '<div class="empty">Bağlı kalıcı ordu yok.</div>'}</div>
+  `, null);
+
+  const armySide = document.getElementById("siege-army-side");
+  const armyCountry = document.getElementById("siege-army-country");
+  const armySelect = document.getElementById("siege-army-id");
+  const addArmyButton = document.getElementById("siege-add-army");
+  const refreshArmyCountries = () => {
+    const countries = participants.filter((country) => country.side_key === armySide.value);
+    armyCountry.innerHTML = countries.map((country) => `<option value="${country.id}">${escapeHtml(country.name)}</option>`).join("");
+    refreshArmyChoices();
+  };
+  const refreshArmyChoices = () => {
+    const armies = data.armies.filter((army) => army.country_id === armyCountry.value && !army.assigned_side);
+    armySelect.innerHTML = armies.map((army) => `<option value="${army.id}" ${army.blocking_reason ? "disabled" : ""}>${escapeHtml(army.name)} · ${number(army.total)} asker${army.blocking_reason ? ` · ${escapeHtml(army.blocking_reason)}` : ""}</option>`).join("");
+    const selectable = armies.some((army) => !army.blocking_reason && Number(army.total) > 0);
+    addArmyButton.disabled = !selectable;
+    if (selectable) armySelect.value = armies.find((army) => !army.blocking_reason && Number(army.total) > 0)?.id || "";
+  };
+  armySide.addEventListener("change", refreshArmyCountries);
+  armyCountry.addEventListener("change", refreshArmyChoices);
+  refreshArmyCountries();
+
+  document.getElementById("siege-add-country").addEventListener("click", async (event) => {
+    event.currentTarget.disabled = true;
+    try {
+      await api(`/api/admin/sieges/${siege.id}/participants`, { method:"POST",body:JSON.stringify({
+        countryId:document.getElementById("siege-country-id").value,side:document.getElementById("siege-country-side").value,action:"ADD"
+      }) });
+      closeEditor(); toast("Devlet aktif kuşatmaya eklendi."); await battlesPage();
+    } catch (error) { toast(error.message,"error"); event.currentTarget.disabled = false; }
+  });
+  addArmyButton.addEventListener("click", async (event) => {
+    event.currentTarget.disabled = true;
+    try {
+      await api(`/api/admin/sieges/${siege.id}/armies`, { method:"POST",body:JSON.stringify({
+        armyId:armySelect.value,side:armySide.value,action:"ADD"
+      }) });
+      closeEditor(); toast("Ordu aktif kuşatmaya takviye olarak eklendi."); await battlesPage();
+    } catch (error) { toast(error.message,"error"); event.currentTarget.disabled = false; }
+  });
+  document.querySelectorAll("[data-siege-remove-army]").forEach((button) => button.addEventListener("click", async () => {
+    const army = assignedArmies.find((item) => item.id === button.dataset.siegeRemoveArmy);
+    if (!army || !window.confirm(`${army.name} ordusunu aktif kuşatmadan çıkarmak istediğine emin misin? Savaşa katıldıktan sonra zar atıldıysa işlem engellenecek.`)) return;
+    button.disabled = true;
+    try {
+      await api(`/api/admin/sieges/${siege.id}/armies`, { method:"POST",body:JSON.stringify({ armyId:army.id,side:button.dataset.side,action:"REMOVE" }) });
+      closeEditor(); toast("Ordu kuşatmadan çıkarıldı."); await battlesPage();
+    } catch (error) { toast(error.message,"error"); button.disabled = false; }
+  }));
+  document.querySelectorAll("[data-siege-remove-country]").forEach((button) => button.addEventListener("click", async () => {
+    const country = participants.find((item) => item.id === button.dataset.siegeRemoveCountry);
+    if (!country || !window.confirm(`${country.name} devletini aktif kuşatmadan çıkarmak istediğine emin misin?`)) return;
+    button.disabled = true;
+    try {
+      await api(`/api/admin/sieges/${siege.id}/participants`, { method:"POST",body:JSON.stringify({ countryId:country.id,side:button.dataset.side,action:"REMOVE" }) });
+      closeEditor(); toast("Devlet kuşatmadan çıkarıldı."); await battlesPage();
+    } catch (error) { toast(error.message,"error"); button.disabled = false; }
   }));
 }
 
@@ -390,7 +472,7 @@ function openEditor(title, subtitle, content, submit) {
   document.getElementById("editor-content").innerHTML = content;
   document.getElementById("editor-error").hidden = true;
   const saveButton = document.getElementById("editor-save");
-  saveButton.hidden = false;
+  saveButton.hidden = typeof submit !== "function";
   saveButton.disabled = false;
   saveButton.textContent = "Değişiklikleri kaydet";
   editorModal.hidden = false;
