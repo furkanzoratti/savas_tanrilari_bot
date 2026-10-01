@@ -13,6 +13,7 @@ import {
   COMMANDER_DOCTRINES
 } from "../domain/characters.js";
 import { CULTURE_GROUPS, type CultureGroup } from "../domain/cultures.js";
+import { MERCENARY_COMPANIES, type MercenaryCompanyKey } from "../domain/mercenaries.js";
 import { RESOURCES, type ResourceType } from "../domain/resources.js";
 import { RELIGIONS, isReligionKey, secondaryReligionFor, type ReligionKey } from "../domain/religions.js";
 import { adminConfig } from "./config.js";
@@ -243,6 +244,16 @@ function defaultSiegeTarget(asset: SiegeAssetType): SiegeTarget {
   if (["ladder_group", "mantlet", "siege_tower"].includes(asset)) return "ASSAULT";
   if (asset === "catapult") return "WALL";
   return "ARMY";
+}
+
+export function mercenaryAssignmentViews(raw: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item) => {
+    const assignment = item && typeof item === "object" ? item as Record<string, unknown> : {};
+    const companyKey = String(assignment.companyKey ?? "");
+    const company = MERCENARY_COMPANIES[companyKey as MercenaryCompanyKey];
+    return { ...assignment, companyName: company?.name ?? companyKey };
+  });
 }
 
 async function armyContext(client: AdminDbClient, input: AdminArmyInput) {
@@ -502,7 +513,7 @@ export const adminPanelService = {
   },
 
   async battles() {
-    return (await adminPool.query(
+    const rows = (await adminPool.query(
       `SELECT battle.id,battle.terrain,battle.status,battle.round_number,battle.siege_phase,
               battle.narrative,battle.winner_side,battle.finish_reason,battle.created_at,battle.updated_at,
               battle.wall_current_hp,battle.wall_max_hp,battle.gate_current_hp,battle.gate_max_hp,
@@ -510,7 +521,24 @@ export const adminPanelService = {
               country_a.name AS country_a_name,side_a.current_total AS current_a,
               side_a.initial_total AS initial_a,side_a.total_losses AS losses_a,side_a.pressure AS pressure_a,
               country_b.name AS country_b_name,side_b.current_total AS current_b,
-              side_b.initial_total AS initial_b,side_b.total_losses AS losses_b,side_b.pressure AS pressure_b
+              side_b.initial_total AS initial_b,side_b.total_losses AS losses_b,side_b.pressure AS pressure_b,
+              COALESCE((
+                SELECT jsonb_agg(jsonb_build_object(
+                  'contractId',assignment.contract_id,
+                  'sideKey',assignment.side_key,
+                  'companyKey',contract.company_key,
+                  'countryId',contract.country_id,
+                  'countryName',owner.name,
+                  'status',contract.status,
+                  'land',assignment.initial_land,
+                  'ships',assignment.initial_ships,
+                  'assets',assignment.initial_assets
+                ) ORDER BY assignment.side_key,owner.name,contract.company_key)
+                FROM battle_mercenary_assignments assignment
+                JOIN mercenary_contracts contract ON contract.id=assignment.contract_id
+                JOIN countries owner ON owner.id=contract.country_id
+                WHERE assignment.battle_id=battle.id
+              ),'[]'::jsonb) AS mercenaries
          FROM battles battle
          LEFT JOIN battle_sides side_a ON side_a.battle_id=battle.id AND side_a.side_key='A'
          LEFT JOIN countries country_a ON country_a.id=side_a.country_id
@@ -522,7 +550,8 @@ export const adminPanelService = {
                  battle.updated_at DESC
         LIMIT 250`,
       [adminConfig.guildId]
-    )).rows;
+    )).rows as Array<Record<string, unknown>>;
+    return rows.map((row) => ({ ...row, mercenaries: mercenaryAssignmentViews(row.mercenaries) }));
   },
 
   async country(countryId: string) {
@@ -785,6 +814,14 @@ export const adminPanelService = {
         "SELECT side_key,is_primary,composition,initial_composition FROM battle_side_participants WHERE battle_id=$1 AND country_id=$2 FOR UPDATE",
         [battle.id,country.id]
       )).rows[0];
+      if ((await client.query(
+        `SELECT 1 FROM battle_rolls roll
+          JOIN battles current_battle ON current_battle.id=roll.battle_id
+         WHERE roll.battle_id=$1 AND roll.round_number=current_battle.round_number LIMIT 1`,
+        [battle.id]
+      )).rowCount) {
+        throw new Error("Başlamış bir değerlendirmede taraf devletleri değiştirilemez. Mevcut değerlendirmeyi sonuçlandırdıktan sonra tekrar deneyin.");
+      }
       if (input.action === "ADD") {
         if (existing) throw new Error(existing.side_key === input.side ? "Bu devlet zaten seçilen tarafta." : "Bu devlet karşı tarafta zaten bulunuyor.");
         await client.query(

@@ -7,7 +7,7 @@ vi.hoisted(()=>{
   process.env.ADMIN_GUILD_ID="456";
   process.env.ADMIN_SESSION_SECRET="0123456789abcdef0123456789abcdef";
 });
-import { addBattleComposition, subtractBattleComposition } from "./service.js";
+import { addBattleComposition, mercenaryAssignmentViews, subtractBattleComposition } from "./service.js";
 
 describe("panel aktif kuşatma takviyesi",()=>{
   it("takviye birliklerini mevcut savaş havuzuna tür bazında ekler",()=>{
@@ -26,5 +26,11 @@ describe("panel aktif kuşatma takviyesi",()=>{
 
   it("çıkarma sırasında negatif birlik üretmez",()=>{
     expect(subtractBattleComposition({ archer:500 },{ archer:800 })).toEqual({});
+  });
+
+  it("savaşa atanmış paralı asker anahtarını panelde görülecek ada çevirir",()=>{
+    expect(mercenaryAssignmentViews([{ companyKey:"hellas_breach_company",sideKey:"A" }])).toEqual([
+      expect.objectContaining({companyKey:"hellas_breach_company",companyName:"Hellas Gedik Birliği",sideKey:"A"})
+    ]);
   });
 });

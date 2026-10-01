@@ -12,6 +12,7 @@ import { completedRoleReportRanges, roleReportService, type RoleReportPeriod } f
 import { renderWelcomeMessage, welcomeService } from "./services/welcome-service.js";
 import { publishGreatPowerRanking } from "./discord/great-power-ui.js";
 import { movementLogService } from "./services/movement-log-service.js";
+import { refreshChangedBattleCards } from "./discord/battle-ui.js";
 
 function countWords(content: string): number {
   const cleaned = content
@@ -130,6 +131,7 @@ client.once("clientReady", async (readyClient) => {
   await sendCompletedRoleReports();
   await sendScheduledGreatPowerRanking();
   await publishMovementLogs();
+  await publishChangedBattleCards();
 });
 
 async function publishMovementLogs():Promise<void>{
@@ -138,6 +140,18 @@ async function publishMovementLogs():Promise<void>{
     try{await movementLogService.publishPending(client,guild.id,50);}
     catch(error){logger.error({error,guildId:guild.id},"Hareket logları yayımlanamadı; kayıtlar kuyrukta kalacak");}
   }
+}
+
+let battleCardRefreshRunning=false;
+async function publishChangedBattleCards():Promise<void>{
+  if(!client.isReady()||battleCardRefreshRunning)return;
+  battleCardRefreshRunning=true;
+  try{
+    for(const guild of client.guilds.cache.values()){
+      const result=await refreshChangedBattleCards(client,guild.id);
+      if(result.updated||result.failed)logger.info({guildId:guild.id,...result},"Değişen savaş kartları eşitlendi");
+    }
+  }finally{battleCardRefreshRunning=false;}
 }
 
 // 23:59:50 sonrası kapanış raporunu yakalar; 00:00'dan itibaren komutlar yeni
@@ -154,6 +168,10 @@ const movementLogTimer=setInterval(()=>{
   void publishMovementLogs().catch((error)=>logger.error(error,"Hareket log yayını başarısız"));
 },10_000);
 movementLogTimer.unref();
+const battleCardRefreshTimer=setInterval(()=>{
+  void publishChangedBattleCards().catch((error)=>logger.error(error,"Savaş kartı otomatik eşitlemesi başarısız"));
+},5_000);
+battleCardRefreshTimer.unref();
 const healthServer = startHealthServer(client);
 await client.login(config.DISCORD_TOKEN);
 
@@ -162,6 +180,7 @@ async function shutdown(signal: string) {
   clearInterval(roleReportTimer);
   clearInterval(greatPowerTimer);
   clearInterval(movementLogTimer);
+  clearInterval(battleCardRefreshTimer);
   healthServer.close();
   client.destroy();
   await pool.end();

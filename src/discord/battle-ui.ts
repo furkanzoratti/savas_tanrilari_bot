@@ -352,7 +352,7 @@ export function battleRollEmbed(view: BattleView, side: BattleSideKey): EmbedBui
     .setFooter({ text: `${view.rolls.length}/2 taraf zarını tamamladı${roll.is_proxy ? " • DM vekili" : ""}` });
 }
 
-async function refreshBattleCard(client: Client, view: BattleView): Promise<boolean> {
+export async function refreshBattleCard(client: Client, view: BattleView): Promise<boolean> {
   if (!view.battle.public_message_id) return false;
   try {
     const channel = await client.channels.fetch(view.battle.channel_id);
@@ -364,6 +364,38 @@ async function refreshBattleCard(client: Client, view: BattleView): Promise<bool
     console.error("Savaş kartı güncellenemedi", { battleId: view.battle.id, error });
     return false;
   }
+}
+
+const lastAutomaticCardVersions = new Map<string, number>();
+
+export async function refreshChangedBattleCards(client: Client, guildId: string): Promise<{ updated: number; failed: number }> {
+  const versions = await battleService.activeCardVersionsForGuild(guildId);
+  const activeKeys = new Set(versions.map((row) => `${guildId}:${row.id}`));
+  let updated = 0;
+  let failed = 0;
+  for (const row of versions) {
+    const key = `${guildId}:${row.id}`;
+    const version = new Date(row.updated_at).getTime();
+    if (lastAutomaticCardVersions.get(key) === version) continue;
+    try {
+      const view = await battleService.byId(guildId,row.id);
+      if (!view || !view.battle.public_message_id) {
+        lastAutomaticCardVersions.set(key,version);
+        continue;
+      }
+      if (await refreshBattleCard(client,view)) {
+        lastAutomaticCardVersions.set(key,version);
+        updated += 1;
+      } else failed += 1;
+    } catch (error) {
+      failed += 1;
+      console.error("Değişen savaş kartı otomatik yenilenemedi",{ guildId,battleId:row.id,error });
+    }
+  }
+  for (const key of lastAutomaticCardVersions.keys()) {
+    if (key.startsWith(`${guildId}:`) && !activeKeys.has(key)) lastAutomaticCardVersions.delete(key);
+  }
+  return { updated,failed };
 }
 
 async function retireBattleCard(client: Client, view: BattleView, replacementMessageId: string): Promise<void> {

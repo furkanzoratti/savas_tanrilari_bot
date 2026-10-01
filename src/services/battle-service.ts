@@ -2159,6 +2159,24 @@ export const battleService = {
     });
   },
 
+  async activeCardVersionsForGuild(guildId: string): Promise<Array<{ id: string; updated_at: Date }>> {
+    return (await pool.query<{ id: string; updated_at: Date }>(
+      `SELECT id,updated_at FROM battles
+        WHERE guild_id=$1 AND public_message_id IS NOT NULL
+          AND status NOT IN ('FINISHED','CANCELLED')
+        ORDER BY updated_at,id`,
+      [guildId]
+    )).rows;
+  },
+
+  async byId(guildId: string, battleId: string): Promise<BattleView | null> {
+    const battle = (await pool.query<{ id: string }>(
+      "SELECT id FROM battles WHERE id=$1 AND guild_id=$2",
+      [battleId,guildId]
+    )).rows[0];
+    return battle ? loadView(pool as unknown as DbClient,battle.id) : null;
+  },
+
   async lockNavalOrder(input:{
     guildId:string;channelId:string;battleId:string;actorId:string;isGameMaster:boolean;side:BattleSideKey;
   }):Promise<BattleView>{

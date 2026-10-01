@@ -5,8 +5,8 @@ vi.hoisted(() => {
   process.env.DISCORD_CLIENT_ID = "test-client";
   process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
 });
-import { battleEmbed, battleRollEmbed, playerFleetStatusEmbeds } from "./battle-ui.js";
-import type { BattleView, PlayerBattleFleetStatus } from "../services/battle-service.js";
+import { battleEmbed, battleRollEmbed, playerFleetStatusEmbeds, refreshChangedBattleCards } from "./battle-ui.js";
+import { battleService, type BattleView, type PlayerBattleFleetStatus } from "../services/battle-service.js";
 
 function siegeView(): BattleView {
   return {
@@ -108,6 +108,27 @@ describe("kuşatma bilgi gizliliği", () => {
     expect(json).toContain("Roma: **Tekdüze Ordu**");
     expect(json).toContain("Savunucu: **Tekdüze Ordu**");
     expect(json).not.toContain("0,85");
+  });
+});
+
+describe("panel sonrası Discord savaş kartı eşitlemesi", () => {
+  it("updated_at değiştiğinde kartı yeniler ve aynı sürümü ikinci kez düzenlemez", async () => {
+    const view=siegeView();
+    view.battle.id="panel-sync-battle";
+    view.battle.guild_id="panel-sync-guild";
+    view.battle.public_message_id="message-1";
+    const edit=vi.fn().mockResolvedValue(undefined);
+    const client={channels:{fetch:vi.fn().mockResolvedValue({
+      isTextBased:()=>true,isDMBased:()=>false,messages:{fetch:vi.fn().mockResolvedValue({edit})}
+    })}} as any;
+    vi.spyOn(battleService,"activeCardVersionsForGuild").mockResolvedValue([
+      {id:view.battle.id,updated_at:new Date("2026-10-01T12:00:00.000Z")}
+    ]);
+    vi.spyOn(battleService,"byId").mockResolvedValue(view);
+
+    expect(await refreshChangedBattleCards(client,view.battle.guild_id)).toEqual({updated:1,failed:0});
+    expect(await refreshChangedBattleCards(client,view.battle.guild_id)).toEqual({updated:0,failed:0});
+    expect(edit).toHaveBeenCalledTimes(1);
   });
 });
 
