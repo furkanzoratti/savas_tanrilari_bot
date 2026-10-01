@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { DbClient } from "../db/pool.js";
 import { pool, withTransaction } from "../db/pool.js";
 import {
-  BASE_SIEGE_STARVATION_TURNS, BATTLE_TERRAINS, BATTLE_UNIT_STATS, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, SIEGE_ASSAULT_FRONTAGE, SIEGE_ATTACKER_DISMOUNT_MAP, activeSiegeAssaultAssets, baseRetreatRate, battleEnds, commanderClashBonus, compositionTotal, egyptianWarChariotPressureBonus, fieldPressureAfterRound, hasAssaultForce, orderState, resolveRound, restoreSiegeAttackerCasualtyTypes, roundDamageFactors, siegeAssaultAccess, siegeAssaultComposition, siegeAssaultGroups, siegeAttackerBreaks, siegeAttackerDismountedComposition, siegeDefenderCaptured, siegeDefenderComposition, siegeDefenseModifiers, siegeOrderState, siegePressureAfterRound,
+  BASE_SIEGE_STARVATION_TURNS, BATTLE_TERRAINS, BATTLE_UNIT_STATS, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, SIEGE_ASSAULT_FRONTAGE, SIEGE_ATTACKER_DISMOUNT_MAP, activeSiegeAssaultAssets, baseRetreatRate, battleEnds, commanderClashBonus, compositionTotal, egyptianWarChariotPressureBonus, fieldPressureAfterRound, hasAssaultForce, orderState, resolveRound, restoreSiegeAttackerCasualtyTypes, roundDamageFactors, siegeAssaultAccess, siegeAssaultComposition, siegeAssaultGroups, siegeAttackerBreaks, siegeAttackerDismountedComposition, siegeDefenderCaptured, siegeDefenderGroups, siegeDefenderReserveBonus, siegeDefenseModifiers, siegeFrontageProfile, siegeOrderState, siegePressureAfterRound,
   rollBattlePool, rollNavalPool, rollSiegeSupport,
   type BattleComposition, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain,
   type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeComposition, type SiegeDismountUnitType, type SiegeTarget, type SiegeTargets
@@ -131,6 +131,8 @@ export interface BattleRoundResult {
   pressureTier: string; pressureWinner: BattleSideKey | null; reserveReliefA: number; reserveReliefB: number;
   defenderRawClash: number; defenderEffectiveClash: number; defenderRawDamage: number; defenderEffectiveDamage: number;
   defenderClashMultiplier: number; defenderDamageMultiplier: number;
+  attackerClashMultiplier?: number; attackerDamageMultiplier?: number;
+  defenderIncomingDamageMultiplier?: number; defenderReserveTiers?: number;
   disabledA:number;disabledB:number;
   chariotPressureBonusA:number;chariotPressureBonusB:number;
   navalOrderA?:NavalBattleOrder;navalOrderB?:NavalBattleOrder;
@@ -446,6 +448,7 @@ async function latestInChannel(client: DbClient, guildId: string, channelId: str
 // Atölye Sv3 bonusu yalnızca o atölyede üretilen kayıtlı topçulara uygulanır.
 
 function expectedSide(view: BattleView): BattleSideKey {
+  if (view.battle.terrain === "SIEGE") return !view.rolls.length ? "A" : "B";
   return !view.rolls.length ? view.battle.first_side : view.battle.first_side === "A" ? "B" : "A";
 }
 
@@ -1158,7 +1161,7 @@ export const battleService = {
         defenderSettlementId = settlement.id;
       }
       const id = randomUUID();
-      const firstSide: BattleSideKey = input.terrain === "AMBUSH" ? "A" : Math.random() < 0.5 ? "A" : "B";
+      const firstSide: BattleSideKey = ["AMBUSH", "SIEGE"].includes(input.terrain) ? "A" : Math.random() < 0.5 ? "A" : "B";
       const wallHp = input.terrain === "SIEGE" ? 30_000 : null;
       const gateHp = input.terrain === "SIEGE" ? 1_000 : null;
       const siegePhase: SiegePhase | null = input.terrain === "SIEGE" ? "BOMBARDMENT" : null;
@@ -2210,10 +2213,8 @@ export const battleService = {
       if (!active || active.id !== input.battleId) throw new GameError("Bu düğme artık geçerli değil; güncel savaş kartını kullanın.");
       const view = await loadView(client, active.id, true);
       if (view.battle.terrain === "SIEGE" && view.battle.siege_phase === "BOMBARDMENT") throw new GameError("Ordular henüz temas etmiyor. Önce kuşatma aşamasını Hücum olarak değiştirin.");
-      const currentRestrictedSiege = view.battle.terrain === "SIEGE"
-        && (view.battle.wall_current_hp ?? 0) > 0 && (view.battle.gate_current_hp ?? 0) > 0;
-      const currentAttackerDismounted = currentRestrictedSiege ? attackerDismountments(view.sides.A) : {};
-      const currentAttackerEffective = currentRestrictedSiege
+      const currentAttackerDismounted = view.battle.terrain === "SIEGE" ? attackerDismountments(view.sides.A) : {};
+      const currentAttackerEffective = view.battle.terrain === "SIEGE"
         ? siegeAttackerDismountedComposition(view.sides.A.composition, currentAttackerDismounted)
         : view.sides.A.composition;
       if (view.battle.terrain === "SIEGE" && !hasAssaultForce(currentAttackerEffective)) throw new GameError("Kuşatan orduda Hücum Birliği kalmadığı için hücum zarı atılamaz.");
@@ -2284,9 +2285,9 @@ export const battleService = {
           wallDamage = support.wallDamage - catapultWallDamage + Math.floor(catapultWallDamage * fortificationMultiplier);
           gateDamage = Math.floor(support.gateDamage * fortificationMultiplier);
         }
-        const wallAfterSupport = Math.max(0, (view.battle.wall_current_hp ?? 0) - wallDamage);
-        const gateAfterSupport = Math.max(0, (view.battle.gate_current_hp ?? 0) - gateDamage);
-        const restrictedSiege = wallAfterSupport > 0 && gateAfterSupport > 0;
+        const pendingAttackerRoll = side === "B" ? view.rolls.find((stored) => stored.side_key === "A") : undefined;
+        const wallAfterSupport = Math.max(0, (view.battle.wall_current_hp ?? 0) - wallDamage - Number(pendingAttackerRoll?.wall_damage ?? 0));
+        const gateAfterSupport = Math.max(0, (view.battle.gate_current_hp ?? 0) - gateDamage - Number(pendingAttackerRoll?.gate_damage ?? 0));
         const dismounted = side === "A" ? attackerDismountments(target) : {};
         rolledDismounted = dismounted;
         const effectiveComposition = side === "A"
@@ -2294,8 +2295,8 @@ export const battleService = {
           : target.composition;
         const rollComposition = side === "A"
           ? siegeAssaultComposition(effectiveComposition, target.support_assets, wallAfterSupport, gateAfterSupport, terrain.frontageA)
-          : siegeDefenderComposition(target.composition);
-        roll = rollBattlePool(rollComposition, frontage, undefined, restrictedSiege ? "SIEGE_RESTRICTED" : "FIELD", undefined, compositionEnabled);
+          : siegeDefenderGroups(target.composition, wallAfterSupport, gateAfterSupport).combined;
+        roll = rollBattlePool(rollComposition, Number.MAX_SAFE_INTEGER, undefined, "SIEGE_RESTRICTED", undefined, compositionEnabled);
         roll.clash += support.clash; roll.damage += support.damage;
         roll.detail.__siege = { engaged: 0, clash: support.clash, damage: support.damage };
       } else {
@@ -2423,9 +2424,17 @@ export const battleService = {
       const gateDamage = siege ? Math.min(view.battle.gate_current_hp ?? 0, rollA.gate_damage ?? 0) : 0;
       const wallAfter = siege ? Math.max(0, (view.battle.wall_current_hp ?? 0) - wallDamage) : null;
       const gateAfter = siege ? Math.max(0, (view.battle.gate_current_hp ?? 0) - gateDamage) : null;
-      const defense = siege ? siegeDefenseModifiers(active.round_number) : { defenderClash: 1, defenderDamage: 1, attackerDamage: 1 };
-      const defenderEffectiveClash = Math.ceil(rollB.clash_total * defense.defenderClash);
-      let defenderEffectiveDamage = Math.ceil(rollB.damage_total * defense.defenderDamage);
+      const defense = siege
+        ? siegeDefenseModifiers(wallAfter ?? 0, gateAfter ?? 0)
+        : { attackerClash: 1, attackerDamage: 1, defenderClash: 1, defenderDamage: 1, defenderIncomingDamage: 1 };
+      const siegeFrontage = siege ? siegeFrontageProfile(wallAfter ?? 0, gateAfter ?? 0) : null;
+      const defenderFrontage = siegeFrontage ? siegeFrontage.defenderInfantry + siegeFrontage.defenderRanged : 1;
+      const defenderReserve = siege
+        ? siegeDefenderReserveBonus(view.sides.B.current_total, defenderFrontage)
+        : { reserve: 0, stepSize: 1, tiers: 0, clashMultiplier: 1, damageMultiplier: 1, incomingDamageMultiplier: 1 };
+      const attackerEffectiveClash = Math.ceil(rollA.clash_total * defense.attackerClash);
+      const defenderEffectiveClash = Math.ceil(rollB.clash_total * defense.defenderClash * defenderReserve.clashMultiplier);
+      let defenderEffectiveDamage = Math.ceil(rollB.damage_total * defense.defenderDamage * defenderReserve.damageMultiplier);
       let attackerEffectiveDamage = rollA.damage_total;
       const commanderA = await battleCommander(client,active.id,"A");
       const commanderB = await battleCommander(client,active.id,"B");
@@ -2454,9 +2463,8 @@ export const battleService = {
         defenderEffectiveDamage=Math.floor(defenderEffectiveDamage*navalIncomingDamageMultiplier(view.sides.A.naval_order!));
       }
       const attackerAntiCavalryDamage = Number(rollA.detail?.__spear_cavalry?.antiCavalryDamage ?? 0);
-      const defenderAntiCavalryDamage = Math.ceil(Number(rollB.detail?.__spear_cavalry?.antiCavalryDamage ?? 0) * defense.defenderDamage);
+      const defenderAntiCavalryDamage = Math.ceil(Number(rollB.detail?.__spear_cavalry?.antiCavalryDamage ?? 0) * defense.defenderDamage * defenderReserve.damageMultiplier);
       const mantletDefense = siege ? Math.min(0.20, (view.sides.A.support_assets.mantlet ?? 0) * 0.02) : 0;
-      const restrictedSiege = siege && (wallAfter ?? 0) > 0 && (gateAfter ?? 0) > 0;
       const attackerDismounted = siege ? attackerDismountments(view.sides.A) : {};
       const attackerEffectiveComposition = siege
         ? siegeAttackerDismountedComposition(view.sides.A.composition, attackerDismounted)
@@ -2474,10 +2482,12 @@ export const battleService = {
         ? restoreSiegeAttackerCasualtyTypes(view.sides.A.composition, effectiveAttackerCasualtyGroups.ranged, attackerDismounted)
         : undefined;
       let resolution = resolveRound(view.sides.A.composition, view.sides.B.composition,
-        { clash: rollA.clash_total, damage: attackerEffectiveDamage, antiCavalryDamage: attackerAntiCavalryDamage, detail: {} },
+        { clash: attackerEffectiveClash, damage: attackerEffectiveDamage, antiCavalryDamage: attackerAntiCavalryDamage, detail: {} },
         { clash: defenderEffectiveClash, damage: defenderEffectiveDamage, antiCavalryDamage: defenderAntiCavalryDamage, detail: {} },
         {
-          mode: naval ? "NAVAL" : "LAND", damageFactorA: defense.attackerDamage, damageFactorB: siege ? 1 - mantletDefense : 1,
+          mode: naval ? "NAVAL" : "LAND",
+          damageFactorA: defense.attackerDamage * defense.defenderIncomingDamage * defenderReserve.incomingDamageMultiplier,
+          damageFactorB: siege ? 1 - mantletDefense : 1,
           ...(siege ? {
             pressureClashA: rollA.clash_total, pressureClashB: rollB.clash_total,
             casualtySplitA: {
@@ -2540,10 +2550,10 @@ export const battleService = {
       const totalA = naval?compositionTotal(activeCompositionA):survivingTotalA;
       const totalB = naval?compositionTotal(activeCompositionB):survivingTotalB;
       const siegePressureA = siege
-        ? siegePressureAfterRound(view.sides.A.pressure, attackerPressureDelta, totalA, SIEGE_ASSAULT_FRONTAGE)
+        ? siegePressureAfterRound(view.sides.A.pressure, attackerPressureDelta, totalA, (siegeFrontage?.attackerInfantry ?? SIEGE_ASSAULT_FRONTAGE) + (siegeFrontage?.attackerRanged ?? 0))
         : null;
       const siegePressureB = siege
-        ? siegePressureAfterRound(view.sides.B.pressure, defenderPressureDelta, totalB, BATTLE_TERRAINS.SIEGE.frontageB)
+        ? siegePressureAfterRound(view.sides.B.pressure, defenderPressureDelta, totalB, defenderFrontage)
         : null;
       const pressureA = naval ? 0 : siegePressureA?.pressure ?? fieldPressureAfterRound(view.sides.A.pressure, attackerPressureDelta);
       const pressureB = naval ? 0 : siegePressureB?.pressure ?? fieldPressureAfterRound(view.sides.B.pressure, defenderPressureDelta);
@@ -2608,7 +2618,7 @@ export const battleService = {
         naval?view.sides.A.naval_order:null,naval?view.sides.B.naval_order:null,
         naval?maneuverPoints.A:null,naval?maneuverPoints.B:null
       ]);
-      const nextFirst: BattleSideKey = active.first_side === "A" ? "B" : "A";
+      const nextFirst: BattleSideKey = siege ? "A" : active.first_side === "A" ? "B" : "A";
       const fieldRetreatSide: BattleSideKey | null = !siege && !naval
         ? attackerBroken && !defenderBroken
           ? "A"
@@ -2651,7 +2661,13 @@ export const battleService = {
           pressureTier: resolution.pressureTier, pressureWinner: resolution.pressureWinner,
           reserveReliefA: siegePressureA?.reserveRelief ?? 0, reserveReliefB: siegePressureB?.reserveRelief ?? 0,
           defenderRawClash: rollB.clash_total, defenderEffectiveClash, defenderRawDamage: rollB.damage_total,
-          defenderEffectiveDamage, defenderClashMultiplier: defense.defenderClash, defenderDamageMultiplier: defense.defenderDamage
+          defenderEffectiveDamage,
+          defenderClashMultiplier: defense.defenderClash * defenderReserve.clashMultiplier,
+          defenderDamageMultiplier: defense.defenderDamage * defenderReserve.damageMultiplier,
+          attackerClashMultiplier: defense.attackerClash,
+          attackerDamageMultiplier: defense.attackerDamage,
+          defenderIncomingDamageMultiplier: defense.defenderIncomingDamage * defenderReserve.incomingDamageMultiplier,
+          defenderReserveTiers: defenderReserve.tiers
           ,disabledA,disabledB,chariotPressureBonusA,chariotPressureBonusB,
           ...(naval?{
             navalOrderA:view.sides.A.naval_order!,navalOrderB:view.sides.B.naval_order!,

@@ -287,13 +287,13 @@ Kuşatmada A saldıran, B savunandır. Sur **30.000 HP**, kapı **1.000 HP** ile
 
 **Bombardıman:** Ordular temas etmez; asker kaybı, baskı ve savaş turu ilerlemesi oluşmaz. Yalnız sur hedefli Katapultlar çalışır. Bir kuşatma aynı oyun turunda en fazla **4 kez** bombalanabilir; haklar yeni oyun turunda yenilenir. Hücuma geçildikten sonra bombardımana dönülemez.
 
-**Tahkimat ve kuşatma yorgunluğu:**
-• 1–3. değerlendirme: B Çarpışma ×1,50; B Hasar ×1,30; B'nin aldığı Hasar ×0,70
-• 4–6. değerlendirme: B Çarpışma ×1,40; B Hasar ×1,20; B'nin aldığı Hasar ×0,80
-• 7–9. değerlendirme: B Çarpışma ×1,30; B Hasar ×1,10; B'nin aldığı Hasar ×0,90
-• 10. ve sonraki değerlendirmeler: B Çarpışma ×1,00; B Hasar ×1,00; B'nin aldığı Hasar ×1,00
+**Tahkimat çarpanları:**
+• Sur ve kapı sağlam: A Çarpışma ×0,80; A Hasar ×0,80; B Çarpışma ×1,20; B Hasar ×1,00; B'nin aldığı Hasar ×0,95
+• Yalnız kapı kırık: A Çarpışma ×0,90; A Hasar ×0,90; B Çarpışma ×1,20; B Hasar ×1,00; B'nin aldığı Hasar ×0,975
+• Yalnız surda gedik: A Çarpışma ×0,90; A Hasar ×0,90; B Çarpışma ×1,20; B Hasar ×1,00; B'nin aldığı Hasar ×0,975
+• Kapı kırık ve surda gedik: A Çarpışma ×1,00; A Hasar ×1,00; B Çarpışma ×1,20; B Hasar ×1,00; B'nin aldığı Hasar ×1,00
 
-Tahkimat etkisi kuşatma uzadıkça azalır. Aynı değerlendirmede kırılan sur veya kapı hücum erişimini hemen değiştirebilir. Kuşatma baskısı, tahkimatla büyütülmüş sonuçtan değil tarafların **ham Çarpışma zarlarından** hesaplanır.
+Kuşatma yorgunluğu yoktur; çarpanlar değerlendirme sayısına göre azalmaz. Aynı değerlendirmede kırılan sur veya kapı hücum erişimini ve çarpanları hemen değiştirebilir. Kuşatma baskısı, tahkimat ve rezerv çarpanlarından önceki **ham Çarpışma sonuçlarından** hesaplanır.
 
 Bot savunucunun **Ham Zar** ve **Tahkimat Sonrası Zar** sonuçlarını ayrı gösterir. Kayıp üstünlüğü çarpanlı sonuçtan, kuşatma baskısı ise tarafların ham Çarpışma sonuçlarından hesaplanır.
 
@@ -305,10 +305,11 @@ Sur ve kapı birlikte sağlamken bütün saldıran ordu doğrudan savaşamaz:
 • 1 Kuşatma Kulesi, en fazla **3.000 Hücum Birliğine** erişim sağlar.
 • Toplam hücum erişimi saldıranın 15.000 kişilik cephesini aşamaz.
 • Kuleler kapasite hesabında önce, merdivenler kalan alanda değerlendirilir.
-• Sur yıkılırsa merdiven/kule erişim şartı kalkar ve normal 15.000 piyade cephesi açılır.
-• Kapı kırılırsa piyade cephesi **+3.000** artarak 18.000'e çıkar.
-• Kapı kırıldığında 5.000 menzilli destekle toplam hücum kapasitesi **23.000** olur.
-• Sur ve kapı birlikte yıkılsa da kapı bonusu birikmez; piyade cephesi 18.000'de kalır.
+• Yalnız kapı kırılırsa erişim şartı kalkar; saldıran **20.000 piyade + 5.000 menzilli** kullanır.
+• Yalnız surda gedik açılırsa saldıran **25.000 piyade + 5.000 menzilli** kullanır.
+• Kapı kırık ve surda gedik varsa saldıran **30.000 piyade + 5.000 menzilli** kullanır.
+• Savunan aynı durumlarda sırasıyla **18.000+5.000**, **20.500+5.000**, **23.000+10.000** ve **23.000+10.000** cephe kullanır.
+• Piyade ve menzilli cephelerinin boşlukları birbirini doldurmaz.
 
 **Hücum Birlikleri:** Hafif Piyade, Milis, Mızraklı, Ağır Piyade, Lejyoner, Hoplit, Pers Ölümsüzleri, İber Caetratileri, Cermen Şok Savaşçıları, Anadolu Kalkanlıları, Triarii Gazileri, Pön Gazileri, Gaesatae, Peltastlar, Gümüş Kalkanlılar ve Machimoi Phalangitai'dir.
 
@@ -326,15 +327,15 @@ Kayıplar belgede özgün birlik adından düşülür.
 
 Kuşatan taraf `/savas suvari-indir` ile kendi Hafif Süvari, Ağır Süvari, Atlı Okçu veya Deve Süvarilerinin istediği kısmını aynı yaya karşılıklarıyla hücuma hazırlayabilir. Emir her değerlendirmede zarlar başlamadan değiştirilebilir ve **0** girilerek kaldırılır. İndirilen birlikler yaya birimin savaş ve dayanıklılık değerlerini kullanır; kayıp yine özgün süvari kaydından düşer. Emir, sur veya kapı kırıldıktan sonra da geçerliliğini korur. Kartaca Savaş Filleri ve diğer indirilemeyen hareketli özel birlikler hücum cephesine girmez.
 
+Sur veya kapı kırıldıktan sonra da savaş kuşatma olarak kalır ve iki tarafın kompozisyonu savaş boyunca **Kuşatma Kompozisyonu** şartlarıyla değerlendirilir. Normal meydan savaşı kompozisyonuna geçilmez.
+
 ## MESAJ 17/20 — 🚨 KUŞATMA BASKISI, AÇLIK VE ŞEHRİN DÜŞMESİ
 
 Kuşatma baskısı **0–12** arasındadır. Tahkimat çarpanları kayıp hesabını etkiler; baskı hesabı ise ham Çarpışma sonuçları üzerinden yürür.
 
 **Düzen göstergesi:** 0–3 Düzenli; 4–7 Baskı Altında; 8–11 Sarsılmış; 12 Kritik Hat.
 
-Tur kaybından sonra kullanılabilir yedek baskıyı azaltır:
-• En az yarım cephe yedeği: −1
-• En az tam cephe yedeği: −2
+Savunucunun cephe dışında kalan askeri rezerv bonusu sağlar. İçinde bulunulan tahkimat durumundaki toplam savunucu cephesi beşe bölünür; rezervde bulunan her tam dilim bir kademe, en fazla beş kademe verir. Her kademe B Çarpışma ve Hasarını %1 artırır, B'nin aldığı Hasarı %1 azaltır. Bonus her değerlendirmede kalan asker üzerinden yeniden hesaplanır. Rezerv baskıyı azaltmaz.
 
 Savunucudaki Panteon Sv3, kuşatma boyunca ilk olumlu baskı artışını 1 puan azaltır.
 
@@ -356,7 +357,7 @@ Savunucudaki Panteon Sv3, kuşatma boyunca ilk olumlu baskı artışını 1 puan
 • **Kuşatma Kulesi:** Adet başına 1d10 Çarpışma + 1d6 Hasar; 3.000 Hücum Birliğine erişim.
 • **Hafif Sur Balistası:** Savunmaya özgü; adet başına 2d8 savunma Hasarı.
 
-Kapı kırıldığında saldıranın piyade hücum cephesi **+3.000** artarak 18.000'e çıkar. Menzilli destek cephesi 5.000 olarak kalır; toplam hücum kapasitesi 23.000 olur. Yalnız surun yıkılması bu ek kapasiteyi vermez. Sur ve kapı birlikte yıkılsa da bonus birikmez.
+Kapı kırıldığında saldıranın piyade cephesi 20.000'e, surda gedik açıldığında 25.000'e, ikisi birlikte kırıldığında 30.000'e çıkar. Saldıranın menzilli desteği her durumda 5.000'dir.
 
 Bir alet türünden aynı savaş turunda en fazla 25 adet etkindir; Koçbaşı 1 ile, kule ve merdivenler ayrıca 15.000 erişim cephesiyle sınırlıdır.
 

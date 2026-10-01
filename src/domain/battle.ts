@@ -9,7 +9,7 @@ export const BATTLE_TERRAINS = {
   MOUNTAIN: { label: "Dağlık Arazi", frontageA: 12_000, frontageB: 12_000, preset: "mountain.png" },
   MOUNTAIN_PASS: { label: "Dağ Geçidi", frontageA: 6_000, frontageB: 6_000, preset: "mountain-pass.png" },
   RIVER_CROSSING: { label: "Nehir Geçişi", frontageA: 10_000, frontageB: 20_000, preset: "river-crossing.png" },
-  SIEGE: { label: "Kuşatma", frontageA: 20_000, frontageB: 18_000, preset: "siege.png" },
+  SIEGE: { label: "Kuşatma", frontageA: 20_000, frontageB: 23_000, preset: "siege.png" },
   NAVAL: { label: "Deniz Savaşı", frontageA: Number.MAX_SAFE_INTEGER, frontageB: Number.MAX_SAFE_INTEGER, preset: "naval.png" }
 } as const;
 
@@ -35,11 +35,70 @@ export const remainingBombardments = (used: number): number => Math.max(0, MAX_B
 export const SIEGE_ASSAULT_FRONTAGE = 15_000;
 export const SIEGE_RANGED_SUPPORT_FRONTAGE = 5_000;
 export const SIEGE_TOTAL_ASSAULT_FRONTAGE = SIEGE_ASSAULT_FRONTAGE + SIEGE_RANGED_SUPPORT_FRONTAGE;
-export const SIEGE_GATE_BREACH_INFANTRY_BONUS = 3_000;
+export const SIEGE_GATE_BREACH_INFANTRY_BONUS = 5_000;
+export const SIEGE_WALL_BREACH_INFANTRY_BONUS = 10_000;
+export const SIEGE_FULL_BREACH_INFANTRY_BONUS = 15_000;
 export const SIEGE_GATE_BREACH_FRONTAGE = SIEGE_ASSAULT_FRONTAGE + SIEGE_GATE_BREACH_INFANTRY_BONUS;
 export const SIEGE_GATE_BREACH_TOTAL_FRONTAGE = SIEGE_GATE_BREACH_FRONTAGE + SIEGE_RANGED_SUPPORT_FRONTAGE;
+export const SIEGE_WALL_BREACH_FRONTAGE = SIEGE_ASSAULT_FRONTAGE + SIEGE_WALL_BREACH_INFANTRY_BONUS;
+export const SIEGE_FULL_BREACH_FRONTAGE = SIEGE_ASSAULT_FRONTAGE + SIEGE_FULL_BREACH_INFANTRY_BONUS;
+export const SIEGE_BREACHED_RANGED_SUPPORT_FRONTAGE = 10_000;
+export const SIEGE_DEFENDER_INTACT_INFANTRY_FRONTAGE = 18_000;
+export const SIEGE_DEFENDER_GATE_BREACH_INFANTRY_FRONTAGE = 20_500;
+export const SIEGE_DEFENDER_WALL_BREACH_INFANTRY_FRONTAGE = 23_000;
 export const LADDER_GROUP_ASSAULT_CAPACITY = 1_000;
 export const SIEGE_TOWER_ASSAULT_CAPACITY = 3_000;
+
+export type SiegeFortificationState = "INTACT" | "GATE_BREACHED" | "WALL_BREACHED" | "FULLY_BREACHED";
+
+export interface SiegeFrontageProfile {
+  state: SiegeFortificationState;
+  attackerInfantry: number;
+  attackerRanged: number;
+  defenderInfantry: number;
+  defenderRanged: number;
+}
+
+export function siegeFortificationState(wallHp: number, gateHp: number): SiegeFortificationState {
+  const wallBreached = Math.max(0, wallHp) <= 0;
+  const gateBreached = Math.max(0, gateHp) <= 0;
+  if (wallBreached && gateBreached) return "FULLY_BREACHED";
+  if (wallBreached) return "WALL_BREACHED";
+  if (gateBreached) return "GATE_BREACHED";
+  return "INTACT";
+}
+
+export function siegeFrontageProfile(wallHp: number, gateHp: number): SiegeFrontageProfile {
+  const state = siegeFortificationState(wallHp, gateHp);
+  if (state === "FULLY_BREACHED") return {
+    state,
+    attackerInfantry: SIEGE_FULL_BREACH_FRONTAGE,
+    attackerRanged: SIEGE_RANGED_SUPPORT_FRONTAGE,
+    defenderInfantry: SIEGE_DEFENDER_WALL_BREACH_INFANTRY_FRONTAGE,
+    defenderRanged: SIEGE_BREACHED_RANGED_SUPPORT_FRONTAGE
+  };
+  if (state === "WALL_BREACHED") return {
+    state,
+    attackerInfantry: SIEGE_WALL_BREACH_FRONTAGE,
+    attackerRanged: SIEGE_RANGED_SUPPORT_FRONTAGE,
+    defenderInfantry: SIEGE_DEFENDER_WALL_BREACH_INFANTRY_FRONTAGE,
+    defenderRanged: SIEGE_BREACHED_RANGED_SUPPORT_FRONTAGE
+  };
+  if (state === "GATE_BREACHED") return {
+    state,
+    attackerInfantry: SIEGE_GATE_BREACH_FRONTAGE,
+    attackerRanged: SIEGE_RANGED_SUPPORT_FRONTAGE,
+    defenderInfantry: SIEGE_DEFENDER_GATE_BREACH_INFANTRY_FRONTAGE,
+    defenderRanged: SIEGE_RANGED_SUPPORT_FRONTAGE
+  };
+  return {
+    state,
+    attackerInfantry: SIEGE_ASSAULT_FRONTAGE,
+    attackerRanged: SIEGE_RANGED_SUPPORT_FRONTAGE,
+    defenderInfantry: SIEGE_DEFENDER_INTACT_INFANTRY_FRONTAGE,
+    defenderRanged: SIEGE_RANGED_SUPPORT_FRONTAGE
+  };
+}
 
 export function commanderClashBonus(skillBonus: number): number {
   return Math.min(3, Math.max(0, Math.floor(skillBonus)));
@@ -453,25 +512,21 @@ export interface SiegeAssaultGroups {
 export function siegeAssaultGroups(
   composition: BattleComposition, support: SiegeComposition, wallHp: number, gateHp: number, frontage = SIEGE_TOTAL_ASSAULT_FRONTAGE
 ): SiegeAssaultGroups {
-  const restricted = wallHp > 0 && gateHp > 0;
+  const profile = siegeFrontageProfile(wallHp, gateHp);
   const access = siegeAssaultAccess(support, SIEGE_ASSAULT_FRONTAGE);
   const meleeSource: BattleComposition = {};
   for (const key of ASSAULT_UNIT_TYPES) {
     const quantity = composition[key] ?? 0;
     if (quantity > 0) meleeSource[key] = quantity;
   }
-  const infantryFrontage = gateHp <= 0
-    ? SIEGE_GATE_BREACH_FRONTAGE
-    : restricted
-      ? access.capacity
-      : SIEGE_ASSAULT_FRONTAGE;
+  const infantryFrontage = profile.state === "INTACT" ? access.capacity : profile.attackerInfantry;
   const infantry = engagedComposition(meleeSource, infantryFrontage);
   const rangedSource: BattleComposition = {};
   for (const key of ["slinger", "archer", "briton_longbow", "balearic_slinger"] as BattleUnitType[]) {
     const quantity = composition[key] ?? 0;
     if (quantity > 0) rangedSource[key] = quantity;
   }
-  const ranged = engagedComposition(rangedSource, Math.min(SIEGE_RANGED_SUPPORT_FRONTAGE, Math.max(0, frontage)));
+  const ranged = engagedComposition(rangedSource, Math.min(profile.attackerRanged, Math.max(0, frontage)));
   return { infantry, ranged, combined: { ...infantry, ...ranged } };
 }
 
@@ -479,6 +534,27 @@ export function siegeAssaultComposition(
   composition: BattleComposition, support: SiegeComposition, wallHp: number, gateHp: number, frontage = SIEGE_TOTAL_ASSAULT_FRONTAGE
 ): BattleComposition {
   return siegeAssaultGroups(composition, support, wallHp, gateHp, frontage).combined;
+}
+
+export function siegeDefenderGroups(
+  composition: BattleComposition,
+  wallHp: number,
+  gateHp: number
+): SiegeAssaultGroups {
+  const profile = siegeFrontageProfile(wallHp, gateHp);
+  const dismounted = siegeDefenderComposition(composition);
+  const rangedSource: BattleComposition = {};
+  const infantrySource: BattleComposition = {};
+  const rangedTypes = new Set<BattleUnitType>(["slinger", "archer", "briton_longbow", "balearic_slinger"]);
+  for (const key of unitKeys) {
+    const quantity = Math.max(0, dismounted[key] ?? 0);
+    if (quantity <= 0) continue;
+    if (rangedTypes.has(key)) rangedSource[key] = quantity;
+    else infantrySource[key] = quantity;
+  }
+  const infantry = engagedComposition(infantrySource, profile.defenderInfantry);
+  const ranged = engagedComposition(rangedSource, profile.defenderRanged);
+  return { infantry, ranged, combined: { ...infantry, ...ranged } };
 }
 
 export function rollBattlePool(
@@ -777,12 +853,52 @@ export function resolveRound(
     pressureTier: pressureOutcome.tier, pressureWinner: pressureOutcome.winner
   };
 }
-export function siegeDefenseModifiers(assaultRound: number): { defenderClash: number; defenderDamage: number; attackerDamage: number } {
-  const round = Math.max(1, Math.floor(assaultRound));
-  if (round <= 3) return { defenderClash: 1.50, defenderDamage: 1.30, attackerDamage: 0.70 };
-  if (round <= 6) return { defenderClash: 1.40, defenderDamage: 1.20, attackerDamage: 0.80 };
-  if (round <= 9) return { defenderClash: 1.30, defenderDamage: 1.10, attackerDamage: 0.90 };
-  return { defenderClash: 1.00, defenderDamage: 1.00, attackerDamage: 1.00 };
+export interface SiegeDefenseModifiers {
+  attackerClash: number;
+  attackerDamage: number;
+  defenderClash: number;
+  defenderDamage: number;
+  defenderIncomingDamage: number;
+}
+
+export function siegeDefenseModifiers(wallHp: number, gateHp: number): SiegeDefenseModifiers {
+  const state = siegeFortificationState(wallHp, gateHp);
+  if (state === "INTACT") return {
+    attackerClash: 0.80, attackerDamage: 0.80,
+    defenderClash: 1.20, defenderDamage: 1.00, defenderIncomingDamage: 0.95
+  };
+  if (state === "FULLY_BREACHED") return {
+    attackerClash: 1.00, attackerDamage: 1.00,
+    defenderClash: 1.20, defenderDamage: 1.00, defenderIncomingDamage: 1.00
+  };
+  return {
+    attackerClash: 0.90, attackerDamage: 0.90,
+    defenderClash: 1.20, defenderDamage: 1.00, defenderIncomingDamage: 0.975
+  };
+}
+
+export interface SiegeReserveBonus {
+  reserve: number;
+  stepSize: number;
+  tiers: number;
+  clashMultiplier: number;
+  damageMultiplier: number;
+  incomingDamageMultiplier: number;
+}
+
+export function siegeDefenderReserveBonus(remaining: number, frontage: number): SiegeReserveBonus {
+  const safeFrontage = Math.max(1, Math.floor(frontage));
+  const reserve = Math.max(0, Math.floor(remaining) - safeFrontage);
+  const stepSize = safeFrontage / 5;
+  const tiers = Math.min(5, Math.max(0, Math.floor(reserve / stepSize)));
+  return {
+    reserve,
+    stepSize,
+    tiers,
+    clashMultiplier: 1 + tiers * 0.01,
+    damageMultiplier: 1 + tiers * 0.01,
+    incomingDamageMultiplier: 1 - tiers * 0.01
+  };
 }
 
 export interface SiegePressureState {
@@ -795,11 +911,10 @@ export interface SiegePressureState {
 export function siegePressureAfterRound(currentPressure: number, delta: number, remaining: number, frontage: number): SiegePressureState {
   const safeFrontage = Math.max(1, Math.floor(frontage));
   const reserve = Math.max(0, Math.floor(remaining) - safeFrontage);
-  const reserveRelief = reserve >= safeFrontage ? 2 : reserve >= Math.ceil(safeFrontage / 2) ? 1 : 0;
   return {
-    pressure: Math.min(SIEGE_PRESSURE_LIMIT, Math.max(0, Math.floor(currentPressure) + Math.floor(delta) - reserveRelief)),
+    pressure: Math.min(SIEGE_PRESSURE_LIMIT, Math.max(0, Math.floor(currentPressure) + Math.floor(delta))),
     reserve,
-    reserveRelief,
+    reserveRelief: 0,
     hasUsableReserve: reserve >= Math.ceil(safeFrontage / 2)
   };
 }

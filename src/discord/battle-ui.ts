@@ -1,5 +1,5 @@
 import { ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, ModalBuilder, StringSelectMenuBuilder, TextInputBuilder, TextInputStyle, type ButtonInteraction, type ChatInputCommandInteraction, type Client, type ModalSubmitInteraction, type StringSelectMenuInteraction } from "discord.js";
-import { BATTLE_TERRAINS, BATTLE_UNIT_STATS, FIELD_BATTLE_PRESSURE_LIMIT, LADDER_GROUP_ASSAULT_CAPACITY, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, SIEGE_ASSET_BATTLE_STATS, SIEGE_ASSAULT_FRONTAGE, SIEGE_ATTACKER_DISMOUNT_MAP, SIEGE_GATE_BREACH_FRONTAGE, SIEGE_GATE_BREACH_TOTAL_FRONTAGE, SIEGE_PRESSURE_LIMIT, SIEGE_RANGED_SUPPORT_FRONTAGE, SIEGE_TOTAL_ASSAULT_FRONTAGE, SIEGE_TOWER_ASSAULT_CAPACITY, assessArmyComposition, orderState, remainingBombardments, siegeAssaultAccess, siegeAttackerDismountedComposition, siegeDefenderComposition, siegeDefenseModifiers, siegeOrderState, type ArmyCompositionContext, type BattleComposition, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain, type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeDismountUnitType, type SiegeTarget } from "../domain/battle.js";
+import { BATTLE_TERRAINS, BATTLE_UNIT_STATS, FIELD_BATTLE_PRESSURE_LIMIT, LADDER_GROUP_ASSAULT_CAPACITY, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, SIEGE_ASSET_BATTLE_STATS, SIEGE_ASSAULT_FRONTAGE, SIEGE_ATTACKER_DISMOUNT_MAP, SIEGE_PRESSURE_LIMIT, SIEGE_TOWER_ASSAULT_CAPACITY, assessArmyComposition, orderState, remainingBombardments, siegeAssaultAccess, siegeAttackerDismountedComposition, siegeDefenderComposition, siegeDefenderReserveBonus, siegeDefenseModifiers, siegeFrontageProfile, siegeOrderState, type ArmyCompositionContext, type BattleComposition, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain, type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeDismountUnitType, type SiegeTarget } from "../domain/battle.js";
 import { NAVAL_BATTLE_ORDERS, isNavalRetreatOrder, navalFleetCondition, type NavalBattleOrder } from "../domain/naval-tactics.js";
 import { SPECIAL_UNITS } from "../domain/special-units.js";
 import { number } from "../domain/format.js";
@@ -22,10 +22,7 @@ const tierLabels: Record<string, string> = { BALANCED: "Dengeli Çarpışma", MI
 const navalConditionLabels = { OPERATIONAL:"Savaşabilir", DAMAGED:"Hasarlı", CRITICAL:"Zorunlu geri çekilme", OUT:"Savaş dışı" } as const;
 
 function currentCompositionLabel(view: BattleView, side: BattleSideKey): string {
-  const restricted = view.battle.terrain === "SIEGE"
-    && (view.battle.wall_current_hp ?? 0) > 0
-    && (view.battle.gate_current_hp ?? 0) > 0;
-  const context: ArmyCompositionContext = restricted ? "SIEGE_RESTRICTED" : "FIELD";
+  const context: ArmyCompositionContext = view.battle.terrain === "SIEGE" ? "SIEGE_RESTRICTED" : "FIELD";
   const selectedDismountments: BattleComposition = {};
   if (view.battle.terrain === "SIEGE" && side === "A") {
     for (const participant of view.sides.A.participants) {
@@ -44,6 +41,7 @@ function currentCompositionLabel(view: BattleView, side: BattleSideKey): string 
 
 function expectedSide(view: BattleView): BattleSideKey | null {
   if (!["WAITING_FIRST_ROLL", "WAITING_SECOND_ROLL"].includes(view.battle.status)) return null;
+  if (view.battle.terrain === "SIEGE") return view.rolls.length ? "B" : "A";
   return view.rolls.length ? view.battle.first_side === "A" ? "B" : "A" : view.battle.first_side;
 }
 
@@ -70,8 +68,13 @@ export function battleEmbed(view: BattleView, roundResult?: BattleRoundResult): 
     }
     return `**Başlangıç:** ${number(side.initial_total)}\n**Mevcut:** ${number(side.current_total)}\n**Toplam Kayıp:** ${number(side.total_losses)}\n**Baskı:** ${number(side.pressure)} puan\n**Düzen:** ${orderLabels[order]}\n**Zar Yetkisi:** ${control}`;
   };
+  const siegeProfile = view.battle.terrain === "SIEGE"
+    ? siegeFrontageProfile(view.battle.wall_current_hp ?? 0, view.battle.gate_current_hp ?? 0)
+    : null;
   const frontage = view.battle.terrain === "NAVAL"
     ? "Cephe sınırı yok: iki tarafın bütün savaşabilir gemileri çatışmaya katılır."
+    : siegeProfile
+      ? `Saldıran: ${number(siegeProfile.attackerInfantry)} piyade + ${number(siegeProfile.attackerRanged)} menzilli • Savunan: ${number(siegeProfile.defenderInfantry)} piyade + ${number(siegeProfile.defenderRanged)} menzilli`
     : terrain.frontageA === terrain.frontageB
       ? `Cephe kapasitesi: ${number(terrain.frontageA)} asker`
       : `Cephe kapasitesi: ${view.sides.A.country_name} ${number(terrain.frontageA)} • ${view.sides.B.country_name} ${number(terrain.frontageB)} asker`;
@@ -104,20 +107,20 @@ export function battleEmbed(view: BattleView, roundResult?: BattleRoundResult): 
     const access = siegeAssaultAccess(view.sides.A.support_assets, SIEGE_ASSAULT_FRONTAGE);
     const ladders = Math.max(0, Math.floor(view.sides.A.support_assets.ladder_group ?? 0));
     const towers = Math.max(0, Math.floor(view.sides.A.support_assets.siege_tower ?? 0));
-    const wallBreachOnly = wallOpen && !gateOpen;
-    const effectiveInfantryAccess = gateOpen ? SIEGE_GATE_BREACH_FRONTAGE : wallBreachOnly ? SIEGE_ASSAULT_FRONTAGE : access.capacity;
-    const effectiveInfantryLimit = gateOpen ? SIEGE_GATE_BREACH_FRONTAGE : SIEGE_ASSAULT_FRONTAGE;
-    const effectiveTotalLimit = gateOpen ? SIEGE_GATE_BREACH_TOTAL_FRONTAGE : SIEGE_TOTAL_ASSAULT_FRONTAGE;
-    const accessNote = gateOpen
-      ? "**Kapı kırıldı:** Merdiven erişimi aranmaz; piyade cephesi +3.000 ile 18.000'e yükselir. Menzilli destek 5.000'de kalır."
-      : wallBreachOnly
-        ? "**Surda gedik açıldı:** Merdiven erişimi aranmaz; 15.000 piyade ve 5.000 menzilli sınırı uygulanır."
+    const profile = siegeFrontageProfile(view.battle.wall_current_hp ?? 0, view.battle.gate_current_hp ?? 0);
+    const effectiveInfantryAccess = profile.state === "INTACT" ? access.capacity : profile.attackerInfantry;
+    const accessNote = profile.state === "FULLY_BREACHED"
+      ? "**Kapı kırıldı ve surda gedik açıldı:** Merdiven/kule erişimi aranmaz; 30.000 piyade cephesi açılır."
+      : profile.state === "GATE_BREACHED"
+        ? "**Kapı kırıldı:** Merdiven/kule erişimi aranmaz; 20.000 piyade cephesi açılır."
+        : profile.state === "WALL_BREACHED"
+          ? "**Surda gedik açıldı:** Merdiven/kule erişimi aranmaz; 25.000 piyade cephesi açılır."
       : view.battle.siege_phase === "BOMBARDMENT"
         ? `**Hücum başlatılırsa doğrudan sur hücumuna katılabilecek azami piyade:** ${number(access.capacity)}`
         : `**Bu tur doğrudan sur hücumuna katılabilecek azami piyade:** ${number(access.capacity)}`;
     embed.addFields(
       { name: "🏰 Tahkimatlar", value: `**Sur:** ${number(view.battle.wall_current_hp ?? 0)} / ${number(view.battle.wall_max_hp ?? 0)} HP${wallOpen ? " — Yıkıldı" : ""}\n**Kapı:** ${number(view.battle.gate_current_hp ?? 0)} / ${number(view.battle.gate_max_hp ?? 0)} HP${gateOpen ? " — Kırıldı" : ""}\n**Erzak Dayanıklılığı:** ${number(view.battle.starvation_remaining ?? 0)} / ${number(view.battle.starvation_capacity ?? 0)} oyun turu${view.battle.starvation_capacity !== null && view.battle.starvation_remaining === 0 ? " — Erzak tükendi; yönetici sonucu belirler." : ""}` },
-      { name: "🪜 Hücum Erişimi", value: `**Merdiven Grupları:** ${number(access.activeLadderGroups)} / ${number(ladders)} aktif → ${number(access.activeLadderGroups * LADDER_GROUP_ASSAULT_CAPACITY)}\n**Kuşatma Kuleleri:** ${number(access.activeSiegeTowers)} / ${number(towers)} aktif → ${number(access.activeSiegeTowers * SIEGE_TOWER_ASSAULT_CAPACITY)}\n**Piyade Hücum Kapasitesi:** ${number(effectiveInfantryAccess)} / ${number(effectiveInfantryLimit)}\n**Menzilli Destek Kapasitesi:** ${number(SIEGE_RANGED_SUPPORT_FRONTAGE)}\n**Toplam Hücum Kapasitesi:** ${number(effectiveInfantryAccess + SIEGE_RANGED_SUPPORT_FRONTAGE)} / ${number(effectiveTotalLimit)}
+      { name: "🪜 Hücum Erişimi", value: `**Merdiven Grupları:** ${number(access.activeLadderGroups)} / ${number(ladders)} aktif → ${number(access.activeLadderGroups * LADDER_GROUP_ASSAULT_CAPACITY)}\n**Kuşatma Kuleleri:** ${number(access.activeSiegeTowers)} / ${number(towers)} aktif → ${number(access.activeSiegeTowers * SIEGE_TOWER_ASSAULT_CAPACITY)}\n**Piyade Hücum Kapasitesi:** ${number(effectiveInfantryAccess)} / ${number(profile.attackerInfantry)}\n**Menzilli Destek Kapasitesi:** ${number(profile.attackerRanged)}\n**Toplam Hücum Kapasitesi:** ${number(effectiveInfantryAccess + profile.attackerRanged)} / ${number(profile.attackerInfantry + profile.attackerRanged)}
 ${accessNote}` }
     );
   }
@@ -145,8 +148,8 @@ ${accessNote}` }
     });
     if (view.battle.terrain === "SIEGE") {
       embed.addFields({
-        name: "🛡️ Savunucu Zar Hesabı",
-        value: `**Ham Zar:** Çarpışma **${number(roundResult.defenderRawClash)}** • Hasar **${number(roundResult.defenderRawDamage)}**\n**Tahkimat Sonrası:** Çarpışma **${number(roundResult.defenderEffectiveClash)}** (×${factor(roundResult.defenderClashMultiplier)}) • Hasar **${number(roundResult.defenderEffectiveDamage)}** (×${factor(roundResult.defenderDamageMultiplier)})\n*Baskı ham Çarpışma zarından; kayıp hesabı tahkimat sonrası değerlerden yapılır.*`
+        name: "🏰 Kuşatma Çarpanları",
+        value: `**Saldıran:** Çarpışma ×${factor(roundResult.attackerClashMultiplier ?? 1)} • Hasar ×${factor(roundResult.attackerDamageMultiplier ?? 1)}\n**Savunucu ham zar:** Çarpışma **${number(roundResult.defenderRawClash)}** • Hasar **${number(roundResult.defenderRawDamage)}**\n**Savunucu nihai:** Çarpışma **${number(roundResult.defenderEffectiveClash)}** (×${factor(roundResult.defenderClashMultiplier)}) • Hasar **${number(roundResult.defenderEffectiveDamage)}** (×${factor(roundResult.defenderDamageMultiplier)})\n**Rezerv:** ${number(roundResult.defenderReserveTiers ?? 0)}/5 kademe • Alınan Hasar ×${factor(roundResult.defenderIncomingDamageMultiplier ?? 1)}\n*Baskı, tahkimat ve rezerv çarpanlarından önceki Çarpışma sonuçlarıyla hesaplanır.*`
       });
     }
   }
@@ -316,12 +319,20 @@ export function battleRollEmbed(view: BattleView, side: BattleSideKey): EmbedBui
   const commander = roll.detail?.__commander;
   const details = view.battle.terrain === "SIEGE" && side === "B"
     ? (() => {
-        const defense = siegeDefenseModifiers(view.battle.round_number);
+        const attackerRoll = view.rolls.find((item) => item.side_key === "A");
+        const wallAfter = Math.max(0, (view.battle.wall_current_hp ?? 0) - Number(attackerRoll?.wall_damage ?? 0));
+        const gateAfter = Math.max(0, (view.battle.gate_current_hp ?? 0) - Number(attackerRoll?.gate_damage ?? 0));
+        const defense = siegeDefenseModifiers(wallAfter, gateAfter);
+        const profile = siegeFrontageProfile(wallAfter, gateAfter);
+        const reserve = siegeDefenderReserveBonus(view.sides.B.current_total, profile.defenderInfantry + profile.defenderRanged);
+        const clashMultiplier = defense.defenderClash * reserve.clashMultiplier;
+        const damageMultiplier = defense.defenderDamage * reserve.damageMultiplier;
         return [
           `Ham Çarpışma: **${number(roll.clash_total)}**`,
           `Ham Hasar: **${number(roll.damage_total)}**`,
-          `Tahkimat Sonrası Çarpışma: **${number(Math.ceil(roll.clash_total * defense.defenderClash))}** (×${factor(defense.defenderClash)})`,
-          `Tahkimat Sonrası Hasar: **${number(Math.ceil(roll.damage_total * defense.defenderDamage))}** (×${factor(defense.defenderDamage)})`
+          `Tahkimat ve Rezerv Sonrası Çarpışma: **${number(Math.ceil(roll.clash_total * clashMultiplier))}** (×${factor(clashMultiplier)})`,
+          `Tahkimat ve Rezerv Sonrası Hasar: **${number(Math.ceil(roll.damage_total * damageMultiplier))}** (×${factor(damageMultiplier)})`,
+          `Rezerv Kademesi: **${reserve.tiers}/5**`
         ];
       })()
     : [

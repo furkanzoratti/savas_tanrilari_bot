@@ -74,8 +74,9 @@ describe("kuşatma bilgi gizliliği", () => {
     expect(mainJson).not.toContain("Ham Çarpışma");
     expect(rollJson).toContain("Ham Çarpışma: **100**");
     expect(rollJson).toContain("Ham Hasar: **80**");
-    expect(rollJson).toContain("Tahkimat Sonrası Çarpışma: **150**");
-    expect(rollJson).toContain("Tahkimat Sonrası Hasar: **104**");
+    expect(rollJson).toContain("Tahkimat ve Rezerv Sonrası Çarpışma: **120**");
+    expect(rollJson).toContain("Tahkimat ve Rezerv Sonrası Hasar: **80**");
+    expect(rollJson).toContain("Rezerv Kademesi: **0/5**");
   });
 
   it("şehir ele geçirilmeden savunucuyu dağılmış göstermez ve baskıyı açıklar", () => {
@@ -101,8 +102,8 @@ describe("kuşatma bilgi gizliliği", () => {
     }).toJSON());
     expect(json).toContain("1.234");
     expect(json).not.toContain("Kayıp gizli");
-    expect(json).toContain("Savunucu Zar Hesabı");
-    expect(json).toContain("Baskı ham Çarpışma zarından");
+    expect(json).toContain("Kuşatma Çarpanları");
+    expect(json).toContain("Baskı, tahkimat ve rezerv çarpanlarından önceki Çarpışma sonuçlarıyla hesaplanır");
     expect(json).toContain("Kayıplar Sonrası Kompozisyon");
     expect(json).toContain("Roma: **Tekdüze Ordu**");
     expect(json).toContain("Savunucu: **Tekdüze Ordu**");

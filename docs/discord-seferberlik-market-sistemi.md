@@ -313,9 +313,10 @@ Sur ve kapı birlikte sağlamken:
 • 1 Kuşatma Kulesi, **3.000 Hücum Birliğine** erişim sağlar.
 • Kuleler kapasite hesabında önce, merdivenler kalan alanda değerlendirilir.
 • Toplam hücum erişimi 15.000 kişilik cepheyi aşamaz.
-• Sur yıkılırsa saldıranın normal 15.000 kişilik piyade cephesi açılır.
-• Kapı kırılırsa piyade cephesi **+3.000** artarak 18.000'e çıkar; 5.000 menzilli destekle toplam kapasite 23.000 olur.
-• Sur ve kapı birlikte yıkılsa da kapı bonusu birikmez; piyade cephesi 18.000'de kalır.
+• Yalnız kapı kırılırsa saldıran **20.000 piyade + 5.000 menzilli** kullanır.
+• Yalnız surda gedik açılırsa saldıran **25.000 piyade + 5.000 menzilli** kullanır.
+• Kapı kırık ve surda gedik varsa saldıran **30.000 piyade + 5.000 menzilli** kullanır.
+• Tahkimat açıldığında merdiven ve kuleyle erişim şartı kalkar.
 
 Hücum Birlikleri:
 
