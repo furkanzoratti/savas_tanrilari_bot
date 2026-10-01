@@ -279,8 +279,8 @@ async function validateNavalParticipantAvailability(
 ):Promise<void> {
   const stocks = (await client.query<{ ship_type:string;quantity:number }>(
     `SELECT n.ship_type,COALESCE(SUM(n.quantity),0)::integer AS quantity
-       FROM naval_units n JOIN settlements s ON s.id=n.settlement_id JOIN guilds g ON g.discord_id=s.guild_id
-      WHERE s.country_id=$1 AND (n.disabled_until_turn IS NULL OR n.disabled_until_turn<=g.current_turn)
+       FROM naval_units n JOIN settlements s ON s.id=n.settlement_id
+      WHERE s.country_id=$1
       GROUP BY n.ship_type`, [participant.country_id]
   )).rows;
   const allocations = (await client.query<{ ship_type:string;quantity:number }>(
@@ -298,6 +298,44 @@ async function validateNavalParticipantAvailability(
       throw new GameError(`Kalıcı filolara tahsis edilmemiş ve kullanıma hazır ${label} mevcudu ${available}; istenen ${requested}.`);
     }
   }
+}
+
+export interface NavalFleetReadiness {
+  settlementName:string;
+  shipType:NavalUnitType;
+  quantity:number;
+  stockTotal:number;
+  otherAllocated:number;
+  disabled:number;
+  readyAvailable:number;
+}
+
+export async function navalFleetReadiness(client:DbClient,fleetId:string):Promise<NavalFleetReadiness[]> {
+  const rows = (await client.query<{
+    settlement_name:string;ship_type:NavalUnitType;quantity:number;
+    stock_total:number;other_allocated:number;disabled:number;
+  }>(
+    `SELECT s.name AS settlement_name,fs.ship_type,fs.quantity,
+            COALESCE((SELECT SUM(n.quantity) FROM naval_units n
+              WHERE n.settlement_id=fs.settlement_id AND n.ship_type=fs.ship_type),0)::integer AS stock_total,
+            COALESCE((SELECT SUM(other.quantity) FROM fleet_ships other
+              WHERE other.settlement_id=fs.settlement_id AND other.ship_type=fs.ship_type AND other.fleet_id<>fs.fleet_id),0)::integer AS other_allocated,
+            COALESCE((SELECT COUNT(*) FROM naval_ship_damage damage
+              WHERE damage.fleet_id=fs.fleet_id AND damage.settlement_id=fs.settlement_id
+                AND damage.ship_type=fs.ship_type AND damage.status='DISABLED'),0)::integer AS disabled
+       FROM fleet_ships fs JOIN fleets f ON f.id=fs.fleet_id JOIN settlements s ON s.id=fs.settlement_id
+       WHERE fs.fleet_id=$1`, [fleetId]
+  )).rows;
+  return rows.map((row)=>{
+    const quantity=Number(row.quantity);
+    const stockTotal=Number(row.stock_total);
+    const otherAllocated=Number(row.other_allocated);
+    const disabled=Number(row.disabled);
+    return {
+      settlementName:row.settlement_name,shipType:row.ship_type,quantity,stockTotal,otherAllocated,disabled,
+      readyAvailable:Math.max(0,stockTotal-otherAllocated-disabled)
+    };
+  });
 }
 
 async function rebuildDraftSide(client: DbClient, battleId: string, side: BattleSideKey): Promise<void> {
@@ -886,7 +924,6 @@ async function applyLossesToDocuments(client: DbClient, battleId: string, guildI
           ? (await client.query<{ id: string; quantity: number; settlement_id: string }>(
               `SELECT n.id,n.quantity,n.settlement_id FROM naval_units n JOIN settlements s ON s.id=n.settlement_id
                 WHERE s.country_id=$1 AND n.ship_type=$2
-                  AND (n.disabled_until_turn IS NULL OR n.disabled_until_turn<=(SELECT current_turn FROM guilds WHERE discord_id=s.guild_id))
                 ORDER BY CASE n.status WHEN 'HOSTILE' THEN 0 WHEN 'ACTIVE' THEN 1 ELSE 2 END,n.id FOR UPDATE OF n`,
               [participant.country_id, forceType]
             )).rows
@@ -1571,23 +1608,19 @@ export const battleService = {
       const participant = await resolveParticipant(client,battle.id,input.side,fleet.country_name);
       const existingFleetUse = await participantUsesFleets(client,battle.id,fleet.country_id);
       if (!existingFleetUse && compositionTotal(participant.composition) > 0) throw new GameError("Bu ülkenin manuel deniz savaşı kadrosu zaten girilmiş. Kalıcı filo kullanmak için önce manuel kadroyu temizleyin.");
-      const readiness = (await client.query<{ settlement_name:string;ship_type:NavalUnitType;quantity:number;ready_available:number }>(
-        `SELECT s.name AS settlement_name,fs.ship_type,fs.quantity,
-                GREATEST(0,
-                  COALESCE((SELECT SUM(n.quantity) FROM naval_units n
-                    WHERE n.settlement_id=fs.settlement_id AND n.ship_type=fs.ship_type
-                      AND (n.disabled_until_turn IS NULL OR n.disabled_until_turn<=g.current_turn)),0)
-                  - COALESCE((SELECT SUM(other.quantity) FROM fleet_ships other
-                    WHERE other.settlement_id=fs.settlement_id AND other.ship_type=fs.ship_type AND other.fleet_id<>fs.fleet_id),0)
-                  - COALESCE((SELECT COUNT(*) FROM naval_ship_damage damage
-                    WHERE damage.fleet_id=fs.fleet_id AND damage.settlement_id=fs.settlement_id
-                      AND damage.ship_type=fs.ship_type AND damage.status='DISABLED'),0)
-                )::integer AS ready_available
-           FROM fleet_ships fs JOIN fleets f ON f.id=fs.fleet_id JOIN settlements s ON s.id=fs.settlement_id
-           JOIN guilds g ON g.discord_id=f.guild_id WHERE fs.fleet_id=$1`, [fleet.id]
-      )).rows;
-      const unavailable = readiness.find((row) => Number(row.quantity) > Number(row.ready_available));
-      if (unavailable) throw new GameError(`**${unavailable.settlement_name}** limanındaki ${unavailable.ship_type} gemilerinin bir kısmı kullanılamıyor veya başka filolara ayrılmış. Filo savaşa hazır değil.`);
+      const readiness = await navalFleetReadiness(client,fleet.id);
+      const unavailable = readiness.find((row) => row.quantity > row.readyAvailable);
+      if (unavailable) {
+        if (unavailable.disabled > 0) throw new GameError(
+          `**${unavailable.settlementName}** limanına bağlı ${unavailable.shipType} gemilerinin **${unavailable.disabled}** tanesi iş göremez. Önce bu gemileri tamire gönderin.`
+        );
+        if (unavailable.otherAllocated > 0) throw new GameError(
+          `**${unavailable.settlementName}** limanındaki ${unavailable.shipType} gemilerinin **${unavailable.otherAllocated}** tanesi başka filolara ayrılmış. Filo tahsislerini kontrol edin.`
+        );
+        throw new GameError(
+          `**${unavailable.settlementName}** limanındaki ${unavailable.shipType} stoku filo kaydıyla uyuşmuyor: filoda **${unavailable.quantity}**, limanda **${unavailable.stockTotal}** gemi kayıtlı.`
+        );
+      }
       const composition = Object.fromEntries((await client.query<{ ship_type:string;quantity:number }>(
         "SELECT ship_type,COALESCE(SUM(quantity),0)::integer AS quantity FROM fleet_ships WHERE fleet_id=$1 GROUP BY ship_type HAVING SUM(quantity)>0",
         [fleet.id]

@@ -35,6 +35,7 @@ import { religionMinorityMigration } from "./religion-minority-migration.js";
 import { secondaryReligionsMigration } from "./secondary-religions-migration.js";
 import { religionDistributionMigration } from "./religion-distribution-migration.js";
 import { battleNavalCargoMigration } from "./battle-naval-cargo-migration.js";
+import { navalLegacyDisableCleanupMigration } from "./naval-legacy-disable-cleanup-migration.js";
 
 export const migrations = [
   {
@@ -2287,5 +2288,6 @@ export const migrations = [
   religionMinorityMigration,
   secondaryReligionsMigration,
   religionDistributionMigration,
-  battleNavalCargoMigration
+  battleNavalCargoMigration,
+  navalLegacyDisableCleanupMigration
 ] as const;
