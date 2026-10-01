@@ -2025,7 +2025,7 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
     if (!interaction.guildId || !isGameMaster(interaction)) { await interaction.respond([]); return; }
     let subcommand = "";
     try { subcommand = interaction.options.getSubcommand(false) ?? ""; } catch { subcommand = ""; }
-    if (!["ordu-ekle", "filo-ekle", "kadro-ayarla", "parali-asker-ayarla", "suvari-indir"].includes(subcommand)) { await interaction.respond([]); return; }
+    if (!["ordu-ekle", "filo-ekle", "tasinan-ordu-ayarla", "kadro-ayarla", "parali-asker-ayarla", "suvari-indir"].includes(subcommand)) { await interaction.respond([]); return; }
     const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
     const participants = await battleService.listParticipantCountries({ guildId: interaction.guildId, channelId: interaction.channelId });
     await interaction.respond(participants
@@ -2038,10 +2038,17 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
     if (!interaction.guildId || !isGameMaster(interaction)) { await interaction.respond([]); return; }
     const countryName = interaction.options.getString("ulke");
     if (!countryName) { await interaction.respond([]); return; }
+    let subcommand = "";
+    try { subcommand = interaction.options.getSubcommand(false) ?? ""; } catch { subcommand = ""; }
     const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
-    const armies = await battleService.listParticipantArmies({ guildId: interaction.guildId, channelId: interaction.channelId, countryName });
-    await interaction.respond(armies.filter((army) => !query || `${army.country_name} ${army.name}`.toLocaleLowerCase("tr-TR").includes(query)).slice(0, 25)
-      .map((army) => ({ name: `${army.country_name} • ${army.name} • ${number(army.total)} asker${army.assigned ? " • Eklendi" : ""}`.slice(0, 100), value: army.id })));
+    const cargoSelection=subcommand==="tasinan-ordu-ayarla";
+    const armies = cargoSelection
+      ? await battleService.listParticipantCargoArmies({ guildId: interaction.guildId, channelId: interaction.channelId, countryName })
+      : await battleService.listParticipantArmies({ guildId: interaction.guildId, channelId: interaction.channelId, countryName });
+    const choices=armies.filter((army) => !query || `${army.country_name} ${army.name}`.toLocaleLowerCase("tr-TR").includes(query)).slice(0,cargoSelection?24:25)
+      .map((army) => ({ name: `${army.country_name} • ${army.name} • ${number(army.total)} asker${army.assigned ? cargoSelection?" • Seçili":" • Eklendi" : ""}`.slice(0, 100), value: army.id }));
+    if(cargoSelection&&(!query||"askersiz temizle boş".includes(query)))choices.unshift({name:"Askersiz • Taşınan ordu seçimini temizle",value:"NONE"});
+    await interaction.respond(choices);
     return;
   }
   if (interaction.commandName === "savas" && focused.name === "filo") {

@@ -380,8 +380,11 @@ function casualtyReportEmbed(view: BattleView, rows: Array<{ side_key: BattleSid
     return `**${side} — ${view.sides[side].country_name}**\n${sideRows.length ? sideRows.map(lineFor).join("\n") : "Kayıp yok."}`;
   }).join("\n\n");
   const shortfall = rows.reduce((sum, row) => sum + row.shortfall + row.population_shortfall, 0);
+  const cargoLosses=(["A","B"] as BattleSideKey[]).flatMap((side)=>view.sides[side].participants
+    .filter((participant)=>Number(participant.embarked_army_loss??0)>0)
+    .map((participant)=>`• ${side} • **${participant.country_name} — ${participant.embarked_army_name??"Taşınan ordu"}: -${number(Number(participant.embarked_army_loss))} asker**`));
   return new EmbedBuilder().setColor(shortfall ? 0xd9822b : 0x2e8b57).setTitle("🔒 Savaş Kayıpları — Belge Mutabakatı")
-    .setDescription(`${text}\n\n${shortfall ? "⚠️ Mutabakat açığı bulunan miktarlar belgede mevcut olmadığı için otomatik düşülemedi." : "✅ Hesaplanan bütün kayıplar ülke belgelerine otomatik işlendi."}`)
+    .setDescription(`${text}${cargoLosses.length?`\n\n**🌊 Batan Gemilerde Taşınan Asker Kayıpları**\n${cargoLosses.join("\n")}`:""}\n\n${shortfall ? "⚠️ Mutabakat açığı bulunan miktarlar belgede mevcut olmadığı için otomatik düşülemedi." : "✅ Hesaplanan bütün kayıplar ülke belgelerine otomatik işlendi."}`)
     .setFooter({ text: "Bu rapor yalnızca oyun yöneticilerine gösterilir." });
 }
 
@@ -414,6 +417,22 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
     await interaction.editReply({
       content: "✅ **" + countryName + "** " + (action === "ADD" ? "savaş tarafına eklendi" : "savaş tarafından çıkarıldı") + ". **" + side + " tarafı:** " + view.sides[side].country_names.join(", "),
     });
+  } else if (sub === "tasinan-ordu-ayarla") {
+    requireGameMaster(interaction);
+    const result=await battleService.setNavalCargoArmy({
+      guildId:interaction.guildId,channelId:interaction.channelId,actorId:interaction.user.id,
+      countryName:interaction.options.getString("ulke",true),armyId:interaction.options.getString("ordu")
+    });
+    if(!result.armyName){
+      await interaction.editReply(`✅ **${result.countryName}** filosunun taşınan ordu seçimi temizlendi; deniz savaşına askersiz katılacak.`);
+    }else{
+      const capacityStatus=result.capacity<=0
+        ? "\n⚠️ Bu ülkenin deniz savaşı kadrosunda henüz taşıma kapasitesi bulunmuyor. Yayımlamadan önce gemi ekleyin."
+        :result.total>result.capacity
+          ? `\n⚠️ Ordu mevcudu taşıma kapasitesini **${number(result.total-result.capacity)}** aşıyor. Savaş bu düzeltilmeden yayımlanamaz.`
+          :"\n✅ Ordu mevcudu mevcut taşıma kapasitesine sığıyor.";
+      await interaction.editReply(`✅ **${result.countryName}** filosunda taşınan ordu **${result.armyName}** olarak seçildi.\n⚔️ Asker: **${number(result.total)}** • 🚢 Taşıma kapasitesi: **${number(result.capacity)}**${capacityStatus}`);
+    }
   } else if (sub === "ordu-ekle") {
     requireGameMaster(interaction);
     const countryName = interaction.options.getString("ulke", true);
@@ -598,7 +617,12 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
           const sourceType = source as SiegeDismountUnitType;
           return `• ${participant.country_name}: ${number(Number(quantity))} ${BATTLE_UNIT_STATS[sourceType].label} → ${BATTLE_UNIT_STATS[SIEGE_ATTACKER_DISMOUNT_MAP[sourceType]].label}`;
         })) : [];
-      return `**${key} — ${view.sides[key].country_name}**\n${lines}${support ? `\n**Kuşatma Desteği**\n${support}` : ""}${dismounted.length ? `\n**Yaya Hücum Emri**\n${dismounted.join("\n")}` : ""}\nBasınç: ${view.sides[key].pressure}`;
+      const cargo=view.battle.terrain==="NAVAL"
+        ?view.sides[key].participants.map((participant)=>participant.embarked_army_name
+          ?`• ${participant.country_name}: **${participant.embarked_army_name}** • ${number(Object.values(participant.embarked_army_composition??{}).reduce((sum,quantity)=>sum+Number(quantity??0),0))} asker${Number(participant.embarked_army_loss??0)>0?` • Kayıp: **-${number(Number(participant.embarked_army_loss))}**`:""}`
+          :`• ${participant.country_name}: **Askersiz**`)
+        :[];
+      return `**${key} — ${view.sides[key].country_name}**\n${lines}${cargo.length?`\n**Gemide Taşınan Ordular**\n${cargo.join("\n")}`:""}${support ? `\n**Kuşatma Desteği**\n${support}` : ""}${dismounted.length ? `\n**Yaya Hücum Emri**\n${dismounted.join("\n")}` : ""}\nBasınç: ${view.sides[key].pressure}`;
     }).join("\n\n");
     await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x333333).setTitle("🔒 Gizli Ordu Detayı").setDescription(detail)] });
   } else if (sub === "kayip-raporu") {

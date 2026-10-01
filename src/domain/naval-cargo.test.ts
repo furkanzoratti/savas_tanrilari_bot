@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { navalCargoCapacity } from "./naval-cargo.js";
+import { navalCargoCapacity, navalCargoSoldierLoss } from "./naval-cargo.js";
 
 describe("naval cargo", () => {
   it("uses existing ship troop capacities plus 1/2/3 siege loads", () => {
@@ -15,5 +15,18 @@ describe("naval cargo", () => {
     expect(navalCargoCapacity({ kerkouros: 1 }, [
       { soldiers: 200, siege: { catapult: 1 } }
     ]).valid).toBe(false);
+  });
+});
+
+describe("deniz savaşında taşınan asker kaybı", () => {
+  it("batan kapasitedeki askerlerin yüzde yetmişini yukarı yuvarlayarak kaybettirir", () => {
+    expect(navalCargoSoldierLoss({ soldiers: 600, initialCapacity: 1_000, sunkCapacity: 500 })).toBe(210);
+  });
+  it("kalan gemiler aşırı yüklenecekse kapasite fazlasını da kayıp sayar", () => {
+    expect(navalCargoSoldierLoss({ soldiers: 1_000, initialCapacity: 1_000, sunkCapacity: 500 })).toBe(500);
+  });
+  it("gemi batmadığında veya filoda asker olmadığında kayıp üretmez", () => {
+    expect(navalCargoSoldierLoss({ soldiers: 600, initialCapacity: 1_000, sunkCapacity: 0 })).toBe(0);
+    expect(navalCargoSoldierLoss({ soldiers: 0, initialCapacity: 1_000, sunkCapacity: 500 })).toBe(0);
   });
 });

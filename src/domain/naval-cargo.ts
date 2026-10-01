@@ -16,6 +16,27 @@ export interface NavalCargoCapacity {
   valid: boolean;
 }
 
+export interface NavalCargoLossInput {
+  soldiers: number;
+  initialCapacity: number;
+  sunkCapacity: number;
+  mortalityRate?: number;
+}
+
+/** Soldiers on sunk capacity are exposed proportionally; rescue is limited by surviving capacity. */
+export function navalCargoSoldierLoss(input:NavalCargoLossInput):number{
+  const soldiers=Math.max(0,Math.floor(input.soldiers));
+  const initialCapacity=Math.max(0,Math.floor(input.initialCapacity));
+  const sunkCapacity=Math.min(initialCapacity,Math.max(0,Math.floor(input.sunkCapacity)));
+  if(!soldiers||!initialCapacity||!sunkCapacity)return 0;
+  const mortality=Math.max(0,Math.min(1,input.mortalityRate??0.70));
+  const exposed=Math.ceil(soldiers*sunkCapacity/initialCapacity);
+  const baseLoss=Math.ceil(exposed*mortality);
+  const remainingCapacity=Math.max(0,initialCapacity-sunkCapacity);
+  const capacityOverflow=Math.max(0,soldiers-remainingCapacity);
+  return Math.min(soldiers,Math.max(baseLoss,capacityOverflow));
+}
+
 /** Troop berths and deck/tow load are independent limits; combined use drives speed. */
 export function navalCargoCapacity(
   composition: Partial<Record<NavalUnitType, number>>,

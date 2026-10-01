@@ -5,7 +5,7 @@ describe("savaş komutları", () => {
   it("taslak, gizli kadro, yayın, tur ve özel detay akışını kaydeder", () => {
     const battle = commandBuilders.find((command) => command.name === "savas");
     const names = battle?.options?.map((option) => option.name) ?? [];
-    expect(names).toEqual(expect.arrayContaining(["baslat", "taraf-ulke", "birlik-ayarla", "kadro-ayarla", "gemi-ayarla", "filo-ayarla", "kusatma-aleti-ayarla", "suvari-indir", "kusatma-asamasi", "bombardiman", "yayinla", "tur-oynat", "ordu-detay", "kayip-raporu", "bitir", "iptal"]));
+    expect(names).toEqual(expect.arrayContaining(["baslat", "taraf-ulke", "tasinan-ordu-ayarla", "birlik-ayarla", "kadro-ayarla", "gemi-ayarla", "filo-ayarla", "kusatma-aleti-ayarla", "suvari-indir", "kusatma-asamasi", "bombardiman", "yayinla", "tur-oynat", "ordu-detay", "kayip-raporu", "bitir", "iptal"]));
   });
 
   it("koalisyon ülkesi ve ülke bazlı kadro seçeneklerini sunar", () => {
@@ -21,6 +21,10 @@ describe("savaş komutları", () => {
     expect(roster?.options?.find((option) => option.name === "ulke")).toMatchObject({ required: true, autocomplete: true });
     const mercenary = battle?.options?.find((option) => option.name === "parali-asker-ayarla");
     expect(mercenary?.options?.map((option) => option.name)).toEqual(["ulke", "islem", "sirket"]);
+    const cargo = battle?.options?.find((option) => option.name === "tasinan-ordu-ayarla");
+    expect(cargo?.options?.map((option) => option.name)).toEqual(["ulke", "ordu"]);
+    expect(cargo?.options?.find((option) => option.name === "ulke")).toMatchObject({ required: true, autocomplete: true });
+    expect(cargo?.options?.find((option) => option.name === "ordu")).toMatchObject({ required: false, autocomplete: true });
     const settlement = roster?.options?.find((option) => option.name === "yerleske");
     expect(settlement).toMatchObject({
       required: false,

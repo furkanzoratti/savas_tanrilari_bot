@@ -34,6 +34,7 @@ import { religionsMigration } from "./religions-migration.js";
 import { religionMinorityMigration } from "./religion-minority-migration.js";
 import { secondaryReligionsMigration } from "./secondary-religions-migration.js";
 import { religionDistributionMigration } from "./religion-distribution-migration.js";
+import { battleNavalCargoMigration } from "./battle-naval-cargo-migration.js";
 
 export const migrations = [
   {
@@ -2285,5 +2286,6 @@ export const migrations = [
   religionsMigration,
   religionMinorityMigration,
   secondaryReligionsMigration,
-  religionDistributionMigration
+  religionDistributionMigration,
+  battleNavalCargoMigration
 ] as const;
