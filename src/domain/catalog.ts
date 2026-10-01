@@ -16,7 +16,8 @@ export const CHARACTER_ROLES: Record<CharacterRole, { label: string; emoji: stri
   SPY: { label: "Casus", emoji: "🕵️" },
   MERCHANT: { label: "Tüccar", emoji: "💰" },
   COMMANDER: { label: "Komutan", emoji: "⚔️" },
-  DIPLOMAT: { label: "Diplomat", emoji: "🤝" }
+  DIPLOMAT: { label: "Diplomat", emoji: "🤝" },
+  MISSIONARY: { label: "Misyoner", emoji: "🕯️" }
 };
 
 export const CITY_POLICIES = {

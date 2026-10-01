@@ -66,7 +66,7 @@ export const cityService = {
            JOIN settlements settlement ON settlement.id=building.settlement_id
           WHERE settlement.country_id=$1 AND building.building_type='academy' AND building.level>0) AS academies,
          (SELECT COUNT(*)::integer FROM country_characters
-          WHERE country_id=$1 AND character_status='ACTIVE') AS characters,
+          WHERE country_id=$1 AND character_status='ACTIVE' AND role<>'MISSIONARY') AS characters,
          (SELECT COUNT(*)::integer FROM academy_training_sessions
           WHERE country_id=$1 AND status IN ('PENDING_ROLL','AWAITING_NAME')) AS pending`,
       [countryId]
@@ -165,7 +165,7 @@ export const cityService = {
              JOIN settlements own_settlement ON own_settlement.id=building.settlement_id
             WHERE own_settlement.country_id=$1 AND building.building_type='academy' AND building.level>0) AS academies,
            (SELECT COUNT(*)::integer FROM country_characters
-            WHERE country_id=$1 AND character_status='ACTIVE') AS characters,
+            WHERE country_id=$1 AND character_status='ACTIVE' AND role<>'MISSIONARY') AS characters,
            (SELECT COUNT(*)::integer FROM academy_training_sessions
             WHERE country_id=$1 AND status IN ('PENDING_ROLL','AWAITING_NAME')) AS pending`,
         [input.countryId]

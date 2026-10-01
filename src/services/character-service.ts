@@ -11,8 +11,13 @@ import { CHARACTER_ROLES, caravanseraiForeignConcessionBonus } from "../domain/c
 import { greatPowerService } from "./great-power-service.js";
 import { GameError } from "./game-service.js";
 import { awardCharacterSpecializationProgress, chooseCharacterSpecialization } from "./character-specialization-progress.js";
-import { RELIGIONS } from "../domain/religions.js";
-import { loadCountryReligionProfile } from "./religion-service.js";
+import { convertReligionDistribution, religionConversionPercent, RELIGIONS, type ReligionKey } from "../domain/religions.js";
+import { fallbackReligionDistribution, loadCountryReligionProfile, loadReligionDistributions } from "./religion-service.js";
+import { isAcquisitionTurn } from "../domain/mobilization.js";
+
+export const MISSIONARY_PURCHASE_COST = 10_000;
+export const MISSIONARY_LIMIT_PER_COUNTRY = 2;
+export const MISSIONARY_TASK_BONUS = 1;
 
 export interface CharacterView {
   id: string;
@@ -47,6 +52,7 @@ export interface CharacterView {
   operation_goal: number | null;
   target_country_name: string | null;
   target_settlement_name: string | null;
+  missionary_operation_religion_key?: ReligionKey | null;
   died_at?: Date | string | null;
   death_settlement_name?: string | null;
 }
@@ -223,6 +229,44 @@ async function countryCuriaBonus(client: DbClient, countryId: string): Promise<n
   )).rows[0]?.level??0);
 }
 
+async function pantheonBonus(client: DbClient, settlementId: string): Promise<number> {
+  const level = Number((await client.query<{ level:number }>(
+    "SELECT level FROM buildings WHERE settlement_id=$1 AND building_type='pantheon' AND status='ACTIVE'",
+    [settlementId]
+  )).rows[0]?.level ?? 0);
+  return Math.max(0,Math.min(3,level));
+}
+
+async function syncCountryTreasury(client:DbClient,countryId:string):Promise<void> {
+  await client.query(
+    "UPDATE countries SET treasury=(SELECT COALESCE(SUM(local_treasury),0)::bigint FROM settlements WHERE country_id=$1) WHERE id=$1",
+    [countryId]
+  );
+}
+
+function religionFamilyPercent(
+  shares:ReadonlyArray<{religionKey:ReligionKey;primaryPercent:number;secondaryPercent:number}>,
+  religionKey:ReligionKey
+):number {
+  const share=shares.find((item)=>item.religionKey===religionKey);
+  return Math.round(((share?.primaryPercent??0)+(share?.secondaryPercent??0))*100)/100;
+}
+
+async function replaceReligionDistribution(
+  client:DbClient,
+  settlementId:string,
+  shares:ReadonlyArray<{religionKey:ReligionKey;primaryPercent:number;secondaryPercent:number}>
+):Promise<void> {
+  await client.query("DELETE FROM settlement_religion_shares WHERE settlement_id=$1",[settlementId]);
+  for (const share of shares) {
+    await client.query(
+      `INSERT INTO settlement_religion_shares(settlement_id,religion_key,primary_percent,secondary_percent)
+       VALUES($1,$2,$3,$4)`,
+      [settlementId,share.religionKey,share.primaryPercent,share.secondaryPercent]
+    );
+  }
+}
+
 export const characterService = {
   async createManualCharacter(input:{guildId:string;countryId:string;actorId:string;name:string;role:CharacterRole;skillBonus:number}):Promise<{id:string;name:string;role:CharacterRole;skillBonus:number}>{
     return withTransaction(async(client)=>{
@@ -235,6 +279,7 @@ export const characterService = {
       if(!(input.role in CHARACTER_ROLES))throw new GameError("Geçersiz karakter rolü seçildi.");
       if(!Number.isInteger(input.skillBonus)||input.skillBonus<0||input.skillBonus>5)
         throw new GameError("Karakter bonusu 0 ile 5 arasında bir tam sayı olmalıdır.");
+      const effectiveSkillBonus=input.role==="MISSIONARY"?MISSIONARY_TASK_BONUS:input.skillBonus;
       const duplicate=await client.query(
         "SELECT 1 FROM country_characters WHERE country_id=$1 AND lower(name)=lower($2)",[input.countryId,name]);
       if(duplicate.rowCount)throw new GameError("Bu devlette aynı isimli bir karakter zaten bulunuyor.");
@@ -243,12 +288,167 @@ export const characterService = {
       const created=(await client.query<{id:string}>(
         `INSERT INTO country_characters(country_id,name,role,skill_bonus,trained_turn,trained_by)
          VALUES($1,$2,$3,$4,$5,$6) RETURNING id`,
-        [input.countryId,name,input.role,input.skillBonus,turn,input.actorId])).rows[0]!;
+        [input.countryId,name,input.role,effectiveSkillBonus,turn,input.actorId])).rows[0]!;
       await client.query(
         `INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details)
          VALUES($1,$2,'CHARACTER_MANUAL_CREATE','character',$3,$4::jsonb)`,
-        [input.guildId,input.actorId,created.id,JSON.stringify({countryId:input.countryId,name,role:input.role,skillBonus:input.skillBonus,turn})]);
-      return {id:created.id,name,role:input.role,skillBonus:input.skillBonus};
+        [input.guildId,input.actorId,created.id,JSON.stringify({countryId:input.countryId,name,role:input.role,skillBonus:effectiveSkillBonus,turn})]);
+      return {id:created.id,name,role:input.role,skillBonus:effectiveSkillBonus};
+    });
+  },
+
+  async purchaseMissionary(input:{
+    guildId:string;countryId:string;actorId:string;settlementId:string;name:string;
+  }):Promise<{id:string;name:string;settlementName:string;cost:number}>{
+    return withTransaction(async(client)=>{
+      const state=await guildState(client,input.guildId);
+      if(!isAcquisitionTurn(state.current_turn,state.acquisition_interval)) {
+        throw new GameError("Misyoner yalnızca Alım Turunda alınabilir.");
+      }
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))",["country:"+input.countryId]);
+      const source=(await client.query<{
+        id:string;name:string;local_treasury:number;is_conquered:boolean;
+      }>(
+        `SELECT settlement.id,settlement.name,settlement.local_treasury,settlement.is_conquered
+           FROM settlements settlement
+           JOIN countries country ON country.id=settlement.country_id
+          WHERE settlement.id=$1 AND settlement.country_id=$2 AND country.guild_id=$3 AND country.status='ACTIVE'
+          FOR UPDATE OF settlement`,
+        [input.settlementId,input.countryId,input.guildId]
+      )).rows[0];
+      if(!source)throw new GameError("Misyonerin alınacağı yerleşke bulunamadı.");
+      if(source.is_conquered)throw new GameError("Fethedilmiş yerleşke asimile edilmeden Misyoner alınamaz.");
+      const name=input.name.trim();
+      if(name.length<2||name.length>60)throw new GameError("Misyoner adı 2-60 karakter arasında olmalıdır.");
+      const existing=Number((await client.query<{count:number}>(
+        "SELECT COUNT(*)::integer AS count FROM country_characters WHERE country_id=$1 AND role='MISSIONARY' AND character_status='ACTIVE'",
+        [input.countryId]
+      )).rows[0]?.count??0);
+      if(existing>=MISSIONARY_LIMIT_PER_COUNTRY)throw new GameError("Bir devlet aynı anda en fazla 2 etkin Misyonere sahip olabilir.");
+      const duplicate=await client.query("SELECT 1 FROM country_characters WHERE country_id=$1 AND lower(name)=lower($2)",[input.countryId,name]);
+      if(duplicate.rowCount)throw new GameError("Bu ülkede aynı adlı başka bir karakter var.");
+      if(Number(source.local_treasury)<MISSIONARY_PURCHASE_COST)throw new GameError("Seçilen yerleşkenin hazinesinde 10.000 Altın bulunmuyor.");
+      const created=(await client.query<{id:string}>(
+        `INSERT INTO country_characters(
+           country_id,trained_settlement_id,name,role,skill_bonus,trained_turn,trained_by
+         ) VALUES($1,$2,$3,'MISSIONARY',$4,$5,$6) RETURNING id`,
+        [input.countryId,source.id,name,MISSIONARY_TASK_BONUS,state.current_turn,input.actorId]
+      )).rows[0]!;
+      await client.query("UPDATE settlements SET local_treasury=local_treasury-$1 WHERE id=$2",[MISSIONARY_PURCHASE_COST,source.id]);
+      await syncCountryTreasury(client,input.countryId);
+      await client.query(
+        "INSERT INTO transactions(country_id,turn,kind,amount,description) VALUES($1,$2,'MISSIONARY_PURCHASE',$3,$4)",
+        [input.countryId,state.current_turn,-MISSIONARY_PURCHASE_COST,source.name+": "+name+" adlı Misyoner"]
+      );
+      await client.query(
+        `INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details)
+         VALUES($1,$2,'MISSIONARY_PURCHASE','character',$3,$4::jsonb)`,
+        [input.guildId,input.actorId,created.id,JSON.stringify({countryId:input.countryId,settlementId:source.id,name,cost:MISSIONARY_PURCHASE_COST,turn:state.current_turn})]
+      );
+      return{id:created.id,name,settlementName:source.name,cost:MISSIONARY_PURCHASE_COST};
+    });
+  },
+
+  async missionaryReligionOptions(countryId:string):Promise<Array<{key:ReligionKey;label:string}>>{
+    const rows=(await pool.query<{religion_key:ReligionKey}>(
+      `SELECT DISTINCT available.religion_key
+         FROM (
+           SELECT share.religion_key
+             FROM settlement_religion_shares share
+             JOIN settlements settlement ON settlement.id=share.settlement_id
+            WHERE settlement.country_id=$1
+              AND share.primary_percent+share.secondary_percent>0
+           UNION
+           SELECT settlement.religion_key
+             FROM settlements settlement
+            WHERE settlement.country_id=$1
+         ) available
+        ORDER BY available.religion_key`,
+      [countryId]
+    )).rows;
+    return rows
+      .filter((row)=>row.religion_key in RELIGIONS)
+      .map((row)=>({key:row.religion_key,label:RELIGIONS[row.religion_key].label}));
+  },
+
+  async startMissionary(input:{
+    guildId:string;countryId:string;actorId:string;characterId:string;targetSettlementId:string;religionKey:ReligionKey;
+  }):Promise<{arrivalTurn:number;missionaryName:string;targetName:string;religionKey:ReligionKey}>{
+    return withTransaction(async(client)=>{
+      const state=await guildState(client,input.guildId);
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))",["missionary-target:"+input.targetSettlementId]);
+      const character=await activeCharacter(client,input.countryId,input.characterId,"MISSIONARY");
+      if(character.assignment!=="NONE")throw new GameError("Bu Misyoner şu anda başka bir görevde.");
+      if(!(input.religionKey in RELIGIONS))throw new GameError("Geçersiz din seçildi.");
+      const availableReligion=await client.query(
+        `SELECT 1
+           FROM settlements settlement
+           LEFT JOIN settlement_religion_shares share
+             ON share.settlement_id=settlement.id AND share.religion_key=$2
+          WHERE settlement.country_id=$1
+            AND (
+              settlement.religion_key=$2
+              OR COALESCE(share.primary_percent,0)+COALESCE(share.secondary_percent,0)>0
+            )
+          LIMIT 1`,
+        [input.countryId,input.religionKey]
+      );
+      if(!availableReligion.rowCount)throw new GameError("Seçilen din bu devletin hiçbir yerleşkesinde mevcut değil.");
+      const target=(await client.query<{id:string;name:string;religion_key:ReligionKey}>(
+        `SELECT settlement.id,settlement.name,settlement.religion_key
+           FROM settlements settlement JOIN countries country ON country.id=settlement.country_id
+          WHERE settlement.id=$1 AND settlement.country_id=$2 AND country.guild_id=$3 AND country.status='ACTIVE'
+          FOR UPDATE OF settlement`,
+        [input.targetSettlementId,input.countryId,input.guildId]
+      )).rows[0];
+      if(!target)throw new GameError("Din değiştirme hedefi kendi devletinize ait etkin bir yerleşke olmalıdır.");
+      if(target.religion_key===input.religionKey)throw new GameError("Hedef yerleşkenin ana dini zaten seçilen dinle aynı.");
+      const live=await client.query(
+        "SELECT 1 FROM missionary_operations WHERE target_settlement_id=$1 AND status IN ('TRAVELING','ACTIVE')",
+        [target.id]
+      );
+      if(live.rowCount)throw new GameError("Bu yerleşkede başka bir Misyonerin din değiştirme görevi zaten sürüyor.");
+      const arrivalTurn=state.current_turn+1;
+      await client.query(
+        `INSERT INTO missionary_operations(
+           guild_id,country_id,missionary_character_id,target_settlement_id,religion_key,status,
+           started_turn,arrival_turn,created_by
+         ) VALUES($1,$2,$3,$4,$5,'TRAVELING',$6,$7,$8)`,
+        [input.guildId,input.countryId,character.id,target.id,input.religionKey,state.current_turn,arrivalTurn,input.actorId]
+      );
+      await client.query(
+        "UPDATE country_characters SET assignment='MISSIONARY_TRAVELING',assigned_settlement_id=$1,assignment_ready_turn=$2 WHERE id=$3",
+        [target.id,arrivalTurn,character.id]
+      );
+      await client.query(
+        `INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details)
+         VALUES($1,$2,'MISSIONARY_TASK_START','character',$3,$4::jsonb)`,
+        [input.guildId,input.actorId,character.id,JSON.stringify({targetSettlementId:target.id,religionKey:input.religionKey,arrivalTurn})]
+      );
+      return{arrivalTurn,missionaryName:character.name,targetName:target.name,religionKey:input.religionKey};
+    });
+  },
+
+  async endMissionary(input:{guildId:string;countryId:string;characterId:string;actorId:string}):Promise<boolean>{
+    return withTransaction(async(client)=>{
+      const state=await guildState(client,input.guildId);
+      const character=await activeCharacter(client,input.countryId,input.characterId,"MISSIONARY");
+      const ended=await client.query(
+        `UPDATE missionary_operations SET status='CANCELLED',updated_at=NOW()
+          WHERE missionary_character_id=$1 AND status IN ('TRAVELING','ACTIVE') RETURNING id`,
+        [character.id]
+      );
+      if(!ended.rowCount&&character.assignment==="NONE")return false;
+      await client.query(
+        "UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL,assignment_ready_turn=NULL WHERE id=$1",
+        [character.id]
+      );
+      await client.query(
+        `INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details)
+         VALUES($1,$2,'MISSIONARY_TASK_CANCEL','character',$3,$4::jsonb)`,
+        [input.guildId,input.actorId,character.id,JSON.stringify({turn:state.current_turn,countryId:input.countryId})]
+      );
+      return true;
     });
   },
   async list(countryId: string): Promise<CharacterView[]> {
@@ -259,6 +459,7 @@ export const characterService = {
               character.commander_victories,character.specialization,character.specialization_progress,
               character.specialization_level,character.specialization_choice_credit,
               character.character_status,character.is_admiral,character.unavailable_until_turn,
+              missionary.religion_key AS missionary_operation_religion_key,
               character.admiral_doctrine,character.admiral_specialization,
               character.admiral_victories,character.admiral_specialization_level,
               character.died_at,death_settlement.name AS death_settlement_name,
@@ -267,11 +468,18 @@ export const characterService = {
               COALESCE(captive_settlement.name,assigned.name) AS assigned_settlement_name,
               COALESCE(captive_country.name,assigned_country.name) AS assigned_country_name,
               army.name AS assigned_army_name,fleet.name AS assigned_fleet_name,
-              COALESCE(merchant.task_type,diplomat.task_type,espionage.target_type) AS operation_type,
-              COALESCE(merchant.status,diplomat.status,espionage.status) AS operation_status,
-              diplomat.progress AS operation_progress,diplomat.goal AS operation_goal,
-              COALESCE(merchant_country.name,diplomat_country.name,spy_country.name) AS target_country_name,
-              COALESCE(merchant_settlement.name,diplomat_settlement.name,spy_settlement.name) AS target_settlement_name
+              COALESCE(merchant.task_type,diplomat.task_type,espionage.target_type,
+                CASE WHEN missionary.id IS NOT NULL THEN 'RELIGIOUS_CONVERSION' END) AS operation_type,
+              COALESCE(merchant.status,diplomat.status,espionage.status,missionary.status) AS operation_status,
+              COALESCE(diplomat.progress,CASE WHEN missionary.id IS NOT NULL THEN (
+                SELECT COALESCE(SUM(share.primary_percent+share.secondary_percent),0)
+                  FROM settlement_religion_shares share
+                 WHERE share.settlement_id=missionary.target_settlement_id
+                   AND share.religion_key=missionary.religion_key
+              ) END) AS operation_progress,
+              COALESCE(diplomat.goal,CASE WHEN missionary.id IS NOT NULL THEN 100 END) AS operation_goal,
+              COALESCE(merchant_country.name,diplomat_country.name,spy_country.name,missionary_country.name) AS target_country_name,
+              COALESCE(merchant_settlement.name,diplomat_settlement.name,spy_settlement.name,missionary_settlement.name) AS target_settlement_name
          FROM country_characters character
          LEFT JOIN settlements trained ON trained.id=character.trained_settlement_id
          LEFT JOIN settlements assigned ON assigned.id=character.assigned_settlement_id
@@ -310,6 +518,13 @@ export const characterService = {
          ) espionage ON TRUE
          LEFT JOIN settlements spy_settlement ON spy_settlement.id=espionage.target_settlement_id
          LEFT JOIN countries spy_country ON spy_country.id=espionage.target_country_id
+         LEFT JOIN LATERAL (
+           SELECT * FROM missionary_operations operation
+            WHERE operation.missionary_character_id=character.id AND operation.status IN ('TRAVELING','ACTIVE')
+            ORDER BY operation.created_at DESC LIMIT 1
+         ) missionary ON TRUE
+         LEFT JOIN settlements missionary_settlement ON missionary_settlement.id=missionary.target_settlement_id
+         LEFT JOIN countries missionary_country ON missionary_country.id=missionary_settlement.country_id
          LEFT JOIN LATERAL (
            SELECT jsonb_object_agg(progress.specialization,progress.successes) AS tracks
              FROM character_specialization_progress progress
@@ -1271,10 +1486,134 @@ export async function processCharacterTurn(
         "↳ Tur etkisi: **"+(delta>=0?"+":"")+delta+" ilerleme** • Önceki: "+operation.progress+"/"+operation.goal+" • Güncel: **"+next+"/"+operation.goal+"**"+(complete?" • **TAMAMLANDI**":"")
       );
     }
+
+    const displacedMissionaries=(await client.query<{
+      missionary_character_id:string;missionary_name:string;target_name:string;
+    }>(
+      `UPDATE missionary_operations operation
+          SET status='CANCELLED',updated_at=NOW()
+         FROM settlements target,country_characters character
+        WHERE operation.guild_id=$1 AND operation.status IN ('TRAVELING','ACTIVE')
+          AND target.id=operation.target_settlement_id AND target.country_id<>operation.country_id
+          AND character.id=operation.missionary_character_id
+      RETURNING operation.missionary_character_id,character.name AS missionary_name,target.name AS target_name`,
+      [guildId]
+    )).rows;
+    for(const displaced of displacedMissionaries){
+      await client.query(
+        "UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL,assignment_ready_turn=NULL WHERE id=$1",
+        [displaced.missionary_character_id]
+      );
+      logs.push("🕯️ **"+displaced.missionary_name+"** için **"+displaced.target_name+"** din değiştirme görevi yerleşke el değiştirdiği için sona erdi.");
+    }
+
+    const missionaryArrivals=(await client.query<{
+      missionary_character_id:string;target_settlement_id:string;
+    }>(
+      `UPDATE missionary_operations
+          SET status='ACTIVE',updated_at=NOW()
+        WHERE guild_id=$1 AND status='TRAVELING' AND arrival_turn<=$2
+      RETURNING missionary_character_id,target_settlement_id`,
+      [guildId,turn]
+    )).rows;
+    for(const arrival of missionaryArrivals){
+      await client.query(
+        `UPDATE country_characters
+            SET assignment='MISSIONARY_CONVERSION',assigned_settlement_id=$1,assignment_ready_turn=NULL
+          WHERE id=$2`,
+        [arrival.target_settlement_id,arrival.missionary_character_id]
+      );
+    }
+
+    const missionaryOperations=(await client.query<{
+      id:string;country_id:string;missionary_character_id:string;target_settlement_id:string;
+      religion_key:ReligionKey;converted_percent:number;missionary_name:string;country_name:string;
+      target_name:string;population:number;target_religion_key:ReligionKey;religion_adherence_percent:number;
+    }>(
+      `SELECT operation.id,operation.country_id,operation.missionary_character_id,
+              operation.target_settlement_id,operation.religion_key,operation.converted_percent,
+              character.name AS missionary_name,country.name AS country_name,
+              target.name AS target_name,target.population,target.religion_key AS target_religion_key,
+              target.religion_adherence_percent
+         FROM missionary_operations operation
+         JOIN country_characters character ON character.id=operation.missionary_character_id
+         JOIN countries country ON country.id=operation.country_id
+         JOIN settlements target ON target.id=operation.target_settlement_id
+        WHERE operation.guild_id=$1 AND operation.status='ACTIVE' AND operation.arrival_turn<=$2
+          AND (operation.last_resolved_turn IS NULL OR operation.last_resolved_turn<$2)
+        ORDER BY operation.created_at
+        FOR UPDATE OF operation,target`,
+      [guildId,turn]
+    )).rows;
+    for(const operation of missionaryOperations){
+      const distributionMap=await loadReligionDistributions(client,[operation.target_settlement_id]);
+      const beforeDistribution=distributionMap.get(operation.target_settlement_id)??fallbackReligionDistribution({
+        religion_key:operation.target_religion_key,
+        religion_adherence_percent:Number(operation.religion_adherence_percent)
+      });
+      const beforeFamily=religionFamilyPercent(beforeDistribution,operation.religion_key);
+      if(beforeFamily>=100){
+        await client.query(
+          "UPDATE missionary_operations SET status='COMPLETED',last_resolved_turn=$1,updated_at=NOW() WHERE id=$2",
+          [turn,operation.id]
+        );
+        await client.query(
+          "UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL,assignment_ready_turn=NULL WHERE id=$1",
+          [operation.missionary_character_id]
+        );
+        logs.push(
+          "🕯️ **"+operation.missionary_name+"** • **Din değiştirme tamamlandı**\n"+
+          "↳ Ülke: **"+operation.country_name+"** • Hedef: **"+operation.target_name+"**\n"+
+          "↳ **"+RELIGIONS[operation.religion_key].label+"** ailesi yerleşkede **%100** düzeyine ulaştı; Misyoner serbest kaldı."
+        );
+        continue;
+      }
+      const attackRoll=randomInt(1,21);
+      const defenseRoll=randomInt(1,21);
+      const attackBonus=MISSIONARY_TASK_BONUS;
+      const populationBonus=culturePopulationResistance(Number(operation.population));
+      const templeBonus=await pantheonBonus(client,operation.target_settlement_id);
+      const defenseBonus=populationBonus+templeBonus;
+      const margin=attackRoll+attackBonus-defenseRoll-defenseBonus;
+      const nextDistribution=convertReligionDistribution(beforeDistribution,operation.religion_key,margin);
+      const afterFamily=religionFamilyPercent(nextDistribution,operation.religion_key);
+      const actualConverted=Math.max(0,Math.round((afterFamily-beforeFamily)*100)/100);
+      if(actualConverted>0)await replaceReligionDistribution(client,operation.target_settlement_id,nextDistribution);
+      const complete=afterFamily>=100;
+      await client.query(
+        `INSERT INTO missionary_rolls(
+           operation_id,game_turn,attack_roll,attack_bonus,attack_total,defense_roll,
+           defense_bonus,defense_total,converted_percent
+         ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT DO NOTHING`,
+        [operation.id,turn,attackRoll,attackBonus,attackRoll+attackBonus,defenseRoll,defenseBonus,
+          defenseRoll+defenseBonus,actualConverted]
+      );
+      await client.query(
+        `UPDATE missionary_operations
+            SET status=$1,last_resolved_turn=$2,
+                converted_percent=LEAST(100,converted_percent+$3),updated_at=NOW()
+          WHERE id=$4`,
+        [complete?"COMPLETED":"ACTIVE",turn,actualConverted,operation.id]
+      );
+      if(complete){
+        await client.query(
+          "UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL,assignment_ready_turn=NULL WHERE id=$1",
+          [operation.missionary_character_id]
+        );
+      }
+      logs.push(
+        "🕯️ **"+operation.missionary_name+"** • **Din Değiştirme**\n"+
+        "↳ Ülke: **"+operation.country_name+"** • Hedef: **"+operation.target_name+"** • İnanç: **"+RELIGIONS[operation.religion_key].label+"**\n"+
+        "↳ Başarı: 1d20 **"+attackRoll+"** + görev bonusu **"+attackBonus+"** = **"+(attackRoll+attackBonus)+"** • "+
+        "Savunma: 1d20 **"+defenseRoll+"** + nüfus **"+populationBonus+"** + Panteon **"+templeBonus+"** = **"+(defenseRoll+defenseBonus)+"**\n"+
+        "↳ Sonuç: **%"+religionConversionPercent(margin)+"** potansiyel • Bu tur çevrilen: **%"+actualConverted+"** • "+
+        "Yerleşkedeki inanç ailesi: **%"+beforeFamily+" → %"+afterFamily+"**"+(complete?" • **TAMAMLANDI**":"")
+      );
+    }
     if (logs.length) {
       await client.query(
         `INSERT INTO character_turn_log_batches(guild_id,game_turn,entries,source,title,dedupe_key)
-         VALUES($1,$2,$3::jsonb,'TURN_RESULT','Akademi Görev Sonuçları',$4)
+         VALUES($1,$2,$3::jsonb,'TURN_RESULT','Karakter Görev Sonuçları',$4)
          ON CONFLICT(guild_id,dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING`,
         [guildId,turn,JSON.stringify(logs),'TURN_RESULT:'+turn]
       );

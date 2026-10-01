@@ -11,6 +11,7 @@ import { cityService } from "../services/city-service.js";
 import { gameService, GameError } from "../services/game-service.js";
 import { logger } from "../logger.js";
 import { requireGameMaster, resolveCountry } from "./auth.js";
+import { RELIGIONS, type ReligionKey } from "../domain/religions.js";
 
 const assignmentLabels: Record<string,string> = {
   NONE: "Görev bekliyor", CURIA: "Curia", AGORA: "Agora / Forum", ARMY: "Ordu komutanı", FLEET: "Filo komutanı",
@@ -27,7 +28,8 @@ const assignmentLabels: Record<string,string> = {
   MERCHANT_BLACK_MARKET: "Karaborsa tasfiyesi", DIPLOMAT_TRAVELING: "Diplomatik göreve gidiyor",
   DIPLOMAT_RECONCILIATION: "Halkla Uzlaşma", DIPLOMAT_CULTURE: "Kültür değiştirme",
   DIPLOMAT_VASSALIZE: "Vassallaştırma", DIPLOMAT_INTEGRATE: "Vassal entegrasyonu",
-  DIPLOMAT_DEFENSE: "Diplomatik savunma"
+  DIPLOMAT_DEFENSE: "Diplomatik savunma", MISSIONARY_TRAVELING: "Din değiştirme görevine gidiyor",
+  MISSIONARY_CONVERSION: "Din değiştirme"
 };
 
 const eventLabels:Record<string,string> = {
@@ -85,6 +87,11 @@ export function characterAvailableForCommand(
     if (subcommand === "savunma-ata") return ["NONE","DIPLOMAT_DEFENSE"].includes(character.assignment) && !character.operation_status;
     if (subcommand === "gorev-bitir") return character.assignment.startsWith("DIPLOMAT_") || Boolean(character.operation_status);
   }
+  if(commandName==="misyoner"){
+    if(character.role!=="MISSIONARY")return false;
+    if(subcommand==="gorev-baslat")return character.assignment==="NONE"&&!character.operation_status;
+    if(subcommand==="gorev-bitir")return character.assignment.startsWith("MISSIONARY_")||Boolean(character.operation_status);
+  }
   return true;
 }
 
@@ -117,6 +124,8 @@ function characterLine(character: CharacterView): string {
       ? DIPLOMAT_TASK_LABELS[character.operation_type as DiplomatTask]
       : character.role === "SPY"
         ? ESPIONAGE_TARGETS[character.operation_type as EspionageTarget]?.label
+        : character.role === "MISSIONARY" && character.operation_type === "RELIGIOUS_CONVERSION"
+          ? "Din değiştirme"
         : undefined;
   const task = character.operation_type
     ? operationLabel ?? assignmentLabels[character.assignment] ?? "Tanımsız görev"
@@ -146,6 +155,9 @@ function characterLine(character: CharacterView): string {
       .filter(([key,value]) => CHARACTER_SPECIALIZATIONS[key as CharacterSpecialization]?.role===character.role && Number(value)>0)
       .map(([key,value]) => CHARACTER_SPECIALIZATIONS[key as CharacterSpecialization].label+" "+value+"/3");
     details.push(tracks.length ? tracks.join(" • ")+(Number(character.specialization_choice_credit??0)>0?" • Eski kredi +"+character.specialization_choice_credit:"") : "Eski uzmanlık kredisi " + character.specialization_progress + "/3");
+  }
+  if(character.role==="MISSIONARY"&&character.missionary_operation_religion_key){
+    details.push("Yaydığı din: "+RELIGIONS[character.missionary_operation_religion_key].label);
   }
   if (character.unavailable_until_turn !== null) details.push("Tur " + character.unavailable_until_turn + " sonuna dek kullanılamaz");
   return roleEmoji + " **" + character.name + "** — " + roleLabel + " (+" + character.skill_bonus + ")\n↳ " + details.join(" • ");
@@ -221,7 +233,7 @@ export async function publishCharacterTurnLogs(client: Client, guildId: string, 
   const publishable = batches.length
     ? batches
     : logs.length
-      ? [{id:"",game_turn:0,entries:logs,publish_attempts:0,source:"TURN_RESULT",title:"Akademi Görev Sonuçları"}]
+      ? [{id:"",game_turn:0,entries:logs,publish_attempts:0,source:"TURN_RESULT",title:"Karakter Görev Sonuçları"}]
       : [];
   if (!publishable.length) return {state:"NO_LOGS",channelId:null,publishedBatches:0,publishedEntries:0};
   const channelId = await characterService.logChannel(guildId);
@@ -242,7 +254,7 @@ export async function publishCharacterTurnLogs(client: Client, guildId: string, 
         await channel.send({
           embeds: [new EmbedBuilder()
             .setColor(0x5865f2)
-            .setTitle("🎓 "+batch.title+(batch.game_turn ? " • Tur "+batch.game_turn : ""))
+            .setTitle("👤 "+batch.title+(batch.game_turn ? " • Tur "+batch.game_turn : ""))
             .setDescription(batch.entries.slice(index,index+12).join("\n\n").slice(0,4000))]
         });
       }
@@ -361,10 +373,54 @@ export async function handleCharacterCommand(interaction: ChatInputCommandIntera
     );
     return true;
   }
-  if (!["komutan","amiral","tuccar","diplomat"].includes(interaction.commandName)) return false;
+  if (!["komutan","amiral","tuccar","diplomat","misyoner"].includes(interaction.commandName)) return false;
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const country = await resolveCountry(interaction);
   const sub = interaction.options.getSubcommand();
+  if(interaction.commandName==="misyoner"){
+    if(sub==="al"){
+      const result=await characterService.purchaseMissionary({
+        guildId:interaction.guildId,countryId:country.id,actorId:interaction.user.id,
+        settlementId:interaction.options.getString("yerleske",true),name:interaction.options.getString("ad",true)
+      });
+      await interaction.editReply(
+        "🕯️ **"+result.name+"** adlı Misyoner **"+result.settlementName+"** yerleşkesinde alındı. "+
+        "Yerel hazineden **"+result.cost.toLocaleString("tr-TR")+" Altın** ödendi. Yayacağı din görev verilirken seçilecek."
+      );
+      await logCharacterCommand(interaction,country.name,
+        "🕯️ Misyoner: **"+result.name+"** (+1) • Alındığı yerleşke: **"+result.settlementName+"**\n"+
+        "↳ Maliyet: **"+result.cost.toLocaleString("tr-TR")+" Altın** • Yayacağı din görev sırasında seçilecek."
+      );
+      return true;
+    }
+    const characterId=interaction.options.getString("misyoner",true);
+    const missionary=await characterForLog(country.id,characterId);
+    if(sub==="gorev-bitir"){
+      const changed=await characterService.endMissionary({guildId:interaction.guildId,countryId:country.id,characterId,actorId:interaction.user.id});
+      await interaction.editReply(changed
+        ? "✅ Misyonerin görevi sona erdirildi. Daha önce çevrilen din yüzdeleri korundu."
+        : "ℹ️ Misyoner zaten müsait durumda.");
+      await logCharacterCommand(interaction,country.name,
+        "🕯️ Misyoner: **"+(missionary?.name??"Bilinmeyen Misyoner")+"** • Devlet: **"+country.name+"**\n"+
+        "↳ Din değiştirme görevi sona erdirildi; yerleşkede daha önce oluşan yüzdeler korundu."
+      );
+      return true;
+    }
+    const result=await characterService.startMissionary({
+      guildId:interaction.guildId,countryId:country.id,actorId:interaction.user.id,characterId,
+      targetSettlementId:interaction.options.getString("hedef-yerleske",true),
+      religionKey:interaction.options.getString("din",true) as ReligionKey
+    });
+    await interaction.editReply(
+      "🕯️ **"+result.missionaryName+"**, **"+result.targetName+"** yerleşkesine gönderildi. "+
+      "**Tur "+result.arrivalTurn+"** başında **"+RELIGIONS[result.religionKey].label+"** için ilk din değiştirme zarı işlenecek."
+    );
+    await logCharacterCommand(interaction,country.name,
+      "🕯️ Misyoner: **"+result.missionaryName+"** (+1) • Hedef: **"+result.targetName+"**\n"+
+      "↳ İnanç: **"+RELIGIONS[result.religionKey].label+"** • Varış ve ilk çözümleme: **Tur "+result.arrivalTurn+"**"
+    );
+    return true;
+  }
   if (interaction.commandName === "amiral") {
     const characterId = interaction.options.getString("amiral",true);
     const admiral = await characterForLog(country.id,characterId);
@@ -593,7 +649,7 @@ export async function handleCharacterCommand(interaction: ChatInputCommandIntera
 }
 
 export async function handleCharacterAutocomplete(interaction: AutocompleteInteraction): Promise<boolean> {
-  if (!interaction.guildId || !["komutan","amiral","tuccar","diplomat"].includes(interaction.commandName)) return false;
+  if (!interaction.guildId || !["komutan","amiral","tuccar","diplomat","misyoner"].includes(interaction.commandName)) return false;
   const country = await gameService.countryForUser(interaction.guildId,interaction.user.id);
   if (!country) { await interaction.respond([]); return true; }
   const focused = interaction.options.getFocused(true);
@@ -616,12 +672,31 @@ export async function handleCharacterAutocomplete(interaction: AutocompleteInter
       .slice(0,25).map((key)=>({name:CHARACTER_SPECIALIZATIONS[key].label,value:key})));
     return true;
   }
-  if (["komutan","amiral","tuccar","diplomat"].includes(focused.name)) {
-    const role = ["komutan","amiral"].includes(focused.name) ? "COMMANDER" : focused.name === "tuccar" ? "MERCHANT" : "DIPLOMAT";
+  if (["komutan","amiral","tuccar","diplomat","misyoner"].includes(focused.name)) {
+    const role = ["komutan","amiral"].includes(focused.name) ? "COMMANDER" : focused.name === "tuccar" ? "MERCHANT" : focused.name === "diplomat" ? "DIPLOMAT" : "MISSIONARY";
     const characters = (await characterService.list(country.id))
       .filter((item) => item.role === role && characterAvailableForCommand(item,interaction.commandName,sub ?? ""));
     await interaction.respond(characters.filter((item) => !query || item.name.toLocaleLowerCase("tr-TR").includes(query)).slice(0,25)
       .map((item) => ({name:(item.name + " (+" + item.skill_bonus + ") • " + (assignmentLabels[item.assignment]??item.assignment)).slice(0,100),value:item.id})));
+    return true;
+  }
+  if(["yerleske","hedef-yerleske"].includes(focused.name)&&interaction.commandName==="misyoner"){
+    let settlements=await gameService.listSettlements(country.id);
+    if(sub==="al")settlements=settlements.filter((item)=>!item.is_conquered);
+    await interaction.respond(settlements
+      .filter((item)=>!query||item.name.toLocaleLowerCase("tr-TR").includes(query)).slice(0,25)
+      .map((item)=>({name:item.name,value:item.id})));
+    return true;
+  }
+  if(focused.name==="din"&&interaction.commandName==="misyoner"&&sub==="gorev-baslat"){
+    const targetId=interaction.options.getString("hedef-yerleske");
+    const target=targetId?(await gameService.listSettlements(country.id)).find((item)=>item.id===targetId):null;
+    const religions=(await characterService.missionaryReligionOptions(country.id))
+      .filter((item)=>item.key!==target?.religion_key);
+    await interaction.respond(religions
+      .filter((item)=>!query||item.label.toLocaleLowerCase("tr-TR").includes(query))
+      .slice(0,25)
+      .map((item)=>({name:item.label,value:item.key})));
     return true;
   }
   if (focused.name === "teklif") {

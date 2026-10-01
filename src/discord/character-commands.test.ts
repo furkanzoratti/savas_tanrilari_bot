@@ -103,7 +103,7 @@ describe("Akademi karakter komutları", () => {
     const manualCharacter=command?.options?.find((item)=>item.name==="karakter-ekle");
     expect(manualCharacter?.options?.map((item)=>item.name)).toEqual(["ulke","rol","ad","bonus"]);
     expect(manualCharacter?.options?.find((item)=>item.name==="rol")?.choices?.map((choice)=>choice.value))
-      .toEqual(["SPY","MERCHANT","COMMANDER","DIPLOMAT"]);
+      .toEqual(["SPY","MERCHANT","COMMANDER","DIPLOMAT","MISSIONARY"]);
     expect(manualCharacter?.options?.find((item)=>item.name==="bonus")).toMatchObject({required:true,min_value:0,max_value:5});
   });
 

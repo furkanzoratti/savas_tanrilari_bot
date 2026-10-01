@@ -12,12 +12,14 @@ describe("karakter ölümü", () => {
       reason:"Casus idam edildi."
     });
 
-    expect(query).toHaveBeenCalledTimes(2);
+    expect(query).toHaveBeenCalledTimes(3);
     expect(query.mock.calls[0]?.[0]).toContain("UPDATE espionage_operations");
     expect(query.mock.calls[0]?.[0]).toContain("status='CANCELLED'");
     expect(query.mock.calls[0]?.[1]).toEqual(["character-1","Casus idam edildi."]);
-    expect(query.mock.calls[1]?.[0]).toContain("character_status='DEAD'");
-    expect(query.mock.calls[1]?.[0]).toContain("death_settlement_id=COALESCE");
-    expect(query.mock.calls[1]?.[1]).toEqual(["character-1","settlement-1"]);
+    expect(query.mock.calls[1]?.[0]).toContain("UPDATE missionary_operations");
+    expect(query.mock.calls[1]?.[0]).toContain("status='CANCELLED'");
+    expect(query.mock.calls[2]?.[0]).toContain("character_status='DEAD'");
+    expect(query.mock.calls[2]?.[0]).toContain("death_settlement_id=COALESCE");
+    expect(query.mock.calls[2]?.[1]).toEqual(["character-1","settlement-1"]);
   });
 });

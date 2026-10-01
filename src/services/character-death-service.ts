@@ -15,6 +15,12 @@ export async function markCharacterDead(input: {
     [characterId,reason]
   );
   await client.query(
+    `UPDATE missionary_operations
+        SET status='CANCELLED',updated_at=NOW()
+      WHERE missionary_character_id=$1 AND status IN ('TRAVELING','ACTIVE')`,
+    [characterId]
+  );
+  await client.query(
     `UPDATE country_characters
         SET character_status='DEAD',died_at=COALESCE(died_at,NOW()),
             death_settlement_id=COALESCE(death_settlement_id,$2),

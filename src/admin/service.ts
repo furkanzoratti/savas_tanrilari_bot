@@ -470,11 +470,18 @@ export const adminPanelService = {
               assigned.name AS assigned_settlement_name,assigned_country.name AS assigned_country_name,
               army.name AS assigned_army_name,fleet.name AS assigned_fleet_name,
               protected.name AS protected_character_name,
-              COALESCE(merchant.task_type,diplomat.task_type,espionage.target_type) AS operation_type,
-              COALESCE(merchant.status,diplomat.status,espionage.status) AS operation_status,
-              diplomat.progress AS operation_progress,diplomat.goal AS operation_goal,
-              COALESCE(merchant_target_country.name,diplomat_target_country.name,spy_target_country.name) AS target_country_name,
-              COALESCE(merchant_target.name,diplomat_target.name,spy_target.name) AS target_settlement_name
+              COALESCE(merchant.task_type,diplomat.task_type,espionage.target_type,
+                CASE WHEN missionary.id IS NOT NULL THEN 'RELIGIOUS_CONVERSION' END) AS operation_type,
+              COALESCE(merchant.status,diplomat.status,espionage.status,missionary.status) AS operation_status,
+              COALESCE(diplomat.progress,CASE WHEN missionary.id IS NOT NULL THEN (
+                SELECT COALESCE(SUM(share.primary_percent+share.secondary_percent),0)
+                  FROM settlement_religion_shares share
+                 WHERE share.settlement_id=missionary.target_settlement_id
+                   AND share.religion_key=missionary.religion_key
+              ) END) AS operation_progress,
+              COALESCE(diplomat.goal,CASE WHEN missionary.id IS NOT NULL THEN 100 END) AS operation_goal,
+              COALESCE(merchant_target_country.name,diplomat_target_country.name,spy_target_country.name,missionary_target_country.name) AS target_country_name,
+              COALESCE(merchant_target.name,diplomat_target.name,spy_target.name,missionary_target.name) AS target_settlement_name
          FROM country_characters character
          JOIN countries country ON country.id=character.country_id
          LEFT JOIN settlements assigned ON assigned.id=character.assigned_settlement_id
@@ -505,6 +512,14 @@ export const adminPanelService = {
          ) espionage ON TRUE
          LEFT JOIN countries spy_target_country ON spy_target_country.id=espionage.target_country_id
          LEFT JOIN settlements spy_target ON spy_target.id=espionage.target_settlement_id
+         LEFT JOIN LATERAL (
+           SELECT operation.* FROM missionary_operations operation
+            WHERE operation.missionary_character_id=character.id
+              AND operation.status IN ('TRAVELING','ACTIVE')
+            ORDER BY operation.created_at DESC LIMIT 1
+         ) missionary ON TRUE
+         LEFT JOIN settlements missionary_target ON missionary_target.id=missionary.target_settlement_id
+         LEFT JOIN countries missionary_target_country ON missionary_target_country.id=missionary_target.country_id
         WHERE country.guild_id=$1 AND country.status='ACTIVE' AND character.character_status='ACTIVE'
           AND character.assignment NOT IN ('NONE','CAPTURED')
         ORDER BY country.name,character.role,character.name`,
@@ -1152,6 +1167,11 @@ export const adminPanelService = {
           WHERE diplomat_character_id=$1 AND status IN ('TRAVELING','ACTIVE','PAUSED') RETURNING id`,
         [character.id]
       );
+      const missionaryOperations = await client.query(
+        `UPDATE missionary_operations SET status='CANCELLED',updated_at=NOW()
+          WHERE missionary_character_id=$1 AND status IN ('TRAVELING','ACTIVE') RETURNING id`,
+        [character.id]
+      );
       const espionageOperations = await client.query(
         "UPDATE espionage_operations SET status='CANCELLED',resolved_at=NOW() WHERE spy_character_id=$1 AND status='TRAVELING' RETURNING id",
         [character.id]
@@ -1173,7 +1193,7 @@ export const adminPanelService = {
         [character.id]
       );
       const changed = character.assignment !== "NONE" || Boolean(
-        merchantOperations.rowCount || diplomatOperations.rowCount || espionageOperations.rowCount ||
+        merchantOperations.rowCount || diplomatOperations.rowCount || missionaryOperations.rowCount || espionageOperations.rowCount ||
         assimilationAssignments.rowCount || armyCommands.rowCount || fleetCommands.rowCount || battleCommands.rowCount
       );
       if (!changed) throw new Error("Bu karakterin iptal edilecek etkin görevi bulunmuyor.");
@@ -1190,6 +1210,7 @@ export const adminPanelService = {
         previousAssignment: character.assignment,
         merchantOperations: merchantOperations.rowCount ?? 0,
         diplomatOperations: diplomatOperations.rowCount ?? 0,
+        missionaryOperations: missionaryOperations.rowCount ?? 0,
         espionageOperations: espionageOperations.rowCount ?? 0,
         assimilationAssignments: assimilationAssignments.rowCount ?? 0,
         armyCommands: armyCommands.rowCount ?? 0,

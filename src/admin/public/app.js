@@ -31,7 +31,8 @@ const assignmentLabels = {
   MERCHANT_BLACK_MARKET: "Karaborsa görevi", DIPLOMAT_TRAVELING: "Diplomatik göreve gidiyor",
   DIPLOMAT_DEFENSE: "Diplomatik savunma", DIPLOMAT_RECONCILIATION: "Halkla uzlaşma",
   DIPLOMAT_CULTURE: "Kültür değiştirme", DIPLOMAT_VASSALIZE: "Diplomatik vassallaştırma",
-  DIPLOMAT_INTEGRATE: "Vassal entegrasyonu"
+  DIPLOMAT_INTEGRATE: "Vassal entegrasyonu", MISSIONARY_TRAVELING: "Din değiştirme görevine gidiyor",
+  MISSIONARY_CONVERSION: "Din değiştirme"
 };
 const assignmentLabel = (value) => assignmentLabels[value] || String(value || "Görevsiz").replaceAll("_", " ");
 const operationLabels = {
@@ -40,13 +41,14 @@ const operationLabels = {
   VASSALIZE: "Diplomatik vassallaştırma", VASSAL_INTEGRATION: "Vassal entegrasyonu",
   ECONOMIC: "Ekonomik casusluk", MILITARY: "Askerî casusluk", PUBLIC: "Kamu casusluğu",
   NAVAL: "Deniz casusluğu", CONSTRUCTION: "İnşaat casusluğu", DISCREDIT: "İtibarsızlaştırma",
-  KIDNAP: "Kaçırma", ASSASSINATE: "Suikast", SUPPLY_COLLAPSE: "İkmal çökertme", DESERTION: "Firar kışkırtma"
+  KIDNAP: "Kaçırma", ASSASSINATE: "Suikast", SUPPLY_COLLAPSE: "İkmal çökertme", DESERTION: "Firar kışkırtma",
+  RELIGIOUS_CONVERSION: "Din değiştirme"
 };
 const operationStatusLabels = {
   PENDING_ACCEPTANCE: "Onay bekliyor", TRAVELING: "İntikal ediyor", ACTIVE: "Aktif",
   CONTROLLED: "Denetimli", PAUSED: "Beklemede"
 };
-const roleLabels = { COMMANDER: "Komutan", DIPLOMAT: "Diplomat", MERCHANT: "Tüccar", SPY: "Casus" };
+const roleLabels = { COMMANDER: "Komutan", DIPLOMAT: "Diplomat", MERCHANT: "Tüccar", SPY: "Casus", MISSIONARY: "Misyoner" };
 const characterStatusLabels = { ACTIVE: "Aktif", DEAD: "Ölü", DISMISSED: "Görevden alınmış" };
 const countryStatusLabels = { ACTIVE: "Aktif", "YOK_EDİLDİ": "Yok edilmiş" };
 const mobilizationLabels = { PEACE: "Barış", PARTIAL: "Kısmi seferberlik", GENERAL: "Genel seferberlik" };

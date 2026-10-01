@@ -152,7 +152,7 @@ export const commandBuilders = [
     .addStringOption((o) => o.setName("ulke").setDescription("Mali dökümü görüntülenecek ülke").setRequired(true))
     .addIntegerOption((o) => o.setName("tur").setDescription("Boş bırakılırsa mevcut tur").setMinValue(0)),
   new SlashCommandBuilder()
-    .setName("karakterlerim").setDescription("Ülkenizin bütün Akademi karakterlerini, konumlarını ve etkin görevlerini gösterir"),
+    .setName("karakterlerim").setDescription("Ülkenizin bütün karakterlerini, konumlarını ve etkin görevlerini gösterir"),
   new SlashCommandBuilder()
     .setName("komutan").setDescription("Komutanın kalıcı doktrin ve uzmanlığını yönetir")
     .addSubcommand((sub) => sub.setName("doktrin-sec").setDescription("Komutan için bir kez seçilebilen kalıcı doktrini belirler")
@@ -282,6 +282,17 @@ export const commandBuilders = [
       .addStringOption((o) => o.setName("uzmanlik").setDescription("Kilidi açılmış uzmanlık dalı").setRequired(true).setAutocomplete(true)))
     .addSubcommand((sub) => sub.setName("gorev-bitir").setDescription("Etkin Diplomat görevini sona erdirir")
       .addStringOption((o) => o.setName("diplomat").setDescription("Görevi bitecek Diplomat").setRequired(true).setAutocomplete(true))),
+  new SlashCommandBuilder()
+    .setName("misyoner").setDescription("Misyoner alımını ve yüzdesel din değiştirme görevlerini yönetir")
+    .addSubcommand((sub)=>sub.setName("al").setDescription("Alım Turunda bir yerleşkeden 10.000 Altına Misyoner alır")
+      .addStringOption((o)=>o.setName("yerleske").setDescription("Ücretin ödeneceği yerleşke").setRequired(true).setAutocomplete(true))
+      .addStringOption((o)=>o.setName("ad").setDescription("Misyonerin adı").setRequired(true).setMinLength(2).setMaxLength(60)))
+    .addSubcommand((sub)=>sub.setName("gorev-baslat").setDescription("Misyoneri kendi yerleşkenizde yüzdesel din değiştirmeye gönderir")
+      .addStringOption((o)=>o.setName("misyoner").setDescription("Müsait Misyoner").setRequired(true).setAutocomplete(true))
+      .addStringOption((o)=>o.setName("hedef-yerleske").setDescription("Din değiştirme uygulanacak kendi yerleşkeniz").setRequired(true).setAutocomplete(true))
+      .addStringOption((o)=>o.setName("din").setDescription("Ülkenizin yerleşkelerinde bulunan ve yayılacak din").setRequired(true).setAutocomplete(true)))
+    .addSubcommand((sub)=>sub.setName("gorev-bitir").setDescription("Etkin Misyoner görevini sona erdirir; çevrilen yüzdeler korunur")
+      .addStringOption((o)=>o.setName("misyoner").setDescription("Görevi bitecek Misyoner").setRequired(true).setAutocomplete(true))),
   new SlashCommandBuilder()
     .setName("karakter-yonetim").setDescription("Yalnızca yönetici: karakterleri ve karakter sonuç kanalını yönetir")
     .addSubcommand((sub) => sub.setName("karakter-ekle").setDescription("Bir devlete istenen rolde manuel karakter ekler")
