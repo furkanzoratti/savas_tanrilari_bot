@@ -12,6 +12,10 @@ export interface GladiatorRow {
   style: string;
   power: number;
   max_hp: number;
+  owner_country_name: string | null;
+  purchase_price: number | null;
+  leading_country_name: string | null;
+  current_bid: number | null;
 }
 
 export interface GladiatorTournamentRow {
@@ -53,6 +57,7 @@ export interface GladiatorTournamentView {
   tournament: GladiatorTournamentRow | null;
   matches: GladiatorMatchRow[];
   registeredCountries: number;
+  auctionStatus: "NOT_OPENED" | "OPEN" | "FINISHED" | "CANCELLED";
 }
 
 interface SeasonRow {
@@ -132,17 +137,45 @@ function numeric(value: number | string | null): number | null {
 
 export const greatGamesGladiatorService = {
   async view(guildId: string): Promise<GladiatorTournamentView> {
-    const roster = (await pool.query<GladiatorRow>(
-      "SELECT id,code,name,origin,style,power,max_hp FROM great_games_gladiators WHERE active=TRUE ORDER BY power DESC,name"
-    )).rows;
     const season = (await pool.query<{ id: string }>(
       "SELECT id FROM great_games_seasons WHERE guild_id=$1 AND game_turn=$2",
       [guildId, GREAT_GAMES_TURN]
     )).rows[0];
-    if (!season) return { roster, tournament: null, matches: [], registeredCountries: 0 };
+    if (!season) {
+      const roster = (await pool.query<GladiatorRow>(
+        `SELECT id,code,name,origin,style,power,max_hp,
+                NULL::text AS owner_country_name,NULL::bigint AS purchase_price,
+                NULL::text AS leading_country_name,NULL::bigint AS current_bid
+           FROM great_games_gladiators WHERE active=TRUE ORDER BY power DESC,name`
+      )).rows;
+      return { roster, tournament: null, matches: [], registeredCountries: 0, auctionStatus: "NOT_OPENED" };
+    }
     const client = await pool.connect();
     try {
+      const roster = (await client.query<GladiatorRow>(
+        `SELECT g.id,g.code,g.name,g.origin,g.style,g.power,g.max_hp,
+                owner.name AS owner_country_name,o.purchase_price,
+                leader.name AS leading_country_name,top_bid.amount AS current_bid
+           FROM great_games_gladiators g
+           LEFT JOIN great_games_gladiator_ownerships o
+             ON o.gladiator_id=g.id AND o.season_id=$1
+           LEFT JOIN countries owner ON owner.id=o.country_id
+           LEFT JOIN great_games_gladiator_auctions a ON a.season_id=$1
+           LEFT JOIN LATERAL (
+             SELECT b.country_id,b.amount
+               FROM great_games_gladiator_auction_bids b
+              WHERE b.auction_id=a.id AND b.gladiator_id=g.id
+              ORDER BY b.amount DESC,b.updated_at ASC LIMIT 1
+           ) top_bid ON TRUE
+           LEFT JOIN countries leader ON leader.id=top_bid.country_id
+          WHERE g.active=TRUE ORDER BY g.power DESC,g.name`,
+        [season.id]
+      )).rows;
       const tournament = await latestTournament(client, season.id);
+      const auctionStatus = (await client.query<{ status: "OPEN" | "FINISHED" | "CANCELLED" }>(
+        "SELECT status FROM great_games_gladiator_auctions WHERE season_id=$1",
+        [season.id]
+      )).rows[0]?.status ?? "NOT_OPENED";
       const registeredCountries = Number((await client.query<{ count: string }>(
         "SELECT COUNT(*)::text AS count FROM great_games_wallets WHERE season_id=$1 AND closed_at IS NULL",
         [season.id]
@@ -152,7 +185,7 @@ export const greatGamesGladiatorService = {
         match.odds_a = numeric(match.odds_a);
         match.odds_b = numeric(match.odds_b);
       }
-      return { roster, tournament, matches: tournamentMatches, registeredCountries };
+      return { roster, tournament, matches: tournamentMatches, registeredCountries, auctionStatus };
     } finally {
       client.release();
     }
