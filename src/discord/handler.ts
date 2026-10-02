@@ -75,6 +75,7 @@ import { handleEspionageAutocomplete, handleEspionageCommand, publishPendingEspi
 import { espionageService, resolveDueEspionageOperations } from "../services/espionage-service.js";
 import { handleCharacterAutocomplete, handleCharacterCommand, publishCharacterTurnLogs } from "./character-ui.js";
 import { characterService, processCharacterTurn } from "../services/character-service.js";
+import { handleDynastyAutocomplete,handleDynastyCommand,processDynastyAutomation } from "./dynasty-ui.js";
 import { handleDiplomacyButton, handleDiplomacyCommand } from "./diplomacy-ui.js";
 import { handlePlayerAutoPurchaseButton, handlePlayerAutoPurchaseCommand } from "./player-auto-purchase-ui.js";
 import { handleWarDeclarationButton, handleWarDeclarationCommand, handleWarDeclarationModal } from "./war-declaration-ui.js";
@@ -95,6 +96,10 @@ interface CharacterAutomationResult {
   espionagePublished: number;
   characterEvents: number;
   characterPublished: number;
+  dynastyProcessed: number;
+  dynastyEvents: number;
+  dynastyDeathChecks: number;
+  dynastyDeathLogsPublished: number;
   warnings: string[];
 }
 
@@ -162,12 +167,30 @@ export async function processDueCharacterSystems(
 ): Promise<CharacterAutomationResult> {
   const espionage = await processEspionageTurn(client,guildId,turn);
   const academy = await processAcademyCharacterTurn(client,guildId,turn,acquisition);
+  let dynastyProcessed=0;
+  let dynastyEvents=0;
+  let dynastyDeathChecks=0;
+  let dynastyDeathLogsPublished=0;
+  let dynastyWarnings:string[]=[];
+  try{
+    const dynasty=await processDynastyAutomation(client,guildId,turn);
+    dynastyProcessed=dynasty.processed;
+    dynastyEvents=dynasty.events.length;
+    dynastyDeathChecks=dynasty.deathChecks;
+    dynastyDeathLogsPublished=dynasty.deathLogsPublished;
+    dynastyWarnings=dynasty.failures.map((failure)=>"Hanedan: "+failure);
+    if(dynasty.deathLogWarning)dynastyWarnings.push(dynasty.deathLogWarning);
+  }catch(error){
+    logger.error({error,guildId,turn},"Hanedan tur otomasyonu tamamlanamadı");
+    dynastyWarnings=["Hanedan yaşlanma ve ölüm kontrolleri bu tur tamamlanamadı; güvenle yeniden denenebilir."];
+  }
   return {
     espionageResolved: espionage.resolved,
     espionagePublished: espionage.published,
     characterEvents: academy.events,
     characterPublished: academy.published,
-    warnings: [espionage.warning,academy.warning].filter((warning): warning is string => Boolean(warning))
+    dynastyProcessed,dynastyEvents,dynastyDeathChecks,dynastyDeathLogsPublished,
+    warnings: [espionage.warning,academy.warning,...dynastyWarnings].filter((warning): warning is string => Boolean(warning))
   };
 }
 
@@ -184,6 +207,8 @@ async function handleCharacterTurnRecovery(interaction: ChatInputCommandInteract
     `✅ **Tur ${guild.current_turn} karakter görevleri yeniden denetlendi.**`,
     `🕵️ Sonuçlandırılan vadesi gelmiş casus görevi: **${result.espionageResolved}** • Loglanan: **${result.espionagePublished}**`,
     `🎓 İşlenen Tüccar/Diplomat etkinliği: **${result.characterEvents}** • Loglanan/kuyruktan yayımlanan: **${result.characterPublished}**`,
+    `👑 İşlenen hanedan: **${result.dynastyProcessed}** • Hanedan olayı: **${result.dynastyEvents}**`,
+    `⚰️ Atılan ölüm zarı: **${result.dynastyDeathChecks}** • Loglanan/kuyruktan yayımlanan: **${result.dynastyDeathLogsPublished}**`,
     result.warnings.length ? `\n⚠️ ${result.warnings.join("\n⚠️ ")}` : "\nBütün işlemler tamamlandı. Komut tekrar kullanılırsa tamamlanmış görevler ikinci kez uygulanmaz."
   ].join("\n"));
 }
@@ -1247,6 +1272,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     return;
   }
   if (await handleGreatGamesCommand(interaction)) return;
+  if (await handleDynastyCommand(interaction)) return;
   if (await handleNavalOperationsCommand(interaction)) return;
   if (await handleLandRaidsCommand(interaction)) return;
   if (interaction.commandName === "olay-yoneticisi") {
@@ -1764,6 +1790,7 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
 }
 
 async function handleAutocomplete(interaction: AutocompleteInteraction): Promise<void> {
+  if (await handleDynastyAutocomplete(interaction)) return;
   if (await handleNavalOperationsAutocomplete(interaction)) return;
   if (await handleLandRaidsAutocomplete(interaction)) return;
   if (await handleCharacterAutocomplete(interaction)) return;

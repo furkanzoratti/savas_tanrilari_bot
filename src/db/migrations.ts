@@ -37,6 +37,10 @@ import { religionDistributionMigration } from "./religion-distribution-migration
 import { battleNavalCargoMigration } from "./battle-naval-cargo-migration.js";
 import { navalLegacyDisableCleanupMigration } from "./naval-legacy-disable-cleanup-migration.js";
 import { missionariesMigration } from "./missionaries-migration.js";
+import { dynastyMigration } from "./dynasty-migration.js";
+import { dynastyInitialRostersMigration } from "./dynasty-initial-rosters-migration.js";
+import { dynastyMarriagesMigration } from "./dynasty-marriages-migration.js";
+import { dynastyDeathLogsMigration } from "./dynasty-death-logs-migration.js";
 
 export const migrations = [
   {
@@ -2291,5 +2295,9 @@ export const migrations = [
   religionDistributionMigration,
   battleNavalCargoMigration,
   navalLegacyDisableCleanupMigration,
-  missionariesMigration
+  missionariesMigration,
+  dynastyMigration,
+  dynastyInitialRostersMigration,
+  dynastyMarriagesMigration,
+  dynastyDeathLogsMigration
 ] as const;

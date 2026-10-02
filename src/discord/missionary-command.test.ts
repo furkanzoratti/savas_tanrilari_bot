@@ -11,5 +11,6 @@ describe("missionary Discord command",()=>{
       .toEqual(["yerleske","ad"]);
     expect(command?.options?.find((option)=>option.name==="gorev-baslat")?.options?.map((option)=>option.name))
       .toEqual(["misyoner","hedef-yerleske","din"]);
+    expect(command?.options?.find((option)=>option.name==="al")?.description).toContain("2.000 Altına");
   });
 });

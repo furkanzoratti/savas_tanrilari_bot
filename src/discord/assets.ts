@@ -11,6 +11,8 @@ export const PEACE_TREATY_BANNER_NAME = "ancient-peace-treaty-banner.png";
 export const NAVAL_RAID_BANNER_NAME = "amrp-naval-raid-banner.png";
 export const LAND_RAID_BANNER_NAME = "amrp-land-raid-banner.png";
 export const HARBOR_BLOCKADE_BANNER_NAME = "amrp-harbor-blockade-banner.png";
+export const DYNASTY_BANNER_NAME = "ancient-dynasty-banner.png";
+export const DYNASTY_MARRIAGE_BANNER_NAME = "ancient-dynastic-marriage-banner.png";
 
 export const TEMPLE_BANNER_PATH = resolve(process.cwd(), "assets", TEMPLE_BANNER_NAME);
 export const BRAND_BANNER_PATH = resolve(process.cwd(), "assets", BRAND_BANNER_NAME);
@@ -23,6 +25,8 @@ export const PEACE_TREATY_BANNER_PATH = resolve(process.cwd(), "assets", PEACE_T
 export const NAVAL_RAID_BANNER_PATH = resolve(process.cwd(), "assets", NAVAL_RAID_BANNER_NAME);
 export const LAND_RAID_BANNER_PATH = resolve(process.cwd(), "assets", LAND_RAID_BANNER_NAME);
 export const HARBOR_BLOCKADE_BANNER_PATH = resolve(process.cwd(), "assets", HARBOR_BLOCKADE_BANNER_NAME);
+export const DYNASTY_BANNER_PATH = resolve(process.cwd(), "assets", DYNASTY_BANNER_NAME);
+export const DYNASTY_MARRIAGE_BANNER_PATH = resolve(process.cwd(), "assets", DYNASTY_MARRIAGE_BANNER_NAME);
 
 export const TEMPLE_BANNER_URL = `attachment://${TEMPLE_BANNER_NAME}`;
 export const BRAND_BANNER_URL = `attachment://${BRAND_BANNER_NAME}`;
@@ -35,6 +39,8 @@ export const PEACE_TREATY_BANNER_URL = `attachment://${PEACE_TREATY_BANNER_NAME}
 export const NAVAL_RAID_BANNER_URL = `attachment://${NAVAL_RAID_BANNER_NAME}`;
 export const LAND_RAID_BANNER_URL = `attachment://${LAND_RAID_BANNER_NAME}`;
 export const HARBOR_BLOCKADE_BANNER_URL = `attachment://${HARBOR_BLOCKADE_BANNER_NAME}`;
+export const DYNASTY_BANNER_URL = `attachment://${DYNASTY_BANNER_NAME}`;
+export const DYNASTY_MARRIAGE_BANNER_URL = `attachment://${DYNASTY_MARRIAGE_BANNER_NAME}`;
 
 export function battlefieldAsset(terrain: string): { name: string; path: string } {
   const names: Record<string, string> = {

@@ -15,7 +15,7 @@ import { convertReligionDistribution, religionConversionPercent, RELIGIONS, type
 import { fallbackReligionDistribution, loadCountryReligionProfile, loadReligionDistributions } from "./religion-service.js";
 import { isAcquisitionTurn } from "../domain/mobilization.js";
 
-export const MISSIONARY_PURCHASE_COST = 10_000;
+export const MISSIONARY_PURCHASE_COST = 2_000;
 export const MISSIONARY_LIMIT_PER_COUNTRY = 2;
 export const MISSIONARY_TASK_BONUS = 1;
 
@@ -327,7 +327,7 @@ export const characterService = {
       if(existing>=MISSIONARY_LIMIT_PER_COUNTRY)throw new GameError("Bir devlet aynı anda en fazla 2 etkin Misyonere sahip olabilir.");
       const duplicate=await client.query("SELECT 1 FROM country_characters WHERE country_id=$1 AND lower(name)=lower($2)",[input.countryId,name]);
       if(duplicate.rowCount)throw new GameError("Bu ülkede aynı adlı başka bir karakter var.");
-      if(Number(source.local_treasury)<MISSIONARY_PURCHASE_COST)throw new GameError("Seçilen yerleşkenin hazinesinde 10.000 Altın bulunmuyor.");
+      if(Number(source.local_treasury)<MISSIONARY_PURCHASE_COST)throw new GameError("Seçilen yerleşkenin hazinesinde 2.000 Altın bulunmuyor.");
       const created=(await client.query<{id:string}>(
         `INSERT INTO country_characters(
            country_id,trained_settlement_id,name,role,skill_bonus,trained_turn,trained_by
