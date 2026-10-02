@@ -75,7 +75,7 @@ import { handleEspionageAutocomplete, handleEspionageCommand, publishPendingEspi
 import { espionageService, resolveDueEspionageOperations } from "../services/espionage-service.js";
 import { handleCharacterAutocomplete, handleCharacterCommand, publishCharacterTurnLogs } from "./character-ui.js";
 import { characterService, processCharacterTurn } from "../services/character-service.js";
-import { handleDynastyAutocomplete,handleDynastyCommand,processDynastyAutomation } from "./dynasty-ui.js";
+import { handleDynastyAutocomplete,handleDynastyButton,handleDynastyCommand,handleDynastyModal,processDynastyAutomation } from "./dynasty-ui.js";
 import { handleDiplomacyButton, handleDiplomacyCommand } from "./diplomacy-ui.js";
 import { handlePlayerAutoPurchaseButton, handlePlayerAutoPurchaseCommand } from "./player-auto-purchase-ui.js";
 import { handleWarDeclarationButton, handleWarDeclarationCommand, handleWarDeclarationModal } from "./war-declaration-ui.js";
@@ -1725,6 +1725,7 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
 }
 
 async function handleButton(interaction: ButtonInteraction): Promise<void> {
+  if (await handleDynastyButton(interaction)) return;
   if (await handlePlayerAutoPurchaseButton(interaction)) return;
   if (await handleMovementButton(interaction)) return;
   if (await handleNavalOperationsButton(interaction)) return;
@@ -1767,6 +1768,7 @@ async function handleButton(interaction: ButtonInteraction): Promise<void> {
 }
 
 async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
+  if (await handleDynastyModal(interaction)) return;
   if (await handleBattleModal(interaction)) return;
   if (await handleMovementModal(interaction)) return;
   if (await handleGreatGamesModal(interaction)) return;

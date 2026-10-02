@@ -536,14 +536,23 @@ export const dynastyService={
     });
   },
 
-  async attemptBirth(input:{guildId:string;countryId:string;actorId:string;childName:string;parentMemberId?:string|null}):Promise<{
-    success:boolean;attemptRoll:number;ageModifier:number;childId:string|null;childName:string|null;childGender:DynastyGender|null;
-    complication:"DEATH"|"ILLNESS"|"HEALTHY"|null;motherName:string;fatherName:string;
+  async attemptBirth(input:{
+    guildId:string;countryId:string;actorId:string;parentMemberId?:string|null;
+    allowAnyMarriedMember?:boolean;
+  }):Promise<{
+    success:boolean;attemptRoll:number;ageModifier:number;pendingBirthId:string|null;childGender:DynastyGender|null;
+    genderRoll:number|null;complication:"DEATH"|"ILLNESS"|"HEALTHY"|null;complicationRoll:number|null;
+    motherName:string;fatherName:string;
   }>{
     return withTransaction(async(client)=>{
       await activeCountry(client,input.guildId,input.countryId);
       const dynasty=await dynastyForCountry(client,input.guildId,input.countryId,true);
       const turn=await currentTurn(client,input.guildId);
+      const pendingName=await client.query(
+        "SELECT 1 FROM dynasty_birth_sessions WHERE dynasty_id=$1 AND status='PENDING_NAME' LIMIT 1",
+        [dynasty.id]
+      );
+      if(pendingName.rowCount)throw new GameError("Bu hanedanda adı henüz konulmamış bir çocuk bulunuyor. Önce mevcut doğumu isimlendirin.");
       if(dynasty.last_birth_attempt_turn!==null&&turn-dynasty.last_birth_attempt_turn<BIRTH_ATTEMPT_COOLDOWN_TURNS)
         throw new GameError("Yeni çocuk denemesi Tur "+(dynasty.last_birth_attempt_turn+BIRTH_ATTEMPT_COOLDOWN_TURNS)+" itibarıyla yapılabilir.");
       const monarch=await client.query<DynastyMemberView>(
@@ -555,10 +564,13 @@ export const dynastyService={
       const parent=input.parentMemberId
         ?await memberForDynasty(client,dynasty.id,input.parentMemberId,true)
         :ruler;
-      if(!dynastyMemberCanBeBirthParent({
+      const regularBirthParent=dynastyMemberCanBeBirthParent({
         memberId:parent.id,monarchId:ruler.id,status:parent.status,spouseId:parent.spouse_id,
         motherId:parent.mother_id,fatherId:parent.father_id
-      }))throw new GameError("Yalnızca hükümdar veya hükümdarın yaşayan ve evli doğrudan çocuğu için gebelik zarı atılabilir.");
+      });
+      const managerBirthParent=input.allowAnyMarriedMember&&parent.status==="ALIVE"&&Boolean(parent.spouse_id);
+      if(!regularBirthParent&&!managerBirthParent)
+        throw new GameError("Yalnızca hükümdar, hükümdarın evli doğrudan çocuğu veya yönetici tarafından seçilen yaşayan ve evli bir hanedan üyesi için gebelik zarı atılabilir.");
       if(!parent.spouse_id)throw new GameError((parent.id===ruler.id?"Hükümdarın":"Seçilen hanedan üyesinin")+" yaşayan bir eşi bulunmalıdır.");
       const spouse=await memberAcrossGuild(client,input.guildId,parent.spouse_id,true);
       if(spouse.status!=="ALIVE")throw new GameError((parent.id===ruler.id?"Hükümdarın":"Seçilen hanedan üyesinin")+" yaşayan bir eşi bulunmalıdır.");
@@ -574,32 +586,38 @@ export const dynastyService={
       const motherAge=Number(mother.age);
       const modifier=birthAgeModifier(motherAge);
       if(modifier===null)throw new GameError("Doğum yapacak eş 18-44 yaş aralığında olmalıdır.");
-      const childName=input.childName.trim().replace(/\s+/g," ");
-      if(childName.length<2||childName.length>80)throw new GameError("Çocuk adı 2-80 karakter arasında olmalıdır.");
-      const duplicate=await client.query("SELECT 1 FROM dynasty_members WHERE dynasty_id=$1 AND lower(name)=lower($2)",[dynasty.id,childName]);
-      if(duplicate.rowCount)throw new GameError("Hanedanda aynı adlı bir üye zaten bulunuyor.");
       await client.query("UPDATE dynasties SET last_birth_attempt_turn=$1,updated_at=NOW() WHERE id=$2",[turn,dynasty.id]);
       const attemptRoll=randomInt(1,21);
       if(!birthAttemptSucceeded(motherAge,attemptRoll)){
         await addEvent(client,dynasty.id,turn,"BIRTH_ATTEMPT_FAILED",mother.id,{motherName:mother.name,fatherName:father.name,parentMemberId:parent.id,roll:attemptRoll,modifier});
-        return{success:false,attemptRoll,ageModifier:modifier,childId:null,childName:null,childGender:null,complication:null,motherName:mother.name,fatherName:father.name};
+        return{
+          success:false,attemptRoll,ageModifier:modifier,pendingBirthId:null,childGender:null,genderRoll:null,
+          complication:null,complicationRoll:null,motherName:mother.name,fatherName:father.name
+        };
       }
       const genderRoll=randomInt(1,3);
       const childGender=newbornGender(genderRoll);
-      const rank=Number((await client.query<{rank:number}>(
-        "SELECT COALESCE(MAX(succession_rank),0)::integer+1 AS rank FROM dynasty_members WHERE dynasty_id=$1",
-        [dynasty.id]
-      )).rows[0]?.rank??1);
-      const child=(await client.query<{id:string}>(
-        `INSERT INTO dynasty_members(
-           dynasty_id,name,gender,age,title,relation,succession_rank,mother_id,father_id,born_turn
-         ) VALUES($1,$2,$3,0,$4,$5,$6,$7,$8,$9) RETURNING id`,
-        [dynasty.id,childName,childGender,childGender==="MALE"?"Prens":"Prenses",
-          parent.id===ruler.id?"Hükümdarın çocuğu":"Hükümdarın torunu",rank,mother.id,father.id,turn]
-      )).rows[0]!;
+      const directMonarchChild=parent.mother_id===ruler.id||parent.father_id===ruler.id;
+      const childRelation=parent.id===ruler.id
+        ?"Hükümdarın çocuğu"
+        :directMonarchChild
+          ?"Hükümdarın torunu"
+          :"Hanedan üyesinin çocuğu";
       const complicationRoll=randomInt(1,21);
       const complication=birthComplication(complicationRoll);
-      await addEvent(client,dynasty.id,turn,"BIRTH",child.id,{childName,gender:childGender,motherName:mother.name,fatherName:father.name,parentMemberId:parent.id,attemptRoll,modifier,genderRoll,complicationRoll,complication});
+      const pending=(await client.query<{id:string}>(
+        `INSERT INTO dynasty_birth_sessions(
+           dynasty_id,initiated_by,parent_member_id,mother_id,father_id,game_turn,
+           attempt_roll,age_modifier,gender_roll,gender,complication_roll,complication,child_relation
+         ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
+        [dynasty.id,input.actorId,parent.id,mother.id,father.id,turn,attemptRoll,modifier,genderRoll,
+          childGender,complicationRoll,complication,childRelation]
+      )).rows[0]!;
+      await addEvent(client,dynasty.id,turn,"BIRTH_AWAITING_NAME",mother.id,{
+        pendingBirthId:pending.id,gender:childGender,motherName:mother.name,fatherName:father.name,
+        parentMemberId:parent.id,attemptRoll,modifier,genderRoll,complicationRoll,complication,
+        managerOverride:Boolean(input.allowAnyMarriedMember)
+      });
       if(complication==="ILLNESS"){
         await client.query(
           "UPDATE dynasty_members SET health='SICK',sick_until_turn=$1,updated_at=NOW() WHERE id=$2",
@@ -610,9 +628,71 @@ export const dynastyService={
         const texts:string[]=[];
         await killMember(client,dynasty.id,mother,turn,"Doğum komplikasyonu",dynasty.country_name,texts);
       }
-      const heir=(await client.query("SELECT 1 FROM dynasty_members WHERE dynasty_id=$1 AND status='ALIVE' AND is_heir=TRUE",[dynasty.id])).rowCount;
-      if(!heir){const texts:string[]=[];await reconcileSuccession(client,dynasty.id,turn,dynasty.country_name,texts);}
-      return{success:true,attemptRoll,ageModifier:modifier,childId:child.id,childName,childGender,complication,motherName:mother.name,fatherName:father.name};
+      return{
+        success:true,attemptRoll,ageModifier:modifier,pendingBirthId:pending.id,childGender,genderRoll,
+        complication,complicationRoll,motherName:mother.name,fatherName:father.name
+      };
+    });
+  },
+
+  async nameBirth(input:{
+    guildId:string;countryId:string;actorId:string;pendingBirthId:string;childName:string;allowManager?:boolean;
+  }):Promise<{dynastyId:string;childId:string;childName:string;childGender:DynastyGender;motherName:string;fatherName:string}>{
+    return withTransaction(async(client)=>{
+      await activeCountry(client,input.guildId,input.countryId);
+      const dynasty=await dynastyForCountry(client,input.guildId,input.countryId,true);
+      type PendingBirth={
+        id:string;initiated_by:string;parent_member_id:string;mother_id:string;father_id:string;game_turn:number;
+        attempt_roll:number;age_modifier:number;gender_roll:number;gender:DynastyGender;
+        complication_roll:number;complication:"DEATH"|"ILLNESS"|"HEALTHY";child_relation:string;status:string;
+        mother_name:string;father_name:string;
+      };
+      const pending=(await client.query<PendingBirth>(
+        `SELECT session.*,mother.name AS mother_name,father.name AS father_name
+           FROM dynasty_birth_sessions session
+           JOIN dynasty_members mother ON mother.id=session.mother_id
+           JOIN dynasty_members father ON father.id=session.father_id
+          WHERE session.id=$1 AND session.dynasty_id=$2
+          FOR UPDATE OF session`,[input.pendingBirthId,dynasty.id]
+      )).rows[0];
+      if(!pending)throw new GameError("İsimlendirilecek doğum kaydı bulunamadı.");
+      if(pending.status!=="PENDING_NAME")throw new GameError("Bu çocuğa daha önce isim verilmiş.");
+      if(pending.initiated_by!==input.actorId&&!input.allowManager)
+        throw new GameError("Bu çocuğa yalnızca doğum zarını atan oyuncu veya oyun yöneticisi isim verebilir.");
+      const childName=input.childName.trim().replace(/\s+/g," ");
+      if(childName.length<2||childName.length>80)throw new GameError("Çocuk adı 2-80 karakter arasında olmalıdır.");
+      const duplicate=await client.query(
+        "SELECT 1 FROM dynasty_members WHERE dynasty_id=$1 AND lower(name)=lower($2)",[dynasty.id,childName]
+      );
+      if(duplicate.rowCount)throw new GameError("Hanedanda aynı adlı bir üye zaten bulunuyor.");
+      const rank=Number((await client.query<{rank:number}>(
+        "SELECT COALESCE(MAX(succession_rank),0)::integer+1 AS rank FROM dynasty_members WHERE dynasty_id=$1",
+        [dynasty.id]
+      )).rows[0]?.rank??1);
+      const child=(await client.query<{id:string}>(
+        `INSERT INTO dynasty_members(
+           dynasty_id,name,gender,age,title,relation,succession_rank,mother_id,father_id,born_turn
+         ) VALUES($1,$2,$3,0,$4,$5,$6,$7,$8,$9) RETURNING id`,
+        [dynasty.id,childName,pending.gender,pending.gender==="MALE"?"Prens":"Prenses",
+          pending.child_relation,rank,pending.mother_id,pending.father_id,pending.game_turn]
+      )).rows[0]!;
+      await client.query(
+        "UPDATE dynasty_birth_sessions SET status='COMPLETED',child_id=$1,completed_at=NOW() WHERE id=$2",
+        [child.id,pending.id]
+      );
+      await addEvent(client,dynasty.id,pending.game_turn,"BIRTH",child.id,{
+        childName,gender:pending.gender,motherName:pending.mother_name,fatherName:pending.father_name,
+        parentMemberId:pending.parent_member_id,attemptRoll:pending.attempt_roll,modifier:pending.age_modifier,
+        genderRoll:pending.gender_roll,complicationRoll:pending.complication_roll,complication:pending.complication
+      });
+      const heir=(await client.query(
+        "SELECT 1 FROM dynasty_members WHERE dynasty_id=$1 AND status='ALIVE' AND is_heir=TRUE",[dynasty.id]
+      )).rowCount;
+      if(!heir){const texts:string[]=[];await reconcileSuccession(client,dynasty.id,pending.game_turn,dynasty.country_name,texts);}
+      return{
+        dynastyId:dynasty.id,childId:child.id,childName,childGender:pending.gender,
+        motherName:pending.mother_name,fatherName:pending.father_name
+      };
     });
   },
 

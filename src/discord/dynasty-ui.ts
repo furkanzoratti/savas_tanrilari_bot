@@ -1,4 +1,8 @@
-import {AttachmentBuilder,ChannelType,EmbedBuilder,MessageFlags,type AutocompleteInteraction,type ChatInputCommandInteraction,type Client} from "discord.js";
+import {
+  ActionRowBuilder,AttachmentBuilder,ButtonBuilder,ButtonStyle,ChannelType,EmbedBuilder,MessageFlags,
+  ModalBuilder,TextInputBuilder,TextInputStyle,
+  type AutocompleteInteraction,type ButtonInteraction,type ChatInputCommandInteraction,type Client,type ModalSubmitInteraction
+} from "discord.js";
 import {DYNASTY_GENDER_LABELS,DYNASTY_HEALTH_LABELS,MINIMUM_MARRIAGE_AGE,type DynastyGender,type DynastyHealth} from "../domain/dynasty.js";
 import {dynastyService,type DynastyTurnResult,type DynastyView} from "../services/dynasty-service.js";
 import {gameService,GameError} from "../services/game-service.js";
@@ -19,6 +23,27 @@ export interface DynastyDeathLogPublishResult{
 }
 
 const errorMessage=(error:unknown)=>error instanceof Error?error.message:String(error);
+
+function birthResultMessage(result:Awaited<ReturnType<typeof dynastyService.attemptBirth>>):string{
+  const roll=result.attemptRoll+(result.ageModifier>=0?" + "+result.ageModifier:" − "+Math.abs(result.ageModifier));
+  if(!result.success)return "🕯️ **Çocuk denemesi başarısız oldu.**\nDoğum zarı: **"+roll+" = "+(result.attemptRoll+result.ageModifier)+"** • Gerekli sonuç: **11**\nYeni deneme iki tur sonra yapılabilir.";
+  const gender=result.childGender==="MALE"?"erkek":"kız";
+  const complication=result.complication==="DEATH"
+    ?" **"+result.motherName+"** doğum komplikasyonu nedeniyle hayatını kaybetti."
+    :result.complication==="ILLNESS"
+      ?" **"+result.motherName+"** hastalandı ve 3 tur yeni gebelik deneyemeyecek."
+      :" Doğum sorunsuz tamamlandı.";
+  return "👶 **Doğum başarılı.**\nDoğum zarı: **"+roll+" = "+(result.attemptRoll+result.ageModifier)+"**\n"+
+    "Cinsiyet zarı: **1d2 → "+result.genderRoll+"** • Çocuk **"+gender+"**.\n"+complication+"\n\nŞimdi çocuğa isim verin.";
+}
+
+function birthNameButton(countryId:string,result:Awaited<ReturnType<typeof dynastyService.attemptBirth>>):ActionRowBuilder<ButtonBuilder>[] {
+  if(!result.success||!result.pendingBirthId)return[];
+  return[new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId("dynasty_birth_name|"+countryId+"|"+result.pendingBirthId)
+      .setLabel("Çocuğa İsim Ver").setEmoji("👶").setStyle(ButtonStyle.Primary)
+  )];
+}
 
 export async function publishDynastyDeathLogs(client:Client,guildId:string):Promise<DynastyDeathLogPublishResult>{
   const batches=await dynastyService.pendingDeathLogBatches(guildId);
@@ -149,20 +174,9 @@ export async function handleDynastyCommand(interaction:ChatInputCommandInteracti
     }else if(sub==="cocuk-dene"){
       const result=await dynastyService.attemptBirth({
         guildId:interaction.guildId,countryId:country.id,actorId:interaction.user.id,
-        childName:interaction.options.getString("isim",true),
         parentMemberId:interaction.options.getString("ebeveyn")
       });
-      const roll=result.attemptRoll+(result.ageModifier>=0?" + "+result.ageModifier:" − "+Math.abs(result.ageModifier));
-      if(!result.success)await interaction.editReply("🕯️ **Çocuk denemesi başarısız oldu.**\nDoğum zarı: **"+roll+" = "+(result.attemptRoll+result.ageModifier)+"** • Gerekli sonuç: **11**\nYeni deneme iki tur sonra yapılabilir.");
-      else{
-        const gender=result.childGender==="MALE"?"erkek":"kız";
-        const complication=result.complication==="DEATH"
-          ?" **"+result.motherName+"** doğum komplikasyonu nedeniyle hayatını kaybetti."
-          :result.complication==="ILLNESS"
-            ?" **"+result.motherName+"** hastalandı ve 3 tur yeni gebelik deneyemeyecek."
-            :" Doğum sorunsuz tamamlandı.";
-        await interaction.editReply("👶 **"+result.childName+"** adlı "+gender+" çocuk hanedana katıldı.\nDoğum zarı: **"+roll+" = "+(result.attemptRoll+result.ageModifier)+"** • "+complication);
-      }
+      await interaction.editReply({content:birthResultMessage(result),components:birthNameButton(country.id,result)});
       await refreshDynastyCard(interaction.client,view.id);
     }else if(sub==="evlilik-teklif"){
       const targetCountryName=interaction.options.getString("hedef-ulke",true);
@@ -281,6 +295,15 @@ export async function handleDynastyCommand(interaction:ChatInputCommandInteracti
   }
   const view=await dynastyService.viewByCountry(country.id);
   if(!view)throw new GameError("Bu devlet için önce `/hanedan-yonetim olustur` kullanılmalıdır.");
+  if(sub==="cocuk-dene"){
+    const result=await dynastyService.attemptBirth({
+      guildId:interaction.guildId,countryId:country.id,actorId:interaction.user.id,
+      parentMemberId:interaction.options.getString("ebeveyn",true),allowAnyMarriedMember:true
+    });
+    await interaction.editReply({content:birthResultMessage(result),components:birthNameButton(country.id,result)});
+    await refreshDynastyCard(interaction.client,view.id);
+    return true;
+  }
   if(sub==="uye-ekle"){
     const id=await dynastyService.addMember({
       guildId:interaction.guildId,countryId:country.id,actorId:interaction.user.id,
@@ -326,6 +349,39 @@ export async function handleDynastyCommand(interaction:ChatInputCommandInteracti
   return true;
 }
 
+export async function handleDynastyButton(interaction:ButtonInteraction):Promise<boolean>{
+  if(!interaction.customId.startsWith("dynasty_birth_name|"))return false;
+  const [,countryId,pendingBirthId]=interaction.customId.split("|");
+  if(!interaction.guildId||!countryId||!pendingBirthId)throw new GameError("Doğum isimlendirme düğmesi geçersiz.");
+  const modal=new ModalBuilder()
+    .setCustomId("dynasty_birth_modal|"+countryId+"|"+pendingBirthId)
+    .setTitle("Hanedan Çocuğuna İsim Ver")
+    .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder().setCustomId("child_name").setLabel("Çocuğun adı")
+        .setPlaceholder("Örn. Alexandros").setStyle(TextInputStyle.Short)
+        .setMinLength(2).setMaxLength(80).setRequired(true)
+    ));
+  await interaction.showModal(modal);
+  return true;
+}
+
+export async function handleDynastyModal(interaction:ModalSubmitInteraction):Promise<boolean>{
+  if(!interaction.customId.startsWith("dynasty_birth_modal|"))return false;
+  const [,countryId,pendingBirthId]=interaction.customId.split("|");
+  if(!interaction.guildId||!countryId||!pendingBirthId)throw new GameError("Doğum isimlendirme formu geçersiz.");
+  await interaction.deferReply({flags:MessageFlags.Ephemeral});
+  const result=await dynastyService.nameBirth({
+    guildId:interaction.guildId,countryId,actorId:interaction.user.id,pendingBirthId,
+    childName:interaction.fields.getTextInputValue("child_name"),allowManager:isGameMaster(interaction)
+  });
+  const gender=result.childGender==="MALE"?"erkek":"kız";
+  await interaction.editReply("👶 **"+result.childName+"** adlı "+gender+" çocuk hanedana kaydedildi.\n"+
+    "Anne: **"+result.motherName+"** • Baba: **"+result.fatherName+"**");
+  if(interaction.message?.editable)await interaction.message.edit({components:[]}).catch(()=>undefined);
+  await refreshDynastyCard(interaction.client,result.dynastyId);
+  return true;
+}
+
 export async function handleDynastyAutocomplete(interaction:AutocompleteInteraction):Promise<boolean>{
   if(!interaction.guildId||!["hanedan","hanedan-yonetim"].includes(interaction.commandName))return false;
   const focused=interaction.options.getFocused(true);
@@ -356,10 +412,11 @@ export async function handleDynastyAutocomplete(interaction:AutocompleteInteract
       :await gameService.countryForUser(interaction.guildId,interaction.user.id);
     const view=country?await dynastyService.viewByCountry(country.id):null;
     const monarch=view?.members.find((member)=>member.status==="ALIVE"&&member.is_monarch);
-    const candidates=(view?.members??[]).filter((member)=>
-      member.status==="ALIVE"&&Boolean(member.spouse_id)&&member.id!==monarch?.id&&
-      (member.mother_id===monarch?.id||member.father_id===monarch?.id)
-    );
+    const candidates=(view?.members??[]).filter((member)=>{
+      if(member.status!=="ALIVE"||!member.spouse_id)return false;
+      if(interaction.commandName==="hanedan-yonetim")return true;
+      return member.id!==monarch?.id&&(member.mother_id===monarch?.id||member.father_id===monarch?.id);
+    });
     await interaction.respond(candidates
       .filter((member)=>!query||(member.name+" "+member.title+" "+member.spouse_name).toLocaleLowerCase("tr-TR").includes(query))
       .slice(0,25).map((member)=>({
