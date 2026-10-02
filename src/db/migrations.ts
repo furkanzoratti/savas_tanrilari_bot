@@ -41,6 +41,7 @@ import { dynastyMigration } from "./dynasty-migration.js";
 import { dynastyInitialRostersMigration } from "./dynasty-initial-rosters-migration.js";
 import { dynastyMarriagesMigration } from "./dynasty-marriages-migration.js";
 import { dynastyDeathLogsMigration } from "./dynasty-death-logs-migration.js";
+import { epirusDynastyMigration } from "./epirus-dynasty-migration.js";
 
 export const migrations = [
   {
@@ -2299,5 +2300,6 @@ export const migrations = [
   dynastyMigration,
   dynastyInitialRostersMigration,
   dynastyMarriagesMigration,
-  dynastyDeathLogsMigration
+  dynastyDeathLogsMigration,
+  epirusDynastyMigration
 ] as const;
