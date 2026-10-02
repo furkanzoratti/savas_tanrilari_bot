@@ -75,7 +75,7 @@ async function serveStatic(pathname: keyof typeof publicFiles, response: ServerR
   const file = publicFiles[pathname];
   const content = await readFile(file.path);
   securityHeaders(response);
-  response.writeHead(200, { "content-type": file.type, "cache-control": pathname === "/" ? "no-store" : "public, max-age=300" });
+  response.writeHead(200, { "content-type": file.type, "cache-control": "no-store" });
   response.end(content);
 }
 
