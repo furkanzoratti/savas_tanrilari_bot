@@ -50,7 +50,7 @@ function gameRules(type: GreatGameType): string {
   if (type === "CHARIOT") return `Katılım 1.000 Altın. Form yayınlandıktan sonra bahisler açılır. Yarış ${GREAT_GAMES_RACE_ROUNDS} etap sürer; her etapta gizli taktik verilir ve 50 kademeli pistteki atlar sonuçlarla birlikte ilerler. Katılım havuzu %65/%35 paylaşılır.`;
   if (type === "CARAVAN") return `Seçilen devletler 2–3 kişilik kervanlara ayrılır. ${GREAT_GAMES_RACE_ROUNDS} aşamanın her birinde, her kervandan yalnız bir takım üyesi ortak rotayı gizlice seçer. Her devletten oyun başlarken 1.000 Altın alınır; kervanların 50 kademeli pistteki sırası canlı değişir.`;
   if (type === "KINGS_BET") return "Katılım 1.000 Altın. Üç ikilemde İşbirliği veya İhanet ve rakibin kararı için tahmin gizlice seçilir.";
-  if (type === "GLADIATOR") return "64 kişilik Capua havuzundan her turnuvada 32 dövüşçü rastgele seçilir. Dövüşte taraflar sırayla saldırır: 1d20 + Güç/10 saldırı, 1d20 + Güç/12 savunma zarıdır. Saldırı savunmayı geçerse 1d10 + Güç/25 hasar verilir. Gladyatör müzayedesi 50 Altından başlar, her teklif tam 25 Altın artar ve bir devlet en fazla 3 gladyatöre sahip olabilir.";
+  if (type === "GLADIATOR") return "64 kişilik Capua havuzundan her turnuvada 32 dövüşçü rastgele seçilir. Dövüşte taraflar sırayla saldırır: 1d20 + Güç/10 saldırı, 1d20 + Güç/12 savunma zarıdır. Saldırı savunmayı geçerse 1d10 + Güç/25 hasar verilir. Gladyatör müzayedesi 50 Altından başlar; sonraki teklif güncel bedelin üzerindeki herhangi bir tam sayı olabilir. Bir devlet en fazla 3 gladyatöre sahip olabilir.";
   return "Her masa üç devletten oluşur. Anlaşma yalnız bir ana ve en fazla bir ikincil kazanan çıkarabilir. Katılım 500 Altındır.";
 }
 
@@ -220,7 +220,7 @@ function gladiatorStatus(view: GladiatorTournamentView): string {
 async function gladiatorRosterPayload(guildId: string, content?: string) {
   const view = await greatGamesGladiatorService.view(guildId);
   const embed = new EmbedBuilder().setColor(0xb43b32).setTitle("⚔️ Capua • Gladyatör Listesi")
-    .setDescription(`**Müzayede:** ${view.auctionStatus === "OPEN" ? "Tekliflere açık" : view.auctionStatus === "FINISHED" ? "Tamamlandı" : "Henüz açılmadı"}\nTeklifler **50 Altından** başlar ve tam **25 Altın** artar. Her devlet en fazla **3 gladyatöre** sahip olabilir.`)
+    .setDescription(`**Müzayede:** ${view.auctionStatus === "OPEN" ? "Tekliflere açık" : view.auctionStatus === "FINISHED" ? "Tamamlandı" : "Henüz açılmadı"}\nTeklifler **50 Altından** başlar. Sonraki teklif güncel bedelin üzerindeki **herhangi bir tam sayı** olabilir. Her devlet en fazla **3 gladyatöre** sahip olabilir.`)
     .addFields(...gladiatorRosterFields(view));
   const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId("gg2|gladiator-roster-refresh|GLADIATOR").setLabel("Listeyi Yenile").setEmoji("🔄").setStyle(ButtonStyle.Secondary)
@@ -230,6 +230,38 @@ async function gladiatorRosterPayload(guildId: string, content?: string) {
     new ButtonBuilder().setCustomId("gg2|gladiator-auction-close|GLADIATOR").setLabel("Müzayedeyi Bitir").setEmoji("🏁").setStyle(ButtonStyle.Danger)
   );
   return { content: content ?? "", embeds: [embed], components: [buttons] };
+}
+
+const GLADIATOR_AUCTION_PAGE_SIZE = 25;
+
+async function gladiatorAuctionSelectionPayload(guildId: string, requestedPage: number) {
+  const view = await greatGamesGladiatorService.view(guildId);
+  if (view.auctionStatus !== "OPEN") throw new GameError("Capua gladyatör müzayedesi tekliflere kapalı.");
+  const fighters = view.roster.filter((fighter) => !fighter.owner_country_name);
+  if (!fighters.length) throw new GameError("Teklif verilebilecek gladyatör bulunmuyor.");
+  const pageCount = Math.max(1, Math.ceil(fighters.length / GLADIATOR_AUCTION_PAGE_SIZE));
+  const safePage = Number.isSafeInteger(requestedPage) ? requestedPage : 0;
+  const page = Math.min(Math.max(0, safePage), pageCount - 1);
+  const pageFighters = fighters.slice(page * GLADIATOR_AUCTION_PAGE_SIZE, (page + 1) * GLADIATOR_AUCTION_PAGE_SIZE);
+  const selector = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`ggs2|gladiator-fighter|${page}`)
+      .setPlaceholder("Teklif verilecek gladyatörü seç")
+      .addOptions(pageFighters.map((fighter) => ({
+        label: fighter.name.slice(0, 100),
+        value: fighter.id,
+        description: `${fighter.code} • Güç ${fighter.power} • Can ${fighter.max_hp} • ${fighter.current_bid ? `Güncel ${gold(Number(fighter.current_bid))}` : "Açılış 50 Altın"}`.slice(0, 100)
+      })))
+  );
+  const navigation = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(`gg2|gladiator-auction-page|${page - 1}`).setLabel("Önceki").setEmoji("⬅️").setStyle(ButtonStyle.Secondary).setDisabled(page === 0),
+    new ButtonBuilder().setCustomId(`gg2|gladiator-auction-page|${page + 1}`).setLabel("Sonraki").setEmoji("➡️").setStyle(ButtonStyle.Secondary).setDisabled(page === pageCount - 1)
+  );
+  return {
+    content: `💰 **Teklif verilecek gladyatörü seç.**\nSayfa **${page + 1}/${pageCount}** • Açılış en az **50 Altın**; sonraki teklif güncel bedelin üzerindeki herhangi bir tam sayı olabilir.`,
+    embeds: [],
+    components: [selector, navigation]
+  };
 }
 
 async function adminDashboardPayload(guildId: string): Promise<AdminPanelPayload> {
@@ -624,7 +656,7 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
     await greatGamesGladiatorAuctionService.open(interaction.guildId, interaction.user.id);
     await interaction.editReply(await adminGamePayload(interaction.guildId, "GLADIATOR"));
     await interaction.followUp({
-      ...(await gladiatorRosterPayload(interaction.guildId, "🔨 **Capua Gladyatör Müzayedesi açıldı.** Teklifler 50 Altından başlar ve her artış tam 25 Altındır.")),
+      ...(await gladiatorRosterPayload(interaction.guildId, "🔨 **Capua Gladyatör Müzayedesi açıldı.** Teklifler 50 Altından başlar; sonraki teklif güncel bedelin üzerindeki herhangi bir tam sayı olabilir.")),
       ephemeral: false
     });
     return true;
@@ -647,10 +679,11 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
     return true;
   }
   if (action === "gladiator-auction-bid") {
-    await interaction.showModal(new ModalBuilder().setCustomId("ggm2|gladiator-auction-bid|GLADIATOR").setTitle("Capua Gladyatör Teklifi").addComponents(
-      new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("fighter").setLabel("Gladyatörün tam adı veya CAP kodu").setPlaceholder("CAP-01").setMaxLength(100).setStyle(TextInputStyle.Short).setRequired(true)),
-      new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("amount").setLabel("Gösterilen sıradaki teklif").setPlaceholder("50").setMaxLength(10).setStyle(TextInputStyle.Short).setRequired(true))
-    ));
+    await interaction.reply({ ...(await gladiatorAuctionSelectionPayload(interaction.guildId, 0)), flags: MessageFlags.Ephemeral });
+    return true;
+  }
+  if (action === "gladiator-auction-page") {
+    await interaction.update(await gladiatorAuctionSelectionPayload(interaction.guildId, Number(rawType ?? 0)));
     return true;
   }
   if (action === "gladiator-start") {
@@ -794,6 +827,25 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
 }
 
 export async function handleGreatGamesSelect(interaction: StringSelectMenuInteraction): Promise<boolean> {
+  if (interaction.customId.startsWith("ggs2|gladiator-fighter|")) {
+    if (!interaction.guildId) throw new GameError("Bu işlem yalnızca sunucuda kullanılabilir.");
+    const fighterId = interaction.values[0];
+    if (!fighterId) throw new GameError("Gladyatör seçilmedi.");
+    const view = await greatGamesGladiatorService.view(interaction.guildId);
+    if (view.auctionStatus !== "OPEN") throw new GameError("Capua gladyatör müzayedesi tekliflere kapalı.");
+    const fighter = view.roster.find((item) => item.id === fighterId && !item.owner_country_name);
+    if (!fighter) throw new GameError("Seçilen gladyatör artık tekliflere açık değil.");
+    const minimum = fighter.current_bid ? Number(fighter.current_bid) + 1 : 50;
+    await interaction.showModal(new ModalBuilder()
+      .setCustomId(`ggm2|gladiator-auction-bid|${fighter.id}`)
+      .setTitle(`${fighter.name} • Teklif`.slice(0, 45))
+      .addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder().setCustomId("amount").setLabel(`Yeni teklif • En az ${gold(minimum)}`.slice(0, 45)).setPlaceholder(String(minimum)).setMaxLength(15).setStyle(TextInputStyle.Short).setRequired(true)
+        )
+      ));
+    return true;
+  }
   if (interaction.customId !== "ggs2|auction-lot") return false;
   const lotId = interaction.values[0];
   if (!lotId) throw new GameError("Müzayede kalemi seçilmedi.");
@@ -821,13 +873,12 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
   }
   const country = await ownCountry(interaction.guildId, interaction.user.id);
   if (action === "gladiator-auction-bid") {
-    const gladiatorQuery = interaction.fields.getTextInputValue("fighter").trim();
     const amount = Number(interaction.fields.getTextInputValue("amount").replaceAll(".", "").trim());
     const result = await greatGamesGladiatorAuctionService.bid({
       guildId: interaction.guildId,
       countryId: country.id,
       userId: interaction.user.id,
-      gladiatorQuery,
+      gladiatorId: rawType!,
       amount
     });
     await interaction.reply({

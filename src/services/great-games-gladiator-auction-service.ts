@@ -59,12 +59,12 @@ export const greatGamesGladiatorAuctionService = {
     guildId: string;
     countryId: string;
     userId: string;
-    gladiatorQuery: string;
+    gladiatorId: string;
     amount: number;
   }): Promise<{ gladiatorName: string; amount: number; availableAfter: number; leadingLots: number }> {
     return withTransaction(async (client) => {
-      if (!Number.isSafeInteger(input.amount) || input.amount < 50 || (input.amount - 50) % 25 !== 0) {
-        throw new GameError("Gladyatör teklifi 50 Altından başlamalı ve 25 Altının katlarıyla artmalıdır.");
+      if (!Number.isSafeInteger(input.amount) || input.amount < 50) {
+        throw new GameError("Gladyatör teklifi en az 50 Altınlık bir tam sayı olmalıdır.");
       }
       const season = await lockedSeason(client, input.guildId);
       const auction = await lockedAuction(client, season.id);
@@ -75,11 +75,10 @@ export const greatGamesGladiatorAuctionService = {
       )).rows[0];
       if (!wallet) throw new GameError("Önce `/oyunlar katil` ile oyun cüzdanını açmalısın.");
       const fighter = (await client.query<{ id: string; name: string; code: string }>(
-        `SELECT id,name,code FROM great_games_gladiators
-          WHERE active=TRUE AND (lower(name)=lower($1) OR lower(code)=lower($1))`,
-        [input.gladiatorQuery.trim()]
+        "SELECT id,name,code FROM great_games_gladiators WHERE active=TRUE AND id=$1",
+        [input.gladiatorId]
       )).rows[0];
-      if (!fighter) throw new GameError("Gladyatör bulunamadı. Tam adını veya CAP kodunu yazmalısın.");
+      if (!fighter) throw new GameError("Seçilen gladyatör bulunamadı veya artık etkin değil.");
       const ownedCount = Number((await client.query<{ count: string }>(
         "SELECT COUNT(*)::text AS count FROM great_games_gladiator_ownerships WHERE season_id=$1 AND country_id=$2",
         [season.id, input.countryId]
@@ -94,8 +93,9 @@ export const greatGamesGladiatorAuctionService = {
           WHERE auction_id=$1 AND gladiator_id=$2 ORDER BY amount DESC,updated_at ASC LIMIT 1 FOR UPDATE`,
         [auction.id, fighter.id]
       )).rows[0];
-      const required = current ? Number(current.amount) + 25 : 50;
-      if (input.amount !== required) throw new GameError(`Bu gladyatör için sıradaki teklif tam ${required.toLocaleString("tr-TR")} Altın olmalıdır.`);
+      if (current && input.amount <= Number(current.amount)) {
+        throw new GameError(`Güncel teklif ${Number(current.amount).toLocaleString("tr-TR")} Altın. Yeni teklif bunun üzerinde olmalıdır.`);
+      }
       const leading = (await client.query<{ gladiator_id: string; amount: number }>(
         `SELECT gladiator_id,amount FROM (
            SELECT DISTINCT ON (gladiator_id) gladiator_id,country_id,amount
