@@ -194,7 +194,8 @@ async function reconcileSuccession(
     const successor=(await client.query<{id:string;name:string;gender:DynastyGender}>(
       `SELECT id,name,gender FROM dynasty_members
         WHERE dynasty_id=$1 AND status='ALIVE' AND (is_heir=TRUE OR succession_rank IS NOT NULL)
-        ORDER BY is_heir DESC,succession_rank NULLS LAST,age DESC,created_at LIMIT 1 FOR UPDATE`,[dynastyId]
+        ORDER BY CASE WHEN gender='MALE' THEN 0 ELSE 1 END,
+                 is_heir DESC,succession_rank NULLS LAST,age DESC,created_at LIMIT 1 FOR UPDATE`,[dynastyId]
     )).rows[0];
     if(!successor){
       await addEvent(client,dynastyId,turn,"SUCCESSION_CRISIS",null,{countryName,reason:"Yaşayan hanedan üyesi bulunmuyor"});
@@ -222,18 +223,21 @@ async function reconcileSuccession(
     "SELECT id FROM dynasty_members WHERE dynasty_id=$1 AND status='ALIVE' AND is_heir=TRUE AND id<>$2 LIMIT 1",
     [dynastyId,monarch.id]
   )).rows[0];
-  if(existingHeir)return;
   const next=(await client.query<{id:string;name:string}>(
     `SELECT id,name FROM dynasty_members
-      WHERE dynasty_id=$1 AND status='ALIVE' AND id<>$2 AND succession_rank IS NOT NULL
-      ORDER BY succession_rank NULLS LAST,age DESC,created_at LIMIT 1 FOR UPDATE`,
+      WHERE dynasty_id=$1 AND status='ALIVE' AND id<>$2 AND (is_heir=TRUE OR succession_rank IS NOT NULL)
+      ORDER BY CASE WHEN gender='MALE' THEN 0 ELSE 1 END,
+               is_heir DESC,succession_rank NULLS LAST,age DESC,created_at LIMIT 1 FOR UPDATE`,
     [dynastyId,monarch.id]
   )).rows[0];
   if(next){
-    await client.query("UPDATE dynasty_members SET is_heir=TRUE,updated_at=NOW() WHERE id=$1",[next.id]);
-    await addEvent(client,dynastyId,turn,"HEIR_DESIGNATED",next.id,{name:next.name,automatic:true});
-    eventTexts.push("📜 **"+next.name+"**, **"+countryName+"** tahtının yeni varisi oldu.");
+    await client.query("UPDATE dynasty_members SET is_heir=(id=$2),updated_at=NOW() WHERE dynasty_id=$1 AND status='ALIVE'",[dynastyId,next.id]);
+    if(existingHeir?.id!==next.id){
+      await addEvent(client,dynastyId,turn,"HEIR_DESIGNATED",next.id,{name:next.name,automatic:true,malePreference:true});
+      eventTexts.push("📜 **"+next.name+"**, **"+countryName+"** tahtının yeni varisi oldu.");
+    }
   }else{
+    await client.query("UPDATE dynasty_members SET is_heir=FALSE,updated_at=NOW() WHERE dynasty_id=$1",[dynastyId]);
     await addEvent(client,dynastyId,turn,"SUCCESSION_CRISIS",monarch.id,{countryName,reason:"Uygun varis bulunmuyor"});
     eventTexts.push("⚠️ **"+countryName+"** devletinde uygun taht varisi bulunmuyor.");
   }
@@ -330,6 +334,22 @@ export const dynastyService={
         throw new GameError("Ad, unvan veya akrabalık açıklaması geçersiz uzunlukta.");
       if(!Number.isInteger(input.age)||input.age<0||input.age>120)throw new GameError("Yaş 0-120 arasında olmalıdır.");
       if(input.isMonarch&&input.isHeir)throw new GameError("Aynı üye hem hükümdar hem de taht varisi olarak eklenemez.");
+      if(input.isMonarch&&input.gender==="FEMALE"){
+        const eligibleMale=await client.query(
+          `SELECT 1 FROM dynasty_members
+            WHERE dynasty_id=$1 AND status='ALIVE' AND gender='MALE' AND is_monarch=FALSE
+              AND (is_heir=TRUE OR succession_rank IS NOT NULL) LIMIT 1`,[dynasty.id]
+        );
+        if(eligibleMale.rowCount)throw new GameError("Yaşayan ve verasete uygun erkek varken kadın üye hükümdar yapılamaz.");
+      }
+      if(input.isHeir&&input.gender==="FEMALE"){
+        const eligibleMale=await client.query(
+          `SELECT 1 FROM dynasty_members
+            WHERE dynasty_id=$1 AND status='ALIVE' AND gender='MALE' AND is_monarch=FALSE
+              AND (is_heir=TRUE OR succession_rank IS NOT NULL) LIMIT 1`,[dynasty.id]
+        );
+        if(eligibleMale.rowCount)throw new GameError("Yaşayan ve verasete uygun erkek varken kadın üye taht varisi yapılamaz.");
+      }
       if(input.isMonarch)await client.query("UPDATE dynasty_members SET is_monarch=FALSE WHERE dynasty_id=$1",[dynasty.id]);
       if(input.isHeir)await client.query("UPDATE dynasty_members SET is_heir=FALSE WHERE dynasty_id=$1",[dynasty.id]);
       for(const id of [input.spouseId,input.motherId,input.fatherId].filter((item):item is string=>Boolean(item)))
@@ -344,6 +364,10 @@ export const dynastyService={
       )).rows[0]!;
       if(input.spouseId)await client.query("UPDATE dynasty_members SET spouse_id=$1 WHERE id=$2",[created.id,input.spouseId]);
       await addEvent(client,dynasty.id,turn,"MEMBER_ADDED",created.id,{name,title,relation,age:input.age,actorId:input.actorId});
+      if(input.isMonarch||input.isHeir||input.successionRank!==null&&input.successionRank!==undefined){
+        const texts:string[]=[];
+        await reconcileSuccession(client,dynasty.id,turn,dynasty.country_name,texts);
+      }
       return created.id;
     });
   },
@@ -525,6 +549,14 @@ export const dynastyService={
       if(member.status!=="ALIVE")throw new GameError("Ölü bir hanedan üyesi seçilemez.");
       const turn=await currentTurn(client,input.guildId);
       if(input.kind==="MONARCH"){
+        if(member.gender==="FEMALE"){
+          const eligibleMale=await client.query(
+            `SELECT 1 FROM dynasty_members
+              WHERE dynasty_id=$1 AND status='ALIVE' AND gender='MALE' AND is_monarch=FALSE AND id<>$2
+                AND (is_heir=TRUE OR succession_rank IS NOT NULL) LIMIT 1`,[dynasty.id,member.id]
+          );
+          if(eligibleMale.rowCount)throw new GameError("Yaşayan ve verasete uygun erkek varken kadın üye hükümdar yapılamaz.");
+        }
         await client.query("UPDATE dynasty_members SET is_monarch=FALSE WHERE dynasty_id=$1",[dynasty.id]);
         await client.query("UPDATE dynasty_members SET is_monarch=TRUE,is_heir=FALSE,title=$1,relation='Hükümdar',updated_at=NOW() WHERE id=$2",[member.gender==="MALE"?"Kral":"Kraliçe",member.id]);
         await addEvent(client,dynasty.id,turn,"MONARCH_DESIGNATED",member.id,{name:member.name,actorId:input.actorId});
@@ -532,6 +564,14 @@ export const dynastyService={
         await reconcileSuccession(client,dynasty.id,turn,country.name,texts);
       }else{
         if(member.is_monarch)throw new GameError("Hükümdar aynı zamanda taht varisi olamaz.");
+        if(member.gender==="FEMALE"){
+          const eligibleMale=await client.query(
+            `SELECT 1 FROM dynasty_members
+              WHERE dynasty_id=$1 AND status='ALIVE' AND gender='MALE' AND is_monarch=FALSE AND id<>$2
+                AND (is_heir=TRUE OR succession_rank IS NOT NULL) LIMIT 1`,[dynasty.id,member.id]
+          );
+          if(eligibleMale.rowCount)throw new GameError("Yaşayan ve verasete uygun erkek varken kadın üye taht varisi yapılamaz.");
+        }
         await client.query("UPDATE dynasty_members SET is_heir=FALSE WHERE dynasty_id=$1",[dynasty.id]);
         await client.query("UPDATE dynasty_members SET is_heir=TRUE,updated_at=NOW() WHERE id=$1",[member.id]);
         await addEvent(client,dynasty.id,turn,"HEIR_DESIGNATED",member.id,{name:member.name,actorId:input.actorId,automatic:false});
@@ -700,10 +740,8 @@ export const dynastyService={
         parentMemberId:pending.parent_member_id,attemptRoll:pending.attempt_roll,modifier:pending.age_modifier,
         genderRoll:pending.gender_roll,complicationRoll:pending.complication_roll,complication:pending.complication
       });
-      const heir=(await client.query(
-        "SELECT 1 FROM dynasty_members WHERE dynasty_id=$1 AND status='ALIVE' AND is_heir=TRUE",[dynasty.id]
-      )).rowCount;
-      if(!heir){const texts:string[]=[];await reconcileSuccession(client,dynasty.id,pending.game_turn,dynasty.country_name,texts);}
+      const texts:string[]=[];
+      await reconcileSuccession(client,dynasty.id,pending.game_turn,dynasty.country_name,texts);
       return{
         dynastyId:dynasty.id,childId:child.id,childName,childGender:pending.gender,
         motherName:pending.mother_name,fatherName:pending.father_name

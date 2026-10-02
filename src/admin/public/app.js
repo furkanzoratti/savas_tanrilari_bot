@@ -50,6 +50,17 @@ const operationStatusLabels = {
 };
 const roleLabels = { COMMANDER: "Komutan", DIPLOMAT: "Diplomat", MERCHANT: "Tüccar", SPY: "Casus", MISSIONARY: "Misyoner" };
 const characterStatusLabels = { ACTIVE: "Aktif", DEAD: "Ölü", DISMISSED: "Görevden alınmış" };
+const dynastyGenderLabels = { MALE: "Erkek", FEMALE: "Kadın" };
+const dynastyHealthLabels = { HEALTHY: "Sağlıklı", SICK: "Hasta" };
+const dynastyEventLabels = {
+  DYNASTY_CREATED: "Hanedan oluşturuldu", DYNASTY_UPDATED: "Hanedan bilgileri güncellendi",
+  MEMBER_ADDED: "Hanedan üyesi eklendi", MEMBER_UPDATED: "Hanedan üyesi güncellendi",
+  BIRTH: "Doğum", BIRTH_AWAITING_NAME: "Doğum gerçekleşti, isim bekleniyor",
+  BIRTH_ATTEMPT_FAILED: "Doğum denemesi başarısız", MATERNAL_ILLNESS: "Doğum sonrası hastalık",
+  RECOVERY: "Hastalıktan iyileşme", DEATH: "Ölüm", DEATH_SAVE_FAILED: "Ölüm zarı başarısız",
+  SUCCESSION: "Taht değişimi", HEIR_DESIGNATED: "Yeni varis", MONARCH_DESIGNATED: "Yeni hükümdar",
+  SUCCESSION_CRISIS: "Veraset krizi", MARRIAGE: "Hanedan evliliği"
+};
 const countryStatusLabels = { ACTIVE: "Aktif", "YOK_EDİLDİ": "Yok edilmiş" };
 const mobilizationLabels = { PEACE: "Barış", PARTIAL: "Kısmi seferberlik", GENERAL: "Genel seferberlik" };
 const turnPhaseLabels = { OPEN: "Açık", CLOSED: "Kapalı", RESOLVING: "Çözümleniyor" };
@@ -194,6 +205,122 @@ async function charactersPage() {
     event.stopPropagation();
     openCharacterEditor(rows.find((item) => item.id === button.dataset.editCharacter)).catch((error) => toast(error.message, "error"));
   }));
+}
+
+async function dynastiesPage() {
+  setActiveRoute("dynasties"); loading();
+  const rows = await api("/api/dynasties");
+  const living = rows.reduce((sum, row) => sum + Number(row.living_count || 0), 0);
+  page.innerHTML = `<div class="page-head"><div><h1>Hanedanlar</h1><p>Devletleri yöneten aileler, hükümdarlar, varisler ve hanedan sağlık durumu</p></div><div class="actions"><span class="pill">${number(rows.length)} hanedan</span><span class="pill neutral">${number(living)} yaşayan üye</span></div></div>
+    <section class="dynasty-grid">${rows.map((row) => `<article class="card dynasty-card"><div class="card-head"><div><h3>${escapeHtml(row.name)}</h3><p>${escapeHtml(row.country_name)}${row.country_status === "ACTIVE" ? "" : " · Etkin değil"}</p></div><span class="pill ${Number(row.sick_count) ? "warning" : "neutral"}">${Number(row.sick_count) ? `${number(row.sick_count)} hasta` : "Sağlıklı"}</span></div><div class="dynasty-leadership"><span><small>Hükümdar</small><strong>${escapeHtml(row.monarch_name || "Atanmamış")}</strong>${row.monarch_title ? `<small>${escapeHtml(row.monarch_title)}</small>` : ""}</span><span><small>Varis</small><strong>${escapeHtml(row.heir_name || "Atanmamış")}</strong>${row.heir_title ? `<small>${escapeHtml(row.heir_title)}</small>` : ""}</span></div><div class="dynasty-card-footer"><span>${number(row.living_count)} yaşayan · ${number(row.member_count)} toplam üye</span><button class="button primary compact" data-open-dynasty="${row.id}">Hanedanı yönet</button></div></article>`).join("") || '<div class="card empty">Hanedan kaydı bulunmuyor.</div>'}</section>`;
+  document.querySelectorAll("[data-open-dynasty]").forEach((button) => button.addEventListener("click", () => {
+    dynastyDetailPage(button.dataset.openDynasty).catch(showPageError);
+  }));
+}
+
+function dynastyMemberConnections(member) {
+  const values = [
+    member.spouse_name ? `Eş: ${member.spouse_name}` : "",
+    member.mother_name ? `Anne: ${member.mother_name}` : "",
+    member.father_name ? `Baba: ${member.father_name}` : ""
+  ].filter(Boolean);
+  return values.join(" · ") || "Akrabalık bağlantısı girilmemiş";
+}
+
+async function dynastyDetailPage(dynastyId) {
+  setActiveRoute("dynasties"); loading();
+  const dynasty = await api(`/api/dynasties/${dynastyId}`);
+  const alive = dynasty.members.filter((member) => member.status === "ALIVE");
+  const sick = alive.filter((member) => member.health === "SICK");
+  const localMarriageCandidates = alive.filter((member) => Number(member.age) >= 16 && !member.spouse_id);
+  page.innerHTML = `<div class="page-head"><div><button class="button compact" data-back-dynasties>← Hanedanlar</button><h1>${escapeHtml(dynasty.name)}</h1><p>${escapeHtml(dynasty.country_name)} · Tur ${number(dynasty.current_turn)}</p></div><div class="actions"><button class="button" data-edit-dynasty="${dynasty.id}">Hanedanı düzenle</button><button class="button" data-local-noble-marriage="${dynasty.id}" ${localMarriageCandidates.length ? "" : "disabled"}>Yerel soyluyla evlendir</button><button class="button primary" data-add-dynasty-member="${dynasty.id}">＋ Yeni üye / akraba</button></div></div>
+    <section class="detail-grid"><div class="detail-cell"><span>Toplam üye</span><strong>${number(dynasty.members.length)}</strong></div><div class="detail-cell"><span>Hayatta</span><strong>${number(alive.length)}</strong></div><div class="detail-cell"><span>Hasta</span><strong>${number(sick.length)}</strong></div><div class="detail-cell"><span>Son doğum denemesi</span><strong>${dynasty.last_birth_attempt_turn === null ? "—" : `Tur ${number(dynasty.last_birth_attempt_turn)}`}</strong></div></section>
+    <div class="section-title"><h2>Hanedan üyeleri</h2><span>Ad, yaş, unvan, sağlık ve akrabalık düzenlenebilir</span></div>
+    <section class="card table-wrap"><table><thead><tr><th>Üye</th><th>Konum</th><th>Yaş / Cinsiyet</th><th>Sağlık</th><th>Akrabalık bağları</th><th>Veraset</th><th></th></tr></thead><tbody>${dynasty.members.map((member) => `<tr><td><strong>${escapeHtml(member.name)}</strong><small>${escapeHtml(member.title)}</small></td><td>${escapeHtml(member.relation)}</td><td>${member.age === null ? "—" : number(member.age)} · ${escapeHtml(dynastyGenderLabels[member.gender] || member.gender)}</td><td><span class="pill ${member.status === "DEAD" ? "neutral" : member.health === "SICK" ? "warning" : ""}">${member.status === "DEAD" ? "Ölü" : escapeHtml(dynastyHealthLabels[member.health] || member.health)}</span>${member.health === "SICK" && member.sick_until_turn !== null ? `<small>Tur ${number(member.sick_until_turn)} sonuna kadar</small>` : member.status === "DEAD" ? `<small>Tur ${number(member.died_turn)} · ${escapeHtml(member.death_reason || "Neden belirtilmedi")}</small>` : ""}</td><td><small>${escapeHtml(dynastyMemberConnections(member))}</small></td><td>${member.is_monarch ? '<span class="pill">Hükümdar</span>' : member.is_heir ? '<span class="pill">Varis</span>' : member.succession_rank ? `Sıra ${number(member.succession_rank)}` : "—"}</td><td><div class="row-actions"><button class="button compact" data-edit-dynasty-member="${member.id}">Düzenle</button>${member.status === "ALIVE" ? `<button class="button compact danger" data-kill-dynasty-member="${member.id}">Öldü olarak işle</button>` : ""}</div></td></tr>`).join("") || '<tr><td colspan="7" class="empty">Hanedan üyesi bulunmuyor.</td></tr>'}</tbody></table></section>
+    <div class="section-title"><h2>Son hanedan olayları</h2><span>${number(dynasty.events.length)} kayıt</span></div><section class="card">${dynasty.events.map((event) => `<div class="audit-item"><span class="audit-dot"></span><div><strong>${escapeHtml(dynastyEventLabels[event.event_type] || event.event_type.replaceAll("_", " "))}</strong><span>Tur ${number(event.game_turn)}${event.member_name ? ` · ${escapeHtml(event.member_name)}` : ""}</span></div></div>`).join("") || '<div class="empty">Henüz hanedan olayı bulunmuyor.</div>'}</section>`;
+  document.querySelector("[data-back-dynasties]").addEventListener("click", dynastiesPage);
+  document.querySelector("[data-edit-dynasty]").addEventListener("click", () => openDynastyEditor(dynasty));
+  document.querySelector("[data-add-dynasty-member]").addEventListener("click", () => openDynastyMemberEditor(dynasty));
+  document.querySelector("[data-local-noble-marriage]")?.addEventListener("click", () => openLocalNobleMarriageEditor(dynasty));
+  document.querySelectorAll("[data-edit-dynasty-member]").forEach((button) => button.addEventListener("click", () => {
+    openDynastyMemberEditor(dynasty, dynasty.members.find((member) => member.id === button.dataset.editDynastyMember));
+  }));
+  document.querySelectorAll("[data-kill-dynasty-member]").forEach((button) => button.addEventListener("click", () => {
+    openDynastyDeathEditor(dynasty, dynasty.members.find((member) => member.id === button.dataset.killDynastyMember));
+  }));
+}
+
+function openDynastyEditor(dynasty) {
+  openEditor("Hanedanı düzenle", dynasty.country_name, `<label>Hanedan adı<input id="edit-dynasty-name" value="${escapeHtml(dynasty.name)}" required minlength="2" maxlength="80"></label>`, async () => {
+    await api(`/api/admin/dynasties/${dynasty.id}`, { method: "PATCH", body: JSON.stringify({ name: document.getElementById("edit-dynasty-name").value }) });
+    closeEditor(); toast("Hanedan bilgileri güncellendi."); await dynastyDetailPage(dynasty.id);
+  });
+}
+
+function openLocalNobleMarriageEditor(dynasty) {
+  const candidates = dynasty.members.filter((member) => member.status === "ALIVE" && Number(member.age) >= 16 && !member.spouse_id);
+  if (!candidates.length) return toast("Bu hanedanda yerel soyluyla evlenebilecek uygun üye bulunmuyor.", "error");
+  const options = candidates.map((member) => `<option value="${member.id}">${escapeHtml(member.name)} · ${number(member.age)} yaş · ${escapeHtml(member.title)}</option>`).join("");
+  openEditor(
+    "Yerel soyluyla evlendir",
+    `${dynasty.country_name} · ${dynasty.name}`,
+    `<div class="preview-warning"><strong>Yerel soylu hanedana eş olarak eklenir.</strong><span>Yeni eş veraset sırasına girmez. Evlilik bağı iki üyede de otomatik kurulur.</span></div><label>Evlenecek hanedan üyesi<select id="local-noble-member">${options}</select></label><div class="form-grid"><label>Yerel soylunun adı<input id="local-noble-first-name" minlength="2" maxlength="50" required></label><label>Soyadı (isteğe bağlı)<input id="local-noble-surname" maxlength="50" placeholder="Boş bırakılabilir"></label><label>Yaşı<input id="local-noble-age" type="number" min="16" max="120" step="1" value="18" required></label></div>`,
+    async () => {
+      await api(`/api/admin/dynasties/${dynasty.id}/local-noble-marriages`, {
+        method: "POST",
+        body: JSON.stringify({
+          memberId: document.getElementById("local-noble-member").value,
+          firstName: document.getElementById("local-noble-first-name").value,
+          surname: document.getElementById("local-noble-surname").value.trim() || null,
+          age: Number(document.getElementById("local-noble-age").value)
+        })
+      });
+      closeEditor(); toast("Yerel soylu evliliği hanedana işlendi."); await dynastyDetailPage(dynasty.id);
+    }
+  );
+}
+
+function dynastyRelationOptions(dynasty, member, kind) {
+  const gender = kind === "mother" ? "FEMALE" : kind === "father" ? "MALE" : null;
+  const current = kind === "spouse" ? member?.spouse_id : kind === "mother" ? member?.mother_id : member?.father_id;
+  const candidates = dynasty.relationCandidates || dynasty.members;
+  return `<option value="">Yok / belirtilmedi</option>${candidates.filter((candidate) => candidate.id !== member?.id && (!gender || candidate.gender === gender) && (kind !== "spouse" || candidate.id === current || (candidate.status === "ALIVE" && !candidate.spouse_id))).map((candidate) => `<option value="${candidate.id}" ${selected(candidate.id, current)}>${escapeHtml(candidate.name)} · ${escapeHtml(candidate.title)} · ${escapeHtml(candidate.country_name || dynasty.country_name)}${candidate.status === "DEAD" ? " · Ölü" : ""}</option>`).join("")}`;
+}
+
+function dynastyMemberInput() {
+  const nullable = (id) => document.getElementById(id).value || null;
+  return {
+    name: document.getElementById("dynasty-member-name").value,
+    gender: document.getElementById("dynasty-member-gender").value,
+    age: Number(document.getElementById("dynasty-member-age").value),
+    title: document.getElementById("dynasty-member-title").value,
+    relation: document.getElementById("dynasty-member-relation").value,
+    health: document.getElementById("dynasty-member-health").value,
+    sickUntilTurn: nullable("dynasty-member-sick-until") === null ? null : Number(document.getElementById("dynasty-member-sick-until").value),
+    isMonarch: document.getElementById("dynasty-member-monarch").checked,
+    isHeir: document.getElementById("dynasty-member-heir").checked,
+    successionRank: nullable("dynasty-member-rank") === null ? null : Number(document.getElementById("dynasty-member-rank").value),
+    spouseId: nullable("dynasty-member-spouse"), motherId: nullable("dynasty-member-mother"), fatherId: nullable("dynasty-member-father")
+  };
+}
+
+function openDynastyMemberEditor(dynasty, member = null) {
+  const dead = member?.status === "DEAD";
+  const health = dead ? "HEALTHY" : (member?.health || "HEALTHY");
+  const defaultSickUntil = member?.sick_until_turn ?? Number(dynasty.current_turn) + 3;
+  openEditor(member ? "Hanedan üyesini düzenle" : "Yeni hanedan üyesi / akraba", `${dynasty.country_name} · ${dynasty.name}`, `<div class="form-grid"><label>Adı<input id="dynasty-member-name" value="${escapeHtml(member?.name || "")}" minlength="2" maxlength="80" required></label><label>Cinsiyet<select id="dynasty-member-gender"><option value="MALE" ${selected("MALE", member?.gender || "MALE")}>Erkek</option><option value="FEMALE" ${selected("FEMALE", member?.gender)}>Kadın</option></select></label><label>Yaş<input id="dynasty-member-age" type="number" min="0" max="120" step="1" value="${Number(member?.age ?? 0)}" required></label><label>Unvan<input id="dynasty-member-title" value="${escapeHtml(member?.title || "Hanedan Üyesi")}" minlength="2" maxlength="80" required></label><label>Akrabalık / konum<input id="dynasty-member-relation" value="${escapeHtml(member?.relation || "Hanedan akrabası")}" minlength="2" maxlength="120" required></label><label>Sağlık<select id="dynasty-member-health" ${dead ? "disabled" : ""}><option value="HEALTHY" ${selected("HEALTHY", health)}>Sağlıklı</option><option value="SICK" ${selected("SICK", health)}>Hasta</option></select></label><label>Hastalık bitiş turu<input id="dynasty-member-sick-until" type="number" min="${Number(dynasty.current_turn)}" step="1" value="${Number(defaultSickUntil)}" ${dead ? "disabled" : ""}><small>Sağlıklı seçilirse bu alan temizlenir.</small></label><label>Veraset sırası<input id="dynasty-member-rank" type="number" min="1" step="1" value="${member?.succession_rank ?? ""}" placeholder="Boş bırakılabilir"></label><label>Eş<select id="dynasty-member-spouse">${dynastyRelationOptions(dynasty, member, "spouse")}</select></label><label>Anne<select id="dynasty-member-mother">${dynastyRelationOptions(dynasty, member, "mother")}</select></label><label>Baba<select id="dynasty-member-father">${dynastyRelationOptions(dynasty, member, "father")}</select></label></div><div class="check-grid"><label class="check"><input id="dynasty-member-monarch" type="checkbox" ${member?.is_monarch ? "checked" : ""} ${dead ? "disabled" : ""}> Hükümdar</label><label class="check"><input id="dynasty-member-heir" type="checkbox" ${member?.is_heir ? "checked" : ""} ${dead ? "disabled" : ""}> Taht varisi</label></div>${dead ? '<div class="preview-warning"><strong>Ölü üye kaydı</strong><span>Kimlik ve akrabalık bilgileri düzeltilebilir; sağlık ve veraset görevleri yeniden açılamaz.</span></div>' : '<div class="preview-warning"><strong>Erkek öncelikli veraset aktiftir.</strong><span>Yaşayan ve verasete uygun erkek varken kadın üye varis veya yeni hükümdar seçilemez.</span></div>'}`, async () => {
+    const input = dynastyMemberInput();
+    await api(member ? `/api/admin/dynasty-members/${member.id}` : `/api/admin/dynasties/${dynasty.id}/members`, { method: member ? "PATCH" : "POST", body: JSON.stringify(input) });
+    closeEditor(); toast(member ? "Hanedan üyesi güncellendi." : "Yeni hanedan üyesi eklendi."); await dynastyDetailPage(dynasty.id);
+  });
+}
+
+function openDynastyDeathEditor(dynasty, member) {
+  if (!member) return;
+  openEditor("Hanedan üyesini öldü olarak işle", `${dynasty.country_name} · ${member.name}`, `<div class="preview-warning"><strong>Bu işlem veraset düzenini değiştirebilir.</strong><span>Üye hükümdar veya varisse sistem yaşayan uygun üyeler arasından yeni atama yapar. Bekleyen evlilik teklifleri iptal edilir.</span></div><label>Ölüm nedeni<textarea id="dynasty-death-reason" minlength="2" maxlength="200" rows="3" required placeholder="Örn. Hastalık, savaş yaraları, yaşlılık…"></textarea></label>`, async () => {
+    await api(`/api/admin/dynasty-members/${member.id}/death`, { method: "POST", body: JSON.stringify({ reason: document.getElementById("dynasty-death-reason").value }) });
+    closeEditor(); toast(`${member.name} öldü olarak işlendi.`); await dynastyDetailPage(dynasty.id);
+  });
 }
 
 function assignmentTarget(row) {
@@ -589,6 +716,7 @@ async function navigate(route) {
     if (route === "settlements") return settlementsPage();
     if (route === "armies") return forcesPage();
     if (route === "characters") return charactersPage();
+    if (route === "dynasties") return dynastiesPage();
     if (route === "assignments") return assignmentsPage();
     if (route === "ai-governance") return aiGovernancePage();
     if (route === "battles") return battlesPage();

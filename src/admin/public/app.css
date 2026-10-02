@@ -113,6 +113,16 @@ tr[data-country-id]:hover td { background: var(--surface-2); }
 .record-card span, .record-card small { color: var(--muted); }
 .record-card span { font-size: 13px; }
 .record-card small { font-size: 12px; }
+.dynasty-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.dynasty-card { display: grid; gap: 12px; }
+.dynasty-card .card-head { margin-bottom: 0; }
+.dynasty-card .card-head h3 { margin: 0; }
+.dynasty-leadership { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.dynasty-leadership > span { min-width: 0; padding: 11px; border-radius: 9px; background: var(--bg); }
+.dynasty-leadership small, .dynasty-leadership strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dynasty-leadership small { color: var(--muted); font-size: 11px; }
+.dynasty-leadership strong { margin: 4px 0; }
+.dynasty-card-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 12px; }
 .row-actions { display: flex; flex-wrap: wrap; gap: 6px; min-width: 180px; }
 .battle-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .battle-sides { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -195,6 +205,7 @@ textarea { resize: vertical; line-height: 1.45; }
   .ai-safety-banner { grid-template-columns: 1fr; }
   .compact-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .battle-grid { grid-template-columns: 1fr; }
+  .dynasty-grid { grid-template-columns: 1fr; }
   .ai-plan-two-columns { grid-template-columns: 1fr; }
 }
 @media (max-width: 620px) {

@@ -121,6 +121,15 @@ const server = createServer(async (request, response) => {
       if (!requireSession(request, response)) return;
       return json(response, 200, await adminPanelService.characters());
     }
+    if (request.method === "GET" && url.pathname === "/api/dynasties") {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await adminPanelService.dynasties());
+    }
+    const dynastyMatch = request.method === "GET" ? url.pathname.match(/^\/api\/dynasties\/([0-9a-f-]+)$/iu) : null;
+    if (dynastyMatch) {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await adminPanelService.dynasty(dynastyMatch[1]!));
+    }
     if (request.method === "GET" && url.pathname === "/api/character-assignments") {
       if (!requireSession(request, response)) return;
       return json(response, 200, await adminPanelService.characterAssignments());
@@ -199,6 +208,36 @@ const server = createServer(async (request, response) => {
       const session = requireMutation(request, response);
       if (!session) return;
       return json(response, 200, await adminPanelService.updateCharacter(session.sub, characterUpdateMatch[1]!, await body(request)));
+    }
+    const dynastyUpdateMatch = request.method === "PATCH" ? url.pathname.match(/^\/api\/admin\/dynasties\/([0-9a-f-]+)$/iu) : null;
+    if (dynastyUpdateMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.updateDynasty(session.sub, dynastyUpdateMatch[1]!, await body(request)));
+    }
+    const dynastyMemberCreateMatch = request.method === "POST" ? url.pathname.match(/^\/api\/admin\/dynasties\/([0-9a-f-]+)\/members$/iu) : null;
+    if (dynastyMemberCreateMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.addDynastyMember(session.sub, dynastyMemberCreateMatch[1]!, await body(request)));
+    }
+    const localNobleMarriageMatch = request.method === "POST" ? url.pathname.match(/^\/api\/admin\/dynasties\/([0-9a-f-]+)\/local-noble-marriages$/iu) : null;
+    if (localNobleMarriageMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.marryLocalNoble(session.sub, localNobleMarriageMatch[1]!, await body(request)));
+    }
+    const dynastyMemberUpdateMatch = request.method === "PATCH" ? url.pathname.match(/^\/api\/admin\/dynasty-members\/([0-9a-f-]+)$/iu) : null;
+    if (dynastyMemberUpdateMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.updateDynastyMember(session.sub, dynastyMemberUpdateMatch[1]!, await body(request)));
+    }
+    const dynastyMemberDeathMatch = request.method === "POST" ? url.pathname.match(/^\/api\/admin\/dynasty-members\/([0-9a-f-]+)\/death$/iu) : null;
+    if (dynastyMemberDeathMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.killDynastyMember(session.sub, dynastyMemberDeathMatch[1]!, await body(request)));
     }
     const aiProfileMatch = request.method === "PATCH" ? url.pathname.match(/^\/api\/admin\/ai-governance\/countries\/([0-9a-f-]+)$/iu) : null;
     if (aiProfileMatch) {

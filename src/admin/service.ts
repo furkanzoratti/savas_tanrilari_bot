@@ -13,6 +13,7 @@ import {
   COMMANDER_DOCTRINES
 } from "../domain/characters.js";
 import { CULTURE_GROUPS, type CultureGroup } from "../domain/cultures.js";
+import { MINIMUM_MARRIAGE_AGE } from "../domain/dynasty.js";
 import { MERCENARY_COMPANIES, type MercenaryCompanyKey } from "../domain/mercenaries.js";
 import { RESOURCES, type ResourceType } from "../domain/resources.js";
 import { RELIGIONS, isReligionKey, secondaryReligionFor, type ReligionKey } from "../domain/religions.js";
@@ -64,6 +65,37 @@ const characterUpdateSchema = z.object({
   admiralSpecializationLevel: z.coerce.number().int().min(0).max(3),
   admiralDoctrine: z.string().nullable().refine((value) => value === null || admiralDoctrineSet.has(value), "Geçersiz amiral doktrini."),
   admiralVictories: z.coerce.number().int().min(0).max(9)
+});
+
+const dynastyUpdateSchema = z.object({
+  name: z.string().trim().min(2).max(80)
+});
+
+const dynastyMemberUpdateSchema = z.object({
+  name: z.string().trim().min(2).max(80),
+  gender: z.enum(["MALE", "FEMALE"]),
+  age: z.coerce.number().int().min(0).max(120),
+  title: z.string().trim().min(2).max(80),
+  relation: z.string().trim().min(2).max(120),
+  health: z.enum(["HEALTHY", "SICK"]),
+  sickUntilTurn: z.coerce.number().int().min(0).nullable(),
+  isMonarch: z.boolean(),
+  isHeir: z.boolean(),
+  successionRank: z.coerce.number().int().min(1).nullable(),
+  spouseId: z.string().uuid().nullable(),
+  motherId: z.string().uuid().nullable(),
+  fatherId: z.string().uuid().nullable()
+});
+
+const dynastyMemberDeathSchema = z.object({
+  reason: z.string().trim().min(2).max(200)
+});
+
+const localNobleMarriageSchema = z.object({
+  memberId: z.string().uuid(),
+  firstName: z.string().trim().min(2).max(50),
+  surname: z.string().trim().max(50).nullable(),
+  age: z.coerce.number().int().min(MINIMUM_MARRIAGE_AGE).max(120)
 });
 
 const armyUpdateSchema = z.object({
@@ -132,6 +164,133 @@ async function writeAdminAudit(
   );
 }
 
+async function dynastyEvent(
+  client: AdminDbClient,
+  dynastyId: string,
+  turn: number,
+  eventType: string,
+  memberId: string | null,
+  details: Record<string, unknown>
+) {
+  await client.query(
+    "INSERT INTO dynasty_events(dynasty_id,game_turn,event_type,member_id,details) VALUES($1,$2,$3,$4,$5::jsonb)",
+    [dynastyId, turn, eventType, memberId, JSON.stringify(details)]
+  );
+}
+
+async function adminDynastyContext(client: AdminDbClient | typeof adminPool, dynastyId: string, lock = false) {
+  const row = (await client.query<{
+    id: string; name: string; country_id: string; country_name: string; current_turn: number;
+  }>(
+    `SELECT dynasty.id,dynasty.name,dynasty.country_id,country.name AS country_name,guild.current_turn
+       FROM dynasties dynasty
+       JOIN countries country ON country.id=dynasty.country_id
+       JOIN guilds guild ON guild.discord_id=dynasty.guild_id
+      WHERE dynasty.id=$1 AND dynasty.guild_id=$2${lock ? " FOR UPDATE OF dynasty" : ""}`,
+    [dynastyId, adminConfig.guildId]
+  )).rows[0];
+  if (!row) throw new Error("Hanedan bulunamadı.");
+  return row;
+}
+
+async function adminDynastyMember(client: AdminDbClient, memberId: string, lock = false) {
+  const row = (await client.query<Record<string, unknown> & {
+    id: string; dynasty_id: string; country_id: string; country_name: string; dynasty_name: string;
+    name: string; gender: "MALE" | "FEMALE"; status: "ALIVE" | "DEAD"; health: "HEALTHY" | "SICK";
+    spouse_id: string | null; is_monarch: boolean; is_heir: boolean; age: number | null; succession_rank: number | null;
+  }>(
+    `SELECT member.*,dynasty.country_id,dynasty.name AS dynasty_name,country.name AS country_name
+       FROM dynasty_members member
+       JOIN dynasties dynasty ON dynasty.id=member.dynasty_id
+       JOIN countries country ON country.id=dynasty.country_id
+      WHERE member.id=$1 AND dynasty.guild_id=$2${lock ? " FOR UPDATE OF member" : ""}`,
+    [memberId, adminConfig.guildId]
+  )).rows[0];
+  if (!row) throw new Error("Hanedan üyesi bulunamadı.");
+  return row;
+}
+
+async function validateDynastyRelation(
+  client: AdminDbClient,
+  _dynastyId: string,
+  memberId: string | null,
+  label: string,
+  gender?: "MALE" | "FEMALE"
+) {
+  if (!memberId) return null;
+  const row = (await client.query<{ id: string; name: string; gender: "MALE" | "FEMALE"; spouse_id: string | null; dynasty_id: string }>(
+    `SELECT member.id,member.name,member.gender,member.spouse_id,member.dynasty_id
+       FROM dynasty_members member JOIN dynasties dynasty ON dynasty.id=member.dynasty_id
+      WHERE member.id=$1 AND dynasty.guild_id=$2`,
+    [memberId, adminConfig.guildId]
+  )).rows[0];
+  if (!row) throw new Error(`${label} oyun içindeki bir hanedandan seçilmelidir.`);
+  if (gender && row.gender !== gender) throw new Error(`${label} için seçilen üyenin cinsiyeti uygun değil.`);
+  return row;
+}
+
+async function reconcileAdminDynastySuccession(
+  client: AdminDbClient,
+  dynasty: { id: string; country_name: string; current_turn: number }
+) {
+  let monarch = (await client.query<{ id: string; name: string; gender: "MALE" | "FEMALE" }>(
+    "SELECT id,name,gender FROM dynasty_members WHERE dynasty_id=$1 AND status='ALIVE' AND is_monarch=TRUE LIMIT 1 FOR UPDATE",
+    [dynasty.id]
+  )).rows[0];
+  if (!monarch) {
+    const successor = (await client.query<{ id: string; name: string; gender: "MALE" | "FEMALE" }>(
+      `SELECT id,name,gender FROM dynasty_members
+        WHERE dynasty_id=$1 AND status='ALIVE' AND (is_heir=TRUE OR succession_rank IS NOT NULL)
+        ORDER BY CASE WHEN gender='MALE' THEN 0 ELSE 1 END,
+                 is_heir DESC,succession_rank NULLS LAST,age DESC,created_at LIMIT 1 FOR UPDATE`,
+      [dynasty.id]
+    )).rows[0];
+    if (!successor) {
+      await dynastyEvent(client, dynasty.id, dynasty.current_turn, "SUCCESSION_CRISIS", null, {
+        countryName: dynasty.country_name, reason: "Yaşayan uygun hanedan üyesi bulunmuyor", source: "ADMIN_PANEL"
+      });
+      return;
+    }
+    await client.query("UPDATE dynasty_members SET is_monarch=FALSE,is_heir=FALSE WHERE dynasty_id=$1", [dynasty.id]);
+    await client.query(
+      "UPDATE dynasty_members SET is_monarch=TRUE,title=$1,relation='Hükümdar',updated_at=NOW() WHERE id=$2",
+      [successor.gender === "MALE" ? "Kral" : "Kraliçe", successor.id]
+    );
+    monarch = successor;
+    await dynastyEvent(client, dynasty.id, dynasty.current_turn, "SUCCESSION", successor.id, {
+      countryName: dynasty.country_name, name: successor.name, source: "ADMIN_PANEL"
+    });
+  }
+  await client.query("UPDATE dynasty_members SET is_heir=FALSE WHERE dynasty_id=$1 AND id=$2", [dynasty.id, monarch.id]);
+  const existingHeir = (await client.query<{ id: string }>(
+    "SELECT id FROM dynasty_members WHERE dynasty_id=$1 AND status='ALIVE' AND is_heir=TRUE AND id<>$2 LIMIT 1",
+    [dynasty.id, monarch.id]
+  )).rows[0];
+  const heir = (await client.query<{ id: string; name: string }>(
+    `SELECT id,name FROM dynasty_members
+      WHERE dynasty_id=$1 AND status='ALIVE' AND id<>$2 AND (is_heir=TRUE OR succession_rank IS NOT NULL)
+      ORDER BY CASE WHEN gender='MALE' THEN 0 ELSE 1 END,
+               is_heir DESC,succession_rank NULLS LAST,age DESC,created_at LIMIT 1 FOR UPDATE`,
+    [dynasty.id, monarch.id]
+  )).rows[0];
+  if (heir) {
+    await client.query(
+      "UPDATE dynasty_members SET is_heir=(id=$2),updated_at=NOW() WHERE dynasty_id=$1 AND status='ALIVE'",
+      [dynasty.id, heir.id]
+    );
+    if (existingHeir?.id !== heir.id) {
+      await dynastyEvent(client, dynasty.id, dynasty.current_turn, "HEIR_DESIGNATED", heir.id, {
+        name: heir.name, automatic: true, malePreference: true, source: "ADMIN_PANEL"
+      });
+    }
+  } else {
+    await client.query("UPDATE dynasty_members SET is_heir=FALSE,updated_at=NOW() WHERE dynasty_id=$1", [dynasty.id]);
+    await dynastyEvent(client, dynasty.id, dynasty.current_turn, "SUCCESSION_CRISIS", monarch.id, {
+      countryName: dynasty.country_name, reason: "Uygun varis bulunmuyor", source: "ADMIN_PANEL"
+    });
+  }
+}
+
 async function auditEntityNames(ids: string[]): Promise<Map<string, string>> {
   if (!ids.length) return new Map();
   const rows = (await adminPool.query<{ id: string; label: string }>(
@@ -155,7 +314,17 @@ async function auditEntityNames(ids: string[]): Promise<Map<string, string>> {
          FROM country_characters character JOIN countries country ON country.id=character.country_id
         WHERE country.guild_id=$1 AND character.id=ANY($2::uuid[])
        UNION ALL
-       SELECT battle.id,'Savaş: '||COALESCE(country_a.name,'A Tarafı')||' — '||COALESCE(country_b.name,'B Tarafı'),6
+       SELECT dynasty.id,dynasty.name||' ('||country.name||')',6
+         FROM dynasties dynasty JOIN countries country ON country.id=dynasty.country_id
+        WHERE dynasty.guild_id=$1 AND dynasty.id=ANY($2::uuid[])
+       UNION ALL
+       SELECT member.id,member.name||' ('||country.name||')',7
+         FROM dynasty_members member
+         JOIN dynasties dynasty ON dynasty.id=member.dynasty_id
+         JOIN countries country ON country.id=dynasty.country_id
+        WHERE dynasty.guild_id=$1 AND member.id=ANY($2::uuid[])
+       UNION ALL
+       SELECT battle.id,'Savaş: '||COALESCE(country_a.name,'A Tarafı')||' — '||COALESCE(country_b.name,'B Tarafı'),8
          FROM battles battle
          LEFT JOIN battle_sides side_a ON side_a.battle_id=battle.id AND side_a.side_key='A'
          LEFT JOIN countries country_a ON country_a.id=side_a.country_id
@@ -461,6 +630,60 @@ export const adminPanelService = {
                  country.name,character.role,character.name`,
       [adminConfig.guildId]
     )).rows;
+  },
+
+  async dynasties() {
+    return (await adminPool.query(
+      `SELECT dynasty.id,dynasty.country_id,dynasty.name,country.name AS country_name,country.status AS country_status,
+              monarch.id AS monarch_id,monarch.name AS monarch_name,monarch.title AS monarch_title,
+              heir.id AS heir_id,heir.name AS heir_name,heir.title AS heir_title,
+              COUNT(member.id)::integer AS member_count,
+              COUNT(member.id) FILTER (WHERE member.status='ALIVE')::integer AS living_count,
+              COUNT(member.id) FILTER (WHERE member.status='ALIVE' AND member.health='SICK')::integer AS sick_count
+         FROM dynasties dynasty
+         JOIN countries country ON country.id=dynasty.country_id
+         LEFT JOIN dynasty_members monarch ON monarch.dynasty_id=dynasty.id AND monarch.status='ALIVE' AND monarch.is_monarch=TRUE
+         LEFT JOIN dynasty_members heir ON heir.dynasty_id=dynasty.id AND heir.status='ALIVE' AND heir.is_heir=TRUE
+         LEFT JOIN dynasty_members member ON member.dynasty_id=dynasty.id
+        WHERE dynasty.guild_id=$1
+        GROUP BY dynasty.id,country.name,country.status,monarch.id,monarch.name,monarch.title,heir.id,heir.name,heir.title
+        ORDER BY CASE WHEN country.status='ACTIVE' THEN 0 ELSE 1 END,country.name,dynasty.name`,
+      [adminConfig.guildId]
+    )).rows;
+  },
+
+  async dynasty(dynastyId: string) {
+    if (!z.string().uuid().safeParse(dynastyId).success) throw new Error("Geçersiz hanedan kimliği.");
+    const dynasty = await adminDynastyContext(adminPool, dynastyId);
+    const members = (await adminPool.query(
+      `SELECT member.*,spouse.name AS spouse_name,mother.name AS mother_name,father.name AS father_name
+         FROM dynasty_members member
+         LEFT JOIN dynasty_members spouse ON spouse.id=member.spouse_id
+         LEFT JOIN dynasty_members mother ON mother.id=member.mother_id
+         LEFT JOIN dynasty_members father ON father.id=member.father_id
+        WHERE member.dynasty_id=$1
+        ORDER BY CASE WHEN member.status='ALIVE' THEN 0 ELSE 1 END,member.is_monarch DESC,member.is_heir DESC,
+                 member.succession_rank NULLS LAST,member.age DESC,member.created_at`,
+      [dynastyId]
+    )).rows;
+    const events = (await adminPool.query(
+      `SELECT event.id,event.game_turn,event.event_type,event.details,event.created_at,member.name AS member_name
+         FROM dynasty_events event LEFT JOIN dynasty_members member ON member.id=event.member_id
+        WHERE event.dynasty_id=$1 AND event.event_type<>'DEATH_SAVE_PASSED'
+        ORDER BY event.game_turn DESC,event.created_at DESC LIMIT 30`,
+      [dynastyId]
+    )).rows;
+    const relationCandidates = (await adminPool.query(
+      `SELECT member.id,member.dynasty_id,member.name,member.title,member.gender,member.status,member.spouse_id,
+              dynasty.name AS dynasty_name,country.name AS country_name
+         FROM dynasty_members member
+         JOIN dynasties dynasty ON dynasty.id=member.dynasty_id
+         JOIN countries country ON country.id=dynasty.country_id
+        WHERE dynasty.guild_id=$1
+        ORDER BY country.name,CASE WHEN member.status='ALIVE' THEN 0 ELSE 1 END,member.name`,
+      [adminConfig.guildId]
+    )).rows;
+    return { ...dynasty, members, events, relationCandidates };
   },
 
   async characterAssignments() {
@@ -1022,6 +1245,252 @@ export const adminPanelService = {
       await writeAdminAudit(client,actorId,"admin.panel.battle.army.add","battle",battle.id,
         { armyId:army.id,armyName:army.name,countryId:army.country_id,countryName:army.country_name,side:input.side,total,status:battle.status });
       return { battleId:battle.id,armyId:army.id,armyName:army.name,countryName:army.country_name,side:input.side,action:input.action,total };
+    });
+  },
+
+  async updateDynasty(actorId: string, dynastyId: string, rawInput: unknown) {
+    const input = dynastyUpdateSchema.parse(rawInput);
+    return withAdminTransaction(async (client) => {
+      const dynasty = await adminDynastyContext(client, dynastyId, true);
+      const updated = (await client.query<{ id: string; country_id: string; name: string }>(
+        "UPDATE dynasties SET name=$1,updated_at=NOW() WHERE id=$2 RETURNING id,country_id,name",
+        [input.name, dynasty.id]
+      )).rows[0]!;
+      await dynastyEvent(client, dynasty.id, dynasty.current_turn, "DYNASTY_UPDATED", null, {
+        previousName: dynasty.name, name: updated.name, actorId, source: "ADMIN_PANEL"
+      });
+      await writeAdminAudit(client, actorId, "admin.panel.dynasty.update", "dynasty", dynasty.id, {
+        previous: { name: dynasty.name }, updated
+      });
+      return updated;
+    });
+  },
+
+  async addDynastyMember(actorId: string, dynastyId: string, rawInput: unknown) {
+    const input = dynastyMemberUpdateSchema.parse(rawInput);
+    return withAdminTransaction(async (client) => {
+      const dynasty = await adminDynastyContext(client, dynastyId, true);
+      if (input.isMonarch && input.isHeir) throw new Error("Bir üye aynı anda hükümdar ve varis olamaz.");
+      if (input.isMonarch && input.gender === "FEMALE") {
+        const eligibleMale = await client.query(
+          `SELECT 1 FROM dynasty_members
+            WHERE dynasty_id=$1 AND status='ALIVE' AND gender='MALE' AND is_monarch=FALSE
+              AND (is_heir=TRUE OR succession_rank IS NOT NULL) LIMIT 1`,
+          [dynasty.id]
+        );
+        if (eligibleMale.rowCount) throw new Error("Yaşayan ve verasete uygun erkek varken kadın üye hükümdar yapılamaz.");
+      }
+      if (input.isHeir && input.gender === "FEMALE") {
+        const eligibleMale = await client.query(
+          `SELECT 1 FROM dynasty_members
+            WHERE dynasty_id=$1 AND status='ALIVE' AND gender='MALE' AND is_monarch=FALSE
+              AND (is_heir=TRUE OR succession_rank IS NOT NULL) LIMIT 1`,
+          [dynasty.id]
+        );
+        if (eligibleMale.rowCount) throw new Error("Yaşayan ve verasete uygun erkek varken kadın üye varis yapılamaz.");
+      }
+      if (input.health === "SICK" && (input.sickUntilTurn === null || input.sickUntilTurn < dynasty.current_turn)) {
+        throw new Error("Hasta üye için iyileşme turu mevcut turdan erken olamaz.");
+      }
+      const duplicate = await client.query(
+        "SELECT 1 FROM dynasty_members WHERE dynasty_id=$1 AND lower(name)=lower($2)",
+        [dynasty.id, input.name]
+      );
+      if (duplicate.rowCount) throw new Error("Bu hanedanda aynı adlı bir üye zaten bulunuyor.");
+      const spouse = await validateDynastyRelation(client, dynasty.id, input.spouseId, "Eş");
+      await validateDynastyRelation(client, dynasty.id, input.motherId, "Anne", "FEMALE");
+      await validateDynastyRelation(client, dynasty.id, input.fatherId, "Baba", "MALE");
+      if (spouse?.spouse_id) throw new Error("Seçilen eş başka bir üyeyle evli görünüyor.");
+      if (input.isMonarch) await client.query("UPDATE dynasty_members SET is_monarch=FALSE,updated_at=NOW() WHERE dynasty_id=$1", [dynasty.id]);
+      if (input.isHeir) await client.query("UPDATE dynasty_members SET is_heir=FALSE,updated_at=NOW() WHERE dynasty_id=$1", [dynasty.id]);
+      const created = (await client.query<Record<string, unknown> & { id: string }>(
+        `INSERT INTO dynasty_members(
+           dynasty_id,name,gender,age,title,relation,status,health,sick_until_turn,is_monarch,is_heir,
+           succession_rank,spouse_id,mother_id,father_id,born_turn
+         ) VALUES($1,$2,$3,$4,$5,$6,'ALIVE',$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
+        [dynasty.id, input.name, input.gender, input.age, input.title, input.relation, input.health,
+          input.health === "SICK" ? input.sickUntilTurn : null, input.isMonarch, input.isHeir,
+          input.successionRank, input.spouseId, input.motherId, input.fatherId, dynasty.current_turn - input.age]
+      )).rows[0]!;
+      if (spouse) await client.query("UPDATE dynasty_members SET spouse_id=$1,updated_at=NOW() WHERE id=$2", [created.id, spouse.id]);
+      await dynastyEvent(client, dynasty.id, dynasty.current_turn, "MEMBER_ADDED", created.id, {
+        name: input.name, title: input.title, relation: input.relation, age: input.age, actorId, source: "ADMIN_PANEL"
+      });
+      if (input.isMonarch || input.isHeir || input.successionRank !== null) {
+        await reconcileAdminDynastySuccession(client, dynasty);
+      }
+      await writeAdminAudit(client, actorId, "admin.panel.dynasty.member.add", "dynasty_member", created.id, {
+        dynastyId: dynasty.id, countryId: dynasty.country_id, name: input.name, title: input.title,
+        relation: input.relation, age: input.age, health: input.health
+      });
+      return created;
+    });
+  },
+
+  async updateDynastyMember(actorId: string, memberId: string, rawInput: unknown) {
+    const input = dynastyMemberUpdateSchema.parse(rawInput);
+    return withAdminTransaction(async (client) => {
+      const snapshot = await adminDynastyMember(client, memberId);
+      const dynasty = await adminDynastyContext(client, snapshot.dynasty_id, true);
+      const member = await adminDynastyMember(client, memberId, true);
+      if (input.isMonarch && input.isHeir) throw new Error("Bir üye aynı anda hükümdar ve varis olamaz.");
+      if (member.status === "DEAD" && (input.isMonarch || input.isHeir || input.health === "SICK")) {
+        throw new Error("Ölü bir üye hükümdar, varis veya hasta olarak işaretlenemez.");
+      }
+      if (input.health === "SICK" && (input.sickUntilTurn === null || input.sickUntilTurn < dynasty.current_turn)) {
+        throw new Error("Hasta üye için iyileşme turu mevcut turdan erken olamaz.");
+      }
+      if (input.isMonarch && input.gender === "FEMALE" && (!member.is_monarch || member.gender !== "FEMALE")) {
+        const eligibleMale = await client.query(
+          `SELECT 1 FROM dynasty_members
+            WHERE dynasty_id=$1 AND status='ALIVE' AND gender='MALE' AND is_monarch=FALSE AND id<>$2
+              AND (is_heir=TRUE OR succession_rank IS NOT NULL) LIMIT 1`,
+          [dynasty.id, member.id]
+        );
+        if (eligibleMale.rowCount) throw new Error("Yaşayan ve verasete uygun erkek varken kadın üye hükümdar yapılamaz.");
+      }
+      if (input.isHeir && input.gender === "FEMALE") {
+        const eligibleMale = await client.query(
+          `SELECT 1 FROM dynasty_members
+            WHERE dynasty_id=$1 AND status='ALIVE' AND gender='MALE' AND is_monarch=FALSE AND id<>$2
+              AND (is_heir=TRUE OR succession_rank IS NOT NULL) LIMIT 1`,
+          [dynasty.id, member.id]
+        );
+        if (eligibleMale.rowCount) throw new Error("Yaşayan ve verasete uygun erkek varken kadın üye varis yapılamaz.");
+      }
+      for (const relationId of [input.spouseId, input.motherId, input.fatherId]) {
+        if (relationId === member.id) throw new Error("Bir üye kendisinin eşi veya ebeveyni olamaz.");
+      }
+      const duplicate = await client.query(
+        "SELECT 1 FROM dynasty_members WHERE dynasty_id=$1 AND lower(name)=lower($2) AND id<>$3",
+        [dynasty.id, input.name, member.id]
+      );
+      if (duplicate.rowCount) throw new Error("Bu hanedanda aynı adlı başka bir üye bulunuyor.");
+      const spouse = await validateDynastyRelation(client, dynasty.id, input.spouseId, "Eş");
+      await validateDynastyRelation(client, dynasty.id, input.motherId, "Anne", "FEMALE");
+      await validateDynastyRelation(client, dynasty.id, input.fatherId, "Baba", "MALE");
+      if (spouse?.spouse_id && spouse.spouse_id !== member.id) throw new Error("Seçilen eş başka bir üyeyle evli görünüyor.");
+      if (input.isMonarch) await client.query("UPDATE dynasty_members SET is_monarch=FALSE,updated_at=NOW() WHERE dynasty_id=$1 AND id<>$2", [dynasty.id, member.id]);
+      if (input.isHeir) await client.query("UPDATE dynasty_members SET is_heir=FALSE,updated_at=NOW() WHERE dynasty_id=$1 AND id<>$2", [dynasty.id, member.id]);
+      if (member.spouse_id !== input.spouseId && member.spouse_id) {
+        await client.query("UPDATE dynasty_members SET spouse_id=NULL,updated_at=NOW() WHERE id=$1 AND spouse_id=$2", [member.spouse_id, member.id]);
+      }
+      const updated = (await client.query(
+        `UPDATE dynasty_members SET name=$1,gender=$2,age=$3,title=$4,relation=$5,health=$6,
+                sick_until_turn=$7,is_monarch=$8,is_heir=$9,succession_rank=$10,spouse_id=$11,
+                mother_id=$12,father_id=$13,born_turn=$14,updated_at=NOW()
+          WHERE id=$15 RETURNING *`,
+        [input.name, input.gender, input.age, input.title, input.relation,
+          member.status === "DEAD" ? "HEALTHY" : input.health,
+          member.status === "ALIVE" && input.health === "SICK" ? input.sickUntilTurn : null,
+          member.status === "ALIVE" && input.isMonarch, member.status === "ALIVE" && input.isHeir,
+          input.successionRank, input.spouseId, input.motherId, input.fatherId,
+          dynasty.current_turn - input.age, member.id]
+      )).rows[0]!;
+      if (spouse) await client.query("UPDATE dynasty_members SET spouse_id=$1,updated_at=NOW() WHERE id=$2", [member.id, spouse.id]);
+      await dynastyEvent(client, dynasty.id, dynasty.current_turn, "MEMBER_UPDATED", member.id, {
+        name: input.name, age: input.age, title: input.title, relation: input.relation, actorId, source: "ADMIN_PANEL"
+      });
+      if (member.status === "ALIVE" && (
+        member.is_monarch !== input.isMonarch || member.is_heir !== input.isHeir ||
+        member.gender !== input.gender || member.succession_rank !== input.successionRank
+      )) {
+        await reconcileAdminDynastySuccession(client, dynasty);
+      }
+      await writeAdminAudit(client, actorId, "admin.panel.dynasty.member.update", "dynasty_member", member.id, {
+        previous: member, updated
+      });
+      return updated;
+    });
+  },
+
+  async marryLocalNoble(actorId: string, dynastyId: string, rawInput: unknown) {
+    const input = localNobleMarriageSchema.parse(rawInput);
+    return withAdminTransaction(async (client) => {
+      const dynasty = await adminDynastyContext(client, dynastyId, true);
+      const member = await adminDynastyMember(client, input.memberId, true);
+      if (member.dynasty_id !== dynasty.id) throw new Error("Seçilen üye bu hanedana ait değil.");
+      if (member.status !== "ALIVE") throw new Error("Ölü bir hanedan üyesi evlendirilemez.");
+      if (member.age === null || member.age < MINIMUM_MARRIAGE_AGE) {
+        throw new Error(`Evlilik için hanedan üyesi en az ${MINIMUM_MARRIAGE_AGE} yaşında olmalıdır.`);
+      }
+      if (member.spouse_id) throw new Error("Seçilen hanedan üyesi zaten evli.");
+      const surname = input.surname?.trim() || null;
+      const spouseName = [input.firstName.trim(), surname].filter(Boolean).join(" ");
+      if (spouseName.length > 80) throw new Error("Yerel soylunun tam adı en fazla 80 karakter olabilir.");
+      const duplicate = await client.query(
+        "SELECT 1 FROM dynasty_members WHERE dynasty_id=$1 AND lower(name)=lower($2)",
+        [dynasty.id, spouseName]
+      );
+      if (duplicate.rowCount) throw new Error("Bu hanedanda aynı adlı bir üye zaten bulunuyor.");
+      const spouseGender = member.gender === "MALE" ? "FEMALE" : "MALE";
+      const spouse = (await client.query<Record<string, unknown> & { id: string }>(
+        `INSERT INTO dynasty_members(
+           dynasty_id,name,gender,age,title,relation,status,health,is_monarch,is_heir,
+           succession_rank,spouse_id,born_turn
+         ) VALUES($1,$2,$3,$4,$5,'Yerel soylu eş','ALIVE','HEALTHY',FALSE,FALSE,NULL,$6,$7)
+         RETURNING *`,
+        [dynasty.id, spouseName, spouseGender, input.age, spouseGender === "FEMALE" ? "Soylu Hanım" : "Soylu Bey",
+          member.id, dynasty.current_turn - input.age]
+      )).rows[0]!;
+      await client.query("UPDATE dynasty_members SET spouse_id=$1,updated_at=NOW() WHERE id=$2", [spouse.id, member.id]);
+      await client.query(
+        `UPDATE dynasty_marriage_proposals SET status='CANCELLED',resolved_turn=$1,resolved_by=$2,resolved_at=NOW()
+          WHERE status='PENDING' AND (proposer_member_id=$3 OR target_member_id=$3)`,
+        [dynasty.current_turn, actorId, member.id]
+      );
+      await dynastyEvent(client, dynasty.id, dynasty.current_turn, "MARRIAGE", member.id, {
+        memberName: member.name, spouseName, spouseAge: input.age, actorId,
+        source: "ADMIN_PANEL_LOCAL_NOBLE"
+      });
+      const result = {
+        dynastyId: dynasty.id, countryId: dynasty.country_id, memberId: member.id,
+        memberName: member.name, spouseId: spouse.id, spouseName, spouseAge: input.age
+      };
+      await writeAdminAudit(
+        client, actorId, "admin.panel.dynasty.local_noble_marriage", "dynasty_member", spouse.id, result
+      );
+      return result;
+    });
+  },
+
+  async killDynastyMember(actorId: string, memberId: string, rawInput: unknown) {
+    const input = dynastyMemberDeathSchema.parse(rawInput);
+    return withAdminTransaction(async (client) => {
+      const snapshot = await adminDynastyMember(client, memberId);
+      const dynasty = await adminDynastyContext(client, snapshot.dynasty_id, true);
+      const member = await adminDynastyMember(client, memberId, true);
+      if (member.status !== "ALIVE") throw new Error("Bu hanedan üyesi zaten ölü.");
+      await client.query(
+        `UPDATE dynasty_members SET status='DEAD',health='HEALTHY',sick_until_turn=NULL,
+                is_monarch=FALSE,is_heir=FALSE,died_turn=$1,death_reason=$2,updated_at=NOW()
+          WHERE id=$3`,
+        [dynasty.current_turn, input.reason, member.id]
+      );
+      await client.query(
+        `UPDATE dynasty_marriage_proposals SET status='CANCELLED',resolved_turn=$1,resolved_by=$2,resolved_at=NOW()
+          WHERE status='PENDING' AND (proposer_member_id=$3 OR target_member_id=$3)`,
+        [dynasty.current_turn, actorId, member.id]
+      );
+      if (member.spouse_id && member.is_monarch) {
+        await client.query(
+          `UPDATE dynasty_members SET relation='Önceki hükümdarın eşi',
+                  title=CASE WHEN gender='FEMALE' THEN 'Dul Kraliçe' ELSE 'Dul Kral Eşi' END,updated_at=NOW()
+            WHERE id=$1 AND status='ALIVE' AND is_monarch=FALSE`,
+          [member.spouse_id]
+        );
+      }
+      await dynastyEvent(client, dynasty.id, dynasty.current_turn, "DEATH", member.id, {
+        name: member.name, age: member.age, reason: input.reason,
+        wasMonarch: member.is_monarch, wasHeir: member.is_heir, actorId, source: "ADMIN_PANEL"
+      });
+      if (member.is_monarch || member.is_heir) await reconcileAdminDynastySuccession(client, dynasty);
+      const result = {
+        id: member.id, dynastyId: dynasty.id, name: member.name, countryName: dynasty.country_name,
+        diedTurn: dynasty.current_turn, reason: input.reason
+      };
+      await writeAdminAudit(client, actorId, "admin.panel.dynasty.member.death", "dynasty_member", member.id, result);
+      return result;
     });
   },
 

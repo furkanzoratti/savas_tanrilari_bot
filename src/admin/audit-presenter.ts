@@ -3,6 +3,11 @@ const ACTION_LABELS: Record<string, string> = {
   "admin.panel.settlement.update": "Yerleşke bilgileri güncellendi",
   "admin.panel.character.update": "Karakter bilgileri güncellendi",
   "admin.panel.character.assignment.cancel": "Karakter görevi iptal edildi",
+  "admin.panel.dynasty.update": "Hanedan bilgileri güncellendi",
+  "admin.panel.dynasty.member.add": "Hanedana yeni üye eklendi",
+  "admin.panel.dynasty.member.update": "Hanedan üyesi güncellendi",
+  "admin.panel.dynasty.member.death": "Hanedan üyesi öldü olarak işlendi",
+  "admin.panel.dynasty.local_noble_marriage": "Yerel soylu evliliği yapıldı",
   "admin.panel.army.update": "Ordu bilgileri güncellendi",
   "admin.panel.army.unit.update": "Ordu mevcudu güncellendi",
   "admin.panel.army.create": "Yeni ordu oluşturuldu",
@@ -59,7 +64,7 @@ const ACTION_LABELS: Record<string, string> = {
 };
 
 const ENTITY_LABELS: Record<string, string> = {
-  country: "Devlet", settlement: "Yerleşke", character: "Karakter", army: "Ordu", fleet: "Filo",
+  country: "Devlet", settlement: "Yerleşke", character: "Karakter", dynasty: "Hanedan", dynasty_member: "Hanedan üyesi", army: "Ordu", fleet: "Filo",
   battle: "Savaş", naval_operation: "Deniz operasyonu", state_war: "Savaş ilanı",
   movement_order: "Hareket emri", map: "Harita", map_edge: "Harita geçişi", guild: "Oyun"
 };
@@ -85,7 +90,10 @@ const FIELD_LABELS: Record<string, string> = {
   reservePercent: "Hazine rezervi", strategicGoals: "Stratejik hedefler", enabled: "Planlamaya hazır",
   testModeEnabled: "AI test modu", automaticPlanning: "Otomatik planlama", automaticExecution: "Otomatik yürütme",
   turn: "Tur", revision: "Taslak sürümü", status: "Taslak durumu", model: "Model",
-  executionApplied: "Oyun emri uygulandı", decision: "İnceleme kararı", reviewNote: "İnceleme notu"
+  executionApplied: "Oyun emri uygulandı", decision: "İnceleme kararı", reviewNote: "İnceleme notu",
+  dynastyId: "Hanedan", title: "Unvan", relation: "Akrabalık", age: "Yaş", health: "Sağlık",
+  diedTurn: "Ölüm turu", reason: "Ölüm nedeni", memberName: "Hanedan üyesi",
+  spouseName: "Yerel soylu eş", spouseAge: "Eşin yaşı"
 };
 
 const VALUE_LABELS: Record<string, string> = {
@@ -95,7 +103,8 @@ const VALUE_LABELS: Record<string, string> = {
   COUNTERINTELLIGENCE_TRAVELING_COUNTRY: "Ülke karşı casusluğuna intikal",
   COUNTERINTELLIGENCE_TRAVELING_SETTLEMENT: "Yerleşke karşı casusluğuna intikal",
   PERSONAL_GUARD: "Kişisel koruma", ASSIMILATION: "Asimilasyon", PEACE: "Barış",
-  PARTIAL: "Kısmi seferberlik", GENERAL: "Genel seferberlik", true: "Evet", false: "Hayır"
+  PARTIAL: "Kısmi seferberlik", GENERAL: "Genel seferberlik", HEALTHY: "Sağlıklı", SICK: "Hasta",
+  MALE: "Erkek", FEMALE: "Kadın", ALIVE: "Hayatta", DEAD: "Ölü", true: "Evet", false: "Hayır"
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;

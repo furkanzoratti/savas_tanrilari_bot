@@ -7,6 +7,18 @@ describe("GM panel audit presenter", () => {
     expect(auditActionLabel("battle.army.add")).toBe("Savaşa ordu eklendi");
     expect(auditActionLabel("admin.panel.battle.participant.add")).toBe("Aktif kuşatmaya devlet eklendi");
     expect(auditActionLabel("admin.panel.battle.army.add")).toBe("Aktif kuşatmaya ordu eklendi");
+    expect(auditActionLabel("admin.panel.dynasty.member.add")).toBe("Hanedana yeni üye eklendi");
+    expect(auditActionLabel("admin.panel.dynasty.member.death")).toBe("Hanedan üyesi öldü olarak işlendi");
+    expect(auditActionLabel("admin.panel.dynasty.local_noble_marriage")).toBe("Yerel soylu evliliği yapıldı");
+  });
+
+  it("hanedan üyesi sağlık ve ölüm ayrıntılarını Türkçe özetler", () => {
+    expect(auditDetailsSummary({ name: "Asterion", title: "Kral", health: "SICK", age: 64 }, new Map()))
+      .toBe("Ad: Asterion • Unvan: Kral • Sağlık: Hasta • Yaş: 64");
+    expect(auditDetailsSummary({ diedTurn: 30, reason: "Yaşlılık" }, new Map()))
+      .toBe("Ölüm turu: 30 • Ölüm nedeni: Yaşlılık");
+    expect(auditDetailsSummary({ memberName: "Asterion", spouseName: "Helena", spouseAge: 24 }, new Map()))
+      .toBe("Hanedan üyesi: Asterion • Yerel soylu eş: Helena • Eşin yaşı: 24");
   });
 
   it("iç içe ayrıntılardaki kimlikleri adlarla özetler", () => {
