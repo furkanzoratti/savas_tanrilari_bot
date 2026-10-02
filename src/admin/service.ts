@@ -420,6 +420,22 @@ export function removeBattleRosterComposition(
   return { next, removed: { [unitType]: quantity } };
 }
 
+export function withdrawBattleRosterComposition(
+  currentRaw: unknown,
+  initialRaw: unknown,
+  unitType: string | null,
+  published: boolean
+): { nextCurrent: Record<string, number>; nextInitial: Record<string, number>; removed: Record<string, number> } {
+  const current = removeBattleRosterComposition(currentRaw,unitType);
+  return {
+    nextCurrent:current.next,
+    nextInitial:published
+      ?subtractBattleComposition(initialRaw,current.removed)
+      :numericComposition(initialRaw),
+    removed:current.removed
+  };
+}
+
 function compositionTotal(composition: unknown): number {
   return Object.values(numericComposition(composition)).reduce((sum, value) => sum + value, 0);
 }
@@ -819,9 +835,12 @@ export const adminPanelService = {
     if (!z.string().uuid().safeParse(battleId).success) throw new Error("Geçersiz savaş kimliği.");
     const battle = (await adminPool.query<{
       id:string;terrain:string;status:string;round_number:number;country_a_name:string|null;country_b_name:string|null;
+      current_round_started:boolean;
     }>(
       `SELECT battle.id,battle.terrain,battle.status,battle.round_number,
-              country_a.name AS country_a_name,country_b.name AS country_b_name
+              country_a.name AS country_a_name,country_b.name AS country_b_name,
+              EXISTS(SELECT 1 FROM battle_rolls roll
+                       WHERE roll.battle_id=battle.id AND roll.round_number=battle.round_number) AS current_round_started
          FROM battles battle
          LEFT JOIN battle_sides side_a ON side_a.battle_id=battle.id AND side_a.side_key='A'
          LEFT JOIN countries country_a ON country_a.id=side_a.country_id
@@ -848,6 +867,16 @@ export const adminPanelService = {
         ORDER BY participant.side_key,participant.is_primary DESC,country.name`,
       [battle.id]
     )).rows;
+    const editable = !["FINISHED","CANCELLED"].includes(battle.status)
+      && !battle.current_round_started
+      && (battle.status === "DRAFT" || battle.terrain !== "NAVAL");
+    const editableReason = ["FINISHED","CANCELLED"].includes(battle.status)
+      ?"Sona ermiş veya iptal edilmiş savaşların kadrosu değiştirilemez."
+      :battle.current_round_started
+        ?"Mevcut değerlendirmede savaş zarı atıldığı için önce değerlendirme sonuçlandırılmalıdır."
+        :battle.terrain === "NAVAL" && battle.status !== "DRAFT"
+          ?"Yayımlanmış deniz savaşlarında gemi sağlamlık kayıtları bulunduğu için filo kadrosu buradan çekilemez."
+        :null;
     const rosters = rows.flatMap((row) => {
       if (row.uses_armies || row.uses_fleets) return [];
       const current = numericComposition(row.composition);
@@ -858,7 +887,7 @@ export const adminPanelService = {
         sideKey:row.side_key,countryId:row.country_id,countryName:row.country_name,
         sourceSettlementName:row.source_settlement_name,
         total:compositionTotal(current),initialTotal:compositionTotal(initial) || compositionTotal(current),
-        editable:battle.status === "DRAFT",
+        editable,
         units:unitTypes.map((unitType) => ({
           unitType,
           label:unitType in BATTLE_UNIT_STATS
@@ -869,7 +898,7 @@ export const adminPanelService = {
         })).sort((left,right)=>left.label.localeCompare(right.label,"tr"))
       }];
     });
-    return { ...battle, editable:battle.status === "DRAFT", rosters };
+    return { ...battle, editable, editableReason, rosters };
   },
 
   async removeBattleManualRoster(actorId: string, battleId: string, rawInput: unknown) {
@@ -881,7 +910,17 @@ export const adminPanelService = {
         [battleId,adminConfig.guildId]
       )).rows[0];
       if (!battle) throw new Error("Savaş bulunamadı.");
-      if (battle.status !== "DRAFT") throw new Error("Manuel kadro yalnızca savaş taslak durumundayken çıkarılabilir.");
+      if (["FINISHED","CANCELLED"].includes(battle.status)) throw new Error("Sona ermiş veya iptal edilmiş savaşların kadrosu değiştirilemez.");
+      if (battle.terrain === "NAVAL" && battle.status !== "DRAFT") {
+        throw new Error("Yayımlanmış deniz savaşlarında gemi sağlamlık kayıtları bulunduğu için filo kadrosu buradan çekilemez.");
+      }
+      if ((await client.query(
+        `SELECT 1 FROM battle_rolls roll JOIN battles current_battle ON current_battle.id=roll.battle_id
+          WHERE roll.battle_id=$1 AND roll.round_number=current_battle.round_number LIMIT 1`,
+        [battle.id]
+      )).rowCount) {
+        throw new Error("Mevcut değerlendirmede savaş zarı atıldığı için önce değerlendirmeyi sonuçlandırın.");
+      }
       const participant = (await client.query<{
         side_key:"A"|"B";country_id:string;country_name:string;composition:unknown;initial_composition:unknown;
         dismounted_composition:unknown;source_settlement_id:string|null;uses_armies:boolean;uses_fleets:boolean;
@@ -903,13 +942,15 @@ export const adminPanelService = {
       if (participant.uses_armies || participant.uses_fleets) {
         throw new Error("Bu kadro kalıcı ordu veya filodan geliyor; manuel kadro ekranından çıkarılamaz.");
       }
-      const currentRemoval = removeBattleRosterComposition(participant.composition,input.unitType);
-      if (!compositionTotal(currentRemoval.removed)) {
+      const published = battle.status !== "DRAFT";
+      const participantWithdrawal = withdrawBattleRosterComposition(
+        participant.composition,participant.initial_composition,input.unitType,published
+      );
+      if (!compositionTotal(participantWithdrawal.removed)) {
         throw new Error(input.unitType ? "Seçilen birlik bu manuel kadroda bulunmuyor." : "Manuel kadro zaten boş.");
       }
-      const initialRemoval = removeBattleRosterComposition(participant.initial_composition,input.unitType);
       const dismountedRemoval = removeBattleRosterComposition(participant.dismounted_composition,input.unitType);
-      const participantRemainingTotal = compositionTotal(currentRemoval.next);
+      const participantRemainingTotal = compositionTotal(participantWithdrawal.nextCurrent);
       const side = (await client.query<{
         composition:unknown;initial_composition:unknown;support_assets:unknown;
       }>(
@@ -917,26 +958,31 @@ export const adminPanelService = {
         [battle.id,participant.side_key]
       )).rows[0];
       if (!side) throw new Error("Savaş tarafı bulunamadı.");
-      const nextSide = subtractBattleComposition(side.composition,currentRemoval.removed);
-      const nextSideInitial = subtractBattleComposition(side.initial_composition,initialRemoval.removed);
+      const nextSide = subtractBattleComposition(side.composition,participantWithdrawal.removed);
+      const nextSideInitial = published
+        ?subtractBattleComposition(side.initial_composition,participantWithdrawal.removed)
+        :numericComposition(side.initial_composition);
       const total = compositionTotal(nextSide);
+      const initialTotal = published ? compositionTotal(nextSideInitial) : total;
+      const totalLosses = published ? Math.max(0,initialTotal-total) : 0;
       await client.query(
         `UPDATE battle_side_participants
             SET composition=$1::jsonb,initial_composition=$2::jsonb,dismounted_composition=$3::jsonb,
                 source_settlement_id=$4
           WHERE battle_id=$5 AND country_id=$6`,
-        [JSON.stringify(currentRemoval.next),JSON.stringify(initialRemoval.next),JSON.stringify(dismountedRemoval.next),
+        [JSON.stringify(participantWithdrawal.nextCurrent),JSON.stringify(participantWithdrawal.nextInitial),JSON.stringify(dismountedRemoval.next),
           participantRemainingTotal?participant.source_settlement_id:null,battle.id,participant.country_id]
       );
       await client.query(
         `UPDATE battle_sides
             SET composition=$1::jsonb,initial_composition=$2::jsonb,
-                initial_total=$3,current_total=$3,total_losses=0,seal=$4
-          WHERE battle_id=$5 AND side_key=$6`,
-        [JSON.stringify(nextSide),JSON.stringify(nextSideInitial),total,battleSeal(nextSide,side.support_assets),battle.id,participant.side_key]
+                initial_total=$3,current_total=$4,total_losses=$5,seal=$6
+          WHERE battle_id=$7 AND side_key=$8`,
+        [JSON.stringify(nextSide),JSON.stringify(nextSideInitial),initialTotal,total,totalLosses,
+          battleSeal(nextSide,side.support_assets),battle.id,participant.side_key]
       );
       await client.query("UPDATE battles SET updated_at=NOW() WHERE id=$1",[battle.id]);
-      const removedTotal = compositionTotal(currentRemoval.removed);
+      const removedTotal = compositionTotal(participantWithdrawal.removed);
       const action = input.unitType
         ?"admin.panel.battle.roster.unit.remove"
         :"admin.panel.battle.roster.clear";

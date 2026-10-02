@@ -7,7 +7,7 @@ vi.hoisted(()=>{
   process.env.ADMIN_GUILD_ID="456";
   process.env.ADMIN_SESSION_SECRET="0123456789abcdef0123456789abcdef";
 });
-import { addBattleComposition, mercenaryAssignmentViews, removeBattleRosterComposition, subtractBattleComposition } from "./service.js";
+import { addBattleComposition, mercenaryAssignmentViews, removeBattleRosterComposition, subtractBattleComposition, withdrawBattleRosterComposition } from "./service.js";
 
 describe("panel aktif kuşatma takviyesi",()=>{
   it("takviye birliklerini mevcut savaş havuzuna tür bazında ekler",()=>{
@@ -40,6 +40,28 @@ describe("panel aktif kuşatma takviyesi",()=>{
       { heavy_infantry:4_000,archer:1_000 },
       null
     )).toEqual({ next:{},removed:{ heavy_infantry:4_000,archer:1_000 } });
+  });
+
+  it("başlamış savaşta çekilen mevcut askeri kayıp saymadan başlangıç havuzundan da düşer",()=>{
+    expect(withdrawBattleRosterComposition(
+      { heavy_infantry:800,archer:500 },
+      { heavy_infantry:1_000,archer:500 },
+      "heavy_infantry",
+      true
+    )).toEqual({
+      nextCurrent:{ archer:500 },
+      nextInitial:{ heavy_infantry:200,archer:500 },
+      removed:{ heavy_infantry:800 }
+    });
+  });
+
+  it("taslak kadro temizlenirken henüz mühürlenmemiş başlangıç bileşimini korur",()=>{
+    expect(withdrawBattleRosterComposition(
+      { heavy_infantry:800,archer:500 },
+      {},
+      null,
+      false
+    )).toEqual({ nextCurrent:{},nextInitial:{},removed:{ heavy_infantry:800,archer:500 } });
   });
 
   it("savaşa atanmış paralı asker anahtarını panelde görülecek ada çevirir",()=>{
