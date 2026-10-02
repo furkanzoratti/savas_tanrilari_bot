@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
   BATTLE_UNIT_STATS,
+  NAVAL_UNIT_STATS,
   type BattleUnitType,
   type SiegeAssetType,
   type SiegeTarget
@@ -29,6 +30,7 @@ import {
 
 const usableUnitTypes = (Object.keys(BATTLE_UNIT_STATS) as BattleUnitType[]).filter((unitType) => unitType !== "militia");
 const usableUnitTypeSet = new Set<string>(usableUnitTypes);
+const battleRosterForceTypeSet = new Set<string>([...Object.keys(BATTLE_UNIT_STATS), ...Object.keys(NAVAL_UNIT_STATS)]);
 const commanderDoctrineSet = new Set<string>(Object.keys(COMMANDER_DOCTRINES));
 const characterSpecializationSet = new Set<string>(Object.keys(CHARACTER_SPECIALIZATIONS));
 const admiralDoctrineSet = new Set<string>(Object.keys(ADMIRAL_DOCTRINES));
@@ -120,6 +122,14 @@ const siegeArmyMutationSchema = z.object({
   armyId: z.string().uuid(),
   side: z.enum(["A", "B"]),
   action: z.enum(["ADD", "REMOVE"])
+});
+
+const battleRosterRemovalSchema = z.object({
+  countryId: z.string().uuid(),
+  unitType: z.string().nullable().refine(
+    (value) => value === null || battleRosterForceTypeSet.has(value),
+    "Geçersiz savaş birimi."
+  )
 });
 
 const armyInputSchema = z.object({
@@ -395,6 +405,19 @@ export function subtractBattleComposition(base: unknown, removal: unknown): Reco
     else delete result[key];
   }
   return result;
+}
+
+export function removeBattleRosterComposition(
+  raw: unknown,
+  unitType: string | null
+): { next: Record<string, number>; removed: Record<string, number> } {
+  const current = numericComposition(raw);
+  if (unitType === null) return { next: {}, removed: current };
+  const quantity = current[unitType] ?? 0;
+  if (!quantity) return { next: current, removed: {} };
+  const next = { ...current };
+  delete next[unitType];
+  return { next, removed: { [unitType]: quantity } };
 }
 
 function compositionTotal(composition: unknown): number {
@@ -790,6 +813,142 @@ export const adminPanelService = {
       [adminConfig.guildId]
     )).rows as Array<Record<string, unknown>>;
     return rows.map((row) => ({ ...row, mercenaries: mercenaryAssignmentViews(row.mercenaries) }));
+  },
+
+  async battleManualRosters(battleId: string) {
+    if (!z.string().uuid().safeParse(battleId).success) throw new Error("Geçersiz savaş kimliği.");
+    const battle = (await adminPool.query<{
+      id:string;terrain:string;status:string;round_number:number;country_a_name:string|null;country_b_name:string|null;
+    }>(
+      `SELECT battle.id,battle.terrain,battle.status,battle.round_number,
+              country_a.name AS country_a_name,country_b.name AS country_b_name
+         FROM battles battle
+         LEFT JOIN battle_sides side_a ON side_a.battle_id=battle.id AND side_a.side_key='A'
+         LEFT JOIN countries country_a ON country_a.id=side_a.country_id
+         LEFT JOIN battle_sides side_b ON side_b.battle_id=battle.id AND side_b.side_key='B'
+         LEFT JOIN countries country_b ON country_b.id=side_b.country_id
+        WHERE battle.id=$1 AND battle.guild_id=$2`,
+      [battleId,adminConfig.guildId]
+    )).rows[0];
+    if (!battle) throw new Error("Savaş bulunamadı.");
+    const rows = (await adminPool.query<{
+      side_key:"A"|"B";country_id:string;country_name:string;source_settlement_name:string|null;
+      composition:unknown;initial_composition:unknown;uses_armies:boolean;uses_fleets:boolean;
+    }>(
+      `SELECT participant.side_key,participant.country_id,country.name AS country_name,
+              source.name AS source_settlement_name,participant.composition,participant.initial_composition,
+              EXISTS(SELECT 1 FROM battle_army_assignments assignment
+                      WHERE assignment.battle_id=participant.battle_id AND assignment.country_id=participant.country_id) AS uses_armies,
+              EXISTS(SELECT 1 FROM battle_fleet_assignments assignment
+                      WHERE assignment.battle_id=participant.battle_id AND assignment.country_id=participant.country_id) AS uses_fleets
+         FROM battle_side_participants participant
+         JOIN countries country ON country.id=participant.country_id
+         LEFT JOIN settlements source ON source.id=participant.source_settlement_id
+        WHERE participant.battle_id=$1
+        ORDER BY participant.side_key,participant.is_primary DESC,country.name`,
+      [battle.id]
+    )).rows;
+    const rosters = rows.flatMap((row) => {
+      if (row.uses_armies || row.uses_fleets) return [];
+      const current = numericComposition(row.composition);
+      const initial = numericComposition(row.initial_composition);
+      const unitTypes = [...new Set([...Object.keys(initial),...Object.keys(current)])];
+      if (!unitTypes.length) return [];
+      return [{
+        sideKey:row.side_key,countryId:row.country_id,countryName:row.country_name,
+        sourceSettlementName:row.source_settlement_name,
+        total:compositionTotal(current),initialTotal:compositionTotal(initial) || compositionTotal(current),
+        editable:battle.status === "DRAFT",
+        units:unitTypes.map((unitType) => ({
+          unitType,
+          label:unitType in BATTLE_UNIT_STATS
+            ?BATTLE_UNIT_STATS[unitType as BattleUnitType].label
+            :NAVAL_UNIT_STATS[unitType as keyof typeof NAVAL_UNIT_STATS]?.label??unitType,
+          quantity:current[unitType]??0,
+          initialQuantity:initial[unitType]??current[unitType]??0
+        })).sort((left,right)=>left.label.localeCompare(right.label,"tr"))
+      }];
+    });
+    return { ...battle, editable:battle.status === "DRAFT", rosters };
+  },
+
+  async removeBattleManualRoster(actorId: string, battleId: string, rawInput: unknown) {
+    if (!z.string().uuid().safeParse(battleId).success) throw new Error("Geçersiz savaş kimliği.");
+    const input = battleRosterRemovalSchema.parse(rawInput);
+    return withAdminTransaction(async (client) => {
+      const battle = (await client.query<{ id:string;status:string;terrain:string }>(
+        "SELECT id,status,terrain FROM battles WHERE id=$1 AND guild_id=$2 FOR UPDATE",
+        [battleId,adminConfig.guildId]
+      )).rows[0];
+      if (!battle) throw new Error("Savaş bulunamadı.");
+      if (battle.status !== "DRAFT") throw new Error("Manuel kadro yalnızca savaş taslak durumundayken çıkarılabilir.");
+      const participant = (await client.query<{
+        side_key:"A"|"B";country_id:string;country_name:string;composition:unknown;initial_composition:unknown;
+        dismounted_composition:unknown;source_settlement_id:string|null;uses_armies:boolean;uses_fleets:boolean;
+      }>(
+        `SELECT participant.side_key,participant.country_id,country.name AS country_name,
+                participant.composition,participant.initial_composition,participant.dismounted_composition,
+                participant.source_settlement_id,
+                EXISTS(SELECT 1 FROM battle_army_assignments assignment
+                        WHERE assignment.battle_id=participant.battle_id AND assignment.country_id=participant.country_id) AS uses_armies,
+                EXISTS(SELECT 1 FROM battle_fleet_assignments assignment
+                        WHERE assignment.battle_id=participant.battle_id AND assignment.country_id=participant.country_id) AS uses_fleets
+           FROM battle_side_participants participant
+           JOIN countries country ON country.id=participant.country_id
+          WHERE participant.battle_id=$1 AND participant.country_id=$2
+          FOR UPDATE OF participant`,
+        [battle.id,input.countryId]
+      )).rows[0];
+      if (!participant) throw new Error("Seçilen devletin savaş kadrosu bulunamadı.");
+      if (participant.uses_armies || participant.uses_fleets) {
+        throw new Error("Bu kadro kalıcı ordu veya filodan geliyor; manuel kadro ekranından çıkarılamaz.");
+      }
+      const currentRemoval = removeBattleRosterComposition(participant.composition,input.unitType);
+      if (!compositionTotal(currentRemoval.removed)) {
+        throw new Error(input.unitType ? "Seçilen birlik bu manuel kadroda bulunmuyor." : "Manuel kadro zaten boş.");
+      }
+      const initialRemoval = removeBattleRosterComposition(participant.initial_composition,input.unitType);
+      const dismountedRemoval = removeBattleRosterComposition(participant.dismounted_composition,input.unitType);
+      const participantRemainingTotal = compositionTotal(currentRemoval.next);
+      const side = (await client.query<{
+        composition:unknown;initial_composition:unknown;support_assets:unknown;
+      }>(
+        "SELECT composition,initial_composition,support_assets FROM battle_sides WHERE battle_id=$1 AND side_key=$2 FOR UPDATE",
+        [battle.id,participant.side_key]
+      )).rows[0];
+      if (!side) throw new Error("Savaş tarafı bulunamadı.");
+      const nextSide = subtractBattleComposition(side.composition,currentRemoval.removed);
+      const nextSideInitial = subtractBattleComposition(side.initial_composition,initialRemoval.removed);
+      const total = compositionTotal(nextSide);
+      await client.query(
+        `UPDATE battle_side_participants
+            SET composition=$1::jsonb,initial_composition=$2::jsonb,dismounted_composition=$3::jsonb,
+                source_settlement_id=$4
+          WHERE battle_id=$5 AND country_id=$6`,
+        [JSON.stringify(currentRemoval.next),JSON.stringify(initialRemoval.next),JSON.stringify(dismountedRemoval.next),
+          participantRemainingTotal?participant.source_settlement_id:null,battle.id,participant.country_id]
+      );
+      await client.query(
+        `UPDATE battle_sides
+            SET composition=$1::jsonb,initial_composition=$2::jsonb,
+                initial_total=$3,current_total=$3,total_losses=0,seal=$4
+          WHERE battle_id=$5 AND side_key=$6`,
+        [JSON.stringify(nextSide),JSON.stringify(nextSideInitial),total,battleSeal(nextSide,side.support_assets),battle.id,participant.side_key]
+      );
+      await client.query("UPDATE battles SET updated_at=NOW() WHERE id=$1",[battle.id]);
+      const removedTotal = compositionTotal(currentRemoval.removed);
+      const action = input.unitType
+        ?"admin.panel.battle.roster.unit.remove"
+        :"admin.panel.battle.roster.clear";
+      await writeAdminAudit(client,actorId,action,"battle",battle.id,{
+        countryId:participant.country_id,countryName:participant.country_name,side:participant.side_key,
+        unitType:input.unitType,quantity:removedTotal,status:battle.status
+      });
+      return {
+        battleId:battle.id,countryId:participant.country_id,countryName:participant.country_name,
+        side:participant.side_key,unitType:input.unitType,removedTotal,remainingTotal:participantRemainingTotal
+      };
+    });
   },
 
   async country(countryId: string) {

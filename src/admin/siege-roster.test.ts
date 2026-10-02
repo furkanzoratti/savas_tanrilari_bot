@@ -7,7 +7,7 @@ vi.hoisted(()=>{
   process.env.ADMIN_GUILD_ID="456";
   process.env.ADMIN_SESSION_SECRET="0123456789abcdef0123456789abcdef";
 });
-import { addBattleComposition, mercenaryAssignmentViews, subtractBattleComposition } from "./service.js";
+import { addBattleComposition, mercenaryAssignmentViews, removeBattleRosterComposition, subtractBattleComposition } from "./service.js";
 
 describe("panel aktif kuşatma takviyesi",()=>{
   it("takviye birliklerini mevcut savaş havuzuna tür bazında ekler",()=>{
@@ -26,6 +26,20 @@ describe("panel aktif kuşatma takviyesi",()=>{
 
   it("çıkarma sırasında negatif birlik üretmez",()=>{
     expect(subtractBattleComposition({ archer:500 },{ archer:800 })).toEqual({});
+  });
+
+  it("manuel savaş kadrosundan yalnız seçilen birlik türünü çıkarır",()=>{
+    expect(removeBattleRosterComposition(
+      { heavy_infantry:4_000,archer:1_000 },
+      "archer"
+    )).toEqual({ next:{ heavy_infantry:4_000 },removed:{ archer:1_000 } });
+  });
+
+  it("manuel savaş kadrosunun tamamını tek işlemde çıkarır",()=>{
+    expect(removeBattleRosterComposition(
+      { heavy_infantry:4_000,archer:1_000 },
+      null
+    )).toEqual({ next:{},removed:{ heavy_infantry:4_000,archer:1_000 } });
   });
 
   it("savaşa atanmış paralı asker anahtarını panelde görülecek ada çevirir",()=>{

@@ -15,6 +15,8 @@ const ACTION_LABELS: Record<string, string> = {
   "admin.panel.battle.participant.remove": "Aktif kuşatmadan devlet çıkarıldı",
   "admin.panel.battle.army.add": "Aktif kuşatmaya ordu eklendi",
   "admin.panel.battle.army.remove": "Aktif kuşatmadan ordu çıkarıldı",
+  "admin.panel.battle.roster.unit.remove": "Savaş kadrosundan birlik çıkarıldı",
+  "admin.panel.battle.roster.clear": "Manuel savaş kadrosu temizlendi",
   "admin.panel.ai.profile.update": "AI devlet profili güncellendi",
   "admin.panel.ai.test_mode.update": "AI test modu güncellendi",
   "admin.panel.ai.plan.generate": "AI devlet planı taslağı üretildi",

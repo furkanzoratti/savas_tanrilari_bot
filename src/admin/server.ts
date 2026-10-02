@@ -138,6 +138,11 @@ const server = createServer(async (request, response) => {
       if (!requireSession(request, response)) return;
       return json(response, 200, await adminPanelService.battles());
     }
+    const battleManualRostersMatch = request.method === "GET" ? url.pathname.match(/^\/api\/battles\/([0-9a-f-]+)\/manual-rosters$/iu) : null;
+    if (battleManualRostersMatch) {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await adminPanelService.battleManualRosters(battleManualRostersMatch[1]!));
+    }
     if (request.method === "GET" && url.pathname === "/api/sieges") {
       if (!requireSession(request, response)) return;
       return json(response, 200, await adminPanelService.activeSieges());
@@ -279,6 +284,12 @@ const server = createServer(async (request, response) => {
       const session = requireMutation(request, response);
       if (!session) return;
       return json(response, 200, await adminPanelService.mutateActiveSiegeArmy(session.sub, siegeArmyMatch[1]!, await body(request)));
+    }
+    const battleManualRosterRemoveMatch = request.method === "POST" ? url.pathname.match(/^\/api\/admin\/battles\/([0-9a-f-]+)\/manual-rosters\/remove$/iu) : null;
+    if (battleManualRosterRemoveMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.removeBattleManualRoster(session.sub, battleManualRosterRemoveMatch[1]!, await body(request)));
     }
     const armyUpdateMatch = request.method === "PATCH" ? url.pathname.match(/^\/api\/admin\/armies\/([0-9a-f-]+)$/iu) : null;
     if (armyUpdateMatch) {
