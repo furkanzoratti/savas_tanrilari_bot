@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
-  AUCTION_BID_INCREMENT, AUCTION_OPENING_BID, DIPLOMACY_SCENARIOS, GREAT_GAMES_RACE_ROUNDS,
+  ACTIVE_GREAT_GAME_TYPES, AUCTION_BID_INCREMENT, AUCTION_OPENING_BID, DIPLOMACY_SCENARIOS, GREAT_GAMES_RACE_ROUNDS,
+  GREAT_GAMES_TURN,
   allocatePool, auctionAvailableBid, auctionNextMinimum, caravanMultiplier, isValidAuctionBidAmount,
-  parseCaravanRoute, parseChariotTactic, parseKingsDecision, pickNonRepeatingValue,
+  gladiatorOdds, parseCaravanRoute, parseChariotTactic, parseKingsDecision, pickNonRepeatingValue,
   raceTrackPosition, resolveCaravanStage, resolveChariotRound,
-  resolveDiplomacyGoalVote, resolveDiplomacyVote, resolveKingsRound
+  resolveDiplomacyGoalVote, resolveDiplomacyVote, resolveGladiatorFight, resolveKingsRound
 } from "./great-games.js";
 
 function sequence(values: number[]): () => number {
@@ -12,7 +13,22 @@ function sequence(values: number[]): () => number {
   return () => values[index++] ?? 0;
 }
 
-describe("15. Tur Büyük Oyunları", () => {
+describe("30. Tur Büyük Oyunları", () => {
+  it("yeni sezonu yalnız seçilen dört etkin oyunla açar", () => {
+    expect(GREAT_GAMES_TURN).toBe(30);
+    expect(ACTIVE_GREAT_GAME_TYPES).toEqual(["AUCTION", "CHARIOT", "KINGS_BET", "GLADIATOR"]);
+  });
+
+  it("Capua oranlarını güce göre üretir ve dövüşü d20 + güç bonusuyla çözer", () => {
+    expect(gladiatorOdds(80, 40)).toEqual({ a: 1.35, b: 2.7 });
+    const result = resolveGladiatorFight(80, 40, sequence([0.4, 0.3]));
+    expect(result.winner).toBe("A");
+    expect(result.remainingHpA).toBe(35);
+    expect(result.remainingHpB).toBe(0);
+    expect(result.exchanges).toHaveLength(17);
+    expect(result.exchanges[0]).toMatchObject({ attacker: "A", hit: true, damage: 4 });
+    expect(result.exchanges[1]).toMatchObject({ attacker: "B", hit: false, damage: 0 });
+  });
   it("müzayedede 500 Altından başlayan sınırsız 250'lik teklifleri doğrular", () => {
     expect(AUCTION_OPENING_BID).toBe(500);
     expect(AUCTION_BID_INCREMENT).toBe(250);

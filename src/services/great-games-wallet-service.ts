@@ -1,6 +1,6 @@
 import type { DbClient } from "../db/pool.js";
 import { pool, withTransaction } from "../db/pool.js";
-import { allocatePool, GREAT_GAMES_TURN, GREAT_GAME_TYPES, type GreatGameType } from "../domain/great-games.js";
+import { ACTIVE_GREAT_GAME_TYPES, allocatePool, GREAT_GAMES_TURN } from "../domain/great-games.js";
 import { GameError } from "./game-service.js";
 
 export type WalletMovementKind =
@@ -17,7 +17,7 @@ async function lockedSeason(client: DbClient, guildId: string) {
     "SELECT id,status,current_game,prize_pool FROM great_games_seasons WHERE guild_id=$1 AND game_turn=$2 FOR UPDATE",
     [guildId, GREAT_GAMES_TURN]
   )).rows[0];
-  if (!row) throw new GameError("15. Tur Büyük Oyunları henüz yönetici tarafından açılmadı.");
+  if (!row) throw new GameError("30. Tur Büyük Oyunları henüz yönetici tarafından açılmadı.");
   return row;
 }
 
@@ -67,7 +67,7 @@ export const greatGamesWalletService = {
       if (inserted) {
         await client.query(
           `INSERT INTO great_games_wallet_movements(wallet_id,amount,balance_after,kind,source_key,description)
-           VALUES($1,5000,5000,'INITIAL_GRANT','initial-grant','15. Tur Büyük Oyunları başlangıç bakiyesi')`,
+          VALUES($1,5000,5000,'INITIAL_GRANT','initial-grant','30. Tur Büyük Oyunları başlangıç bakiyesi')`,
           [inserted.id]
         );
         balance = 5_000;
@@ -78,7 +78,7 @@ export const greatGamesWalletService = {
 
       const countryName = (await client.query<{ name: string }>("SELECT name FROM countries WHERE id=$1", [countryId])).rows[0]?.name;
       if (!countryName) throw new GameError("Etkinliğe kaydedilecek devlet bulunamadı.");
-      for (const gameType of Object.keys(GREAT_GAME_TYPES) as GreatGameType[]) {
+      for (const gameType of ACTIVE_GREAT_GAME_TYPES) {
         const metadata = gameType === "CHARIOT"
           ? { autoEnrolled: true, driverName: `${countryName} Sürücüsü`.slice(0, 40) }
           : { autoEnrolled: true };
@@ -86,7 +86,7 @@ export const greatGamesWalletService = {
           `INSERT INTO great_games_entries(season_id,game_type,country_id,discord_user_id,stake,score,metadata)
            VALUES($1,$2,$3,$4,0,$5,$6::jsonb)
            ON CONFLICT(season_id,game_type,country_id) DO NOTHING`,
-          [season.id, gameType, countryId, userId, gameType === "CARAVAN" ? 3 : 0, JSON.stringify(metadata)]
+          [season.id, gameType, countryId, userId, 0, JSON.stringify(metadata)]
         );
       }
       return { created: Boolean(inserted), balance };

@@ -46,6 +46,8 @@ import { additionalDynastyRostersMigration } from "./additional-dynasty-rosters-
 import { dynastyBirthNamingMigration } from "./dynasty-birth-naming-migration.js";
 import { boiiAndLugiiDynastiesMigration } from "./boii-and-lugii-dynasties-migration.js";
 import { dynastyMarriageMessageMigration } from "./dynasty-marriage-message-migration.js";
+import { greatGamesCapuaMigration } from "./great-games-capua-migration.js";
+import { greatGamesGladiatorCombatMigration } from "./great-games-gladiator-combat-migration.js";
 
 export const migrations = [
   {
@@ -2309,5 +2311,7 @@ export const migrations = [
   additionalDynastyRostersMigration,
   dynastyBirthNamingMigration,
   boiiAndLugiiDynastiesMigration,
-  dynastyMarriageMessageMigration
+  dynastyMarriageMessageMigration,
+  greatGamesCapuaMigration,
+  greatGamesGladiatorCombatMigration
 ] as const;

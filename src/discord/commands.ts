@@ -135,9 +135,10 @@ export const commandBuilders = [
     .addSubcommand((sub) => sub.setName("aktar").setDescription("R56 Hex ve yerleşke konumlarını veritabanına aktarır; hareketi açmaz")
       .addBooleanOption((o) => o.setName("sinir-onayi").setDescription("Beş tartışmalı sınır Hex'inin mevcut çoğunluk atamasını kabul ediyorum").setRequired(true))),
   new SlashCommandBuilder()
-    .setName("oyunlar").setDescription("15. Tur Büyük Oyunlarını ve oyun cüzdanını yönetir")
+    .setName("oyunlar").setDescription("30. Tur Büyük Oyunlarını ve oyun cüzdanını yönetir")
     .addSubcommand((sub) => sub.setName("panel").setDescription("Yalnızca yönetici: Büyük Oyunlar yönetim panelini açar"))
     .addSubcommand((sub) => sub.setName("katil").setDescription("Etkinliğe katılır ve 5.000 Altınlık oyun cüzdanını açar"))
+    .addSubcommand((sub) => sub.setName("gladyatorler").setDescription("Capua dövüşçülerinin güç sıralamasını ve güncel turnuva ağacını gösterir"))
     .addSubcommand((sub) => sub.setName("cuzdan").setDescription("Oyun cüzdanı bakiyeni gösterir"))
     .addSubcommand((sub) => sub.setName("para-aktar").setDescription("Rastgele uygun bir yerleşkenden oyun cüzdanına Altın aktarır")
       .addIntegerOption((o) => o.setName("miktar").setDescription("Aktarılacak Altın").setRequired(true).setMinValue(1)))

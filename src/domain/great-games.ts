@@ -1,4 +1,4 @@
-export const GREAT_GAMES_TURN = 15;
+export const GREAT_GAMES_TURN = 30;
 export const GREAT_GAMES_RACE_ROUNDS = 6;
 export const RACE_TRACK_STEPS = 50;
 export const CHARIOT_TRACK_TARGET = 100;
@@ -27,10 +27,12 @@ export const GREAT_GAME_TYPES = {
   CHARIOT: { label: "Savaş Arabaları Turnuvası", emoji: "🏇", stake: 1_000 },
   CARAVAN: { label: "Ticaret Kervanı", emoji: "🐫", stake: 0 },
   KINGS_BET: { label: "Kralların Bahsi", emoji: "👑", stake: 1_000 },
-  DIPLOMACY: { label: "Diplomasi Masası", emoji: "🤝", stake: 500 }
+  DIPLOMACY: { label: "Diplomasi Masası", emoji: "🤝", stake: 500 },
+  GLADIATOR: { label: "Capua Gladyatör Dövüşleri", emoji: "⚔️", stake: 0 }
 } as const;
 
 export type GreatGameType = keyof typeof GREAT_GAME_TYPES;
+export const ACTIVE_GREAT_GAME_TYPES = ["AUCTION", "CHARIOT", "KINGS_BET", "GLADIATOR"] as const satisfies readonly GreatGameType[];
 export type ChariotTactic = "AGGRESSIVE" | "BALANCED" | "CAUTIOUS" | "SQUEEZE";
 export type KingsDecision = "COOPERATE" | "BETRAY";
 
@@ -117,6 +119,111 @@ export type AuctionRewardType = keyof typeof AUCTION_REWARDS;
 
 export function rollDie(sides: number, random = Math.random): number {
   return Math.floor(random() * sides) + 1;
+}
+
+export interface GladiatorFightResult {
+  fighterARoll: number;
+  fighterBRoll: number;
+  fighterAScore: number;
+  fighterBScore: number;
+  remainingHpA: number;
+  remainingHpB: number;
+  winner: "A" | "B";
+  tieBreaks: number;
+  exchanges: GladiatorExchange[];
+}
+
+export interface GladiatorExchange {
+  turn: number;
+  attacker: "A" | "B";
+  attackRoll: number;
+  attackTotal: number;
+  defenseRoll: number;
+  defenseTotal: number;
+  hit: boolean;
+  damageRoll: number | null;
+  damage: number;
+  remainingHpA: number;
+  remainingHpB: number;
+}
+
+export function gladiatorOdds(powerA: number, powerB: number, maxHpA = 35, maxHpB = 35): { a: number; b: number } {
+  if (![powerA, powerB, maxHpA, maxHpB].every((value) => Number.isFinite(value) && value > 0)) {
+    throw new Error("Gladyatör güç ve can puanları pozitif olmalıdır.");
+  }
+  const ratingA = powerA * Math.sqrt(maxHpA / 35);
+  const ratingB = powerB * Math.sqrt(maxHpB / 35);
+  const total = ratingA + ratingB;
+  const decimal = (probability: number) => Math.round(Math.min(4, Math.max(1.1, 0.9 / probability)) * 100) / 100;
+  return { a: decimal(ratingA / total), b: decimal(ratingB / total) };
+}
+
+export function resolveGladiatorFight(
+  powerA: number,
+  powerB: number,
+  random = Math.random,
+  maxHpA = 35,
+  maxHpB = 35
+): GladiatorFightResult {
+  if (![powerA, powerB, maxHpA, maxHpB].every((value) => Number.isSafeInteger(value) && value > 0)) {
+    throw new Error("Gladyatör güç ve can puanları pozitif tam sayı olmalıdır.");
+  }
+  let remainingHpA = maxHpA;
+  let remainingHpB = maxHpB;
+  let fighterARoll = 0;
+  let fighterBRoll = 0;
+  const exchanges: GladiatorExchange[] = [];
+  for (let turn = 1; turn <= 200 && remainingHpA > 0 && remainingHpB > 0; turn += 1) {
+    const attacker: "A" | "B" = turn % 2 === 1 ? "A" : "B";
+    const attackerPower = attacker === "A" ? powerA : powerB;
+    const defenderPower = attacker === "A" ? powerB : powerA;
+    const attackRoll = rollDie(20, random);
+    const defenseRoll = rollDie(20, random);
+    const attackTotal = attackRoll + Math.floor(attackerPower / 10);
+    const defenseTotal = defenseRoll + Math.floor(defenderPower / 12);
+    const hit = attackTotal > defenseTotal;
+    const damageRoll = hit ? rollDie(10, random) : null;
+    const damage = hit ? damageRoll! + Math.floor(attackerPower / 25) : 0;
+    if (attacker === "A") {
+      fighterARoll = attackRoll;
+      fighterBRoll = defenseRoll;
+      remainingHpB = Math.max(0, remainingHpB - damage);
+    } else {
+      fighterARoll = defenseRoll;
+      fighterBRoll = attackRoll;
+      remainingHpA = Math.max(0, remainingHpA - damage);
+    }
+    exchanges.push({
+      turn,
+      attacker,
+      attackRoll,
+      attackTotal,
+      defenseRoll,
+      defenseTotal,
+      hit,
+      damageRoll,
+      damage,
+      remainingHpA,
+      remainingHpB
+    });
+  }
+  if (remainingHpA > 0 && remainingHpB > 0) {
+    const ratioA = remainingHpA / maxHpA;
+    const ratioB = remainingHpB / maxHpB;
+    if (ratioA === ratioB ? powerA >= powerB : ratioA > ratioB) remainingHpB = 0;
+    else remainingHpA = 0;
+  }
+  return {
+    fighterARoll,
+    fighterBRoll,
+    fighterAScore: remainingHpA,
+    fighterBScore: remainingHpB,
+    remainingHpA,
+    remainingHpB,
+    winner: remainingHpA > 0 ? "A" : "B",
+    tieBreaks: 0,
+    exchanges
+  };
 }
 
 export interface ChariotRoundEntry {

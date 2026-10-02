@@ -4,7 +4,7 @@ import {
   type ButtonInteraction, type ChatInputCommandInteraction, type ModalSubmitInteraction, type StringSelectMenuInteraction
 } from "discord.js";
 import {
-  AUCTION_OPENING_BID, CARAVAN_ROUTES, CARAVAN_TRACK_TARGET, CHARIOT_TACTICS, CHARIOT_TRACK_TARGET,
+  ACTIVE_GREAT_GAME_TYPES, AUCTION_OPENING_BID, CARAVAN_ROUTES, CARAVAN_TRACK_TARGET, CHARIOT_TACTICS, CHARIOT_TRACK_TARGET,
   GREAT_GAMES_RACE_ROUNDS, GREAT_GAME_TYPES, RACE_TRACK_STEPS, auctionNextMinimum, diplomacyGoalKey,
   parseCaravanRoute, parseChariotTactic, parseKingsDecision, raceTrackPosition,
   type CaravanRoute, type ChariotTactic, type GreatGameType, type KingsDecision
@@ -15,6 +15,7 @@ import { greatGamesFlowService } from "../services/great-games-flow-service.js";
 import { greatGamesAuctionService } from "../services/great-games-auction-service.js";
 import { greatGamesBetService } from "../services/great-games-bet-service.js";
 import { greatGamesWalletService } from "../services/great-games-wallet-service.js";
+import { greatGamesGladiatorService, type GladiatorMatchRow, type GladiatorTournamentView } from "../services/great-games-gladiator-service.js";
 import { GameError, gameService } from "../services/game-service.js";
 import { isGameMaster } from "./auth.js";
 
@@ -48,6 +49,7 @@ function gameRules(type: GreatGameType): string {
   if (type === "CHARIOT") return `Katılım 1.000 Altın. Form yayınlandıktan sonra bahisler açılır. Yarış ${GREAT_GAMES_RACE_ROUNDS} etap sürer; her etapta gizli taktik verilir ve 50 kademeli pistteki atlar sonuçlarla birlikte ilerler. Katılım havuzu %65/%35 paylaşılır.`;
   if (type === "CARAVAN") return `Seçilen devletler 2–3 kişilik kervanlara ayrılır. ${GREAT_GAMES_RACE_ROUNDS} aşamanın her birinde, her kervandan yalnız bir takım üyesi ortak rotayı gizlice seçer. Her devletten oyun başlarken 1.000 Altın alınır; kervanların 50 kademeli pistteki sırası canlı değişir.`;
   if (type === "KINGS_BET") return "Katılım 1.000 Altın. Üç ikilemde İşbirliği veya İhanet ve rakibin kararı için tahmin gizlice seçilir.";
+  if (type === "GLADIATOR") return "64 kişilik Capua havuzundan her turnuvada 32 dövüşçü rastgele seçilir. Dövüşte taraflar sırayla saldırır: 1d20 + Güç/10 saldırı, 1d20 + Güç/12 savunma zarıdır. Saldırı savunmayı geçerse 1d10 + Güç/25 hasar verilir; canı sıfırlanan elenir. Her üst tur öncesinde bahisler yeniden açılır.";
   return "Her masa üç devletten oluşur. Anlaşma yalnız bir ana ve en fazla bir ikincil kazanan çıkarabilir. Katılım 500 Altındır.";
 }
 
@@ -141,14 +143,80 @@ function auctionFields(lots: Awaited<ReturnType<typeof greatGamesAuctionService.
   });
 }
 
+const GLADIATOR_ROUND_LABELS: Record<number, string> = {
+  1: "Son 32",
+  2: "Son 16",
+  3: "Çeyrek Final",
+  4: "Yarı Final",
+  5: "Final"
+};
+
+function gladiatorRosterFields(view: GladiatorTournamentView) {
+  const lines = view.roster.map((fighter, index) =>
+    `**${index + 1}. ${fighter.name}** — Güç **${fighter.power}** • Can **${fighter.max_hp}**`
+  );
+  const chunks: string[] = [];
+  for (const line of lines) {
+    const current = chunks.at(-1);
+    if (!current || current.length + line.length + 1 > 980) chunks.push(line);
+    else chunks[chunks.length - 1] = `${current}\n${line}`;
+  }
+  return chunks.map((value, index) => ({
+    name: index === 0 ? "📊 64 Dövüşçü • Güç Sıralaması" : `📊 Güç Sıralaması • Devam ${index + 1}`,
+    value,
+    inline: false
+  }));
+}
+
+function gladiatorMatchLine(match: GladiatorMatchRow): string {
+  if (!match.fighter_a_name || !match.fighter_b_name) return `**#${match.bracket_position}** — Üst tur sonuçları bekleniyor`;
+  const left = `${match.fighter_a_name} (G${match.fighter_a_power} • C${match.fighter_a_max_hp})`;
+  const right = `${match.fighter_b_name} (G${match.fighter_b_power} • C${match.fighter_b_max_hp})`;
+  if (match.status === "FINISHED") {
+    return `**#${match.bracket_position}** ${left} — ${right}\n↳ 🏆 **${match.winner_name}** • Kalan can ${match.score_a}–${match.score_b}`;
+  }
+  return `**#${match.bracket_position}** ${left} **${Number(match.odds_a).toFixed(2)}x** — ${right} **${Number(match.odds_b).toFixed(2)}x**`;
+}
+
+function gladiatorBracketFields(view: GladiatorTournamentView) {
+  if (!view.tournament) return [{ name: "🏟️ Turnuva Ağacı", value: "Henüz turnuva başlatılmadı.", inline: false }];
+  const fields: Array<{ name: string; value: string; inline: false }> = [];
+  for (let round = 1; round <= 5; round += 1) {
+    const roundMatches = view.matches.filter((match) => match.round === round);
+    const chunks: string[] = [];
+    for (const match of roundMatches) {
+      const line = gladiatorMatchLine(match);
+      const current = chunks.at(-1);
+      if (!current || current.length + line.length + 2 > 980) chunks.push(line);
+      else chunks[chunks.length - 1] = `${current}\n${line}`;
+    }
+    for (let index = 0; index < chunks.length; index += 1) {
+      fields.push({
+        name: `⚔️ ${GLADIATOR_ROUND_LABELS[round]}${index ? ` • Devam ${index + 1}` : ""}`,
+        value: chunks[index]!,
+        inline: false
+      });
+    }
+  }
+  return fields;
+}
+
+function gladiatorStatus(view: GladiatorTournamentView): string {
+  const tournament = view.tournament;
+  if (!tournament) return "Turnuva bekleniyor";
+  if (tournament.status === "COMPLETED") return `Tamamlandı • Şampiyon ${tournament.champion_name ?? "Bilinmiyor"}`;
+  const round = GLADIATOR_ROUND_LABELS[tournament.current_round] ?? `Tur ${tournament.current_round}`;
+  return tournament.status === "BETTING" ? `${round} • Bahisler açık` : `${round} • Bahisler kapalı, dövüşler sürüyor`;
+}
+
 async function adminDashboardPayload(guildId: string): Promise<AdminPanelPayload> {
   const data = await greatGamesService.dashboard(guildId);
   const status = data.season
     ? `${data.season.status}${data.season.current_game ? ` • ${GREAT_GAME_TYPES[data.season.current_game].label}` : ""}`
     : "Henüz açılmadı";
-  const embed = new EmbedBuilder().setColor(0xd6ad3c).setTitle("🏛️ 15. Tur Büyük Oyunları • Yönetici Paneli")
+  const embed = new EmbedBuilder().setColor(0xd6ad3c).setTitle("🏛️ 30. Tur Büyük Oyunları • Yönetici Paneli")
     .setDescription(`**Oyun turu:** ${data.currentTurn} • **Durum:** ${status}\nOyuncular bu paneli göremez. Kayıtlı devletleri oyun bazında rastgele veya elle seçebilir, ardından herkese açık oyun formunu yayınlayabilirsin.`);
-  for (const type of Object.keys(GREAT_GAME_TYPES) as GreatGameType[]) {
+  for (const type of ACTIVE_GREAT_GAME_TYPES) {
     const selected = chosenEntries(data, type);
     embed.addFields({
       name: `${GREAT_GAME_TYPES[type].emoji} ${GREAT_GAME_TYPES[type].label}`,
@@ -156,7 +224,7 @@ async function adminDashboardPayload(guildId: string): Promise<AdminPanelPayload
     });
   }
   const games = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    ...(Object.keys(GREAT_GAME_TYPES) as GreatGameType[]).map((type) => new ButtonBuilder()
+    ...ACTIVE_GREAT_GAME_TYPES.map((type) => new ButtonBuilder()
       .setCustomId(`gg2|admin-view|${type}`).setLabel(GREAT_GAME_TYPES[type].label.slice(0, 30))
       .setEmoji(GREAT_GAME_TYPES[type].emoji).setStyle(ButtonStyle.Secondary))
   );
@@ -168,6 +236,29 @@ async function adminDashboardPayload(guildId: string): Promise<AdminPanelPayload
 
 async function adminGamePayload(guildId: string, type: GreatGameType): Promise<AdminPanelPayload> {
   const data = await greatGamesService.dashboard(guildId);
+  if (type === "GLADIATOR") {
+    const view = await greatGamesGladiatorService.view(guildId);
+    const embed = new EmbedBuilder().setColor(0xb43b32).setTitle("⚔️ Capua Gladyatör Dövüşleri • Yönetim")
+      .setDescription(`${gameRules(type)}\n\n**Durum:** ${gladiatorStatus(view)}\n**Etkinliğe kayıtlı devlet:** ${view.registeredCountries}\n**Turnuva tekrarı:** ${view.tournament?.run_number ?? 0}`)
+      .addFields(...gladiatorBracketFields(view), ...gladiatorRosterFields(view));
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("gg2|admin-home").setLabel("Ana Panel").setStyle(ButtonStyle.Secondary)
+    );
+    const running = view.tournament && ["BETTING", "FIGHTING"].includes(view.tournament.status);
+    if (data.season?.status === "OPEN" && !running) row.addComponents(
+      new ButtonBuilder().setCustomId("gg2|gladiator-start|GLADIATOR").setLabel("32 Dövüşçüyle Başlat").setEmoji("🎲").setStyle(ButtonStyle.Success)
+    );
+    if (view.tournament?.status === "BETTING") row.addComponents(
+      new ButtonBuilder().setCustomId("gg2|gladiator-close|GLADIATOR").setLabel("Bahisleri Kapat").setEmoji("🔒").setStyle(ButtonStyle.Danger)
+    );
+    if (view.tournament?.status === "FIGHTING") row.addComponents(
+      new ButtonBuilder().setCustomId("gg2|gladiator-fight|GLADIATOR").setLabel("Sıradaki Dövüşü Yap").setEmoji("🎲").setStyle(ButtonStyle.Primary)
+    );
+    if (running) row.addComponents(
+      new ButtonBuilder().setCustomId("gg2|recover|GLADIATOR").setLabel("Formu Yeniden Yayınla").setEmoji("📣").setStyle(ButtonStyle.Secondary)
+    );
+    return { embeds: [embed], components: [row] };
+  }
   const entries = chosenEntries(data, type).filter((entry) => entry.status !== "FINISHED");
   const selectedNames = entries.length ? entries.map((entry, index) => `${index + 1}. ${entry.country_name}`).join("\n") : "Henüz katılımcı seçilmedi.";
   const embed = new EmbedBuilder().setColor(0xb78b32).setTitle(`${GREAT_GAME_TYPES[type].emoji} ${GREAT_GAME_TYPES[type].label} • Yönetim`)
@@ -195,12 +286,18 @@ async function publicGamePayload(guildId: string, type: GreatGameType, content?:
   const data = await greatGamesService.dashboard(guildId);
   const entries = chosenEntries(data, type);
   const activeForType = data.season?.current_game === type;
+  const gladiatorView = type === "GLADIATOR" ? await greatGamesGladiatorService.view(guildId) : null;
 
-  const embed = new EmbedBuilder().setColor(type === "CARAVAN" ? 0xc88a3d : 0xd6ad3c)
+  const embed = new EmbedBuilder().setColor(type === "GLADIATOR" ? 0xb43b32 : type === "CARAVAN" ? 0xc88a3d : 0xd6ad3c)
     .setTitle(`${GREAT_GAME_TYPES[type].emoji} ${GREAT_GAME_TYPES[type].label}`)
-    .setDescription(`${gameRules(type)}\n\n**Durum:** ${statusLabel(data, type, entries)} • **Katılımcı:** ${entries.length}`);
+    .setDescription(type === "GLADIATOR" && gladiatorView
+      ? `${gameRules(type)}\n\n**Durum:** ${gladiatorStatus(gladiatorView)} • **Bahse katılabilecek devlet:** ${gladiatorView.registeredCountries}`
+      : `${gameRules(type)}\n\n**Durum:** ${statusLabel(data, type, entries)} • **Katılımcı:** ${entries.length}`);
 
-  if (type === "AUCTION") {
+  if (type === "GLADIATOR" && gladiatorView) {
+    embed.addFields(...gladiatorBracketFields(gladiatorView), ...gladiatorRosterFields(gladiatorView));
+    embed.setFooter({ text: "Her devlet her eşleşmede bir kez, 100–5.000 Altın arasında bahis yapabilir. Oran bahis verildiği anda kilitlenir." });
+  } else if (type === "AUCTION") {
     const lots = await greatGamesAuctionService.lots(guildId);
     if (lots.length) embed.addFields(...auctionFields(lots));
     embed.setFooter({ text: "Teklifler görünürdür. Her yeni teklif güncel bedeli tam 250 Altın artırır; yönetici bitirene kadar müzayede açık kalır." });
@@ -262,8 +359,19 @@ async function publicGamePayload(guildId: string, type: GreatGameType, content?:
     buttons.addComponents(new ButtonBuilder().setCustomId(`gg2|start|${type}`).setLabel("Oyunu Başlat").setEmoji("▶️").setStyle(ButtonStyle.Success));
   }
   if (data.season?.status === "ACTIVE" && activeForType) {
-    if (type !== "AUCTION") buttons.addComponents(new ButtonBuilder().setCustomId(`gg2|action|${type}`).setLabel("Gizli Hamle Ver").setStyle(ButtonStyle.Primary));
-    buttons.addComponents(new ButtonBuilder().setCustomId(`gg2|resolve|${type}`).setLabel(type === "AUCTION" ? "Müzayedeyi Bitir" : "Aşamayı Çöz").setEmoji(type === "AUCTION" ? "🏁" : "🎲").setStyle(ButtonStyle.Danger));
+    if (type === "GLADIATOR" && gladiatorView?.tournament?.status === "BETTING") {
+      buttons.addComponents(
+        new ButtonBuilder().setCustomId("gg2|gladiator-bet|GLADIATOR").setLabel("Bahis Yap").setEmoji("💰").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId("gg2|gladiator-close|GLADIATOR").setLabel("Bahisleri Kapat").setEmoji("🔒").setStyle(ButtonStyle.Danger)
+      );
+    } else if (type === "GLADIATOR" && gladiatorView?.tournament?.status === "FIGHTING") {
+      buttons.addComponents(
+        new ButtonBuilder().setCustomId("gg2|gladiator-fight|GLADIATOR").setLabel("Sıradaki Dövüşü Yap").setEmoji("🎲").setStyle(ButtonStyle.Danger)
+      );
+    } else {
+      if (type !== "AUCTION") buttons.addComponents(new ButtonBuilder().setCustomId(`gg2|action|${type}`).setLabel("Gizli Hamle Ver").setStyle(ButtonStyle.Primary));
+      buttons.addComponents(new ButtonBuilder().setCustomId(`gg2|resolve|${type}`).setLabel(type === "AUCTION" ? "Müzayedeyi Bitir" : "Aşamayı Çöz").setEmoji(type === "AUCTION" ? "🏁" : "🎲").setStyle(ButtonStyle.Danger));
+    }
   }
   const components: Array<ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>> = [buttons];
   if (type === "AUCTION" && data.season?.status === "ACTIVE" && activeForType) {
@@ -362,7 +470,7 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
     if (!standings.length) throw new GameError("Büyük Oyunlara katılmış devlet veya kaydedilmiş puan bulunmuyor.");
     const lines = standings.map((standing, index) =>
       `**${index + 1}. ${standing.countryName} — ${standing.total} Puan**\n` +
-      `↳ 🏺 Müzayede ${standing.byGame.AUCTION} • 🏇 Arabalar ${standing.byGame.CHARIOT} • 🐫 Kervan ${standing.byGame.CARAVAN} • 👑 Krallar ${standing.byGame.KINGS_BET} • 🤝 Diplomasi ${standing.byGame.DIPLOMACY}`
+      `↳ 🏺 Müzayede ${standing.byGame.AUCTION} • 🏇 Arabalar ${standing.byGame.CHARIOT} • 👑 Krallar ${standing.byGame.KINGS_BET} • ⚔️ Capua ${standing.byGame.GLADIATOR}`
     );
     await interaction.reply({
       embeds: [new EmbedBuilder()
@@ -413,11 +521,15 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
     await interaction.editReply(clip(`🏛️ Büyük Oyunlar kapatıldı. Ödül havuzu önce dereceye giren cüzdanlara dağıtıldı; ardından bütün cüzdanlardan toplam **${gold(result.total)}** ülke yerleşkelerine aktarıldı.${awards}`, 1_990));
     return true;
   }
+  if (subcommand === "gladyatorler") {
+    await interaction.reply(await publicGamePayload(interaction.guildId, "GLADIATOR"));
+    return true;
+  }
   const country = await ownCountry(interaction.guildId, interaction.user.id);
   if (subcommand === "katil") {
     const result = await greatGamesWalletService.join(interaction.guildId, country.id, interaction.user.id);
     await interaction.reply({ content: result.created
-      ? `✅ ${country.name}, beş oyunun tamamına aday kaydedildi. Oyun cüzdanına **${gold(5_000)}** yüklendi.`
+      ? `✅ ${country.name}, 30. Tur Büyük Oyunlarına yeniden katıldı ve dört etkin oyuna aday kaydedildi. Oyun cüzdanına **${gold(5_000)}** yüklendi.`
       : `ℹ️ ${country.name} zaten kayıtlı. Eksik oyun adaylıkları tamamlandı; güncel bakiye **${gold(result.balance)}**.`, flags: MessageFlags.Ephemeral });
     return true;
   }
@@ -440,6 +552,7 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
   if (!interaction.customId.startsWith("gg2|")) return false;
   if (!interaction.guildId) throw new GameError("Bu işlem yalnızca sunucuda kullanılabilir.");
   const [, action, rawType] = interaction.customId.split("|");
+  const fromAdminCard = interaction.message.embeds[0]?.title?.includes("Yönetim") ?? false;
   if (action === "admin-home") {
     if (!isGameMaster(interaction)) throw new GameError("Bu panel yalnızca oyun yöneticisine açıktır.");
     await greatGamesService.openSeason(interaction.guildId, interaction.user.id);
@@ -464,6 +577,56 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
     if (!isGameMaster(interaction)) throw new GameError("Yalnızca oyun yöneticisi kayıtları açabilir.");
     await greatGamesService.openSeason(interaction.guildId, interaction.user.id);
     await interaction.update(await adminDashboardPayload(interaction.guildId)); return true;
+  }
+  if (action === "gladiator-start") {
+    if (!isGameMaster(interaction)) throw new GameError("Capua turnuvasını yalnızca oyun yöneticisi başlatabilir.");
+    await interaction.deferUpdate();
+    const result = await greatGamesGladiatorService.start(interaction.guildId, interaction.user.id);
+    await interaction.editReply(await adminGamePayload(interaction.guildId, "GLADIATOR"));
+    await interaction.followUp({
+      ...(await publicGamePayload(interaction.guildId, "GLADIATOR", `🎲 **${result.runNumber}. Capua Turnuvası** başladı. 64 dövüşçüden 32'si rastgele seçildi; Son 32 bahisleri açıldı.`)),
+      ephemeral: false
+    });
+    return true;
+  }
+  if (action === "gladiator-close") {
+    if (!isGameMaster(interaction)) throw new GameError("Capua bahislerini yalnızca oyun yöneticisi kapatabilir.");
+    await interaction.deferUpdate();
+    const result = await greatGamesGladiatorService.closeBetting(interaction.guildId);
+    const notice = `🔒 **${GLADIATOR_ROUND_LABELS[result.round] ?? `Tur ${result.round}`} bahisleri kapandı.** Yönetici dövüşleri sırayla çözebilir.`;
+    if (fromAdminCard) {
+      await interaction.editReply(await adminGamePayload(interaction.guildId, "GLADIATOR"));
+      await interaction.followUp({ ...(await publicGamePayload(interaction.guildId, "GLADIATOR", notice)), ephemeral: false });
+    } else {
+      await interaction.editReply(await publicGamePayload(interaction.guildId, "GLADIATOR", notice));
+    }
+    return true;
+  }
+  if (action === "gladiator-fight") {
+    if (!isGameMaster(interaction)) throw new GameError("Capua dövüşlerini yalnızca oyun yöneticisi çözebilir.");
+    await interaction.deferUpdate();
+    const result = await greatGamesGladiatorService.resolveNextFight(interaction.guildId);
+    const resultHeadline = result.tournamentCompleted
+      ? `🏆 **Capua Şampiyonu: ${result.winner}!** Final ${result.combatTurns} hücum turu ve ${result.successfulHits} başarılı vuruş sürdü. Kalan can: ${result.score}. Turnuva tamamlandı; yönetici dilerse yeni bir turnuva başlatabilir.`
+      : result.roundCompleted
+        ? `⚔️ **${result.fighterA} — ${result.fighterB}:** Kazanan **${result.winner}** • ${result.combatTurns} hücum turu • ${result.successfulHits} başarılı vuruş • Kalan can ${result.score}\n✅ Tur tamamlandı. **${GLADIATOR_ROUND_LABELS[result.nextRound!] ?? `Tur ${result.nextRound}`} bahisleri açıldı.**`
+        : `⚔️ **${result.fighterA} — ${result.fighterB}:** Kazanan **${result.winner}** • ${result.combatTurns} hücum turu • ${result.successfulHits} başarılı vuruş • Kalan can ${result.score}`;
+    const notice = clip(`${resultHeadline}\n\n**Dövüş Zarları**\n${result.combatLog.join("\n")}`, 1_990);
+    if (fromAdminCard) {
+      await interaction.editReply(await adminGamePayload(interaction.guildId, "GLADIATOR"));
+      await interaction.followUp({ ...(await publicGamePayload(interaction.guildId, "GLADIATOR", notice)), ephemeral: false });
+    } else {
+      await interaction.editReply(await publicGamePayload(interaction.guildId, "GLADIATOR", notice));
+    }
+    return true;
+  }
+  if (action === "gladiator-bet") {
+    await interaction.showModal(new ModalBuilder().setCustomId("ggm2|gladiator-bet|GLADIATOR").setTitle("Capua Gladyatör Bahsi").addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("match").setLabel("Eşleşme numarası").setPlaceholder("Örnek: 3").setStyle(TextInputStyle.Short).setRequired(true)),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("side").setLabel("Dövüşçü tarafı: A veya B").setPlaceholder("A").setMaxLength(1).setStyle(TextInputStyle.Short).setRequired(true)),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("amount").setLabel("Bahis: 100–5.000 Altın").setPlaceholder("1000").setMaxLength(10).setStyle(TextInputStyle.Short).setRequired(true))
+    ));
+    return true;
   }
   if (action === "cancel") {
     throw new GameError("Büyük Oyunlar sabit olarak açık tutulur; sezon bütünüyle iptal edilemez.");
@@ -582,6 +745,24 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
     return true;
   }
   const country = await ownCountry(interaction.guildId, interaction.user.id);
+  if (action === "gladiator-bet") {
+    const matchNumber = Number(interaction.fields.getTextInputValue("match").trim());
+    const sideRaw = interaction.fields.getTextInputValue("side").trim().toLocaleUpperCase("tr-TR");
+    if (sideRaw !== "A" && sideRaw !== "B") throw new GameError("Dövüşçü tarafı `A` veya `B` olmalıdır.");
+    const amount = Number(interaction.fields.getTextInputValue("amount").replaceAll(".", "").trim());
+    const result = await greatGamesGladiatorService.placeBet({
+      guildId: interaction.guildId,
+      countryId: country.id,
+      matchNumber,
+      side: sideRaw,
+      amount
+    });
+    await interaction.reply({
+      content: `✅ **${result.fighterName}** için **${gold(amount)}** bahis kilitlendi. Oran: **${result.odds.toFixed(2)}x** • Olası ödeme: **${gold(result.possiblePayout)}** • Cüzdan: **${gold(result.balance)}**`,
+      flags: MessageFlags.Ephemeral
+    });
+    return true;
+  }
   if (action === "chariot-bet") {
     const amount = Number(interaction.fields.getTextInputValue("amount").replaceAll(".", ""));
     const targetCountryName = interaction.fields.getTextInputValue("target").trim();

@@ -32,7 +32,7 @@ async function lockedSeason(client: DbClient, guildId: string): Promise<GreatGam
     "SELECT * FROM great_games_seasons WHERE guild_id=$1 AND game_turn=$2 FOR UPDATE",
     [guildId, GREAT_GAMES_TURN]
   )).rows[0];
-  if (!season) throw new GameError("15. Tur Büyük Oyunları henüz açılmadı.");
+  if (!season) throw new GameError("30. Tur Büyük Oyunları henüz açılmadı.");
   return season;
 }
 
@@ -127,6 +127,7 @@ export const greatGamesFlowService = {
     countryNames?: readonly string[];
   }): Promise<SelectionResult> {
     return withTransaction(async (client) => {
+      if (input.gameType === "GLADIATOR") throw new GameError("Capua turnuvasında devlet seçilmez; 32 dövüşçüyü bot rastgele belirler.");
       const season = await lockedSeason(client, input.guildId);
       if (season.status !== "OPEN") throw new GameError("Katılımcılar yalnızca başka bir oyun yayında veya etkin değilken seçilebilir.");
       let allEntries = await gameEntries(client, season.id, input.gameType);
@@ -237,6 +238,7 @@ export const greatGamesFlowService = {
 
   async publishGame(guildId: string, gameType: GreatGameType): Promise<SelectionResult> {
     return withTransaction(async (client) => {
+      if (gameType === "GLADIATOR") throw new GameError("Capua turnuvası başlatıldığında form doğrudan yayınlanır.");
       const season = await lockedSeason(client, guildId);
       if (!["OPEN", "PUBLISHED"].includes(season.status) || season.current_game !== gameType) {
         throw new GameError("Önce bu oyun için katılımcıları seçmelisiniz.");
@@ -252,6 +254,7 @@ export const greatGamesFlowService = {
 
   async startPublishedGame(guildId: string, gameType: GreatGameType): Promise<SelectionResult> {
     return withTransaction(async (client) => {
+      if (gameType === "GLADIATOR") throw new GameError("Capua turnuvası özel turnuva düğmesiyle başlatılır.");
       const season = await lockedSeason(client, guildId);
       if (season.status !== "PUBLISHED" || season.current_game !== gameType) throw new GameError("Bu oyun henüz yayınlanmadı veya zaten başladı.");
       const selected = (await gameEntries(client, season.id, gameType))
