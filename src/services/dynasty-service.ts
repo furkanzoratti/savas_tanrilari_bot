@@ -46,6 +46,7 @@ export interface DynastyMarriageProposalView{
   proposer_member_id:string;target_member_id:string;status:DynastyMarriageStatus;
   created_turn:number;resolved_turn:number|null;created_by:string;resolved_by:string|null;
   created_at:Date|string;resolved_at:Date|string|null;
+  public_channel_id:string|null;public_message_id:string|null;
   proposer_country_name:string;target_country_name:string;
   proposer_member_name:string;target_member_name:string;
 }
@@ -409,6 +410,20 @@ export const dynastyService={
           AND (proposal.proposer_country_id=$3 OR proposal.target_country_id=$3)
         ORDER BY proposal.created_at DESC LIMIT 25`,[guildId,status,countryId]
     )).rows;
+  },
+
+  async marriageProposalById(guildId:string,proposalId:string):Promise<DynastyMarriageProposalView>{
+    return withTransaction((client)=>loadMarriageProposal(client,guildId,proposalId));
+  },
+
+  async setMarriageProposalMessage(input:{guildId:string;proposalId:string;channelId:string;messageId:string}):Promise<void>{
+    const result=await pool.query(
+      `UPDATE dynasty_marriage_proposals
+          SET public_channel_id=$1,public_message_id=$2
+        WHERE id=$3 AND guild_id=$4`,
+      [input.channelId,input.messageId,input.proposalId,input.guildId]
+    );
+    if(!result.rowCount)throw new GameError("Evlilik teklifi bulunamadı.");
   },
 
   async proposeMarriage(input:{

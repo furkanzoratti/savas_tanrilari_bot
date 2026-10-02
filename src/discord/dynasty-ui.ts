@@ -4,7 +4,7 @@ import {
   type AutocompleteInteraction,type ButtonInteraction,type ChatInputCommandInteraction,type Client,type ModalSubmitInteraction
 } from "discord.js";
 import {DYNASTY_GENDER_LABELS,DYNASTY_HEALTH_LABELS,MINIMUM_MARRIAGE_AGE,type DynastyGender,type DynastyHealth} from "../domain/dynasty.js";
-import {dynastyService,type DynastyTurnResult,type DynastyView} from "../services/dynasty-service.js";
+import {dynastyService,type DynastyMarriageProposalView,type DynastyTurnResult,type DynastyView} from "../services/dynasty-service.js";
 import {gameService,GameError} from "../services/game-service.js";
 import {logger} from "../logger.js";
 import {isGameMaster,requireGameMaster,resolveCountry} from "./auth.js";
@@ -43,6 +43,43 @@ function birthNameButton(countryId:string,result:Awaited<ReturnType<typeof dynas
     new ButtonBuilder().setCustomId("dynasty_birth_name|"+countryId+"|"+result.pendingBirthId)
       .setLabel("Çocuğa İsim Ver").setEmoji("👶").setStyle(ButtonStyle.Primary)
   )];
+}
+
+function marriageProposalEmbed(proposal:DynastyMarriageProposalView):EmbedBuilder{
+  const pending=proposal.status==="PENDING";
+  const accepted=proposal.status==="ACCEPTED";
+  const title=pending?"💍 Hanedan Evliliği Teklifi":accepted?"✅ Hanedan Evliliği Kabul Edildi":"❌ Hanedan Evliliği "+(proposal.status==="REJECTED"?"Reddedildi":"İptal Edildi");
+  const status=pending
+    ?"**"+proposal.target_country_name+"** oyuncuları veya oyun yöneticisi aşağıdaki düğmelerden cevap verebilir."
+    :accepted
+      ?"Teklif kabul edildi ve evlilik iki hanedana işlendi."
+      :proposal.status==="REJECTED"?"Teklif reddedildi.":"Teklif geri çekildi veya iptal edildi.";
+  return new EmbedBuilder()
+    .setColor(pending?0xc59b45:accepted?0x4f9d69:0xa33b3b)
+    .setTitle(title).setImage(DYNASTY_MARRIAGE_BANNER_URL)
+    .setDescription(
+      "**Teklif Eden:** "+proposal.proposer_country_name+" • "+proposal.proposer_member_name+"\n"+
+      "**Hedef:** "+proposal.target_country_name+" • "+proposal.target_member_name+"\n\n"+status
+    )
+    .setFooter({text:"Teklif • "+proposal.id});
+}
+
+function marriageProposalButtons(proposal:DynastyMarriageProposalView):ActionRowBuilder<ButtonBuilder>[] {
+  if(proposal.status!=="PENDING")return[];
+  return[new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId("dynasty_marriage_accept|"+proposal.id).setLabel("Kabul Et").setEmoji("✅").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId("dynasty_marriage_reject|"+proposal.id).setLabel("Reddet").setEmoji("❌").setStyle(ButtonStyle.Danger)
+  )];
+}
+
+async function refreshMarriageProposalMessage(client:Client,proposal:DynastyMarriageProposalView):Promise<boolean>{
+  if(!proposal.public_channel_id||!proposal.public_message_id)return false;
+  const channel=await client.channels.fetch(proposal.public_channel_id).catch(()=>null);
+  if(!channel?.isTextBased()||channel.isDMBased())return false;
+  const message=await channel.messages.fetch(proposal.public_message_id).catch(()=>null);
+  if(!message)return false;
+  await message.edit({embeds:[marriageProposalEmbed(proposal)],components:marriageProposalButtons(proposal)});
+  return true;
 }
 
 export async function publishDynastyDeathLogs(client:Client,guildId:string):Promise<DynastyDeathLogPublishResult>{
@@ -194,13 +231,15 @@ export async function handleDynastyCommand(interaction:ChatInputCommandInteracti
         proposal.target_member_name+"** ("+proposal.target_country_name+").\nTeklif kimliği: `"+proposal.id+"`"
       );
       const channel=interaction.channel;
-      if(channel?.isTextBased()&&!channel.isDMBased())await channel.send({embeds:[new EmbedBuilder()
-        .setColor(0xc59b45).setTitle("💍 Hanedan Evliliği Teklifi")
-        .setImage(DYNASTY_MARRIAGE_BANNER_URL)
-        .setDescription("**"+proposal.proposer_country_name+"**, **"+proposal.target_country_name+"** devletine hanedan evliliği teklif etti.\n\n"+
-          "**"+proposal.proposer_member_name+"** × **"+proposal.target_member_name+"**\n\n"+
-          "Hedef devlet `/hanedan evlilik-cevapla` ile teklifi yanıtlayabilir.")
-        .setFooter({text:"Teklif • "+proposal.id})],files:[new AttachmentBuilder(DYNASTY_MARRIAGE_BANNER_PATH,{name:DYNASTY_MARRIAGE_BANNER_NAME})]}).catch(()=>undefined);
+      if(channel?.isTextBased()&&!channel.isDMBased()){
+        const message=await channel.send({
+          embeds:[marriageProposalEmbed(proposal)],components:marriageProposalButtons(proposal),
+          files:[new AttachmentBuilder(DYNASTY_MARRIAGE_BANNER_PATH,{name:DYNASTY_MARRIAGE_BANNER_NAME})]
+        }).catch(()=>null);
+        if(message)await dynastyService.setMarriageProposalMessage({
+          guildId:interaction.guildId,proposalId:proposal.id,channelId:channel.id,messageId:message.id
+        });
+      }
     }else if(sub==="evlilik-cevapla"){
       const decision=interaction.options.getString("karar",true) as "ACCEPT"|"REJECT";
       const result=await dynastyService.respondMarriage({
@@ -212,12 +251,7 @@ export async function handleDynastyCommand(interaction:ChatInputCommandInteracti
         ?"💍 Evlilik teklifi kabul edildi. **"+result.proposal.proposer_member_name+"** ile **"+result.proposal.target_member_name+"** evlendi."
         :"❌ Evlilik teklifi reddedildi.");
       for(const dynastyId of result.dynastyIds)await refreshDynastyCard(interaction.client,dynastyId).catch(()=>false);
-      const channel=interaction.channel;
-      if(channel?.isTextBased()&&!channel.isDMBased())await channel.send({embeds:[new EmbedBuilder()
-        .setColor(accepted?0x4f9d69:0xa33b3b).setTitle(accepted?"💍 Hanedan Evliliği Gerçekleşti":"❌ Hanedan Evliliği Teklifi Reddedildi")
-        .setImage(DYNASTY_MARRIAGE_BANNER_URL)
-        .setDescription("**"+result.proposal.proposer_country_name+"** • "+result.proposal.proposer_member_name+"\n"+
-          "**"+result.proposal.target_country_name+"** • "+result.proposal.target_member_name)],files:[new AttachmentBuilder(DYNASTY_MARRIAGE_BANNER_PATH,{name:DYNASTY_MARRIAGE_BANNER_NAME})]}).catch(()=>undefined);
+      await refreshMarriageProposalMessage(interaction.client,result.proposal).catch(()=>false);
     }else if(sub==="evlilik-teklifleri"){
       const proposals=await dynastyService.listMarriageProposals(interaction.guildId,country.id);
       if(!proposals.length){await interaction.editReply("Bu devlet için bekleyen evlilik teklifi bulunmuyor.");return true;}
@@ -232,6 +266,7 @@ export async function handleDynastyCommand(interaction:ChatInputCommandInteracti
         guildId:interaction.guildId,proposerCountryId:country.id,proposalId:interaction.options.getString("teklif",true),actorId:interaction.user.id
       });
       await interaction.editReply("↩️ **"+proposal.target_country_name+"** devletine gönderilen hanedan evliliği teklifi geri çekildi.");
+      await refreshMarriageProposalMessage(interaction.client,proposal).catch(()=>false);
     }
     return true;
   }
@@ -350,18 +385,44 @@ export async function handleDynastyCommand(interaction:ChatInputCommandInteracti
 }
 
 export async function handleDynastyButton(interaction:ButtonInteraction):Promise<boolean>{
-  if(!interaction.customId.startsWith("dynasty_birth_name|"))return false;
-  const [,countryId,pendingBirthId]=interaction.customId.split("|");
-  if(!interaction.guildId||!countryId||!pendingBirthId)throw new GameError("Doğum isimlendirme düğmesi geçersiz.");
-  const modal=new ModalBuilder()
-    .setCustomId("dynasty_birth_modal|"+countryId+"|"+pendingBirthId)
-    .setTitle("Hanedan Çocuğuna İsim Ver")
-    .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(
-      new TextInputBuilder().setCustomId("child_name").setLabel("Çocuğun adı")
-        .setPlaceholder("Örn. Alexandros").setStyle(TextInputStyle.Short)
-        .setMinLength(2).setMaxLength(80).setRequired(true)
-    ));
-  await interaction.showModal(modal);
+  if(interaction.customId.startsWith("dynasty_birth_name|")){
+    const [,countryId,pendingBirthId]=interaction.customId.split("|");
+    if(!interaction.guildId||!countryId||!pendingBirthId)throw new GameError("Doğum isimlendirme düğmesi geçersiz.");
+    const modal=new ModalBuilder()
+      .setCustomId("dynasty_birth_modal|"+countryId+"|"+pendingBirthId)
+      .setTitle("Hanedan Çocuğuna İsim Ver")
+      .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder().setCustomId("child_name").setLabel("Çocuğun adı")
+          .setPlaceholder("Örn. Alexandros").setStyle(TextInputStyle.Short)
+          .setMinLength(2).setMaxLength(80).setRequired(true)
+      ));
+    await interaction.showModal(modal);
+    return true;
+  }
+  const marriageMatch=/^dynasty_marriage_(accept|reject)\|(.+)$/.exec(interaction.customId);
+  if(!marriageMatch)return false;
+  if(!interaction.guildId)throw new GameError("Sunucu bulunamadı.");
+  await interaction.deferReply({flags:MessageFlags.Ephemeral});
+  const decision=marriageMatch[1]==="accept"?"ACCEPT":"REJECT";
+  const proposal=await dynastyService.marriageProposalById(interaction.guildId,marriageMatch[2]!);
+  if(proposal.status!=="PENDING")throw new GameError("Bu evlilik teklifi daha önce sonuçlandırılmış.");
+  if(!isGameMaster(interaction)){
+    const country=await gameService.countryForUser(interaction.guildId,interaction.user.id);
+    if(!country||country.id!==proposal.target_country_id)
+      throw new GameError("Bu evlilik teklifini yalnızca hedef devletin oyuncuları veya oyun yöneticisi yanıtlayabilir.");
+  }
+  const result=await dynastyService.respondMarriage({
+    guildId:interaction.guildId,responderCountryId:proposal.target_country_id,proposalId:proposal.id,
+    actorId:interaction.user.id,decision
+  });
+  const accepted=decision==="ACCEPT";
+  await interaction.message.edit({
+    embeds:[marriageProposalEmbed(result.proposal)],components:marriageProposalButtons(result.proposal)
+  }).catch(()=>undefined);
+  for(const dynastyId of result.dynastyIds)await refreshDynastyCard(interaction.client,dynastyId).catch(()=>false);
+  await interaction.editReply(accepted
+    ?"✅ Teklif kabul edildi. **"+result.proposal.proposer_member_name+"** ile **"+result.proposal.target_member_name+"** evlendi."
+    :"❌ Evlilik teklifi reddedildi.");
   return true;
 }
 
