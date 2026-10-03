@@ -95,13 +95,23 @@ export function planPlayerPurchases(
   return { ...base, mode, acquisitionTurn };
 }
 
-function comparable(plan: PlayerAutoPurchasePlan): string {
+export function playerAutoPurchasePlanFingerprint(plan: PlayerAutoPurchasePlan): string {
+  const shipActions=plan.shipActions.map((action)=>({
+    settlementId:String(action.settlementId),shipType:String(action.shipType),
+    quantity:Number(action.quantity),cost:Number(action.cost)
+  })).sort((left,right)=>left.settlementId.localeCompare(right.settlementId)
+    ||left.shipType.localeCompare(right.shipType)||left.quantity-right.quantity||left.cost-right.cost);
+  const unitActions=plan.unitActions.map((action)=>({
+    settlementId:String(action.settlementId),unitType:String(action.unitType),
+    quantity:Number(action.quantity),cost:Number(action.cost)
+  })).sort((left,right)=>left.settlementId.localeCompare(right.settlementId)
+    ||left.unitType.localeCompare(right.unitType)||left.quantity-right.quantity||left.cost-right.cost);
   return JSON.stringify({
     mode: plan.mode,
-    acquisitionTurn: plan.acquisitionTurn,
-    countryId: plan.countryId,
-    shipActions: plan.shipActions,
-    unitActions: plan.unitActions
+    acquisitionTurn:Number(plan.acquisitionTurn),
+    countryId:String(plan.countryId),
+    shipActions,
+    unitActions
   });
 }
 
@@ -181,7 +191,7 @@ export const playerAutoPurchaseService = {
     }
 
     const refreshed = await currentPlan(input.guildId, row.country_id, row.mode);
-    if (comparable(refreshed) !== comparable(row.plan)) {
+    if (playerAutoPurchasePlanFingerprint(refreshed) !== playerAutoPurchasePlanFingerprint(row.plan)) {
       await pool.query("UPDATE player_auto_purchase_previews SET status='STALE',completed_at=NOW() WHERE id=$1 AND status='PENDING'", [row.id]);
       throw new GameError("Hazine, kapasite veya mevcut birlik durumu önizlemeden sonra değişti. Güvenliğiniz için alım uygulanmadı; yeni bir önizleme oluşturun.");
     }

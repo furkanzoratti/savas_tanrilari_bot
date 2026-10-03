@@ -10,7 +10,7 @@ vi.mock("./game-service.js", async (importOriginal) => {
   };
 });
 
-import { planPlayerPurchases } from "./player-auto-purchase-service.js";
+import { planPlayerPurchases,playerAutoPurchasePlanFingerprint } from "./player-auto-purchase-service.js";
 
 function documentFixture(options: { naval?: boolean; specialUnits?: string[] } = {}) {
   return {
@@ -60,5 +60,21 @@ describe("oyuncu otomatik alım planlaması", () => {
     const quality = ["heavy_infantry", "heavy_cavalry", "hoplite"].some((unitType) => types.has(unitType as any));
     expect(low).toBe(true);
     expect(quality).toBe(true);
+  });
+
+  it("JSONB alan ve eylem sırası değişse bile aynı planı geçerli kabul eder",()=>{
+    const original=planPlayerPurchases("guild",30,"QUALITY",documentFixture({specialUnits:["hoplite"]}));
+    const fromJsonb={
+      ...original,
+      unitActions:[...original.unitActions].reverse().map((action)=>({
+        cost:action.cost,quantity:action.quantity,unitType:action.unitType,
+        settlementName:action.settlementName,settlementId:action.settlementId
+      })),
+      shipActions:[...original.shipActions].reverse().map((action)=>({
+        cost:action.cost,quantity:action.quantity,shipType:action.shipType,
+        settlementName:action.settlementName,settlementId:action.settlementId
+      }))
+    };
+    expect(playerAutoPurchasePlanFingerprint(fromJsonb)).toBe(playerAutoPurchasePlanFingerprint(original));
   });
 });
