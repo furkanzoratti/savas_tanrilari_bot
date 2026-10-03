@@ -151,6 +151,7 @@ const PREMIUM_UNITS = new Set<PurchasableUnitType>([
 export interface PurchasePlanningOptions {
   unitCandidates?: readonly PurchasableUnitType[];
   qualityMixTarget?: number;
+  compositionBaseline?: "CURRENT" | "EMPTY";
 }
 
 function currentArmyComposition(doc: CountryDocument): BattleComposition {
@@ -331,7 +332,7 @@ export function planCountryPurchases(
   const defaultCandidates = [...BASE_PURCHASABLE_UNITS, ...unlockedSpecials.filter((unitType) => !baseUnitSet.has(unitType))];
   const unlockedSet = new Set<PurchasableUnitType>([...BASE_PURCHASABLE_UNITS, ...unlockedSpecials]);
   const unitCandidates = (options.unitCandidates ?? defaultCandidates).filter((unitType) => unlockedSet.has(unitType));
-  const composition = currentArmyComposition(doc);
+  const composition = options.compositionBaseline === "EMPTY" ? {} : currentArmyComposition(doc);
   const grouped = new Map<string, UnitAction>();
   while (remainingPersonnel >= NPC_UNIT_PURCHASE_BATCH && remainingBudget > 0) {
     let selected: { settlement: CountryDocument["settlements"][number]; unitType: PurchasableUnitType; cost: number } | undefined;

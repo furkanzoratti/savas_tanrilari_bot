@@ -11,6 +11,7 @@ vi.mock("./game-service.js", async (importOriginal) => {
 });
 
 import { planPlayerPurchases,playerArmyUnitCandidates,playerAutoPurchasePlanFingerprint } from "./player-auto-purchase-service.js";
+import { assessArmyComposition } from "../domain/battle.js";
 
 function documentFixture(options: { naval?: boolean; specialUnits?: string[] } = {}) {
   return {
@@ -56,6 +57,10 @@ describe("oyuncu otomatik alım planlaması", () => {
     expect(plan.unitActions.length).toBeGreaterThan(0);
     expect(plan.unitActions.every((action) => allowed.has(action.unitType))).toBe(true);
     expect(plan.shipActions).toHaveLength(0);
+    const composition = Object.fromEntries(plan.unitActions.map((action) => [action.unitType, action.quantity]));
+    expect(assessArmyComposition(composition, "FIELD").tier).toBe("EXCELLENT");
+    expect(composition.heavy_infantry).toBeGreaterThan(0);
+    expect(composition.heavy_cavalry).toBeGreaterThan(0);
   });
 
   it("hafif ordu planına yalnız hafif standart ve dayanıklılığı düşük özel birlikleri alır", () => {

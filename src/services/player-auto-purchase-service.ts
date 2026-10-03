@@ -20,7 +20,7 @@ export const PLAYER_AUTO_PURCHASE_MODES: Record<PlayerAutoPurchaseMode, { label:
   },
   QUALITY: {
     label: "Ağır Ordu",
-    description: "Ağır Piyade ve Ağır Süvariyi temel alır; eşdeğer özel hat ve hareketli birlikleri paylaştırır, daha güçlü özel mızraklı ve menzilli birlikleri standartlarının yerine kullanır."
+    description: "Yeni alım paketini kendi içinde dengeler; her rolde erişilebilen en güçlü ve pahalı sınıfları, uygun özel birliklerle birlikte kullanır."
   },
   LIGHT: {
     label: "Hafif Ordu",
@@ -28,7 +28,7 @@ export const PLAYER_AUTO_PURCHASE_MODES: Record<PlayerAutoPurchaseMode, { label:
   },
   GENERAL: {
     label: "Orta Ordu",
-    description: "Bütün erişilebilir standart ve özel birlikleri dengeli biçimde karıştırır; düşük ve kaliteli birlikleri oranlarken kompozisyon rollerini korur."
+    description: "Yeni alım paketinde ucuz ve pahalı sınıfları dengeli biçimde karıştırır; bütün kompozisyon rollerini ve yaklaşık yarı yarıya kalite dağılımını korur."
   }
 };
 
@@ -90,7 +90,9 @@ export function playerArmyUnitCandidates(
   if (mode === "LIGHT") {
     return uniqueUnits([
       ...LIGHT_STANDARD_UNITS,
-      ...specials.filter((unitType) => BATTLE_UNIT_STATS[unitType as BattleUnitType].durability === 1)
+      ...specials.filter((unitType) =>
+        BATTLE_UNIT_STATS[unitType as BattleUnitType].durability === 1 && UNITS[unitType].price <= 3_500
+      )
     ]);
   }
 
@@ -148,6 +150,7 @@ export function planPlayerPurchases(
     const candidates = playerArmyUnitCandidates(mode, document.specialUnitUnlocks ?? []);
     base = planCountryPurchases(document, config, "ARMY_ONLY", 0, {
       unitCandidates: candidates,
+      compositionBaseline: "EMPTY",
       ...(mode === "GENERAL" ? { qualityMixTarget: 0.50 } : {})
     });
   }
