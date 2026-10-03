@@ -659,6 +659,68 @@ async function casualtyRows(client: DbClient, battleId: string): Promise<Casualt
   return (await client.query<CasualtyApplication>("SELECT side_key,force_type,calculated_loss,applied_loss,shortfall,mercenary_loss_applied,population_loss_applied,population_shortfall FROM battle_casualty_applications WHERE battle_id=$1 ORDER BY side_key,force_type", [battleId])).rows;
 }
 
+async function applyExactSunkFleetLosses(
+  client:DbClient,
+  input:{battleId:string;countryId:string;shipType:NavalUnitType;maximum:number}
+):Promise<{ships:number;population:number}>{
+  const sources=(await client.query<{fleet_id:string;settlement_id:string;quantity:number}>(
+    `SELECT hull.fleet_id,hull.settlement_id,COUNT(*)::integer AS quantity
+       FROM battle_ship_hulls hull
+       JOIN battle_fleet_assignments assignment
+         ON assignment.battle_id=hull.battle_id AND assignment.fleet_id=hull.fleet_id
+      WHERE hull.battle_id=$1 AND hull.country_id=$2 AND hull.ship_type=$3
+        AND hull.fleet_id IS NOT NULL AND hull.settlement_id IS NOT NULL
+        AND (hull.sunk_round IS NOT NULL OR hull.current_hp<=0)
+      GROUP BY hull.fleet_id,hull.settlement_id
+      ORDER BY hull.fleet_id,hull.settlement_id`,
+    [input.battleId,input.countryId,input.shipType]
+  )).rows;
+  let remaining=Math.max(0,Math.floor(input.maximum));
+  let ships=0;
+  let population=0;
+  for(const source of sources){
+    if(remaining<=0)break;
+    const allocation=(await client.query<{quantity:number}>(
+      "SELECT quantity FROM fleet_ships WHERE fleet_id=$1 AND settlement_id=$2 AND ship_type=$3 FOR UPDATE",
+      [source.fleet_id,source.settlement_id,input.shipType]
+    )).rows[0];
+    const requested=Math.min(remaining,Number(source.quantity),Number(allocation?.quantity??0));
+    if(requested<=0)continue;
+    const stockRows=(await client.query<{id:string;quantity:number}>(
+      `SELECT id,quantity FROM naval_units WHERE settlement_id=$1 AND ship_type=$2
+        ORDER BY CASE status WHEN 'HOSTILE' THEN 0 WHEN 'ACTIVE' THEN 1 ELSE 2 END,id FOR UPDATE`,
+      [source.settlement_id,input.shipType]
+    )).rows;
+    let sourceApplied=0;
+    for(const stock of stockRows){
+      if(sourceApplied>=requested)break;
+      const deducted=Math.min(Number(stock.quantity),requested-sourceApplied);
+      if(deducted<=0)continue;
+      const next=Number(stock.quantity)-deducted;
+      if(next===0)await client.query("DELETE FROM naval_units WHERE id=$1",[stock.id]);
+      else await client.query("UPDATE naval_units SET quantity=$1 WHERE id=$2",[next,stock.id]);
+      sourceApplied+=deducted;
+    }
+    if(sourceApplied<=0)continue;
+    const nextAllocation=Number(allocation!.quantity)-sourceApplied;
+    if(nextAllocation===0)await client.query(
+      "DELETE FROM fleet_ships WHERE fleet_id=$1 AND settlement_id=$2 AND ship_type=$3",
+      [source.fleet_id,source.settlement_id,input.shipType]
+    );
+    else await client.query(
+      "UPDATE fleet_ships SET quantity=$1 WHERE fleet_id=$2 AND settlement_id=$3 AND ship_type=$4",
+      [nextAllocation,source.fleet_id,source.settlement_id,input.shipType]
+    );
+    await client.query("UPDATE fleets SET updated_at=NOW() WHERE id=$1",[source.fleet_id]);
+    population+=await deductPopulationForCasualties(
+      client,source.settlement_id,shipCrewRequirement(input.shipType,sourceApplied)
+    );
+    ships+=sourceApplied;
+    remaining-=sourceApplied;
+  }
+  return {ships,population};
+}
+
 async function applyLossesToDocuments(client: DbClient, battleId: string, guildId: string, actorId: string): Promise<CasualtyApplication[]> {
   const battle = (await client.query<BattleRow>("SELECT * FROM battles WHERE id=$1 FOR UPDATE", [battleId])).rows[0];
   if (!battle) throw new GameError("Savaş bulunamadı.");
@@ -786,59 +848,11 @@ async function applyLossesToDocuments(client: DbClient, battleId: string, guildI
           [battleId,participant.country_id]
         )).rows : [];
         if (fleetAssignments.length) {
-          const fleetSources = fleetAssignments.map((assignment) => ({
-            contractId:assignment.fleet_id,
-            quantity:Number(assignment.initial_composition?.[forceType as BattleForceType] ?? 0)
-          })).filter((source) => source.quantity > 0);
-          const fleetTotal = fleetSources.reduce((sum,source) => sum+source.quantity,0);
-          const fleetShares = fleetTotal > 0
-            ? allocateLossBySource(Math.min(share.loss,fleetTotal),fleetTotal,fleetSources).mercenaries
-            : [];
-          for (const fleetShare of fleetShares) {
-            const allocations = (await client.query<{ settlement_id:string;quantity:number }>(
-              "SELECT settlement_id,quantity FROM fleet_ships WHERE fleet_id=$1 AND ship_type=$2 ORDER BY settlement_id FOR UPDATE",
-              [fleetShare.contractId,forceType]
-            )).rows;
-            const allocationTotal = allocations.reduce((sum,row) => sum+Number(row.quantity),0);
-            const sourceShares = allocationTotal > 0
-              ? allocateLossBySource(Math.min(fleetShare.loss,allocationTotal),allocationTotal,
-                  allocations.map((row) => ({ contractId:row.settlement_id,quantity:Number(row.quantity) }))).mercenaries
-              : [];
-            for (const sourceShare of sourceShares) {
-              const allocation = allocations.find((row) => row.settlement_id === sourceShare.contractId);
-              if (!allocation) continue;
-              const shipRows = (await client.query<{ id:string;quantity:number }>(
-                `SELECT id,quantity FROM naval_units WHERE settlement_id=$1 AND ship_type=$2
-                  ORDER BY CASE status WHEN 'HOSTILE' THEN 0 WHEN 'ACTIVE' THEN 1 ELSE 2 END,id FOR UPDATE`,
-                [allocation.settlement_id,forceType]
-              )).rows;
-              const stockTotal = shipRows.reduce((sum,row) => sum+Number(row.quantity),0);
-              const stockShares = stockTotal > 0
-                ? allocateLossBySource(Math.min(sourceShare.loss,stockTotal),stockTotal,
-                    shipRows.map((row) => ({ contractId:row.id,quantity:Number(row.quantity) }))).mercenaries
-                : [];
-              let sourceApplied = 0;
-              for (const stockShare of stockShares) {
-                const stock = shipRows.find((row) => row.id === stockShare.contractId);
-                if (!stock) continue;
-                const deducted = Math.min(Number(stock.quantity),stockShare.loss);
-                if (!deducted) continue;
-                const nextStock = Number(stock.quantity)-deducted;
-                if (!nextStock) await client.query("DELETE FROM naval_units WHERE id=$1", [stock.id]);
-                else await client.query("UPDATE naval_units SET quantity=$1 WHERE id=$2", [nextStock,stock.id]);
-                sourceApplied += deducted;
-              }
-              if (!sourceApplied) continue;
-              const nextAllocation = Number(allocation.quantity)-sourceApplied;
-              if (!nextAllocation) await client.query("DELETE FROM fleet_ships WHERE fleet_id=$1 AND settlement_id=$2 AND ship_type=$3", [fleetShare.contractId,allocation.settlement_id,forceType]);
-              else await client.query("UPDATE fleet_ships SET quantity=$1 WHERE fleet_id=$2 AND settlement_id=$3 AND ship_type=$4", [nextAllocation,fleetShare.contractId,allocation.settlement_id,forceType]);
-              await client.query("UPDATE fleets SET updated_at=NOW() WHERE id=$1", [fleetShare.contractId]);
-              const personnelLoss = shipCrewRequirement(forceType as keyof typeof import("../domain/catalog.js").SHIPS,sourceApplied);
-              const populationLoss = await deductPopulationForCasualties(client, allocation.settlement_id, personnelLoss);
-              populationApplied += populationLoss;
-              stateApplied += sourceApplied;
-            }
-          }
+          const exact=await applyExactSunkFleetLosses(client,{
+            battleId,countryId:participant.country_id,shipType:forceType as NavalUnitType,maximum:share.loss
+          });
+          stateApplied+=exact.ships;
+          populationApplied+=exact.population;
           continue;
         }
         const armyAssignments = !naval ? (await client.query<{ army_id: string; initial_composition: BattleComposition }>(

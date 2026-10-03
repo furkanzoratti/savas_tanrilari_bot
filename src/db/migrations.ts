@@ -51,6 +51,7 @@ import { greatGamesGladiatorCombatMigration } from "./great-games-gladiator-comb
 import { greatGamesGladiatorAuctionMigration } from "./great-games-gladiator-auction-migration.js";
 import { greatGamesGladiatorFreeBidMigration } from "./great-games-gladiator-free-bid-migration.js";
 import { dynastyMalePreferenceMigration } from "./dynasty-male-preference-migration.js";
+import { navalDamageAllocationReconciliationMigration } from "./naval-damage-allocation-reconciliation-migration.js";
 
 export const migrations = [
   {
@@ -2319,5 +2320,6 @@ export const migrations = [
   greatGamesGladiatorCombatMigration,
   greatGamesGladiatorAuctionMigration,
   greatGamesGladiatorFreeBidMigration,
-  dynastyMalePreferenceMigration
+  dynastyMalePreferenceMigration,
+  navalDamageAllocationReconciliationMigration
 ] as const;
