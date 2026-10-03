@@ -179,6 +179,7 @@ function gladiatorRoundLabel(tournament:GladiatorTournamentView["tournament"],ro
 }
 
 const GLADIATOR_ROSTER_PAGE_SIZE=16;
+const GLADIATOR_OWNERSHIP_PAGE_SIZE=10;
 
 function safePage(requested:number,pageCount:number){
   return Math.min(Math.max(0,Number.isSafeInteger(requested)?requested:0),Math.max(0,pageCount-1));
@@ -277,6 +278,52 @@ async function gladiatorRosterPayload(guildId: string, content?: string,requeste
     new ButtonBuilder().setCustomId("gg2|gladiator-auction-close|GLADIATOR").setLabel("Müzayedeyi Bitir").setEmoji("🏁").setStyle(ButtonStyle.Danger)
   );
   return { content: content ?? "", embeds: [embed], components: [buttons] };
+}
+
+async function gladiatorOwnershipPayload(guildId:string,requestedPage=0){
+  const [view,wallets]=await Promise.all([
+    greatGamesGladiatorService.view(guildId),
+    greatGamesWalletService.listParticipants(guildId)
+  ]);
+  const fightersByCountry=new Map<string,typeof view.roster>();
+  for(const fighter of view.roster){
+    if(!fighter.owner_country_name)continue;
+    const owned=fightersByCountry.get(fighter.owner_country_name)??[];
+    owned.push(fighter);
+    fightersByCountry.set(fighter.owner_country_name,owned);
+  }
+  const countryNames=new Set(wallets.map((wallet)=>wallet.country_name));
+  for(const countryName of fightersByCountry.keys())countryNames.add(countryName);
+  const countries=[...countryNames].sort((left,right)=>left.localeCompare(right,"tr"));
+  const pageCount=Math.max(1,Math.ceil(countries.length/GLADIATOR_OWNERSHIP_PAGE_SIZE));
+  const page=safePage(requestedPage,pageCount);
+  const ownedCount=view.roster.filter((fighter)=>Boolean(fighter.owner_country_name)).length;
+  const fields=countries
+    .slice(page*GLADIATOR_OWNERSHIP_PAGE_SIZE,(page+1)*GLADIATOR_OWNERSHIP_PAGE_SIZE)
+    .map((countryName)=>{
+      const fighters=[...(fightersByCountry.get(countryName)??[])].sort((left,right)=>
+        Number(right.power)-Number(left.power)||left.name.localeCompare(right.name,"tr")
+      );
+      return {
+        name:`🏛️ ${countryName} • ${fighters.length}/3`.slice(0,256),
+        value:fighters.length
+          ? fighters.map((fighter)=>`• **${fighter.name}** [${fighter.code}] — G**${fighter.power}** • ${gold(Number(fighter.purchase_price??0))}`).join("\n")
+          : "Henüz gladyatörü bulunmuyor.",
+        inline:false as const
+      };
+    });
+  const embed=new EmbedBuilder()
+    .setColor(0x9b6a35)
+    .setTitle("🏛️ Capua • Ülke Gladyatör Sahiplikleri")
+    .setDescription(`**Katılımcı devlet:** ${countries.length} • **Sahipli gladyatör:** ${ownedCount}/${view.roster.length} • **Sayfa:** ${page+1}/${pageCount}\nHer devlet en fazla **3 gladyatöre** sahip olabilir. Listede kod, güç ve gladyatörün alış bedeli gösterilir.`)
+    .addFields(...(fields.length?fields:[{name:"Kayıt bulunamadı",value:"Henüz katılımcı devlet veya gladyatör sahipliği bulunmuyor.",inline:false}]))
+    .setFooter({text:"Sahiplik değişikliklerini görmek için Yenile düğmesini kullanabilirsin."});
+  const navigation=new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(`gg2|gladiator-owners-page|${page-1}`).setLabel("Önceki").setEmoji("⬅️").setStyle(ButtonStyle.Secondary).setDisabled(page===0),
+    new ButtonBuilder().setCustomId(`gg2|gladiator-owners-page|${page}`).setLabel("Yenile").setEmoji("🔄").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`gg2|gladiator-owners-page|${page+1}`).setLabel("Sonraki").setEmoji("➡️").setStyle(ButtonStyle.Secondary).setDisabled(page===pageCount-1)
+  );
+  return {embeds:[embed],components:[navigation]};
 }
 
 async function gladiatorPointsPayload(guildId:string,requestedPage=0){
@@ -681,6 +728,10 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
     await interaction.reply(await gladiatorRosterPayload(interaction.guildId));
     return true;
   }
+  if(subcommand==="gladyator-sahiplikleri"){
+    await interaction.reply(await gladiatorOwnershipPayload(interaction.guildId));
+    return true;
+  }
   if(subcommand==="gladyator-puanlari"){
     await interaction.reply(await gladiatorPointsPayload(interaction.guildId));
     return true;
@@ -744,6 +795,10 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
   }
   if(action==="gladiator-roster-page"){
     await interaction.update(await gladiatorRosterPayload(interaction.guildId,undefined,Number(rawType)));
+    return true;
+  }
+  if(action==="gladiator-owners-page"){
+    await interaction.update(await gladiatorOwnershipPayload(interaction.guildId,Number(rawType)));
     return true;
   }
   if(action==="gladiator-points-page"){
