@@ -48,6 +48,7 @@ import { treasuryLedgerService, type TreasuryMovement } from "../services/treasu
 import { assertCountryAccess, isGameMaster, requireGameMaster, resolveCountry } from "./auth.js";
 import { buildingChoices, shipChoices, unitChoices } from "./commands.js";
 import { batchDocumentEmbeds, embedTextLength, renderDocument } from "./document.js";
+import { playerMentionPayload } from "./player-mentions.js";
 import { publishGreatPowerRanking } from "./great-power-ui.js";
 import {
   BRAND_BANNER_PATH,
@@ -392,7 +393,7 @@ async function handleTrade(interaction: ChatInputCommandInteraction): Promise<vo
       route: interaction.options.getString("tur", true) as TradeRoute
     });
     const players = await gameService.playerIds(receiver.id);
-    const mentions = players.length ? players.map((id) => `<@${id}>`).join(" ") : `**${receiver.name} yöneticileri**`;
+    const notification=playerMentionPayload(players,`**${receiver.name} yöneticileri**`);
     const embed = new EmbedBuilder()
       .setColor(0xc59b45)
       .setTitle("🤝 Yeni Hammadde Ticaret Teklifi")
@@ -408,7 +409,7 @@ async function handleTrade(interaction: ChatInputCommandInteraction): Promise<vo
       new ButtonBuilder().setCustomId(`trade_accept|${agreement.id}`).setLabel("Kabul Et").setEmoji("✅").setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId(`trade_reject|${agreement.id}`).setLabel("Reddet").setEmoji("❌").setStyle(ButtonStyle.Danger)
     );
-    await interaction.editReply({ content: mentions, embeds: [embed], components: [buttons], allowedMentions: { users: players } });
+    await interaction.editReply({ content: notification.content, embeds: [embed], components: [buttons], allowedMentions: notification.allowedMentions });
   } else if (sub === "liste") {
     const agreements = await tradeService.list(country.id);
     const lines = agreements.map((agreement) => {

@@ -8,6 +8,7 @@ import {dynastyService,type DynastyMarriageProposalView,type DynastyTurnResult,t
 import {gameService,GameError} from "../services/game-service.js";
 import {logger} from "../logger.js";
 import {isGameMaster,requireGameMaster,resolveCountry} from "./auth.js";
+import {playerMentionPayload} from "./player-mentions.js";
 import {
   DYNASTY_BANNER_NAME,DYNASTY_BANNER_PATH,DYNASTY_BANNER_URL,
   DYNASTY_MARRIAGE_BANNER_NAME,DYNASTY_MARRIAGE_BANNER_PATH,DYNASTY_MARRIAGE_BANNER_URL
@@ -231,7 +232,10 @@ export async function handleDynastyCommand(interaction:ChatInputCommandInteracti
       );
       const channel=interaction.channel;
       if(channel?.isTextBased()&&!channel.isDMBased()){
+        const players=await gameService.playerIds(targetCountry.id);
+        const notification=playerMentionPayload(players,"**"+targetCountry.name+"** • Oyuncu atanmamış; oyun yöneticisi yanıtlayabilir.");
         const message=await channel.send({
+          content:notification.content,allowedMentions:notification.allowedMentions,
           embeds:[marriageProposalEmbed(proposal)],components:marriageProposalButtons(proposal),
           files:[new AttachmentBuilder(DYNASTY_MARRIAGE_BANNER_PATH,{name:DYNASTY_MARRIAGE_BANNER_NAME})]
         }).catch(()=>null);

@@ -10,6 +10,7 @@ import {
   warDeclarationService, type OfficialWarView, type PeaceOfferView, type WarEndOutcome, type WarInvitationView, type WarSide
 } from "../services/war-declaration-service.js";
 import { assertCountryAccess, isGameMaster, requireGameMaster, resolveCountry } from "./auth.js";
+import { playerMentionPayload } from "./player-mentions.js";
 import {
   WAR_DECLARATION_BANNER_NAME, WAR_DECLARATION_BANNER_PATH, WAR_DECLARATION_BANNER_URL,
   PEACE_TREATY_BANNER_NAME, PEACE_TREATY_BANNER_PATH, PEACE_TREATY_BANNER_URL
@@ -365,10 +366,11 @@ export async function handleWarDeclarationCommand(interaction: ChatInputCommandI
     if (!war) throw new GameError("Aktif savaş bulunamadı.");
     try {
       const players = await gameService.playerIds(target.id);
+      const notification=playerMentionPayload(players,`📯 **${target.name}** • Oyun yöneticisi yanıtlayabilir.`);
       const message = await channel.send({
-        content: players.length ? players.map((id) => `<@${id}>`).join(" ") : `📯 **${target.name}** • Oyun yöneticisi yanıtlayabilir.`,
+        content: notification.content,
         embeds: [renderWarInvitation(invitation, war)], components: [warInvitationButtons(invitation.id)],
-        allowedMentions: { users: players }
+        allowedMentions: notification.allowedMentions
       });
       await warDeclarationService.attachWarInvitationMessage(invitation.id, channel.id, message.id);
     } catch (error) {
@@ -562,6 +564,17 @@ export async function handleWarDeclarationButton(interaction: ButtonInteraction)
         : `❌ **${result.invitation.country_name}** savaş çağrısını reddetti.`,
       embeds: [resolved], components: []
     });
+    if(accepted){
+      const participants=await warDeclarationService.participants(result.war.id);
+      const playerGroups=await Promise.all(participants.map((participant)=>gameService.playerIds(participant.country_id)));
+      const notification=playerMentionPayload(playerGroups.flat(),"⚔️ Savaş cephelerinde oyuncu ataması bulunmuyor.");
+      const channel=await warChannel(interaction);
+      await channel.send({
+        content:notification.content,
+        embeds:[renderWarStructureUpdate(result.war)],
+        allowedMentions:notification.allowedMentions
+      });
+    }
     await interaction.editReply("✅ Savaş çağrısı sonuçlandırıldı.");
     return true;
   }

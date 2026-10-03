@@ -74,6 +74,11 @@ describe("kültür ve yerleşke kartı", () => {
     expect(fields.find((field) => field.name === "💰 Gelir Kalemleri")?.value).toContain("Toplam:");
     expect(fields.find((field) => field.name === "💰 Gelir Kalemleri")?.value).not.toContain("Tahsil edilecek");
     expect(fields.find((field) => field.name === "🏦 Yerel Hazine")?.value).toContain("500 Altın");
+    expect(fields.find((field) => field.name === "🏦 Yerel Hazine")?.value).toContain("Yerel Hammadde");
+    expect(fields.slice(0,6).map((field)=>field.name)).toEqual([
+      "🏺 Kültür","⛩️ Din ve Mezhep","🏦 Yerel Hazine",
+      "👥 Nüfus","💰 Gelir Kalemleri","🧾 Yerleşke Giderleri"
+    ]);
     expect(fields.find((field) => field.name === "👥 Nüfus")?.value).toContain("🎖️ **Ordu Limiti**");
     expect(fields.find((field) => field.name === "👥 Nüfus")?.value).toContain("7.500");
     expect(fields.find((field) => field.name === "💰 Gelir Kalemleri")?.value).not.toContain("Deniz Ticareti");

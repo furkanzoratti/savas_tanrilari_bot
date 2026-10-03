@@ -225,15 +225,17 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
         { name: "🏺 Kültür", value: spacedSection(`**${culture}**`), inline: true },
         { name: "⛩️ Din ve Mezhep", value: spacedSection(religionLines.join("\n")||"Din dağılımı bulunmuyor."), inline: true },
         {
-          name: "📦 Yerel Hammadde",
+          name: "🏦 Yerel Hazine",
           value: spacedSection([
+            `**${gold(settlement.local_treasury)}**`,
+            "",
+            "📦 **Yerel Hammadde**",
             `**${producedResource} ×${number(settlement.localResourceProduction)}**`,
             `Ticarette: **${number(settlement.localResourceTradeUsage)}** • Kalan: **${number(settlement.localResourceRemaining)}**`,
             settlement.ownResourceActive ? "✅ Yerel hammadde etkisi aktif" : "⛔ Yerel hammadde etkisi ticarette tüketildi"
           ].join("\n")),
           inline: true
         },
-        { name: "🏦 Yerel Hazine", value: spacedSection(`**${gold(settlement.local_treasury)}**`), inline: true },
         {
           name: "👥 Nüfus",
           value: spacedSection([

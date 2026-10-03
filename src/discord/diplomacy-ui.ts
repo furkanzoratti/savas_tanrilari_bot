@@ -10,6 +10,7 @@ import {
 import { gameService, GameError } from "../services/game-service.js";
 import { isGameMaster, requireGameMaster, resolveCountry } from "./auth.js";
 import { addCountryRoleToMember, deleteCountryRole, ensureCountryRole } from "./country-roles.js";
+import { playerMentionPayload } from "./player-mentions.js";
 import {
   PACT_BANNER_NAME, PACT_BANNER_PATH, PACT_BANNER_URL,
   STATE_PROFILE_BANNER_NAME, STATE_PROFILE_BANNER_PATH, STATE_PROFILE_BANNER_URL
@@ -162,10 +163,10 @@ async function handleAlliance(interaction: ChatInputCommandInteraction): Promise
   });
   try {
     const players = await gameService.playerIds(target.id);
-    const mention = players.length ? players.map((id) => `<@${id}>`).join(" ") : `**${target.name}** • Oyuncu atanmamış; oyun yöneticisi yanıtlayabilir.`;
+    const notification=playerMentionPayload(players,`**${target.name}** • Oyuncu atanmamış; oyun yöneticisi yanıtlayabilir.`);
     const message = await interaction.editReply({
-      content: mention, embeds: [allianceInviteEmbed(alliance)], components: [responseButtons("alliance", alliance.id)],
-      allowedMentions: { users: players }
+      content: notification.content, embeds: [allianceInviteEmbed(alliance)], components: [responseButtons("alliance", alliance.id)],
+      allowedMentions: notification.allowedMentions
     });
     await diplomacyService.attachAllianceMessage(alliance.id, channel.id, message.id);
   } catch (error) {
@@ -231,11 +232,11 @@ async function handlePact(interaction: ChatInputCommandInteraction): Promise<voi
     });
     try {
       const players = await gameService.playerIds(target.id);
-      const mention = players.length ? players.map((id) => `<@${id}>`).join(" ") : `**${target.name}** • Oyuncu atanmamış; oyun yöneticisi yanıtlayabilir.`;
+      const notification=playerMentionPayload(players,`**${target.name}** • Oyuncu atanmamış; oyun yöneticisi yanıtlayabilir.`);
       const message = await interaction.editReply({
-        content: mention, embeds: [pactInviteEmbed(invitation)], components: [responseButtons("pact", invitation.id)],
+        content: notification.content, embeds: [pactInviteEmbed(invitation)], components: [responseButtons("pact", invitation.id)],
         files: [new AttachmentBuilder(PACT_BANNER_PATH, { name: PACT_BANNER_NAME })],
-        allowedMentions: { users: players }
+        allowedMentions: notification.allowedMentions
       });
       await diplomacyService.attachPactMessage(invitation.id, channel.id, message.id);
     } catch (error) {
