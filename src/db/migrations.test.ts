@@ -339,6 +339,16 @@ describe("yüzüncü migration", () => {
   });
 });
 
+describe("yüz yirmi yedinci migration", () => {
+  const migration = migrations.find((item) => item.version === 127);
+
+  it("oyuncu otomatik alımına hafif ordu modunu ekler", () => {
+    expect(migration?.name).toBe("player_auto_purchase_army_modes");
+    expect(migration?.sql).toContain("DROP CONSTRAINT IF EXISTS player_auto_purchase_previews_mode_check");
+    expect(migration?.sql).toContain("'SHIPS','QUALITY','LIGHT','GENERAL'");
+  });
+});
+
 describe("yüz birinci migration", () => {
   const migration = migrations.find((item) => item.version === 101);
 

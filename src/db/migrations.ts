@@ -30,6 +30,7 @@ import { adminPanelControlsMigration } from "./admin-panel-controls-migration.js
 import { aiCountryGovernanceMigration } from "./ai-country-governance-migration.js";
 import { regionalSpecialUnitsMigration } from "./regional-special-units-migration.js";
 import { playerAutoPurchaseMigration } from "./player-auto-purchase-migration.js";
+import { playerAutoPurchaseArmyModesMigration } from "./player-auto-purchase-army-modes-migration.js";
 import { religionsMigration } from "./religions-migration.js";
 import { religionMinorityMigration } from "./religion-minority-migration.js";
 import { secondaryReligionsMigration } from "./secondary-religions-migration.js";
@@ -2329,5 +2330,6 @@ export const migrations = [
   carthageRepairTransferToIbossimMigration,
   greatGamesGladiatorChampionshipMigration,
   dynastyCoupleBirthAttemptsMigration,
-  automaticCultureEffectsMigration
+  automaticCultureEffectsMigration,
+  playerAutoPurchaseArmyModesMigration
 ] as const;

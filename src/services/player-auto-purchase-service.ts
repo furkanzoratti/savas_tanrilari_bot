@@ -1,6 +1,8 @@
 import { SHIPS, UNITS } from "../domain/catalog.js";
+import { BATTLE_UNIT_STATS, roleWeights, type BattleUnitType } from "../domain/battle.js";
 import { isAcquisitionTurn } from "../domain/mobilization.js";
 import type { PurchasableUnitType } from "../domain/npc-auto-purchase.js";
+import { isSpecialUnitType } from "../domain/special-units.js";
 import { pool } from "../db/pool.js";
 import { gameService, GameError } from "./game-service.js";
 import {
@@ -9,7 +11,7 @@ import {
   type NpcCountryPurchasePlan
 } from "./npc-auto-purchase-service.js";
 
-export type PlayerAutoPurchaseMode = "SHIPS" | "QUALITY" | "GENERAL";
+export type PlayerAutoPurchaseMode = "SHIPS" | "QUALITY" | "LIGHT" | "GENERAL";
 
 export const PLAYER_AUTO_PURCHASE_MODES: Record<PlayerAutoPurchaseMode, { label: string; description: string }> = {
   SHIPS: {
@@ -17,12 +19,16 @@ export const PLAYER_AUTO_PURCHASE_MODES: Record<PlayerAutoPurchaseMode, { label:
     description: "Tersane ve liman kapasitesini en pahalı uygun gemiden başlayarak doldurur; kalan puanları Trireme veya Kerkouros ile değerlendirir."
   },
   QUALITY: {
-    label: "Kaliteli Asker",
-    description: "Açık özel birlikler ile Ağır Süvari, Ağır Piyade, Okçu ve Mızraklılardan Mükemmel Kompozisyona yaklaşan bir eğitim planı kurar."
+    label: "Ağır Ordu",
+    description: "Ağır Piyade ve Ağır Süvariyi temel alır; eşdeğer özel hat ve hareketli birlikleri paylaştırır, daha güçlü özel mızraklı ve menzilli birlikleri standartlarının yerine kullanır."
+  },
+  LIGHT: {
+    label: "Hafif Ordu",
+    description: "Yalnız Hafif Piyade, Hafif Süvari, Sapancı ve hafif dayanıklılık sınıfındaki erişilebilir özel birliklerden hızlı ve ekonomik bir plan kurar."
   },
   GENERAL: {
-    label: "Genel Eğitim",
-    description: "Bütün alınabilir birlikleri kullanır; düşük ve kaliteli birlikleri dengelerken kompozisyon koşullarını korur."
+    label: "Orta Ordu",
+    description: "Bütün erişilebilir standart ve özel birlikleri dengeli biçimde karıştırır; düşük ve kaliteli birlikleri oranlarken kompozisyon rollerini korur."
   }
 };
 
@@ -56,9 +62,64 @@ interface PreviewRow {
   expires_at: Date;
 }
 
-const QUALITY_STANDARD_UNITS: readonly PurchasableUnitType[] = [
-  "heavy_cavalry", "heavy_infantry", "archer", "spear"
+const BASE_ARMY_UNITS: readonly PurchasableUnitType[] = [
+  "light_infantry", "spear", "archer", "light_cavalry", "slinger", "heavy_infantry", "heavy_cavalry"
 ];
+
+const LIGHT_STANDARD_UNITS: readonly PurchasableUnitType[] = ["light_infantry", "light_cavalry", "slinger"];
+
+function battlePower(unitType: BattleUnitType): number {
+  const stats = BATTLE_UNIT_STATS[unitType];
+  return stats.clashDice * (stats.clashSides + 1) / 2 + stats.damageDice * (stats.damageSides + 1) / 2;
+}
+
+function roleWeight(unitType: PurchasableUnitType, role: keyof typeof roleWeights[BattleUnitType]): number {
+  return roleWeights[unitType as BattleUnitType]?.[role] ?? 0;
+}
+
+function uniqueUnits(units: readonly PurchasableUnitType[]): PurchasableUnitType[] {
+  return [...new Set(units)];
+}
+
+export function playerArmyUnitCandidates(
+  mode: Exclude<PlayerAutoPurchaseMode, "SHIPS">,
+  unlockedSpecials: readonly PurchasableUnitType[]
+): PurchasableUnitType[] {
+  const specials = uniqueUnits(unlockedSpecials.filter((unitType) => isSpecialUnitType(unitType)));
+  if (mode === "GENERAL") return uniqueUnits([...BASE_ARMY_UNITS, ...specials]);
+  if (mode === "LIGHT") {
+    return uniqueUnits([
+      ...LIGHT_STANDARD_UNITS,
+      ...specials.filter((unitType) => BATTLE_UNIT_STATS[unitType as BattleUnitType].durability === 1)
+    ]);
+  }
+
+  const heavyInfantryPower = battlePower("heavy_infantry");
+  const heavyCavalryPower = battlePower("heavy_cavalry");
+  const spearPower = battlePower("spear");
+  const archerPower = battlePower("archer");
+  const equivalentLine = specials.filter((unitType) =>
+    roleWeight(unitType, "line") >= 0.5
+    && BATTLE_UNIT_STATS[unitType as BattleUnitType].durability >= 2
+    && battlePower(unitType as BattleUnitType) >= heavyInfantryPower
+  );
+  const equivalentMobile = specials.filter((unitType) =>
+    roleWeight(unitType, "mobile") >= 0.5
+    && battlePower(unitType as BattleUnitType) >= heavyCavalryPower * 0.85
+  );
+  const superiorSpears = specials.filter((unitType) =>
+    roleWeight(unitType, "spear") >= 0.5 && battlePower(unitType as BattleUnitType) > spearPower
+  );
+  const superiorRanged = specials.filter((unitType) =>
+    roleWeight(unitType, "ranged") >= 0.5 && battlePower(unitType as BattleUnitType) > archerPower
+  );
+  return uniqueUnits([
+    "heavy_infantry", ...equivalentLine,
+    "heavy_cavalry", ...equivalentMobile,
+    ...(superiorSpears.length ? superiorSpears : ["spear" as const]),
+    ...(superiorRanged.length ? superiorRanged : ["archer" as const])
+  ]);
+}
 
 function planningConfig(guildId: string): NpcAutoPurchaseConfig {
   return {
@@ -83,14 +144,12 @@ export function planPlayerPurchases(
   if (mode === "SHIPS") {
     base = planCountryPurchases(document, config, "NAVAL_FOCUS", 0, { unitCandidates: [] });
     base = { ...base, notes: base.notes.filter((note) => !note.includes("kişilik hedef") && !note.includes("Hedef askerî doluluk")) };
-  } else if (mode === "QUALITY") {
-    const candidates: PurchasableUnitType[] = [
-      ...QUALITY_STANDARD_UNITS,
-      ...(document.specialUnitUnlocks ?? []).filter((unitType) => !QUALITY_STANDARD_UNITS.includes(unitType))
-    ];
-    base = planCountryPurchases(document, config, "ARMY_ONLY", 0, { unitCandidates: candidates });
   } else {
-    base = planCountryPurchases(document, config, "ARMY_ONLY", 0, { qualityMixTarget: 0.50 });
+    const candidates = playerArmyUnitCandidates(mode, document.specialUnitUnlocks ?? []);
+    base = planCountryPurchases(document, config, "ARMY_ONLY", 0, {
+      unitCandidates: candidates,
+      ...(mode === "GENERAL" ? { qualityMixTarget: 0.50 } : {})
+    });
   }
   return { ...base, mode, acquisitionTurn };
 }

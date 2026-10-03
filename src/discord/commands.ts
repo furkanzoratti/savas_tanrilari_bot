@@ -571,8 +571,9 @@ export const commandBuilders = [
     .addStringOption((option) => option.setName("tur").setDescription("Hazırlanacak otomatik alım planı").setRequired(true)
       .addChoices(
         { name: "Gemi Alımı", value: "SHIPS" },
-        { name: "Kaliteli Asker", value: "QUALITY" },
-        { name: "Genel Eğitim", value: "GENERAL" }
+        { name: "Ağır Ordu", value: "QUALITY" },
+        { name: "Hafif Ordu", value: "LIGHT" },
+        { name: "Orta Ordu", value: "GENERAL" }
       ))
     .addStringOption(countryOption),
   new SlashCommandBuilder()

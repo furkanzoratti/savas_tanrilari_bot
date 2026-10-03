@@ -314,7 +314,7 @@ const COMPOSITION_TIERS: Record<ArmyCompositionTier, Pick<ArmyCompositionAssessm
   EXCELLENT: { label: "Mükemmel Kompozisyon", clashMultiplier: 1.15, damageMultiplier: 1.08 }
 };
 
-const roleWeights: Record<BattleUnitType, Partial<Record<keyof ArmyCompositionAssessment["roleShares"], number>>> = {
+export const roleWeights: Record<BattleUnitType, Partial<Record<keyof ArmyCompositionAssessment["roleShares"], number>>> = {
   light_infantry: { line: 1 }, militia: { line: 1 }, heavy_infantry: { line: 1 }, legionary: { line: 1 }, persian_immortal: { line: 1 },
   punic_veteran: { line: 1 }, gaesatae: { line: 1 }, peltast: { line: 0.8, ranged: 0.2 },
   spear: { spear: 1 }, hoplite: { line: 0.5, spear: 0.5 }, triarii_veteran: { spear: 1 },

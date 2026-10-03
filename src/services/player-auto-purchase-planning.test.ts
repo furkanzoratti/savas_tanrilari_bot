@@ -10,7 +10,7 @@ vi.mock("./game-service.js", async (importOriginal) => {
   };
 });
 
-import { planPlayerPurchases,playerAutoPurchasePlanFingerprint } from "./player-auto-purchase-service.js";
+import { planPlayerPurchases,playerArmyUnitCandidates,playerAutoPurchasePlanFingerprint } from "./player-auto-purchase-service.js";
 
 function documentFixture(options: { naval?: boolean; specialUnits?: string[] } = {}) {
   return {
@@ -45,15 +45,31 @@ describe("oyuncu otomatik alım planlaması", () => {
     ]));
   });
 
-  it("kaliteli asker planını yalnız izinli özel ve dört kaliteli standart birlikten kurar", () => {
-    const plan = planPlayerPurchases("guild", 30, "QUALITY", documentFixture({ specialUnits: ["hoplite"] }));
-    const allowed = new Set(["heavy_cavalry", "heavy_infantry", "archer", "spear", "hoplite"]);
+  it("ağır ordu planını ağır standartlar ve onları karşılayan özel birliklerden kurar", () => {
+    const specialUnits = ["hoplite", "germanic_companion_cavalry", "sarmatian_longswordsmen", "briton_longbow", "peltast"];
+    const candidates = playerArmyUnitCandidates("QUALITY", specialUnits as any);
+    expect(candidates).toEqual([
+      "heavy_infantry", "sarmatian_longswordsmen", "heavy_cavalry", "germanic_companion_cavalry", "hoplite", "briton_longbow"
+    ]);
+    const plan = planPlayerPurchases("guild", 30, "QUALITY", documentFixture({ specialUnits }));
+    const allowed = new Set(candidates);
     expect(plan.unitActions.length).toBeGreaterThan(0);
     expect(plan.unitActions.every((action) => allowed.has(action.unitType))).toBe(true);
     expect(plan.shipActions).toHaveLength(0);
   });
 
-  it("genel eğitimde düşük ve kaliteli birlikleri aynı planda dengeler", () => {
+  it("hafif ordu planına yalnız hafif standart ve dayanıklılığı düşük özel birlikleri alır", () => {
+    const specialUnits = ["peltast", "iberian_caetrati", "briton_longbow", "hoplite", "germanic_companion_cavalry"];
+    expect(playerArmyUnitCandidates("LIGHT", specialUnits as any)).toEqual([
+      "light_infantry", "light_cavalry", "slinger", "peltast", "iberian_caetrati", "briton_longbow"
+    ]);
+    const plan = planPlayerPurchases("guild", 30, "LIGHT", documentFixture({ specialUnits }));
+    const allowed = new Set(["light_infantry", "light_cavalry", "slinger", "peltast", "iberian_caetrati", "briton_longbow"]);
+    expect(plan.unitActions.length).toBeGreaterThan(0);
+    expect(plan.unitActions.every((action) => allowed.has(action.unitType))).toBe(true);
+  });
+
+  it("orta orduda düşük ve kaliteli birlikleri aynı planda dengeler", () => {
     const plan = planPlayerPurchases("guild", 30, "GENERAL", documentFixture({ specialUnits: ["hoplite"] }));
     const types = new Set(plan.unitActions.map((action) => action.unitType));
     const low = ["light_infantry", "slinger", "light_cavalry"].some((unitType) => types.has(unitType as any));
