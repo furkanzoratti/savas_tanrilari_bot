@@ -50,7 +50,7 @@ function gameRules(type: GreatGameType): string {
   if (type === "CHARIOT") return `Katılım 1.000 Altın. Form yayınlandıktan sonra bahisler açılır. Yarış ${GREAT_GAMES_RACE_ROUNDS} etap sürer; her etapta gizli taktik verilir ve 50 kademeli pistteki atlar sonuçlarla birlikte ilerler. Katılım havuzu %65/%35 paylaşılır.`;
   if (type === "CARAVAN") return `Seçilen devletler 2–3 kişilik kervanlara ayrılır. ${GREAT_GAMES_RACE_ROUNDS} aşamanın her birinde, her kervandan yalnız bir takım üyesi ortak rotayı gizlice seçer. Her devletten oyun başlarken 1.000 Altın alınır; kervanların 50 kademeli pistteki sırası canlı değişir.`;
   if (type === "KINGS_BET") return "Katılım 1.000 Altın. Üç ikilemde İşbirliği veya İhanet ve rakibin kararı için tahmin gizlice seçilir.";
-  if (type === "GLADIATOR") return "64 kişilik Capua havuzundan her turnuvada 32 dövüşçü rastgele seçilir. Dövüşte taraflar sırayla saldırır: 1d20 + Güç/10 saldırı, 1d20 + Güç/12 savunma zarıdır. Saldırı savunmayı geçerse 1d10 + Güç/25 hasar verilir. Gladyatör müzayedesi 50 Altından başlar; sonraki teklif güncel bedelin üzerindeki herhangi bir tam sayı olabilir. Bir devlet en fazla 3 gladyatöre sahip olabilir.";
+  if (type === "GLADIATOR") return "Capua sezonu dört adet 32 kişilik eleme ve 12 kişilik finalden oluşur. 64 gladyatörün her biri elemelere tam iki kez katılır; her turnuvada 1. sıra 32, son sıra 1 puan kazanır. Dört elemenin puan sıralamasındaki ilk 12 finale çıkar, ilk 4 doğrudan çeyrek finale geçer. Dövüşte taraflar sırayla saldırır: 1d20 + Güç/10 saldırı, 1d20 + Güç/12 savunma zarıdır. Saldırı savunmayı geçerse 1d10 + Güç/25 hasar verilir.";
   return "Her masa üç devletten oluşur. Anlaşma yalnız bir ana ve en fazla bir ikincil kazanan çıkarabilir. Katılım 500 Altındır.";
 }
 
@@ -152,6 +152,16 @@ const GLADIATOR_ROUND_LABELS: Record<number, string> = {
   5: "Final"
 };
 
+const GLADIATOR_FINAL_ROUND_LABELS:Record<number,string>={
+  1:"Final Ön Elemesi",2:"Final Çeyrek Finali",3:"Final Yarı Finali",4:"Büyük Final"
+};
+
+function gladiatorRoundLabel(tournament:GladiatorTournamentView["tournament"],round:number):string{
+  return tournament?.tournament_type==="FINAL"
+    ? GLADIATOR_FINAL_ROUND_LABELS[round]??`Final Turu ${round}`
+    : GLADIATOR_ROUND_LABELS[round]??`Tur ${round}`;
+}
+
 function gladiatorRosterFields(view: GladiatorTournamentView) {
   const lines = view.roster.map((fighter, index) => {
     const market = fighter.owner_country_name
@@ -161,7 +171,7 @@ function gladiatorRosterFields(view: GladiatorTournamentView) {
         : view.auctionStatus === "OPEN"
           ? "Sahipsiz • Açılış 50 Altın"
           : "Sahipsiz";
-    return `**${index + 1}. ${fighter.name}** [${fighter.code}] — G**${fighter.power}** C**${fighter.max_hp}** • ${market}`;
+    return `**${index + 1}. ${fighter.name}** [${fighter.code}] — G**${fighter.power}** C**${fighter.max_hp}** • Eleme **${fighter.qualifier_appearances}/2** • **${fighter.qualifier_points} P** • ${market}`;
   });
   const chunks: string[] = [];
   for (const line of lines) {
@@ -189,7 +199,7 @@ function gladiatorMatchLine(match: GladiatorMatchRow): string {
 function gladiatorBracketFields(view: GladiatorTournamentView) {
   if (!view.tournament) return [{ name: "🏟️ Turnuva Ağacı", value: "Henüz turnuva başlatılmadı.", inline: false }];
   const fields: Array<{ name: string; value: string; inline: false }> = [];
-  for (let round = 1; round <= 5; round += 1) {
+  for (let round = 1; round <= view.tournament.round_count; round += 1) {
     const roundMatches = view.matches.filter((match) => match.round === round);
     const chunks: string[] = [];
     for (const match of roundMatches) {
@@ -200,7 +210,7 @@ function gladiatorBracketFields(view: GladiatorTournamentView) {
     }
     for (let index = 0; index < chunks.length; index += 1) {
       fields.push({
-        name: `⚔️ ${GLADIATOR_ROUND_LABELS[round]}${index ? ` • Devam ${index + 1}` : ""}`,
+        name: `⚔️ ${gladiatorRoundLabel(view.tournament,round)}${index ? ` • Devam ${index + 1}` : ""}`,
         value: chunks[index]!,
         inline: false
       });
@@ -209,11 +219,21 @@ function gladiatorBracketFields(view: GladiatorTournamentView) {
   return fields;
 }
 
+function gladiatorStandingFields(view:GladiatorTournamentView){
+  if(!view.standings.length)return [];
+  return [{
+    name:`🏆 Eleme Puan Tablosu • ${view.qualifiersCompleted}/4`,
+    value:view.standings.map((fighter,index)=>
+      `**${index+1}. ${fighter.name}** — **${fighter.points} P** • ${fighter.appearances}/2 turnuva • En iyi ${fighter.best_placement}.`
+    ).join("\n"),inline:false as const
+  }];
+}
+
 function gladiatorStatus(view: GladiatorTournamentView): string {
   const tournament = view.tournament;
   if (!tournament) return "Turnuva bekleniyor";
   if (tournament.status === "COMPLETED") return `Tamamlandı • Şampiyon ${tournament.champion_name ?? "Bilinmiyor"}`;
-  const round = GLADIATOR_ROUND_LABELS[tournament.current_round] ?? `Tur ${tournament.current_round}`;
+  const round = gladiatorRoundLabel(tournament,tournament.current_round);
   return tournament.status === "BETTING" ? `${round} • Bahisler açık` : `${round} • Bahisler kapalı, dövüşler sürüyor`;
 }
 
@@ -221,7 +241,7 @@ async function gladiatorRosterPayload(guildId: string, content?: string) {
   const view = await greatGamesGladiatorService.view(guildId);
   const embed = new EmbedBuilder().setColor(0xb43b32).setTitle("⚔️ Capua • Gladyatör Listesi")
     .setDescription(`**Müzayede:** ${view.auctionStatus === "OPEN" ? "Tekliflere açık" : view.auctionStatus === "FINISHED" ? "Tamamlandı" : "Henüz açılmadı"}\nTeklifler **50 Altından** başlar. Sonraki teklif güncel bedelin üzerindeki **herhangi bir tam sayı** olabilir. Her devlet en fazla **3 gladyatöre** sahip olabilir.`)
-    .addFields(...gladiatorRosterFields(view));
+    .addFields(...gladiatorStandingFields(view),...gladiatorRosterFields(view));
   const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId("gg2|gladiator-roster-refresh|GLADIATOR").setLabel("Listeyi Yenile").setEmoji("🔄").setStyle(ButtonStyle.Secondary)
   );
@@ -230,6 +250,32 @@ async function gladiatorRosterPayload(guildId: string, content?: string) {
     new ButtonBuilder().setCustomId("gg2|gladiator-auction-close|GLADIATOR").setLabel("Müzayedeyi Bitir").setEmoji("🏁").setStyle(ButtonStyle.Danger)
   );
   return { content: content ?? "", embeds: [embed], components: [buttons] };
+}
+
+async function gladiatorPointsPayload(guildId:string){
+  const view=await greatGamesGladiatorService.view(guildId);
+  const ranked=[...view.roster].sort((left,right)=>
+    Number(right.qualifier_points)-Number(left.qualifier_points)
+    ||Number(left.qualifier_best_placement??Number.MAX_SAFE_INTEGER)-Number(right.qualifier_best_placement??Number.MAX_SAFE_INTEGER)
+    ||Number(right.power)-Number(left.power)||left.name.localeCompare(right.name,"tr")
+  );
+  const lines=ranked.map((fighter,index)=>{
+    const finalLine=index<12?"🟢":"⚪";
+    const best=fighter.qualifier_best_placement?`${fighter.qualifier_best_placement}.` : "—";
+    return `${finalLine} **${index+1}. ${fighter.name}** — **${fighter.qualifier_points} P** • Katılım ${fighter.qualifier_appearances}/2 • En iyi ${best} • G${fighter.power}`;
+  });
+  const chunks:string[]=[];
+  for(const line of lines){
+    const current=chunks.at(-1);
+    if(!current||current.length+line.length+1>980)chunks.push(line);
+    else chunks[chunks.length-1]=`${current}\n${line}`;
+  }
+  const embed=new EmbedBuilder().setColor(0xd6ad3c).setTitle("🏆 Capua • Gladyatör Puan Durumu")
+    .setDescription(`**Tamamlanan eleme:** ${view.qualifiersCompleted}/4\n🟢 İlk 12 final çizgisindedir. Dört eleme tamamlandığında ilk dört gladyatör doğrudan çeyrek finale geçer.`)
+    .addFields(...chunks.map((value,index)=>({
+      name:index===0?"📊 Genel Sıralama":`📊 Genel Sıralama • Devam ${index+1}`,value,inline:false
+    })));
+  return {embeds:[embed],components:[]};
 }
 
 const GLADIATOR_AUCTION_PAGE_SIZE = 25;
@@ -294,14 +340,16 @@ async function adminGamePayload(guildId: string, type: GreatGameType): Promise<A
   if (type === "GLADIATOR") {
     const view = await greatGamesGladiatorService.view(guildId);
     const embed = new EmbedBuilder().setColor(0xb43b32).setTitle("⚔️ Capua Gladyatör Dövüşleri • Yönetim")
-      .setDescription(`${gameRules(type)}\n\n**Durum:** ${gladiatorStatus(view)}\n**Gladyatör müzayedesi:** ${view.auctionStatus === "OPEN" ? "Tekliflere açık" : view.auctionStatus === "FINISHED" ? "Tamamlandı" : "Henüz açılmadı"}\n**Etkinliğe kayıtlı devlet:** ${view.registeredCountries}\n**Turnuva tekrarı:** ${view.tournament?.run_number ?? 0}`)
-      .addFields(...gladiatorBracketFields(view));
+      .setDescription(`${gameRules(type)}\n\n**Durum:** ${gladiatorStatus(view)}\n**Gladyatör müzayedesi:** ${view.auctionStatus === "OPEN" ? "Tekliflere açık" : view.auctionStatus === "FINISHED" ? "Tamamlandı" : "Henüz açılmadı"}\n**Etkinliğe kayıtlı devlet:** ${view.registeredCountries}\n**Tamamlanan eleme:** ${view.qualifiersCompleted}/4${view.finalCompleted ? " • Final tamamlandı" : ""}`)
+      .addFields(...gladiatorStandingFields(view),...gladiatorBracketFields(view));
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId("gg2|admin-home").setLabel("Ana Panel").setStyle(ButtonStyle.Secondary)
     );
     const running = view.tournament && ["BETTING", "FIGHTING"].includes(view.tournament.status);
-    if (data.season?.status === "OPEN" && !running) row.addComponents(
-      new ButtonBuilder().setCustomId("gg2|gladiator-start|GLADIATOR").setLabel("32 Dövüşçüyle Başlat").setEmoji("🎲").setStyle(ButtonStyle.Success)
+    if (data.season?.status === "OPEN" && !running && !view.finalCompleted) row.addComponents(
+      new ButtonBuilder().setCustomId("gg2|gladiator-start|GLADIATOR")
+        .setLabel(view.qualifiersCompleted>=4?"12 Kişilik Finali Başlat":`${view.qualifiersCompleted+1}. Elemeyi Başlat`)
+        .setEmoji("🎲").setStyle(ButtonStyle.Success)
     );
     if (view.tournament?.status === "BETTING") row.addComponents(
       new ButtonBuilder().setCustomId("gg2|gladiator-close|GLADIATOR").setLabel("Bahisleri Kapat").setEmoji("🔒").setStyle(ButtonStyle.Danger)
@@ -357,7 +405,7 @@ async function publicGamePayload(guildId: string, type: GreatGameType, content?:
       : `${gameRules(type)}\n\n**Durum:** ${statusLabel(data, type, entries)} • **Katılımcı:** ${entries.length}`);
 
   if (type === "GLADIATOR" && gladiatorView) {
-    embed.addFields(...gladiatorBracketFields(gladiatorView));
+    embed.addFields(...gladiatorStandingFields(gladiatorView),...gladiatorBracketFields(gladiatorView));
     embed.setFooter({ text: "Güç, can, sahiplik ve güncel müzayede teklifleri: /oyunlar gladyatorler" });
   } else if (type === "AUCTION") {
     const lots = await greatGamesAuctionService.lots(guildId);
@@ -593,6 +641,10 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
     await interaction.reply(await gladiatorRosterPayload(interaction.guildId));
     return true;
   }
+  if(subcommand==="gladyator-puanlari"){
+    await interaction.reply(await gladiatorPointsPayload(interaction.guildId));
+    return true;
+  }
   const country = await ownCountry(interaction.guildId, interaction.user.id);
   if (subcommand === "katil") {
     const result = await greatGamesWalletService.join(interaction.guildId, country.id, interaction.user.id);
@@ -691,8 +743,11 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
     await interaction.deferUpdate();
     const result = await greatGamesGladiatorService.start(interaction.guildId, interaction.user.id);
     await interaction.editReply(await adminGamePayload(interaction.guildId, "GLADIATOR"));
+    const opening=result.tournamentType==="FINAL"
+      ? "🏆 **Capua 12 Kişilik Final Turnuvası** başladı. 5–12. sıralar final ön elemesine çıktı; ilk dört gladyatör çeyrek finali bekliyor."
+      : `🎲 **${result.qualifierNumber}. Capua Eleme Turnuvası** başladı. 32 kişilik dengeli kadro belirlendi; Son 32 bahisleri açıldı.`;
     await interaction.followUp({
-      ...(await publicGamePayload(interaction.guildId, "GLADIATOR", `🎲 **${result.runNumber}. Capua Turnuvası** başladı. 64 dövüşçüden 32'si rastgele seçildi; Son 32 bahisleri açıldı.`)),
+      ...(await publicGamePayload(interaction.guildId, "GLADIATOR", opening)),
       ephemeral: false
     });
     return true;
@@ -701,7 +756,7 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
     if (!isGameMaster(interaction)) throw new GameError("Capua bahislerini yalnızca oyun yöneticisi kapatabilir.");
     await interaction.deferUpdate();
     const result = await greatGamesGladiatorService.closeBetting(interaction.guildId);
-    const notice = `🔒 **${GLADIATOR_ROUND_LABELS[result.round] ?? `Tur ${result.round}`} bahisleri kapandı.** Yönetici dövüşleri sırayla çözebilir.`;
+    const notice = `🔒 **${result.tournamentType==="FINAL"?(GLADIATOR_FINAL_ROUND_LABELS[result.round]??`Final Turu ${result.round}`):(GLADIATOR_ROUND_LABELS[result.round]??`Tur ${result.round}`)} bahisleri kapandı.** Yönetici dövüşleri sırayla çözebilir.`;
     if (fromAdminCard) {
       await interaction.editReply(await adminGamePayload(interaction.guildId, "GLADIATOR"));
       await interaction.followUp({ ...(await publicGamePayload(interaction.guildId, "GLADIATOR", notice)), ephemeral: false });
@@ -715,9 +770,11 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
     await interaction.deferUpdate();
     const result = await greatGamesGladiatorService.resolveNextFight(interaction.guildId);
     const resultHeadline = result.tournamentCompleted
-      ? `🏆 **Capua Şampiyonu: ${result.winner}!** Final ${result.combatTurns} hücum turu ve ${result.successfulHits} başarılı vuruş sürdü. Kalan can: ${result.score}. Turnuva tamamlandı; yönetici dilerse yeni bir turnuva başlatabilir.`
+      ? result.tournamentType==="FINAL"
+        ? `👑 **Capua Büyük Şampiyonu: ${result.winner}!** Büyük Final ${result.combatTurns} hücum turu ve ${result.successfulHits} başarılı vuruş sürdü. Kalan can: ${result.score}. Capua sezonu tamamlandı.`
+        : `🏆 **${result.qualifiersCompleted}. Eleme Turnuvası Şampiyonu: ${result.winner}!** Final ${result.combatTurns} hücum turu ve ${result.successfulHits} başarılı vuruş sürdü. Kalan can: ${result.score}. ${result.qualifiersCompleted<4?"Sıradaki eleme turnuvası açılabilir.":"Dört eleme tamamlandı; 12 kişilik final turnuvası açılabilir."}`
       : result.roundCompleted
-        ? `⚔️ **${result.fighterA} — ${result.fighterB}:** Kazanan **${result.winner}** • ${result.combatTurns} hücum turu • ${result.successfulHits} başarılı vuruş • Kalan can ${result.score}\n✅ Tur tamamlandı. **${GLADIATOR_ROUND_LABELS[result.nextRound!] ?? `Tur ${result.nextRound}`} bahisleri açıldı.**`
+        ? `⚔️ **${result.fighterA} — ${result.fighterB}:** Kazanan **${result.winner}** • ${result.combatTurns} hücum turu • ${result.successfulHits} başarılı vuruş • Kalan can ${result.score}\n✅ Tur tamamlandı. **${result.tournamentType==="FINAL"?(GLADIATOR_FINAL_ROUND_LABELS[result.nextRound!]??`Final Turu ${result.nextRound}`):(GLADIATOR_ROUND_LABELS[result.nextRound!]??`Tur ${result.nextRound}`)} bahisleri açıldı.**`
         : `⚔️ **${result.fighterA} — ${result.fighterB}:** Kazanan **${result.winner}** • ${result.combatTurns} hücum turu • ${result.successfulHits} başarılı vuruş • Kalan can ${result.score}`;
     const notice = clip(`${resultHeadline}\n\n**Dövüş Zarları**\n${result.combatLog.join("\n")}`, 1_990);
     if (fromAdminCard) {
