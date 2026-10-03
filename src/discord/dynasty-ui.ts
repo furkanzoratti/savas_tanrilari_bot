@@ -152,14 +152,13 @@ export function dynastyEmbed(view:DynastyView):EmbedBuilder{
       :"Yok";
   const children=living.filter((member)=>member.mother_id===monarch?.id||member.father_id===monarch?.id);
   const other=living.filter((member)=>member.id!==monarch?.id&&member.id!==spouse?.id&&!children.some((child)=>child.id===member.id));
-  const nextBirth=view.last_birth_attempt_turn===null?view.current_turn:view.last_birth_attempt_turn+2;
   const overview=[
     "**Hanedan:** "+view.name,
     "**Hükümdar:** "+(monarch?monarch.title+" "+monarch.name+" — "+age(monarch.age):"⚠️ Veraset krizi"),
     "**Eşi:** "+spouseText,
     "**Tahtın Varisi:** "+(heir?heir.title+" "+heir.name+" — "+age(heir.age):"Belirlenmedi"),
     "**Yaşayan Üye:** "+living.length+" • **Ölen Üye:** "+dead.length,
-    "**Yeni çocuk denemesi:** "+(view.current_turn>=nextBirth?"Hazır":"Tur "+nextBirth)
+    "**Son çocuk denemesi:** "+(view.last_birth_attempt_turn===null?"Henüz yapılmadı":"Tur "+view.last_birth_attempt_turn)+" • Bekleme süresi çifte özeldir"
   ].join("\n");
   const embed=new EmbedBuilder().setColor(0xc59b45).setTitle("👑 "+view.country_name+" • Hanedan Formu").setDescription(overview).setImage(DYNASTY_BANNER_URL);
   if(children.length)embed.addFields({name:"👶 Hükümdarın Çocukları",value:children.map(memberLine).join("\n\n").slice(0,1024)});

@@ -13,7 +13,7 @@ export const RESOURCES = {
   AMBER: { label: "Kehribar", effects: ["Panteon +300 Altın ek gelir sağlar", "İsyan ihtimali -%10"] },
   SILK: { label: "İpek", effects: ["Agora, Ticaret Loncası, Kervansaray, Gümrükhane ve Zanaatkârlar Mahallesi gelirleri +%10", "Akademide yetiştirilen karakterlerin zarlarına +1"] },
   SPICES: { label: "Baharat", effects: ["Yerleşkenin toplam geliri +%20", "Nüfus artış hızı +%5"] },
-  PURPLE_DYE: { label: "Mor Boya", effects: ["Curia'nın ikinci politika sınırını geliştirir", "Ülkenin ticaret sözleşmesi sınırı +1"] }
+  PURPLE_DYE: { label: "Mor Boya", effects: ["Temel yerel üretim 3 hammadde", "Curia'nın ikinci politika sınırını geliştirir", "Ülkenin ticaret sözleşmesi sınırı +1"] }
 } as const;
 
 export type ResourceType = keyof typeof RESOURCES;

@@ -1,8 +1,7 @@
 import { pool, withTransaction, type DbClient } from "../db/pool.js";
 import { TRADE_INCOME_PER_COUNTRY, type TradeRoute, type TradeStatus } from "../domain/trade.js";
-import { RESOURCES, tradeAgreementLimit, type ResourceType } from "../domain/resources.js";
-import { rawMaterialProduction } from "../domain/catalog.js";
-import { countryResourceAccess } from "./resource-service.js";
+import { RESOURCES, isResourceType, tradeAgreementLimit, type ResourceType } from "../domain/resources.js";
+import { countryResourceAccess, localResourceProduction } from "./resource-service.js";
 import { GameError } from "./game-service.js";
 
 export interface TradeAgreementView {
@@ -28,16 +27,18 @@ async function assertSettlement(client: DbClient, settlementId: string, countryI
 }
 
 async function assertSettlementResourceCapacity(client: DbClient, settlementId: string): Promise<void> {
-  const capacityRow = (await client.query<{ level: number; bonus: number }>(
+  const capacityRow = (await client.query<{ level: number; bonus: number; resource_type:string }>(
     `SELECT
        COALESCE((SELECT level FROM buildings
          WHERE settlement_id=$1 AND building_type='raw_material'
            AND status IN ('ACTIVE','BUILDING') AND level>0
          LIMIT 1),0)::integer AS level,
-       COALESCE((SELECT trade_capacity_bonus FROM settlements WHERE id=$1),0)::integer AS bonus`,
+       COALESCE((SELECT trade_capacity_bonus FROM settlements WHERE id=$1),0)::integer AS bonus,
+       COALESCE((SELECT resource_type FROM settlements WHERE id=$1),'') AS resource_type`,
     [settlementId]
   )).rows[0];
-  const capacity = rawMaterialProduction(Number(capacityRow?.level ?? 0)) + Number(capacityRow?.bonus ?? 0);
+  const resourceType=capacityRow&&isResourceType(capacityRow.resource_type)?capacityRow.resource_type:undefined;
+  const capacity = localResourceProduction(Number(capacityRow?.level ?? 0),resourceType) + Number(capacityRow?.bonus ?? 0);
   const used = Number((await client.query<{ count: number }>(
     `SELECT COUNT(*)::integer AS count FROM trade_agreements
       WHERE status IN ('PENDING','ACTIVE')

@@ -4,7 +4,7 @@ import {
   BIRTH_ATTEMPT_COOLDOWN_TURNS,MATERNAL_ILLNESS_COOLDOWN_TURNS,
   MINIMUM_MARRIAGE_AGE,
   birthAgeModifier,birthAttemptSucceeded,birthComplication,dynastyDeathFailureMaximum,dynastyDeathSaveFailed,dynastyMemberCanBeBirthParent,
-  dynastyMemberCanMarry,newbornGender,type DynastyGender,type DynastyHealth,type DynastyMemberStatus
+  dynastyMemberCanMarry,newbornGender,orderedDynastyCoupleIds,type DynastyGender,type DynastyHealth,type DynastyMemberStatus
 } from "../domain/dynasty.js";
 import {GameError} from "./game-service.js";
 
@@ -608,8 +608,6 @@ export const dynastyService={
         [dynasty.id]
       );
       if(pendingName.rowCount)throw new GameError("Bu hanedanda adı henüz konulmamış bir çocuk bulunuyor. Önce mevcut doğumu isimlendirin.");
-      if(dynasty.last_birth_attempt_turn!==null&&turn-dynasty.last_birth_attempt_turn<BIRTH_ATTEMPT_COOLDOWN_TURNS)
-        throw new GameError("Yeni çocuk denemesi Tur "+(dynasty.last_birth_attempt_turn+BIRTH_ATTEMPT_COOLDOWN_TURNS)+" itibarıyla yapılabilir.");
       const monarch=await client.query<DynastyMemberView>(
         "SELECT * FROM dynasty_members WHERE dynasty_id=$1 AND status='ALIVE' AND is_monarch=TRUE LIMIT 1 FOR UPDATE",
         [dynasty.id]
@@ -641,6 +639,22 @@ export const dynastyService={
       const motherAge=Number(mother.age);
       const modifier=birthAgeModifier(motherAge);
       if(modifier===null)throw new GameError("Doğum yapacak eş 18-44 yaş aralığında olmalıdır.");
+      const [firstMemberId,secondMemberId]=orderedDynastyCoupleIds(mother.id,father.id);
+      const coupleAttempt=(await client.query<{last_attempt_turn:number}>(
+        `SELECT last_attempt_turn FROM dynasty_couple_birth_attempts
+          WHERE dynasty_id=$1 AND first_member_id=$2 AND second_member_id=$3 FOR UPDATE`,
+        [dynasty.id,firstMemberId,secondMemberId]
+      )).rows[0];
+      if(coupleAttempt&&turn-coupleAttempt.last_attempt_turn<BIRTH_ATTEMPT_COOLDOWN_TURNS)
+        throw new GameError(mother.name+" ile "+father.name+" için yeni çocuk denemesi Tur "+
+          (coupleAttempt.last_attempt_turn+BIRTH_ATTEMPT_COOLDOWN_TURNS)+" itibarıyla yapılabilir.");
+      await client.query(
+        `INSERT INTO dynasty_couple_birth_attempts(dynasty_id,first_member_id,second_member_id,last_attempt_turn)
+         VALUES($1,$2,$3,$4)
+         ON CONFLICT(dynasty_id,first_member_id,second_member_id)
+         DO UPDATE SET last_attempt_turn=EXCLUDED.last_attempt_turn,updated_at=NOW()`,
+        [dynasty.id,firstMemberId,secondMemberId,turn]
+      );
       await client.query("UPDATE dynasties SET last_birth_attempt_turn=$1,updated_at=NOW() WHERE id=$2",[turn,dynasty.id]);
       const attemptRoll=randomInt(1,21);
       if(!birthAttemptSucceeded(motherAge,attemptRoll)){

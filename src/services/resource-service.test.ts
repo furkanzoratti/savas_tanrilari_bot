@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { DbClient } from "../db/pool.js";
-import { localResourceState, settlementResourceStates } from "./resource-service.js";
+import { localResourceProduction, localResourceState, settlementResourceStates } from "./resource-service.js";
 
 describe("yerel hammadde ticaret tüketimi", () => {
   it("binasız yerleşkenin iki aktif ticaretinde yerel etkiyi kapatır", () => {
@@ -20,6 +20,17 @@ describe("yerel hammadde ticaret tüketimi", () => {
       ownResourceActive: true
     });
     expect(localResourceState(3, 8).ownResourceActive).toBe(false);
+  });
+
+  it("Mor Boyaya binasızken üç hammadde ve üç ticaret kullanımı verir",()=>{
+    expect(localResourceProduction(0,"PURPLE_DYE")).toBe(3);
+    expect(localResourceState(0,2,"PURPLE_DYE")).toEqual({
+      production:3,activeTradeUsage:2,remaining:1,ownResourceActive:true
+    });
+    expect(localResourceState(0,3,"PURPLE_DYE")).toEqual({
+      production:3,activeTradeUsage:3,remaining:0,ownResourceActive:false
+    });
+    expect(localResourceProduction(1,"PURPLE_DYE")).toBe(4);
   });
 
   it("tükenen yerel kaynağı kaldırırken ticaretle gelen kaynağı etkin tutar", async () => {

@@ -11,8 +11,13 @@ export interface SettlementResourceState {
   resources: ResourceType[];
 }
 
-export function localResourceState(rawMaterialLevel: number, activeTradeUsage: number): Pick<SettlementResourceState, "production" | "activeTradeUsage" | "remaining" | "ownResourceActive"> {
-  const production = rawMaterialProduction(rawMaterialLevel);
+export function localResourceProduction(rawMaterialLevel:number,resourceType?:ResourceType):number {
+  const standardProduction=rawMaterialProduction(rawMaterialLevel);
+  return resourceType==="PURPLE_DYE"?Math.max(3,standardProduction):standardProduction;
+}
+
+export function localResourceState(rawMaterialLevel: number, activeTradeUsage: number,resourceType?:ResourceType): Pick<SettlementResourceState, "production" | "activeTradeUsage" | "remaining" | "ownResourceActive"> {
+  const production = localResourceProduction(rawMaterialLevel,resourceType);
   const usage = Math.max(0, Math.floor(activeTradeUsage));
   const remaining = Math.max(0, production - usage);
   return { production, activeTradeUsage: usage, remaining, ownResourceActive: remaining > 0 };
@@ -33,7 +38,7 @@ export async function settlementResourceStates(client: DbClient, countryId: stri
   const result = new Map<string, SettlementResourceState>();
   for (const row of own.rows) {
     if (!isResourceType(row.resource_type)) continue;
-    const availability = localResourceState(Number(row.raw_material_level), Number(row.active_trade_usage));
+    const availability = localResourceState(Number(row.raw_material_level), Number(row.active_trade_usage),row.resource_type);
     result.set(row.id, {
       localResource: row.resource_type,
       ...availability,

@@ -30,6 +30,12 @@ export function dynastyMemberCanBeBirthParent(input:{
   return input.status==="ALIVE"&&Boolean(input.spouseId)&&(isMonarch||isMonarchChild);
 }
 
+export function orderedDynastyCoupleIds(firstMemberId:string,secondMemberId:string):[string,string]{
+  return firstMemberId.localeCompare(secondMemberId)<=0
+    ?[firstMemberId,secondMemberId]
+    :[secondMemberId,firstMemberId];
+}
+
 export function dynastyDeathFailureMaximum(age:number):number{
   if(age<=60)return 0;
   if(age<=64)return 1;

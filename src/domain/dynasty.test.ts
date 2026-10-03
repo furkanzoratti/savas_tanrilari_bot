@@ -1,7 +1,8 @@
 import {describe,expect,it} from "vitest";
 import {
   birthAgeModifier,birthAttemptSucceeded,birthComplication,dynastyDeathFailureMaximum,
-  dynastyDeathSaveFailed,dynastyMemberCanBeBirthParent,dynastyMemberCanMarry,newbornGender
+  dynastyDeathSaveFailed,dynastyMemberCanBeBirthParent,dynastyMemberCanMarry,newbornGender,
+  orderedDynastyCoupleIds
 } from "./dynasty.js";
 
 describe("dynasty rules",()=>{
@@ -26,6 +27,11 @@ describe("dynasty rules",()=>{
     expect(dynastyMemberCanBeBirthParent({...base,memberId:"grandchild",fatherId:"child"})).toBe(false);
     expect(dynastyMemberCanBeBirthParent({...base,memberId:"child",fatherId:"ruler",spouseId:null})).toBe(false);
     expect(dynastyMemberCanBeBirthParent({...base,memberId:"child",fatherId:"ruler",status:"DEAD"})).toBe(false);
+  });
+
+  it("stores a married couple under the same key regardless of selected parent",()=>{
+    expect(orderedDynastyCoupleIds("b-member","a-member")).toEqual(["a-member","b-member"]);
+    expect(orderedDynastyCoupleIds("a-member","b-member")).toEqual(["a-member","b-member"]);
   });
 
   it("applies fertility modifiers and the 11 point success threshold",()=>{
