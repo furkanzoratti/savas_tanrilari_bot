@@ -162,8 +162,15 @@ function gladiatorRoundLabel(tournament:GladiatorTournamentView["tournament"],ro
     : GLADIATOR_ROUND_LABELS[round]??`Tur ${round}`;
 }
 
-function gladiatorRosterFields(view: GladiatorTournamentView) {
-  const lines = view.roster.map((fighter, index) => {
+const GLADIATOR_ROSTER_PAGE_SIZE=16;
+
+function safePage(requested:number,pageCount:number){
+  return Math.min(Math.max(0,Number.isSafeInteger(requested)?requested:0),Math.max(0,pageCount-1));
+}
+
+function gladiatorRosterFields(view: GladiatorTournamentView,page:number) {
+  const start=page*GLADIATOR_ROSTER_PAGE_SIZE;
+  const lines = view.roster.slice(start,start+GLADIATOR_ROSTER_PAGE_SIZE).map((fighter, index) => {
     const market = fighter.owner_country_name
       ? `Sahip **${fighter.owner_country_name}**`
       : view.auctionStatus === "OPEN" && fighter.current_bid
@@ -171,7 +178,7 @@ function gladiatorRosterFields(view: GladiatorTournamentView) {
         : view.auctionStatus === "OPEN"
           ? "Sahipsiz • Açılış 50 Altın"
           : "Sahipsiz";
-    return `**${index + 1}. ${fighter.name}** [${fighter.code}] — G**${fighter.power}** C**${fighter.max_hp}** • Eleme **${fighter.qualifier_appearances}/2** • **${fighter.qualifier_points} P** • ${market}`;
+    return `**${start+index+1}. ${fighter.name}** [${fighter.code}] — G**${fighter.power}** C**${fighter.max_hp}** • Eleme **${fighter.qualifier_appearances}/2** • **${fighter.qualifier_points} P** • ${market}`;
   });
   const chunks: string[] = [];
   for (const line of lines) {
@@ -180,7 +187,7 @@ function gladiatorRosterFields(view: GladiatorTournamentView) {
     else chunks[chunks.length - 1] = `${current}\n${line}`;
   }
   return chunks.map((value, index) => ({
-    name: index === 0 ? "📊 64 Dövüşçü • Güç Sıralaması" : `📊 Güç Sıralaması • Devam ${index + 1}`,
+    name: index === 0 ? "📊 Dövüşçüler • Güç Sıralaması" : `📊 Güç Sıralaması • Devam ${index + 1}`,
     value,
     inline: false
   }));
@@ -237,13 +244,17 @@ function gladiatorStatus(view: GladiatorTournamentView): string {
   return tournament.status === "BETTING" ? `${round} • Bahisler açık` : `${round} • Bahisler kapalı, dövüşler sürüyor`;
 }
 
-async function gladiatorRosterPayload(guildId: string, content?: string) {
+async function gladiatorRosterPayload(guildId: string, content?: string,requestedPage=0) {
   const view = await greatGamesGladiatorService.view(guildId);
+  const pageCount=Math.max(1,Math.ceil(view.roster.length/GLADIATOR_ROSTER_PAGE_SIZE));
+  const page=safePage(requestedPage,pageCount);
   const embed = new EmbedBuilder().setColor(0xb43b32).setTitle("⚔️ Capua • Gladyatör Listesi")
-    .setDescription(`**Müzayede:** ${view.auctionStatus === "OPEN" ? "Tekliflere açık" : view.auctionStatus === "FINISHED" ? "Tamamlandı" : "Henüz açılmadı"}\nTeklifler **50 Altından** başlar. Sonraki teklif güncel bedelin üzerindeki **herhangi bir tam sayı** olabilir. Her devlet en fazla **3 gladyatöre** sahip olabilir.`)
-    .addFields(...gladiatorStandingFields(view),...gladiatorRosterFields(view));
+    .setDescription(`**Müzayede:** ${view.auctionStatus === "OPEN" ? "Tekliflere açık" : view.auctionStatus === "FINISHED" ? "Tamamlandı" : "Henüz açılmadı"} • **Sayfa:** ${page+1}/${pageCount}\nTeklifler **50 Altından** başlar. Sonraki teklif güncel bedelin üzerindeki **herhangi bir tam sayı** olabilir. Her devlet en fazla **3 gladyatöre** sahip olabilir.`)
+    .addFields(...gladiatorStandingFields(view),...gladiatorRosterFields(view,page));
   const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId("gg2|gladiator-roster-refresh|GLADIATOR").setLabel("Listeyi Yenile").setEmoji("🔄").setStyle(ButtonStyle.Secondary)
+    new ButtonBuilder().setCustomId(`gg2|gladiator-roster-page|${page-1}`).setLabel("Önceki").setEmoji("⬅️").setStyle(ButtonStyle.Secondary).setDisabled(page===0),
+    new ButtonBuilder().setCustomId(`gg2|gladiator-roster-refresh|${page}`).setLabel("Yenile").setEmoji("🔄").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`gg2|gladiator-roster-page|${page+1}`).setLabel("Sonraki").setEmoji("➡️").setStyle(ButtonStyle.Secondary).setDisabled(page===pageCount-1)
   );
   if (view.auctionStatus === "OPEN") buttons.addComponents(
     new ButtonBuilder().setCustomId("gg2|gladiator-auction-bid|GLADIATOR").setLabel("Teklif Ver").setEmoji("💰").setStyle(ButtonStyle.Primary),
@@ -252,17 +263,21 @@ async function gladiatorRosterPayload(guildId: string, content?: string) {
   return { content: content ?? "", embeds: [embed], components: [buttons] };
 }
 
-async function gladiatorPointsPayload(guildId:string){
+async function gladiatorPointsPayload(guildId:string,requestedPage=0){
   const view=await greatGamesGladiatorService.view(guildId);
   const ranked=[...view.roster].sort((left,right)=>
     Number(right.qualifier_points)-Number(left.qualifier_points)
     ||Number(left.qualifier_best_placement??Number.MAX_SAFE_INTEGER)-Number(right.qualifier_best_placement??Number.MAX_SAFE_INTEGER)
     ||Number(right.power)-Number(left.power)||left.name.localeCompare(right.name,"tr")
   );
-  const lines=ranked.map((fighter,index)=>{
-    const finalLine=index<12?"🟢":"⚪";
+  const pageCount=Math.max(1,Math.ceil(ranked.length/GLADIATOR_ROSTER_PAGE_SIZE));
+  const page=safePage(requestedPage,pageCount);
+  const start=page*GLADIATOR_ROSTER_PAGE_SIZE;
+  const lines=ranked.slice(start,start+GLADIATOR_ROSTER_PAGE_SIZE).map((fighter,index)=>{
+    const rank=start+index;
+    const finalLine=rank<12?"🟢":"⚪";
     const best=fighter.qualifier_best_placement?`${fighter.qualifier_best_placement}.` : "—";
-    return `${finalLine} **${index+1}. ${fighter.name}** — **${fighter.qualifier_points} P** • Katılım ${fighter.qualifier_appearances}/2 • En iyi ${best} • G${fighter.power}`;
+    return `${finalLine} **${rank+1}. ${fighter.name}** — **${fighter.qualifier_points} P** • Katılım ${fighter.qualifier_appearances}/2 • En iyi ${best} • G${fighter.power}`;
   });
   const chunks:string[]=[];
   for(const line of lines){
@@ -271,11 +286,16 @@ async function gladiatorPointsPayload(guildId:string){
     else chunks[chunks.length-1]=`${current}\n${line}`;
   }
   const embed=new EmbedBuilder().setColor(0xd6ad3c).setTitle("🏆 Capua • Gladyatör Puan Durumu")
-    .setDescription(`**Tamamlanan eleme:** ${view.qualifiersCompleted}/4\n🟢 İlk 12 final çizgisindedir. Dört eleme tamamlandığında ilk dört gladyatör doğrudan çeyrek finale geçer.`)
+    .setDescription(`**Tamamlanan eleme:** ${view.qualifiersCompleted}/4 • **Sayfa:** ${page+1}/${pageCount}\n🟢 İlk 12 final çizgisindedir. Dört eleme tamamlandığında ilk dört gladyatör doğrudan çeyrek finale geçer.`)
     .addFields(...chunks.map((value,index)=>({
       name:index===0?"📊 Genel Sıralama":`📊 Genel Sıralama • Devam ${index+1}`,value,inline:false
     })));
-  return {embeds:[embed],components:[]};
+  const navigation=new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(`gg2|gladiator-points-page|${page-1}`).setLabel("Önceki").setEmoji("⬅️").setStyle(ButtonStyle.Secondary).setDisabled(page===0),
+    new ButtonBuilder().setCustomId(`gg2|gladiator-points-page|${page}`).setLabel("Yenile").setEmoji("🔄").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`gg2|gladiator-points-page|${page+1}`).setLabel("Sonraki").setEmoji("➡️").setStyle(ButtonStyle.Secondary).setDisabled(page===pageCount-1)
+  );
+  return {embeds:[embed],components:[navigation]};
 }
 
 const GLADIATOR_AUCTION_PAGE_SIZE = 25;
@@ -699,7 +719,15 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
     await interaction.update(await adminDashboardPayload(interaction.guildId)); return true;
   }
   if (action === "gladiator-roster-refresh") {
-    await interaction.update(await gladiatorRosterPayload(interaction.guildId));
+    await interaction.update(await gladiatorRosterPayload(interaction.guildId,undefined,Number(rawType)));
+    return true;
+  }
+  if(action==="gladiator-roster-page"){
+    await interaction.update(await gladiatorRosterPayload(interaction.guildId,undefined,Number(rawType)));
+    return true;
+  }
+  if(action==="gladiator-points-page"){
+    await interaction.update(await gladiatorPointsPayload(interaction.guildId,Number(rawType)));
     return true;
   }
   if (action === "gladiator-auction-open") {
