@@ -12,7 +12,7 @@ import {
   WAR_DECLARATION_BANNER_PATH, WAR_DECLARATION_BANNER_URL,
   PEACE_TREATY_BANNER_PATH, PEACE_TREATY_BANNER_URL
 } from "./assets.js";
-import { parsePeaceIndemnity, renderPeaceAnnouncement, renderPeaceOffer, renderWarDeclaration, renderWarEndAnnouncement, renderWarInvitation } from "./war-declaration-ui.js";
+import { parsePeaceIndemnity, renderActiveWarPages, renderPeaceAnnouncement, renderPeaceOffer, renderWarDeclaration, renderWarEndAnnouncement, renderWarInvitation } from "./war-declaration-ui.js";
 
 describe("resmî savaş ilanları ve barış duyuruları", () => {
   it("oyuncu ve yönetici savaş komutlarını ayrı ayrı kaydeder", () => {
@@ -73,6 +73,27 @@ describe("resmî savaş ilanları ve barış duyuruları", () => {
     expect(JSON.stringify(embed)).toContain("Massilia");
     expect(JSON.stringify(embed)).toContain("Roma Cephesi");
     expect(JSON.stringify(embed)).toContain("Sicilya'nın güvenliği");
+  });
+
+  it("aktif savaşları okunabilir kartlara ayırır ve uzun listeleri sayfalar",()=>{
+    const base={
+      id:"war",guild_id:"guild",attacker_country_id:"roma",attacker_country_name:"Roma",
+      defender_country_id:"kartaca",defender_country_name:"Kartaca",war_goal:"Sicilya'nın güvenliği",
+      war_type:"FACTION" as const,attacker_pact_id:null,attacker_pact_name:null,
+      defender_pact_id:null,defender_pact_name:null,attacker_participant_names:["Roma","Massilia"],
+      defender_participant_names:["Kartaca","Numidya"],reason:"Sınır anlaşmazlığı",declaration:"İlan",
+      status:"ACTIVE" as const,started_turn:12,ended_turn:null,winner_country_id:null,
+      winner_country_name:null,end_outcome:null,end_description:null,channel_id:null,message_id:null
+    };
+    const pages=renderActiveWarPages(Array.from({length:7},(_,index)=>({...base,id:`war-${index}`})));
+    expect(pages).toHaveLength(2);
+    expect(pages[0]!.toJSON().fields).toHaveLength(6);
+    expect(pages[1]!.toJSON().fields).toHaveLength(1);
+    const first=JSON.stringify(pages[0]!.toJSON());
+    expect(first).toContain("👑 **Roma**");
+    expect(first).toContain("Saldıran");
+    expect(first).toContain("Savunan");
+    expect(first).toContain("Çok Taraflı Savaş");
   });
 
   it("barış teklifinde tazminatı ve ödeyen tarafı açıklar", () => {

@@ -103,6 +103,44 @@ export function renderWarStructureUpdate(war: OfficialWarView): EmbedBuilder {
     .setFooter({ text: "Barış teklifleri yalnızca burada gösterilen iki savaş lideri arasında yürütülür." });
 }
 
+const ACTIVE_WARS_PER_PAGE=6;
+
+function compactWarFront(names:string[],leader:string):string{
+  const participants=names.length?names:[leader];
+  return participants.map((name)=>name===leader?`👑 **${name}**`:name).join(" · ");
+}
+
+export function renderActiveWarPages(wars:OfficialWarView[]):EmbedBuilder[]{
+  if(!wars.length)return[new EmbedBuilder()
+    .setColor(0x5965a8)
+    .setTitle("⚔️ Devam Eden Devlet Savaşları")
+    .setDescription("Şu anda resmî olarak devam eden bir devlet savaşı bulunmuyor.")
+    .setFooter({text:"Yeni savaş ilanları burada listelenecek."})];
+  const pages:Array<OfficialWarView[]>=[];
+  for(let index=0;index<wars.length;index+=ACTIVE_WARS_PER_PAGE)pages.push(wars.slice(index,index+ACTIVE_WARS_PER_PAGE));
+  return pages.map((page,pageIndex)=>{
+    const embed=new EmbedBuilder()
+      .setColor(0x9f252c)
+      .setTitle(`⚔️ Devam Eden Devlet Savaşları${pages.length>1?` • ${pageIndex+1}/${pages.length}`:""}`)
+      .setDescription(`Sunucuda **${wars.length} aktif savaş** bulunuyor. 👑 işareti cephe liderini gösterir.`)
+      .setFooter({text:`Aktif savaşlar • Sayfa ${pageIndex+1}/${pages.length}`});
+    for(const war of page){
+      const type=war.war_type==="PACT"?"Pakt Savaşı":war.war_type==="FACTION"?"Çok Taraflı Savaş":"Devlet Savaşı";
+      const details=[
+        `🎯 **Hedef:** ${war.war_goal}`,
+        `🔴 **Saldıran:** ${compactWarFront(war.attacker_participant_names,war.attacker_country_name)}`,
+        `🔵 **Savunan:** ${compactWarFront(war.defender_participant_names,war.defender_country_name)}`,
+        `🏷️ ${type}  •  ⏳ **Tur ${war.started_turn}**`
+      ].join("\n").slice(0,900);
+      embed.addFields({
+        name:`⚔️ ${war.attacker_country_name}  ↔  ${war.defender_country_name}`.slice(0,256),
+        value:`${details}\n\u200B`,inline:false
+      });
+    }
+    return embed;
+  });
+}
+
 function warInvitationButtons(id: string): ActionRowBuilder<ButtonBuilder> {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(`war_invite_accept|${id}`).setLabel("Savaşa Katıl").setEmoji("⚔️").setStyle(ButtonStyle.Success),
@@ -246,10 +284,9 @@ export async function handleWarDeclarationCommand(interaction: ChatInputCommandI
   if (interaction.commandName === "aktif-savaslar") {
     await interaction.deferReply();
     const wars = await warDeclarationService.activeWars(interaction.guildId);
-    const lines = wars.map((war) => `⚔️ **${war.attacker_country_name}** — **${war.defender_country_name}**\n🎯 ${war.war_goal}\n🔴 ${war.attacker_participant_names.join(", ")}\n🔵 ${war.defender_participant_names.join(", ")}\n⏳ Tur ${war.started_turn}`);
-    const embed = new EmbedBuilder().setColor(0x9f252c).setTitle("⚔️ Devam Eden Devlet Savaşları")
-      .setDescription((lines.length ? lines.join("\n\n") : "Şu anda resmî olarak devam eden bir devlet savaşı bulunmuyor.").slice(0, 4096));
-    await interaction.editReply({ embeds: [embed] });
+    const pages=renderActiveWarPages(wars);
+    await interaction.editReply({embeds:[pages[0]!]});
+    for(const page of pages.slice(1))await interaction.followUp({embeds:[page]});
     return true;
   }
 
