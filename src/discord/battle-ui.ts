@@ -270,6 +270,34 @@ export function playerFleetStatusEmbeds(status: PlayerBattleFleetStatus,audience
   }
   return embeds;
 }
+
+function embedTextLength(embed: EmbedBuilder): number {
+  const data=embed.toJSON();
+  return (data.title?.length??0)
+    +(data.description?.length??0)
+    +(data.author?.name.length??0)
+    +(data.footer?.text.length??0)
+    +(data.fields??[]).reduce((sum,field)=>sum+field.name.length+field.value.length,0);
+}
+
+export function fleetStatusEmbedPages(embeds: EmbedBuilder[],maxCharacters=5_800): EmbedBuilder[][] {
+  const pages:EmbedBuilder[][]=[];
+  let page:EmbedBuilder[]=[];
+  let characters=0;
+  for(const embed of embeds){
+    const nextCharacters=embedTextLength(embed);
+    if(page.length&&(page.length>=10||characters+nextCharacters>maxCharacters)){
+      pages.push(page);
+      page=[];
+      characters=0;
+    }
+    page.push(embed);
+    characters+=nextCharacters;
+  }
+  if(page.length)pages.push(page);
+  return pages;
+}
+
 export async function refreshActiveBattleCards(client: Client, guildId: string): Promise<{ updated: number; failed: number }> {
   let updated = 0;
   let failed = 0;
@@ -727,17 +755,19 @@ export async function handleBattleButton(interaction: ButtonInteraction): Promis
     if(!isGameMaster(interaction))throw new GameError("İki tarafın gemi durumunu yalnızca oyun yöneticileri görebilir.");
     const status=await battleService.adminFleetStatus({guildId:interaction.guildId,battleId});
     const embeds=playerFleetStatusEmbeds(status,"GM");
-    await interaction.editReply({content:"🔐 Deniz savaşındaki iki tarafın bütün gemi can durumları:",embeds:embeds.slice(0,10)});
-    for(let index=10;index<embeds.length;index+=10){
-      await interaction.followUp({embeds:embeds.slice(index,index+10),ephemeral:true});
+    const pages=fleetStatusEmbedPages(embeds);
+    await interaction.editReply({content:"🔐 Deniz savaşındaki iki tarafın bütün gemi can durumları:",embeds:pages[0]??[]});
+    for(const page of pages.slice(1)){
+      await interaction.followUp({embeds:page,ephemeral:true});
     }
   } else if (interaction.customId.startsWith("battle_fleet_status|")) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const status = await battleService.playerFleetStatus({ guildId: interaction.guildId, battleId, actorId: interaction.user.id });
     const embeds = playerFleetStatusEmbeds(status);
-    await interaction.editReply({ content: "⚓ Savaştaki kendi filolarınızın gemi can durumu:", embeds: embeds.slice(0, 10) });
-    for (let index = 10; index < embeds.length; index += 10) {
-      await interaction.followUp({ embeds: embeds.slice(index, index + 10), flags: MessageFlags.Ephemeral });
+    const pages=fleetStatusEmbedPages(embeds);
+    await interaction.editReply({ content: "⚓ Savaştaki kendi filolarınızın gemi can durumu:", embeds: pages[0]??[] });
+    for (const page of pages.slice(1)) {
+      await interaction.followUp({ embeds: page, flags: MessageFlags.Ephemeral });
     }
   } else if (interaction.customId.startsWith("battle_armies|")) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });

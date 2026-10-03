@@ -5,7 +5,7 @@ vi.hoisted(() => {
   process.env.DISCORD_CLIENT_ID = "test-client";
   process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
 });
-import { battleEmbed, battleRollEmbed, playerFleetStatusEmbeds, refreshChangedBattleCards } from "./battle-ui.js";
+import { battleEmbed, battleRollEmbed, fleetStatusEmbedPages, playerFleetStatusEmbeds, refreshChangedBattleCards } from "./battle-ui.js";
 import { battleService, type BattleView, type PlayerBattleFleetStatus } from "../services/battle-service.js";
 
 function siegeView(): BattleView {
@@ -192,5 +192,27 @@ describe("özel filo can durumu", () => {
     expect(json).toContain("Classis");
     expect(json).toContain("Pön Filosu");
     expect(json).toContain("yalnızca oyun yöneticisine görünür");
+  });
+
+  it("kalabalık iki taraflı filo dökümünü Discord'un toplam embed sınırına göre mesajlara böler",()=>{
+    const ships:PlayerBattleFleetStatus["ships"]=Array.from({length:160},(_,index)=>({
+      id:`ship-${index}`,sideKey:index%2===0?"A":"B",countryId:index%2===0?"rome":"carthage",
+      countryName:index%2===0?"Roma":"Kartaca",fleetId:`fleet-${index%8}`,fleetName:`Filo ${index%8}`,
+      settlementName:`Yerleşke ${index}`,shipType:"quinquereme",maxHp:120,currentHp:index%3===0?80:120,
+      disabledRound:null,sunkRound:null
+    }));
+    const embeds=playerFleetStatusEmbeds({battleId:"battle",roundNumber:5,ships},"GM");
+    const pages=fleetStatusEmbedPages(embeds);
+    expect(pages.length).toBeGreaterThan(1);
+    expect(pages.flat()).toHaveLength(embeds.length);
+    for(const page of pages){
+      expect(page.length).toBeLessThanOrEqual(10);
+      const textLength=page.reduce((sum,embed)=>{
+        const data=embed.toJSON();
+        return sum+(data.title?.length??0)+(data.description?.length??0)+(data.author?.name.length??0)
+          +(data.footer?.text.length??0)+(data.fields??[]).reduce((fieldSum,field)=>fieldSum+field.name.length+field.value.length,0);
+      },0);
+      expect(textLength).toBeLessThanOrEqual(5_800);
+    }
   });
 });
