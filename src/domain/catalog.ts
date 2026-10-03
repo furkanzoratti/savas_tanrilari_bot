@@ -165,7 +165,7 @@ export const UNITS = {
   militia: { name: "Milis", price: 0, upkeep: 100 }
 } as const;
 
-export const PORT_SHIP_CAPACITY_BY_LEVEL = { 1: 30, 2: 40, 3: 50 } as const;
+export const PORT_SHIP_CAPACITY_BY_LEVEL = { 1: 30, 2: 50, 3: 70 } as const;
 export const PORT_SHIP_CAPACITY = PORT_SHIP_CAPACITY_BY_LEVEL[1];
 
 export function portShipCapacity(level: number): number {

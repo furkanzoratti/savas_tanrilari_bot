@@ -100,6 +100,24 @@ const localNobleMarriageSchema = z.object({
   age: z.coerce.number().int().min(MINIMUM_MARRIAGE_AGE).max(120)
 });
 
+type LocalNobleMarriageCandidate = {
+  status: "ALIVE" | "DEAD";
+  age: number | null;
+  spouse_id: string | null;
+  spouse_status: "ALIVE" | "DEAD" | null;
+};
+
+export function canMarryLocalNoble(member: LocalNobleMarriageCandidate): boolean {
+  return member.status === "ALIVE" && member.age !== null && member.age >= MINIMUM_MARRIAGE_AGE &&
+    (!member.spouse_id || member.spouse_status === "DEAD");
+}
+
+export function localNobleSpouseProfile(memberGender: "MALE" | "FEMALE") {
+  return memberGender === "MALE"
+    ? { gender: "FEMALE" as const, title: "Soylu Hanım" }
+    : { gender: "MALE" as const, title: "Soylu Bey" };
+}
+
 const armyUpdateSchema = z.object({
   name: z.string().trim().min(2).max(60),
   commanderId: z.string().uuid().nullable()
@@ -207,12 +225,15 @@ async function adminDynastyMember(client: AdminDbClient, memberId: string, lock 
   const row = (await client.query<Record<string, unknown> & {
     id: string; dynasty_id: string; country_id: string; country_name: string; dynasty_name: string;
     name: string; gender: "MALE" | "FEMALE"; status: "ALIVE" | "DEAD"; health: "HEALTHY" | "SICK";
-    spouse_id: string | null; is_monarch: boolean; is_heir: boolean; age: number | null; succession_rank: number | null;
+    spouse_id: string | null; spouse_status: "ALIVE" | "DEAD" | null;
+    is_monarch: boolean; is_heir: boolean; age: number | null; succession_rank: number | null;
   }>(
-    `SELECT member.*,dynasty.country_id,dynasty.name AS dynasty_name,country.name AS country_name
+    `SELECT member.*,dynasty.country_id,dynasty.name AS dynasty_name,country.name AS country_name,
+            spouse.status AS spouse_status
        FROM dynasty_members member
        JOIN dynasties dynasty ON dynasty.id=member.dynasty_id
        JOIN countries country ON country.id=dynasty.country_id
+       LEFT JOIN dynasty_members spouse ON spouse.id=member.spouse_id
       WHERE member.id=$1 AND dynasty.guild_id=$2${lock ? " FOR UPDATE OF member" : ""}`,
     [memberId, adminConfig.guildId]
   )).rows[0];
@@ -695,7 +716,8 @@ export const adminPanelService = {
     if (!z.string().uuid().safeParse(dynastyId).success) throw new Error("Geçersiz hanedan kimliği.");
     const dynasty = await adminDynastyContext(adminPool, dynastyId);
     const members = (await adminPool.query(
-      `SELECT member.*,spouse.name AS spouse_name,mother.name AS mother_name,father.name AS father_name
+      `SELECT member.*,spouse.name AS spouse_name,spouse.status AS spouse_status,
+              mother.name AS mother_name,father.name AS father_name
          FROM dynasty_members member
          LEFT JOIN dynasty_members spouse ON spouse.id=member.spouse_id
          LEFT JOIN dynasty_members mother ON mother.id=member.mother_id
@@ -1619,7 +1641,7 @@ export const adminPanelService = {
       if (member.age === null || member.age < MINIMUM_MARRIAGE_AGE) {
         throw new Error(`Evlilik için hanedan üyesi en az ${MINIMUM_MARRIAGE_AGE} yaşında olmalıdır.`);
       }
-      if (member.spouse_id) throw new Error("Seçilen hanedan üyesi zaten evli.");
+      if (member.spouse_id && member.spouse_status !== "DEAD") throw new Error("Seçilen hanedan üyesi zaten evli.");
       const surname = input.surname?.trim() || null;
       const spouseName = [input.firstName.trim(), surname].filter(Boolean).join(" ");
       if (spouseName.length > 80) throw new Error("Yerel soylunun tam adı en fazla 80 karakter olabilir.");
@@ -1628,16 +1650,22 @@ export const adminPanelService = {
         [dynasty.id, spouseName]
       );
       if (duplicate.rowCount) throw new Error("Bu hanedanda aynı adlı bir üye zaten bulunuyor.");
-      const spouseGender = member.gender === "MALE" ? "FEMALE" : "MALE";
+      const spouseProfile = localNobleSpouseProfile(member.gender);
       const spouse = (await client.query<Record<string, unknown> & { id: string }>(
         `INSERT INTO dynasty_members(
            dynasty_id,name,gender,age,title,relation,status,health,is_monarch,is_heir,
            succession_rank,spouse_id,born_turn
          ) VALUES($1,$2,$3,$4,$5,'Yerel soylu eş','ALIVE','HEALTHY',FALSE,FALSE,NULL,$6,$7)
          RETURNING *`,
-        [dynasty.id, spouseName, spouseGender, input.age, spouseGender === "FEMALE" ? "Soylu Hanım" : "Soylu Bey",
+        [dynasty.id, spouseName, spouseProfile.gender, input.age, spouseProfile.title,
           member.id, dynasty.current_turn - input.age]
       )).rows[0]!;
+      if (member.spouse_id) {
+        await client.query(
+          "UPDATE dynasty_members SET spouse_id=NULL,updated_at=NOW() WHERE id=$1 AND spouse_id=$2",
+          [member.spouse_id, member.id]
+        );
+      }
       await client.query("UPDATE dynasty_members SET spouse_id=$1,updated_at=NOW() WHERE id=$2", [spouse.id, member.id]);
       await client.query(
         `UPDATE dynasty_marriage_proposals SET status='CANCELLED',resolved_turn=$1,resolved_by=$2,resolved_at=NOW()

@@ -227,12 +227,17 @@ function dynastyMemberConnections(member) {
   return values.join(" · ") || "Akrabalık bağlantısı girilmemiş";
 }
 
+function canMarryLocalNoble(member) {
+  return member.status === "ALIVE" && Number(member.age) >= 16 &&
+    (!member.spouse_id || member.spouse_status === "DEAD");
+}
+
 async function dynastyDetailPage(dynastyId) {
   setActiveRoute("dynasties"); loading();
   const dynasty = await api(`/api/dynasties/${dynastyId}`);
   const alive = dynasty.members.filter((member) => member.status === "ALIVE");
   const sick = alive.filter((member) => member.health === "SICK");
-  const localMarriageCandidates = alive.filter((member) => Number(member.age) >= 16 && !member.spouse_id);
+  const localMarriageCandidates = alive.filter(canMarryLocalNoble);
   page.innerHTML = `<div class="page-head"><div><button class="button compact" data-back-dynasties>← Hanedanlar</button><h1>${escapeHtml(dynasty.name)}</h1><p>${escapeHtml(dynasty.country_name)} · Tur ${number(dynasty.current_turn)}</p></div><div class="actions"><button class="button" data-edit-dynasty="${dynasty.id}">Hanedanı düzenle</button><button class="button" data-local-noble-marriage="${dynasty.id}" ${localMarriageCandidates.length ? "" : "disabled"}>Yerel soyluyla evlendir</button><button class="button primary" data-add-dynasty-member="${dynasty.id}">＋ Yeni üye / akraba</button></div></div>
     <section class="detail-grid"><div class="detail-cell"><span>Toplam üye</span><strong>${number(dynasty.members.length)}</strong></div><div class="detail-cell"><span>Hayatta</span><strong>${number(alive.length)}</strong></div><div class="detail-cell"><span>Hasta</span><strong>${number(sick.length)}</strong></div><div class="detail-cell"><span>Son doğum denemesi</span><strong>${dynasty.last_birth_attempt_turn === null ? "—" : `Tur ${number(dynasty.last_birth_attempt_turn)}`}</strong></div></section>
     <div class="section-title"><h2>Hanedan üyeleri</h2><span>Ad, yaş, unvan, sağlık ve akrabalık düzenlenebilir</span></div>
@@ -258,13 +263,13 @@ function openDynastyEditor(dynasty) {
 }
 
 function openLocalNobleMarriageEditor(dynasty) {
-  const candidates = dynasty.members.filter((member) => member.status === "ALIVE" && Number(member.age) >= 16 && !member.spouse_id);
+  const candidates = dynasty.members.filter(canMarryLocalNoble);
   if (!candidates.length) return toast("Bu hanedanda yerel soyluyla evlenebilecek uygun üye bulunmuyor.", "error");
-  const options = candidates.map((member) => `<option value="${member.id}">${escapeHtml(member.name)} · ${number(member.age)} yaş · ${escapeHtml(member.title)}</option>`).join("");
+  const options = candidates.map((member) => `<option value="${member.id}">${escapeHtml(member.name)} · ${escapeHtml(dynastyGenderLabels[member.gender] || member.gender)} · ${number(member.age)} yaş · ${escapeHtml(member.title)}${member.spouse_status === "DEAD" ? " · Dul" : ""}</option>`).join("");
   openEditor(
     "Yerel soyluyla evlendir",
     `${dynasty.country_name} · ${dynasty.name}`,
-    `<div class="preview-warning"><strong>Yerel soylu hanedana eş olarak eklenir.</strong><span>Yeni eş veraset sırasına girmez. Evlilik bağı iki üyede de otomatik kurulur.</span></div><label>Evlenecek hanedan üyesi<select id="local-noble-member">${options}</select></label><div class="form-grid"><label>Yerel soylunun adı<input id="local-noble-first-name" minlength="2" maxlength="50" required></label><label>Soyadı (isteğe bağlı)<input id="local-noble-surname" maxlength="50" placeholder="Boş bırakılabilir"></label><label>Yaşı<input id="local-noble-age" type="number" min="16" max="120" step="1" value="18" required></label></div>`,
+    `<div class="preview-warning"><strong>Erkek ve kadın hanedan üyeleri evlendirilebilir.</strong><span>Erkek üyeye kadın, kadın üyeye erkek yerel soylu eş oluşturulur. Dul üyeler yeniden evlenebilir; yeni eş veraset sırasına girmez.</span></div><label>Evlenecek hanedan üyesi<select id="local-noble-member">${options}</select></label><div class="form-grid"><label>Yerel soylunun adı<input id="local-noble-first-name" minlength="2" maxlength="50" required></label><label>Soyadı (isteğe bağlı)<input id="local-noble-surname" maxlength="50" placeholder="Boş bırakılabilir"></label><label>Yaşı<input id="local-noble-age" type="number" min="16" max="120" step="1" value="18" required></label></div>`,
     async () => {
       await api(`/api/admin/dynasties/${dynasty.id}/local-noble-marriages`, {
         method: "POST",

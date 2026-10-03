@@ -124,8 +124,8 @@ describe("seferberlik ve bakım", () => {
     expect(PORT_SHIP_CAPACITY).toBe(30);
     expect(portShipCapacity(0)).toBe(0);
     expect(portShipCapacity(1)).toBe(30);
-    expect(portShipCapacity(2)).toBe(40);
-    expect(portShipCapacity(3)).toBe(50);
+    expect(portShipCapacity(2)).toBe(50);
+    expect(portShipCapacity(3)).toBe(70);
     expect(shipHarborRequirement("quinquereme", 3)).toBe(12);
     expect(fleetTransportCapacity({ kerkouros: 2, trireme: 1, quinquereme: 1 })).toBe(1_700);
     expect(fleetTransportCapacity({ trireme: 3 }, 1.10)).toBe(1_650);
