@@ -296,6 +296,29 @@ export const greatGamesService = {
     );
   },
 
+  async latestRoundResult(guildId: string, gameType: GreatGameType): Promise<{ round: number; summary: string[] } | null> {
+    const rows = (await pool.query<{ round: number; line: string; result_order: number }>(
+      `WITH latest AS (
+         SELECT MAX(a.round)::integer AS round
+         FROM great_games_actions a
+         JOIN great_games_seasons s ON s.id=a.season_id
+         WHERE s.guild_id=$1 AND s.game_turn=$2 AND a.game_type=$3
+           AND a.resolved=TRUE AND a.payload ? 'roundResult'
+       )
+       SELECT a.round,a.payload->>'roundResult' AS line,
+              COALESCE((a.payload->>'roundResultOrder')::integer,0) AS result_order
+       FROM great_games_actions a
+       JOIN great_games_seasons s ON s.id=a.season_id
+       CROSS JOIN latest
+       WHERE s.guild_id=$1 AND s.game_turn=$2 AND a.game_type=$3
+         AND a.resolved=TRUE AND a.payload ? 'roundResult' AND a.round=latest.round
+       ORDER BY result_order,a.created_at`,
+      [guildId, GREAT_GAMES_TURN, gameType]
+    )).rows;
+    if (!rows.length) return null;
+    return { round: Number(rows[0]!.round), summary: rows.map((row) => row.line) };
+  },
+
   async openSeason(guildId: string, actorId: string): Promise<GreatGamesSeasonRow> {
     return withTransaction(async (client) => {
       await currentTurn(client, guildId);
@@ -501,10 +524,17 @@ export const greatGamesService = {
           countryId: action.country_id, tactic: action.payload.tactic as ChariotTactic,
           targetCountryId: (action.payload.targetCountryId as string | null) ?? null
         })));
-        for (const result of results) {
+        for (const [resultIndex, result] of results.entries()) {
           await client.query("UPDATE great_games_entries SET score=score+$1 WHERE season_id=$2 AND game_type=$3 AND country_id=$4", [result.score, season.id, gameType, result.countryId]);
           const tactic = CHARIOT_TACTICS[result.tactic].label;
-          summary.push(`${list.find((entry) => entry.country_id === result.countryId)?.country_name}: ${tactic} • ${result.crashed ? `Kaza • Etap puanı 0` : `Zar ${result.naturalRoll}${result.penaltyRoll ? ` − ${result.penaltyRoll} sıkıştırma` : ""} • Etap puanı ${result.score}`}`);
+          const resultLine = `${list.find((entry) => entry.country_id === result.countryId)?.country_name}: ${tactic} • ${result.crashed ? `Kaza • Etap puanı 0` : `Zar ${result.naturalRoll}${result.penaltyRoll ? ` − ${result.penaltyRoll} sıkıştırma` : ""} • Etap puanı ${result.score}`}`;
+          await client.query(
+            `UPDATE great_games_actions
+             SET payload=payload || jsonb_build_object('roundResult',$1::text,'roundResultOrder',$2::integer),updated_at=NOW()
+             WHERE season_id=$3 AND game_type=$4 AND country_id=$5 AND round=$6`,
+            [resultLine, resultIndex, season.id, gameType, result.countryId, season.current_round]
+          );
+          summary.push(resultLine);
         }
         finished = season.current_round >= GREAT_GAMES_RACE_ROUNDS;
       } else if (gameType === "CARAVAN") {

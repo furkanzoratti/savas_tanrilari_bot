@@ -5,8 +5,8 @@ import {
 } from "discord.js";
 import {
   ACTIVE_GREAT_GAME_TYPES, AUCTION_OPENING_BID, CARAVAN_ROUTES, CARAVAN_TRACK_TARGET, CHARIOT_TACTICS, CHARIOT_TRACK_TARGET,
-  GREAT_GAMES_RACE_ROUNDS, GREAT_GAME_TYPES, RACE_TRACK_STEPS, auctionNextMinimum, diplomacyGoalKey,
-  parseCaravanRoute, parseChariotTactic, parseKingsDecision, raceTrackPosition,
+  GREAT_GAMES_RACE_ROUNDS, GREAT_GAME_TYPES, auctionNextMinimum, diplomacyGoalKey,
+  parseCaravanRoute, parseChariotTactic, parseKingsDecision,
   type CaravanRoute, type ChariotTactic, type GreatGameType, type KingsDecision
 } from "../domain/great-games.js";
 import { gold } from "../domain/format.js";
@@ -31,6 +31,8 @@ const CARAVAN_ROLE_LABELS: Record<string, string> = {
   GUIDE: "Rehber",
   FINANCIER: "Finansör"
 };
+
+const RACE_TRACK_DISPLAY_STEPS = 30;
 
 function gameId(value: string): GreatGameType {
 
@@ -77,8 +79,8 @@ function kingsDecisionLabel(value: KingsDecision): string {
 }
 
 function raceTrack(score: number, target: number, marker: string): string {
-  const position = raceTrackPosition(score, target);
-  return `Başlangıç ${"━".repeat(position)}${marker}${"·".repeat(RACE_TRACK_STEPS - position)} 🏁`;
+  const position = Math.max(0, Math.min(RACE_TRACK_DISPLAY_STEPS, Math.floor((score / target) * RACE_TRACK_DISPLAY_STEPS)));
+  return `Başlangıç ${"━".repeat(position)}${marker}${"·".repeat(RACE_TRACK_DISPLAY_STEPS - position)} 🏁`;
 }
 
 function chariotFields(entries: GreatGamesEntryRow[]) {
@@ -92,8 +94,22 @@ function chariotFields(entries: GreatGamesEntryRow[]) {
     if (!current || current.length + block.length + 2 > 1_000) chunks.push(block);
     else chunks[chunks.length - 1] = `${current}\n\n${block}`;
   }
-  return (chunks.length ? chunks : ["Henüz yarışçı bulunmuyor."]).slice(0, 24).map((value, index) => ({
-    name: index === 0 ? `🏇 Yarış Pisti • Bitiş ${CHARIOT_TRACK_TARGET} puan` : `🏇 Yarış Pisti • Devam ${index + 1}`,
+  return (chunks.length ? chunks : ["Henüz yarışçı bulunmuyor."]).slice(0, 19).map((value, index) => ({
+    name: index === 0 ? "🏇 Yarış Pisti" : `🏇 Yarış Pisti • Devam ${index + 1}`,
+    value,
+    inline: false
+  }));
+}
+
+function chariotResultFields(result: { round: number; summary: string[] }) {
+  const chunks: string[] = [];
+  for (const line of result.summary) {
+    const current = chunks.at(-1);
+    if (!current || current.length + line.length + 1 > 1_000) chunks.push(line);
+    else chunks[chunks.length - 1] = `${current}\n${line}`;
+  }
+  return chunks.slice(0, 5).map((value, index) => ({
+    name: index === 0 ? `🎲 Son Etap Sonuçları • Etap ${result.round}` : `🎲 Son Etap Sonuçları • Devam ${index + 1}`,
     value,
     inline: false
   }));
@@ -436,7 +452,6 @@ async function publicGamePayload(guildId: string, type: GreatGameType, content?:
     embed.setFooter({ text: "Her aşama çözüldüğünde kervanlar 50 kademeli pistte yeni puanlarına göre ilerler." });
   } else if (type === "CHARIOT") {
     embed.addFields(...chariotFields(entries));
-    embed.setFooter({ text: "Her 2 puan atı bir kademe ilerletir; pist her etap çözüldüğünde otomatik güncellenir." });
   } else {
     const ranked = [...entries].sort((left, right) => Number(right.score) - Number(left.score) || left.country_name.localeCompare(right.country_name, "tr"));
     embed.addFields({ name: "Katılan Devletler", value: clip(ranked.map((entry, index) => `${index + 1}. **${entry.country_name}**${Number(entry.score) ? ` — ${entry.score} puan` : ""}`).join("\n") || "Katılımcı bulunmuyor.") });
@@ -479,6 +494,11 @@ async function publicGamePayload(guildId: string, type: GreatGameType, content?:
         value: clip(lines.join("\n") || "Henüz eşleşme bulunmuyor.")
       });
     }
+  }
+
+  if (type === "CHARIOT") {
+    const latestResult = await greatGamesService.latestRoundResult(guildId, type);
+    if (latestResult) embed.addFields(...chariotResultFields(latestResult));
   }
 
   const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -904,7 +924,10 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
       await interaction.editReply(await publicGamePayload(interaction.guildId, type, `🏺 **Müzayede Sonuçları**\n${result.summary.join("\n")}`.slice(0, 2_000)));
     } else {
       const result = await greatGamesService.resolveRound(interaction.guildId);
-      await interaction.editReply(await publicGamePayload(interaction.guildId, type, `🎲 **Aşama ${result.round} Sonuçları**\n${result.summary.join("\n")}${result.finished ? "\n🏁 Oyun tamamlandı." : ""}`.slice(0, 2_000)));
+      const resultContent = type === "CHARIOT"
+        ? undefined
+        : `🎲 **Aşama ${result.round} Sonuçları**\n${result.summary.join("\n")}${result.finished ? "\n🏁 Oyun tamamlandı." : ""}`.slice(0, 2_000);
+      await interaction.editReply(await publicGamePayload(interaction.guildId, type, resultContent));
     }
     return true;
   }
