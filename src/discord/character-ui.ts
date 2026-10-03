@@ -43,7 +43,6 @@ const purchaseCategoryLabels:Record<string,string> = {
 const DIPLOMAT_TASK_BY_SUBCOMMAND: Partial<Record<string,DiplomatTask>> = {
   "halkla-uzlas":"RECONCILIATION",
   "kultur-degistir":"CULTURE_CHANGE",
-  "vassallastir":"VASSALIZE",
   "vassal-entegre-et":"VASSAL_INTEGRATION"
 };
 

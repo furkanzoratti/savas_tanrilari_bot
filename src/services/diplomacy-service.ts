@@ -2,6 +2,7 @@ import { pool, withTransaction, type DbClient } from "../db/pool.js";
 import { DIPLOMACY_LIMITS } from "../domain/diplomacy.js";
 import type { ResourceType } from "../domain/resources.js";
 import { GameError } from "./game-service.js";
+import { syncCountryPrimaryCulture } from "./culture-service.js";
 
 export interface CountryDiplomacyEntry {
   id: string;
@@ -452,6 +453,7 @@ export const diplomacyService = {
       await client.query("UPDATE armies SET country_id=$2,updated_at=NOW() WHERE country_id=$1", [vassal.id, overlord.id]);
       await client.query("UPDATE fleets SET country_id=$2,updated_at=NOW() WHERE country_id=$1", [vassal.id, overlord.id]);
       await client.query("UPDATE settlements SET country_id=$2,is_conquered=FALSE,conquered_turn=NULL WHERE country_id=$1", [vassal.id, overlord.id]);
+      await syncCountryPrimaryCulture(client, overlord.id);
       for (const table of ["recruitment_orders", "naval_orders", "siege_orders", "garrison_replenishment_orders", "siege_assets", "mercenary_contracts", "pantheon_loans", "purchase_agent_discounts"] as const) {
         await client.query(`UPDATE ${table} SET country_id=$2 WHERE country_id=$1`, [vassal.id, overlord.id]);
       }

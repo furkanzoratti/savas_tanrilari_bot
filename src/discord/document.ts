@@ -114,6 +114,7 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
     ? document.tradeAgreements.map((agreement) => `${agreement.status === "ACTIVE" ? "✅" : "⏳"} **${agreement.partner_name}** • ${TRADE_ROUTE_LABELS[agreement.route]}\n${agreement.proposer_settlement_name} (${RESOURCES[agreement.proposer_resource].label}) ⇄ ${agreement.receiver_settlement_name} (${RESOURCES[agreement.receiver_resource].label})`).join("\n\n")
     : "Aktif veya bekleyen ticaret antlaşması yok.";
   const remainingCapacity = Math.max(0, document.militaryLimit - document.militaryUsed);
+  const primaryCulture = CULTURE_GROUPS[document.country.primary_culture_group]?.label ?? document.country.primary_culture_group;
   const formable = document.country.active_formable_key ? FORMABLE_COUNTRIES[document.country.active_formable_key] : null;
   const mercenarySummary = (document.mercenaries ?? []).length
     ? (document.mercenaries ?? []).map((contract) => {
@@ -133,6 +134,7 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
     .setImage(TEMPLE_BANNER_URL)
     .addFields(
       { name: "👑 Yönetim", value: spacedSection(document.playerIds.length ? document.playerIds.map((id) => `<@${id}>`).join(" • ") : "Oyuncu atanmamış.") },
+      { name: "🏺 Ana Kültür", value: spacedSection(`**${primaryCulture}**\nÖzgür nüfus çoğunluğuna göre otomatik belirlenir.`) },
       { name: "🏦 Hazine", value: spacedSection(`**${gold(document.country.treasury)}**`), inline: true },
       { name: "👥 Özgür Nüfus", value: spacedSection(`**${number(document.freePopulation)}**`), inline: true },
       { name: "⚔️ Askerî Kapasite", value: spacedSection(`Mevcut: **${number(document.militaryUsed)}**\nSınır: ${number(document.militaryLimit)}\nKalan: ${number(remainingCapacity)}${document.manpowerPenaltyActive ? "\n⚠️ Sınır aşımı: bakım +%25" : document.militaryUsed > document.militaryLimit ? "\n⏳ Sınır aşımı: düzeltme süresi" : ""}`), inline: true },
@@ -171,6 +173,12 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
     const occupiedSlots = settlement.buildings.filter((building) => building.level > 0 || building.status === "BUILDING").length;
     const activeConstruction = settlement.buildings.filter((building) => building.status === "BUILDING").length;
     const culture = CULTURE_GROUPS[settlement.culture_group]?.label ?? settlement.culture_group;
+    const foreignCulture = settlement.culture_group !== "UNASSIGNED"
+      && document.country.primary_culture_group !== "UNASSIGNED"
+      && settlement.culture_group !== document.country.primary_culture_group;
+    const cultureText = foreignCulture
+      ? `**${culture}** • ⚠️ Yabancı kültür\nToplam gelir: **×0,80**\nAskerî limit: **${document.guild.culture_military_penalty_enabled ? "×0,80" : "hazırlık sürecinde • etkisiz"}**`
+      : `**${culture}** • ✅ Ana kültürle uyumlu`;
     const religionLines=(settlement.religionDistribution??[]).flatMap((share)=>[
       `${share.active?"Ana din":"Din"}: **${share.religionLabel} • %${number(share.primaryPercent)}**`,
       `${share.active?"İkinci mezhep":"Mezhep"}: **${share.secondaryLabel} • %${number(share.secondaryPercent)}**`
@@ -222,7 +230,7 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
         `Bina: **${occupiedSlots}/${settlement.slotLimit} slot** • İnşaat: **${activeConstruction}/${settlement.constructionLimit ?? 2}**${settlement.is_coastal ? " • ⚓ Kıyı" : ""}`
       ].join("\n"))
       .addFields(
-        { name: "🏺 Kültür", value: spacedSection(`**${culture}**`), inline: true },
+        { name: "🏺 Kültür", value: spacedSection(cultureText), inline: true },
         { name: "⛩️ Din ve Mezhep", value: spacedSection(religionLines.join("\n")||"Din dağılımı bulunmuyor."), inline: true },
         {
           name: "🏦 Yerel Hazine",

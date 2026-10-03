@@ -55,10 +55,10 @@ describe("Akademi karakter komutları", () => {
   });
 
   it("aynı turda yeniden görevlendirilebilen Diplomat ve Tüccarı doğru filtreler", () => {
-    expect(characterAvailableForCommand(availableCharacter,"diplomat","vassallastir")).toBe(true);
+    expect(characterAvailableForCommand(availableCharacter,"diplomat","vassal-entegre-et")).toBe(true);
     expect(characterAvailableForCommand(availableCharacter,"diplomat","asimilasyon")).toBe(true);
     expect(characterAvailableForCommand({...availableCharacter,assignment:"DIPLOMAT_DEFENSE"},"diplomat","gorev-bitir")).toBe(true);
-    expect(characterAvailableForCommand({...availableCharacter,assignment:"DIPLOMAT_DEFENSE"},"diplomat","vassallastir")).toBe(false);
+    expect(characterAvailableForCommand({...availableCharacter,assignment:"DIPLOMAT_DEFENSE"},"diplomat","vassal-entegre-et")).toBe(false);
     expect(characterAvailableForCommand({...availableCharacter,role:"MERCHANT",assignment:"MERCHANT_DOMESTIC"},"tuccar","gorev-bitir")).toBe(true);
     expect(characterAvailableForCommand({...availableCharacter,character_status:"DEAD"},"diplomat","gorev-baslat")).toBe(false);
   });
@@ -66,17 +66,18 @@ describe("Akademi karakter komutları", () => {
   it("Diplomat görevlerinde yalnızca göreve ait seçenekleri gösterir", () => {
     const command = commandBuilders.find((item) => item.name === "diplomat");
     expect(command?.options?.map((item) => item.name)).toEqual([
-      "halkla-uzlas","kultur-degistir","asimilasyon","vassallastir","vassal-entegre-et","savunma-ata","uzmanlik-sec","gorev-bitir"
+      "halkla-uzlas","kultur-degistir","asimilasyon","vassal-entegre-et","savunma-ata","uzmanlik-sec","gorev-bitir"
     ]);
     const reconciliation = command?.options?.find((item) => item.name === "halkla-uzlas");
     const culture = command?.options?.find((item) => item.name === "kultur-degistir");
-    const vassalize = command?.options?.find((item) => item.name === "vassallastir");
+    const integration = command?.options?.find((item) => item.name === "vassal-entegre-et");
     expect(reconciliation?.options?.map((item) => item.name)).toEqual(["diplomat","olay","hedef-sehir"]);
     expect(reconciliation?.options?.find((item) => item.name === "olay")?.choices?.map((choice) => choice.value)).toEqual([
       "BLACK_MARKET","EPIDEMIC","UNREST","REBELLION"
     ]);
     expect(culture?.options?.map((item) => item.name)).toEqual(["diplomat","kultur","hedef-sehir"]);
-    expect(vassalize?.options?.map((item) => item.name)).toEqual(["diplomat","hedef-ulke"]);
+    expect(command?.options?.find((item) => item.name === "vassallastir")).toBeUndefined();
+    expect(integration?.options?.map((item) => item.name)).toEqual(["diplomat","hedef-ulke"]);
     expect(command?.options?.find((item) => item.name === "asimilasyon")?.options?.map((item) => item.name)).toEqual(["diplomat","hedef-sehir"]);
   });
 

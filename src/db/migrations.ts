@@ -55,6 +55,7 @@ import { navalDamageAllocationReconciliationMigration } from "./naval-damage-all
 import { carthageRepairTransferToIbossimMigration } from "./carthage-repair-transfer-to-ibossim-migration.js";
 import { greatGamesGladiatorChampionshipMigration } from "./great-games-gladiator-championship-migration.js";
 import { dynastyCoupleBirthAttemptsMigration } from "./dynasty-couple-birth-attempts-migration.js";
+import { automaticCultureEffectsMigration } from "./automatic-culture-effects-migration.js";
 
 export const migrations = [
   {
@@ -2327,5 +2328,6 @@ export const migrations = [
   navalDamageAllocationReconciliationMigration,
   carthageRepairTransferToIbossimMigration,
   greatGamesGladiatorChampionshipMigration,
-  dynastyCoupleBirthAttemptsMigration
+  dynastyCoupleBirthAttemptsMigration,
+  automaticCultureEffectsMigration
 ] as const;

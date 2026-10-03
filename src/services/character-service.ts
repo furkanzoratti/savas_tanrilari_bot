@@ -14,6 +14,7 @@ import { awardCharacterSpecializationProgress, chooseCharacterSpecialization } f
 import { convertReligionDistribution, religionConversionPercent, RELIGIONS, type ReligionKey } from "../domain/religions.js";
 import { fallbackReligionDistribution, loadCountryReligionProfile, loadReligionDistributions } from "./religion-service.js";
 import { isAcquisitionTurn } from "../domain/mobilization.js";
+import { syncCountryPrimaryCulture } from "./culture-service.js";
 
 export const MISSIONARY_PURCHASE_COST = 2_000;
 export const MISSIONARY_LIMIT_PER_COUNTRY = 2;
@@ -1461,6 +1462,7 @@ export async function processCharacterTurn(
       if (complete) {
         if (operation.task_type === "CULTURE_CHANGE") {
           await client.query("UPDATE settlements SET culture_group=$1 WHERE id=$2", [operation.target_culture_group,operation.target_settlement_id]);
+          await syncCountryPrimaryCulture(client, operation.country_id);
         } else if (operation.task_type === "VASSALIZE") {
           await client.query(
             "INSERT INTO country_vassalages(guild_id,overlord_country_id,vassal_country_id,started_turn,created_by) VALUES($1,$2,$3,$4,'DIPLOMAT') ON CONFLICT DO NOTHING",

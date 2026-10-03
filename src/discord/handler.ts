@@ -274,7 +274,8 @@ function renderCountryDetail(detail:CountryDetailView):EmbedBuilder[] {
       .setDescription(index===0?[
         `💰 **Devlet Toplam Hazinesi:** ${gold(detail.totalTreasury)}`,
         `🏘️ **Toplam Yerleşke:** ${number(detail.settlementCount)}`,
-        `👥 **Toplam Özgür Nüfus:** ${number(detail.totalPopulation)}`
+        `👥 **Toplam Özgür Nüfus:** ${number(detail.totalPopulation)}`,
+        `🏺 **Ana Kültür:** ${CULTURE_GROUPS[detail.country.primaryCultureGroup]?.label??detail.country.primaryCultureGroup}`
       ].join("\n"):null)
       .addFields({name:`Yerleşkeler${settlementChunks.length>1?` • ${index+1}`:""}`,value:chunk});
     if (index===0) embed.setImage(STATE_DETAIL_BANNER_URL);
@@ -1254,6 +1255,17 @@ async function handleGreatPowerCommand(interaction: ChatInputCommandInteraction)
   await interaction.editReply(`✅ Güncel **${snapshot.rows.length} devletlik Büyük Güçler sıralaması** <#${channelId}> kanalında paylaşıldı.`);
 }
 async function handleCommand(interaction: ChatInputCommandInteraction): Promise<void> {
+  if (interaction.commandName === "kultur-askeri-ceza") {
+    requireGameMaster(interaction);
+    if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const enabled = interaction.options.getBoolean("aktif", true);
+    await gameService.setCultureMilitaryPenalty(interaction.guildId, interaction.user.id, enabled);
+    await interaction.editReply(enabled
+      ? "✅ Yabancı kültürlü yerleşkelerin askerî limit katkısı **×0,80** olarak etkinleştirildi. Limit aşımındaki devletler mevcut düzeltme süresi ve bakım cezası kurallarına tabidir."
+      : "✅ Yabancı kültürün askerî limit cezası kapatıldı. Gelir cezası **×0,80** uygulanmaya devam eder.");
+    return;
+  }
   if (interaction.commandName === "operasyon-masasi") {
     requireGameMaster(interaction);
     if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");

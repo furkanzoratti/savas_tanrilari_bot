@@ -29,6 +29,9 @@ describe("yönetim komutları", () => {
     const militiaAdd = commandBuilders.find((command) => command.name === "milis-ekle");
     expect(militiaAdd?.description).toContain("Yalnızca yönetici");
     expect(militiaAdd?.options?.map((option) => option.name)).toEqual(["ulke", "yerleske", "miktar"]);
+    const culturePenalty = commandBuilders.find((command) => command.name === "kultur-askeri-ceza");
+    expect(culturePenalty?.description).toContain("Yalnızca yönetici");
+    expect(culturePenalty?.options?.find((option) => option.name === "aktif")).toMatchObject({ required: true });
   });
 
   it("yok edilmiş devletleri listeleme, geri getirme ve vassallık yönetimini kaydeder", () => {

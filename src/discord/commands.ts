@@ -270,9 +270,6 @@ export const commandBuilders = [
     .addSubcommand((sub) => sub.setName("asimilasyon").setDescription("Diplomatı fethedilmiş bir yerleşkenin asimilasyonuna gönderir")
       .addStringOption((o) => o.setName("diplomat").setDescription("Müsait Diplomat").setRequired(true).setAutocomplete(true))
       .addStringOption((o) => o.setName("hedef-sehir").setDescription("Asimilasyonu süren fethedilmiş yerleşke").setRequired(true).setAutocomplete(true)))
-    .addSubcommand((sub) => sub.setName("vassallastir").setDescription("Başka bir devleti diplomatik olarak vassallaştırmaya çalışır")
-      .addStringOption((o) => o.setName("diplomat").setDescription("Müsait Diplomat").setRequired(true).setAutocomplete(true))
-      .addStringOption((o) => o.setName("hedef-ulke").setDescription("Vassallaştırılmaya çalışılacak devlet").setRequired(true).setAutocomplete(true)))
     .addSubcommand((sub) => sub.setName("vassal-entegre-et").setDescription("Etkin bir vassalın bağlılığını ilhak için ilerletir")
       .addStringOption((o) => o.setName("diplomat").setDescription("Müsait Diplomat").setRequired(true).setAutocomplete(true))
       .addStringOption((o) => o.setName("hedef-ulke").setDescription("Entegre edilecek etkin vassal devlet").setRequired(true).setAutocomplete(true)))
@@ -982,6 +979,12 @@ export const commandBuilders = [
     .addIntegerOption((o) => o.setName("miktar").setDescription("Eklenecek Milis miktarı").setMinValue(1).setRequired(true)),
   new SlashCommandBuilder()
     .setName("operasyon-masasi").setDescription("Yalnızca yönetici: GM Operasyon Masası için tek kullanımlık giriş bağlantısı üretir"),
+  new SlashCommandBuilder()
+    .setName("kultur-askeri-ceza").setDescription("Yalnızca yönetici: yabancı kültürün askerî limit cezasını açar veya kapatır")
+    .addBooleanOption((option) => option
+      .setName("aktif")
+      .setDescription("Yabancı kültürlü nüfus askerî limite ×0,80 katkı sağlasın mı?")
+      .setRequired(true)),
   new SlashCommandBuilder()
     .setName("yonetim").setDescription("Oyun yöneticisi komutları")
     .addSubcommand((sub) => sub.setName("ulke-olustur").setDescription("Yeni ülke oluşturur")

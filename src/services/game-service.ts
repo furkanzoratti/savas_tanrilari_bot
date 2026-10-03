@@ -28,11 +28,13 @@ import { grantFormableFoundingReward } from "./formable-country-reward-service.j
 import { siegeStarvationBonus } from "../domain/siege-starvation.js";
 import { dominantReligionFromDistributions, religionBeliefShares, religionDistributionModifiers, religionUnitDiscount, RELIGIONS, SECONDARY_RELIGIONS, type ReligionBeliefShare, type ReligionKey, type ReligionModifiers } from "../domain/religions.js";
 import { fallbackReligionDistribution, loadReligionDistributions, loadSettlementReligionModifiers, resetSettlementReligionDistribution } from "./religion-service.js";
+import { applyCultureIncomeEffect, cultureMilitaryPopulation } from "../domain/culture-effects.js";
+import { syncCountryPrimaryCulture, syncGuildPrimaryCultures } from "./culture-service.js";
 
 export class GameError extends Error {}
 
-interface GuildRow { discord_id: string; current_turn: number; turn_phase: string; acquisition_interval: number; army_composition_activation_turn: number | null }
-interface CountryRow { id: string; guild_id: string; name: string; treasury: number; mobilization: Mobilization; mobilization_started_turn: number | null; manpower_over_limit_since_turn: number | null; manpower_penalty_active: boolean; discord_role_id: string | null; status: "ACTIVE" | "YOK_EDİLDİ"; destroyed_turn: number | null; destroyed_reason: string | null; active_formable_key: FormableCountryKey | null }
+interface GuildRow { discord_id: string; current_turn: number; turn_phase: string; acquisition_interval: number; army_composition_activation_turn: number | null; culture_military_penalty_enabled: boolean }
+interface CountryRow { id: string; guild_id: string; name: string; treasury: number; mobilization: Mobilization; mobilization_started_turn: number | null; manpower_over_limit_since_turn: number | null; manpower_penalty_active: boolean; discord_role_id: string | null; status: "ACTIVE" | "YOK_EDİLDİ"; destroyed_turn: number | null; destroyed_reason: string | null; active_formable_key: FormableCountryKey | null; primary_culture_group: CultureGroup }
 interface SettlementRow {
   id: string; country_id: string; name: string; population: number; slave_population: number;
   base_income: number; tax_income: number; land_trade_income: number; sea_trade_income: number;
@@ -270,7 +272,7 @@ export interface CountryDocument {
 }
 
 export interface CountryDetailView {
-  country:{id:string;name:string};
+  country:{id:string;name:string;primaryCultureGroup:CultureGroup};
   totalTreasury:number;
   totalPopulation:number;
   settlementCount:number;
@@ -560,9 +562,21 @@ async function loadMercenaryContracts(client: DbClient, countryId: string): Prom
   }));
 }
 
-async function countryManpower(client: DbClient, countryId: string): Promise<{ population: number; used: number }> {
-  const populationResult = await client.query<{ total: number }>(
-    "SELECT COALESCE(SUM(population), 0)::bigint AS total FROM settlements WHERE country_id = $1 AND is_conquered=FALSE",
+async function countryManpower(client: DbClient, countryId: string): Promise<{ population: number; militaryPopulation: number; used: number }> {
+  const populationResult = await client.query<{ total: number; military_total: number }>(
+    `SELECT COALESCE(SUM(settlement.population),0)::bigint AS total,
+            COALESCE(SUM(CASE
+              WHEN guild.culture_military_penalty_enabled=TRUE
+               AND settlement.culture_group<>'UNASSIGNED'
+               AND country.primary_culture_group<>'UNASSIGNED'
+               AND settlement.culture_group<>country.primary_culture_group
+              THEN FLOOR(settlement.population*0.80)
+              ELSE settlement.population
+            END),0)::bigint AS military_total
+       FROM countries country
+       JOIN guilds guild ON guild.discord_id=country.guild_id
+       LEFT JOIN settlements settlement ON settlement.country_id=country.id AND settlement.is_conquered=FALSE
+      WHERE country.id=$1`,
     [countryId]
   );
   const unitResult = await client.query<{ total: number }>(
@@ -598,7 +612,8 @@ async function countryManpower(client: DbClient, countryId: string): Promise<{ p
   const shipManpower = [...ships.rows, ...pendingShips.rows]
     .reduce((sum, row) => sum + (SHIPS[row.ship_type]?.manpower ?? 0) * row.quantity, 0);
   return {
-    population: populationResult.rows[0]?.total ?? 0,
+    population: Number(populationResult.rows[0]?.total ?? 0),
+    militaryPopulation: Number(populationResult.rows[0]?.military_total ?? populationResult.rows[0]?.total ?? 0),
     used:(unitResult.rows[0]?.total??0)+(displacedResult.rows[0]?.total??0)+(pendingResult.rows[0]?.total??0)+
       (pendingGarrison.rows[0]?.total??0)+shipManpower
   };
@@ -815,7 +830,9 @@ export const gameService = {
   async countryDetail(countryId:string):Promise<CountryDetailView> {
     const client=await pool.connect();
     try {
+      await syncCountryPrimaryCulture(client,countryId);
       const country=await getCountry(client,countryId);
+      const guild=await getGuild(client,country.guild_id);
       const settlements=(await client.query<SettlementRow>(
         "SELECT * FROM settlements WHERE country_id=$1 ORDER BY name",
         [countryId]
@@ -865,13 +882,18 @@ export const gameService = {
           id:settlement.id,name:settlement.name,localTreasury:Number(settlement.local_treasury),population,
           cultureGroup:settlement.culture_group,
           militaryUsed:personnelBySettlement.get(settlement.id)??0,
-          militaryLimit:settlement.is_conquered?0:settlementMobilizationLimit(population,country.mobilization,marshalPartial),
+          militaryLimit:settlement.is_conquered?0:settlementMobilizationLimit(
+            cultureMilitaryPopulation(
+              population,settlement.culture_group,country.primary_culture_group,
+              guild.culture_military_penalty_enabled
+            ),country.mobilization,marshalPartial
+          ),
           religionDistribution:religionBeliefShares(distribution,settlement.religion_key)
         };
       });
       const percent=(population:number)=>totalPopulation>0?population/totalPopulation*100:0;
       return {
-        country:{id:country.id,name:country.name},
+        country:{id:country.id,name:country.name,primaryCultureGroup:country.primary_culture_group},
         totalTreasury:settlements.reduce((sum,settlement)=>sum+Number(settlement.local_treasury),0),
         totalPopulation,settlementCount:settlements.length,settlements:detailedSettlements,
         religions:[...religionPopulations.entries()].map(([key,population])=>{
@@ -1077,6 +1099,7 @@ export const gameService = {
       const settlement = result.rows[0]!;
       await ensureStandardGarrison(client, settlement.id, settlement.population, settlement.garrison_level, true);
       settlement.garrison_level = garrisonLevel(settlement.population);
+      await syncCountryPrimaryCulture(client, country.id);
       await audit(client, input.guildId, input.actorId, "SETTLEMENT_CREATE", "settlement", settlement.id, input);
       return settlement;
     });
@@ -1088,6 +1111,7 @@ export const gameService = {
       if (country.guild_id !== input.guildId) throw new GameError("Ülke bu sunucuya ait değil.");
       const changed = await client.query("UPDATE settlements SET culture_group=$1 WHERE id=$2 AND country_id=$3 RETURNING id", [input.cultureGroup, input.settlementId, country.id]);
       if (!changed.rowCount) throw new GameError("Yerleşke bulunamadı.");
+      await syncCountryPrimaryCulture(client, country.id);
       await audit(client, input.guildId, input.actorId, "SETTLEMENT_CULTURE_SET", "settlement", input.settlementId, { cultureGroup: input.cultureGroup });
     });
   },
@@ -1620,6 +1644,8 @@ export const gameService = {
       const newGarrison = await scheduleMandatoryGarrisonReplenishment(client, { settlementId: settlement.id, currentTurn: guild.current_turn, reason: "CONQUEST" });
       await syncCountryTreasury(client, source.id);
       await syncCountryTreasury(client, target.id);
+      await syncCountryPrimaryCulture(client, source.id);
+      await syncCountryPrimaryCulture(client, target.id);
       await audit(client, input.guildId, input.actorId, "SETTLEMENT_TRANSFER", "settlement", settlement.id, {
         fromCountryId: source.id, toCountryId: target.id, cancelledRecruitmentOrders: activeOrders.rows.length, cancelledNavalOrders: cancelledNaval.rowCount ?? 0, cancelledSiegeOrders: cancelledSiege.rowCount ?? 0, endedTrades: trades.rowCount ?? 0, conqueredTurn,
         enslavedGarrison, removedArmyPersonnel, preservedArmyPersonnel, evacuatedArmyPopulation, remainingSourceSettlements, removedShips, removedSiegeAssets, destroyedMercenaryContracts: mercenaryContracts.length,
@@ -1638,6 +1664,7 @@ export const gameService = {
   async document(countryId: string, options: { includeArmies?: boolean } = {}): Promise<CountryDocument> {
     const client = await pool.connect();
     try {
+      await syncCountryPrimaryCulture(client, countryId);
       const country = await getCountry(client, countryId);
       const guild = await getGuild(client, country.guild_id);
       const playerIds = (await client.query<{ discord_user_id: string }>("SELECT discord_user_id FROM country_members WHERE country_id=$1 ORDER BY discord_user_id", [countryId])).rows.map((row) => row.discord_user_id);
@@ -1886,7 +1913,12 @@ export const gameService = {
         });
         const incomePenalty = incomePenalties.find((penalty) => penalty.settlement_id === settlement.id) ?? null;
         const mobilizedIncome = scaleIncome(economy.payable, marshalPartial ? 1 : MOBILIZATION_RULES[country.mobilization].incomeMultiplier);
-        const incomeBreakdown = applyIncomePenalty(mobilizedIncome, Number(incomePenalty?.penalty_percent ?? 0));
+        const incomeAfterGeneralPenalty = applyIncomePenalty(mobilizedIncome, Number(incomePenalty?.penalty_percent ?? 0));
+        const incomeBreakdown = applyCultureIncomeEffect(
+          incomeAfterGeneralPenalty,
+          settlement.culture_group,
+          country.primary_culture_group
+        );
         const populationGain = applyFormablePopulationModifiers(calculatePopulationGain({
           population: settlement.population,
           buildings: activeBuildings,
@@ -1938,7 +1970,16 @@ export const gameService = {
           militaryUsed: settlementMilitaryUsed,
           displacedArmyPersonnel,
           displacedArmyUpkeep,
-          militaryLimit: settlement.is_conquered ? 0 : settlementMobilizationLimit(settlement.population, country.mobilization, marshalPartial),
+          militaryLimit: settlement.is_conquered ? 0 : settlementMobilizationLimit(
+            cultureMilitaryPopulation(
+              settlement.population,
+              settlement.culture_group,
+              country.primary_culture_group,
+              guild.culture_military_penalty_enabled
+            ),
+            country.mobilization,
+            marshalPartial
+          ),
           trainingCapacity,
           trainingUsed,
           trainingRemaining: Math.max(0, trainingCapacity - trainingUsed),
@@ -1986,7 +2027,7 @@ export const gameService = {
         mercenaries,
         freePopulation: manpower.population,
         militaryUsed: manpower.used,
-        militaryLimit: militaryLimit(manpower.population, country.mobilization, marshalPartial),
+        militaryLimit: militaryLimit(manpower.militaryPopulation, country.mobilization, marshalPartial),
         manpowerPenaltyActive: country.manpower_penalty_active,
         totalGrossIncome: incomeTotal(totalGrossBreakdown),
         totalPayableIncome,
@@ -2447,7 +2488,7 @@ export const gameService = {
         }
         const manpower = await countryManpower(client, country.id);
         const marshalPartial = await hasActiveMarshalPartialMobilization(client, country.id, input.mobilization);
-        if (manpower.used > militaryLimit(manpower.population, input.mobilization, marshalPartial)) throw new GameError("Mevcut personel yeni seferberlik sınırının üzerinde.");
+        if (manpower.used > militaryLimit(manpower.militaryPopulation, input.mobilization, marshalPartial)) throw new GameError("Mevcut personel yeni seferberlik sınırının üzerinde.");
       }
       await client.query("UPDATE countries SET mobilization=$1,mobilization_started_turn=$2 WHERE id=$3", [input.mobilization, guild.current_turn, country.id]);
       await audit(client, input.guildId, input.actorId, "MOBILIZATION_SET", "country", country.id, { from: country.mobilization, to: input.mobilization });
@@ -2482,7 +2523,12 @@ export const gameService = {
 
       const marshalPartial = await hasActiveMarshalPartialMobilization(client, country.id, country.mobilization);
       const localUsed = await settlementManpower(client, settlement.id);
-      const localLimit = settlementMobilizationLimit(settlement.population, country.mobilization, marshalPartial);
+      const localLimit = settlementMobilizationLimit(
+        cultureMilitaryPopulation(
+          settlement.population, settlement.culture_group, country.primary_culture_group,
+          guild.culture_military_penalty_enabled
+        ), country.mobilization, marshalPartial
+      );
       const remainingCapacity = Math.max(0, localLimit - localUsed);
       if (input.quantity > remainingCapacity) throw new GameError(`Yerleşkenin Ordu Limitinde yalnızca ${remainingCapacity.toLocaleString("tr-TR")} kişilik yer bulunuyor.`);
       const trainingCapacity = settlementTrainingCapacity(settlement.population, country.mobilization, marshalPartial);
@@ -2491,7 +2537,7 @@ export const gameService = {
       if (input.quantity > trainingRemaining) throw new GameError(`Bu Alım Turunda Eğitim Kapasitesinde yalnızca ${trainingRemaining.toLocaleString("tr-TR")} kişilik yer bulunuyor.`);
 
       const manpower = await countryManpower(client, country.id);
-      const limit = militaryLimit(manpower.population, country.mobilization, marshalPartial);
+      const limit = militaryLimit(manpower.militaryPopulation, country.mobilization, marshalPartial);
       if (manpower.used > limit) throw new GameError("Devlet askerî personel sınırının üzerindeyken yeni asker alamaz.");
       if (manpower.used + input.quantity > limit) throw new GameError(`Askerî personel sınırında yalnızca ${Math.max(0, limit - manpower.used).toLocaleString("tr-TR")} kişilik yer var.`);
 
@@ -2559,13 +2605,18 @@ export const gameService = {
       const personLoad = formableModifiers(country.active_formable_key).observerManpower ?? 200;
       const marshalPartial = await hasActiveMarshalPartialMobilization(client, country.id, country.mobilization);
       const localUsed = await settlementManpower(client, settlement.id);
-      const localLimit = settlementMobilizationLimit(settlement.population, country.mobilization, marshalPartial);
+      const localLimit = settlementMobilizationLimit(
+        cultureMilitaryPopulation(
+          settlement.population, settlement.culture_group, country.primary_culture_group,
+          guild.culture_military_penalty_enabled
+        ), country.mobilization, marshalPartial
+      );
       if (localUsed + personLoad > localLimit) throw new GameError("Yerleşkenin Ordu Limitinde Gözcü Birliği için yer yok.");
       const trainingCapacity = settlementTrainingCapacity(settlement.population, country.mobilization, marshalPartial);
       const usage = (await client.query<{ quantity: number }>("SELECT quantity FROM recruitment_usage WHERE settlement_id=$1 AND acquisition_turn=$2 FOR UPDATE", [settlement.id, guild.current_turn])).rows[0]?.quantity ?? 0;
       if (usage + personLoad > trainingCapacity) throw new GameError("Bu Alım Turundaki Eğitim Kapasitesi Gözcü Birliği için yeterli değil.");
       const manpower = await countryManpower(client, country.id);
-      const limit = militaryLimit(manpower.population, country.mobilization, marshalPartial);
+      const limit = militaryLimit(manpower.militaryPopulation, country.mobilization, marshalPartial);
       if (manpower.used + personLoad > limit) throw new GameError("Askerî personel sınırında Gözcü Birliği için yer yok.");
 
       const cost = await applyPurchaseAgentDiscount(client,{
@@ -2710,7 +2761,7 @@ export const gameService = {
       const manpower = await countryManpower(client, country.id);
       const personNeed = ship.manpower * input.quantity;
       const marshalPartial = await hasActiveMarshalPartialMobilization(client, country.id, country.mobilization);
-      const limit = militaryLimit(manpower.population, country.mobilization, marshalPartial);
+      const limit = militaryLimit(manpower.militaryPopulation, country.mobilization, marshalPartial);
       if (manpower.used > limit) throw new GameError("Devlet askerî personel sınırının üzerindeyken yeni gemi üretemez.");
       if (manpower.used + personNeed > limit) throw new GameError("Gemi mürettebatı askerî personel sınırını aşıyor.");
       const effectiveResources = (await settlementResourceAccess(client, country.id)).get(settlement.id) ?? [];
@@ -2852,6 +2903,7 @@ export const gameService = {
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`turn:${guildId}`]);
       const guild = await getGuild(client, guildId);
       await client.query("SELECT 1 FROM guilds WHERE discord_id=$1 FOR UPDATE", [guildId]);
+      await syncGuildPrimaryCultures(client, guildId);
       const newTurn = guild.current_turn + 1;
       const acquisition = isAcquisitionTurn(newTurn, guild.acquisition_interval);
       const eventKey = `TURN_ADVANCE:${newTurn}`;
@@ -3023,7 +3075,7 @@ export const gameService = {
       for (const country of manpowerCountries) {
         const manpower = await countryManpower(client, country.id);
         const marshalPartial = await hasActiveMarshalPartialMobilization(client, country.id, country.mobilization);
-        const overLimit = manpower.used > militaryLimit(manpower.population, country.mobilization, marshalPartial);
+        const overLimit = manpower.used > militaryLimit(manpower.militaryPopulation, country.mobilization, marshalPartial);
         if (!overLimit) {
           await client.query("UPDATE countries SET manpower_over_limit_since_turn=NULL,manpower_penalty_active=FALSE WHERE id=$1", [country.id]);
         } else if (country.manpower_over_limit_since_turn === null) {
@@ -3117,6 +3169,15 @@ export const gameService = {
               adjustedSettlementIncome[key]-=deducted;
               deductionToAllocate-=deducted;
             }
+            const cultureAdjustedIncome = applyCultureIncomeEffect(
+              adjustedSettlementIncome,
+              settlement.culture_group,
+              country.primary_culture_group
+            );
+            const cultureIncomeDeduction = Math.max(
+              0,
+              incomeTotal(adjustedSettlementIncome)-incomeTotal(cultureAdjustedIncome)
+            );
             const settlementUnits = (await client.query<{ unit_type: keyof typeof UNITS; quantity: number; status: UnitStatus }>("SELECT unit_type,quantity,status FROM unit_stacks WHERE settlement_id=$1", [settlement.id])).rows;
             const displacedUnits = displacedSupport.get(settlement.id) ?? [];
             const settlementShips = (await client.query<{ ship_type: keyof typeof SHIPS; quantity: number; status: ShipStatus }>("SELECT ship_type,quantity,status FROM naval_units WHERE settlement_id=$1", [settlement.id])).rows;
@@ -3130,9 +3191,9 @@ export const gameService = {
                 country.active_formable_key
               );
             const settlementUpkeep = economy.buildingUpkeep + unitUpkeep + shipUpkeep;
-            const settlementGross = incomeTotal(adjustedSettlementIncome);
+            const settlementGross = incomeTotal(cultureAdjustedIncome);
             const settlementNet = settlementGross - settlementUpkeep;
-            incomeBreakdown = addIncomeBreakdowns(incomeBreakdown, adjustedSettlementIncome);
+            incomeBreakdown = addIncomeBreakdowns(incomeBreakdown, cultureAdjustedIncome);
             upkeep += settlementUpkeep;
             const nextPopulation = settlement.population + popGain;
             await client.query("UPDATE settlements SET population=$1,ruin_stage=$2,local_treasury=local_treasury+$3,last_acquisition_income=$4 WHERE id=$5", [nextPopulation, nextRuinStage(settlement.ruin_stage), settlementNet, settlementGross, settlement.id]);
@@ -3154,6 +3215,7 @@ export const gameService = {
               settlement.ruin_stage ? "Haraplık Sv"+settlement.ruin_stage : null,
               country.mobilization !== "PEACE" ? MOBILIZATION_RULES[country.mobilization].label+" −"+mobilizationDeduction.toLocaleString("tr-TR") : null,
               incomePenalty ? "Gelir cezası %"+incomePenalty.penalty_percent : null,
+              cultureIncomeDeduction ? "Yabancı kültür geliri ×0,80 −"+cultureIncomeDeduction.toLocaleString("tr-TR") : null,
               activeBlockade ? "Deniz ablukası %"+blockadePercent+" −"+blockadeDeduction.toLocaleString("tr-TR") : null,
               raidIncomeDeduction ? "Deniz yağması gelir kaybı −"+raidIncomeDeduction.toLocaleString("tr-TR") : null,
               ...activePolicies.map((policy)=>CITY_POLICIES[policy].label),
@@ -3165,11 +3227,11 @@ export const gameService = {
                ) VALUES($1,$2,$3,'ACQUISITION_SETTLEMENT',$4,$5,$6,$7::jsonb)`,
               [country.id,settlement.id,newTurn,settlementNet,settlement.name+" Alım Turu gelir ve giderleri",
                 Number(settlement.local_treasury)+settlementNet,JSON.stringify({
-                  buildingIncome:adjustedSettlementIncome.building,taxIncome:adjustedSettlementIncome.tax,
-                  landTradeIncome:adjustedSettlementIncome.landTrade,seaTradeIncome:adjustedSettlementIncome.seaTrade,
+                  buildingIncome:cultureAdjustedIncome.building,taxIncome:cultureAdjustedIncome.tax,
+                  landTradeIncome:cultureAdjustedIncome.landTrade,seaTradeIncome:cultureAdjustedIncome.seaTrade,
                   buildingUpkeep:economy.buildingUpkeep,unitUpkeep,displacedArmyUpkeep,shipUpkeep,
                   penaltyDeduction,mobilizationDeduction,blockadeDeduction,blockadePercent,
-                  raidIncomeDeduction,raidIncomeDeductionPending:Math.max(0,pendingRaidDeduction-raidIncomeDeduction),populationGain:popGain,effects
+                  cultureIncomeDeduction,raidIncomeDeduction,raidIncomeDeductionPending:Math.max(0,pendingRaidDeduction-raidIncomeDeduction),populationGain:popGain,effects
                 })]
             );
             if (incomePenalty) {
@@ -3229,6 +3291,7 @@ export const gameService = {
       const startedGarrisons = await scheduleAllMissingGarrisons(client, guildId, newTurn);
       const garrisonReplenishmentStartedDetails = startedGarrisons.map((order) => ({ settlementName: order.settlementName, personnel: order.personnel, cost: order.cost, completionTurn: order.completionTurn, reason: order.reason }));
       await snapshotTreasuryTransferTurn(client, guildId, newTurn);
+      await syncGuildPrimaryCultures(client, guildId);
       await client.query("UPDATE guilds SET current_turn=$1,turn_phase='OPEN',updated_at=NOW() WHERE discord_id=$2", [newTurn, guildId]);
       const movement = await resolveMovementStage(client, guildId, actorId, newTurn, "ADVANCE");
       await audit(client, guildId, actorId, "TURN_ADVANCE", "guild", guildId, {
@@ -3293,6 +3356,18 @@ export const gameService = {
       }
       await client.query("UPDATE guilds SET turn_phase=$1,updated_at=NOW() WHERE discord_id=$2", [phase, guildId]);
       await audit(client, guildId, actorId, "TURN_PHASE", "guild", guildId, { phase });
+    });
+  },
+
+  async setCultureMilitaryPenalty(guildId: string, actorId: string, enabled: boolean): Promise<void> {
+    await withTransaction(async (client) => {
+      await ensureGuild(client, guildId);
+      await syncGuildPrimaryCultures(client, guildId);
+      await client.query(
+        "UPDATE guilds SET culture_military_penalty_enabled=$1,updated_at=NOW() WHERE discord_id=$2",
+        [enabled, guildId]
+      );
+      await audit(client, guildId, actorId, "CULTURE_MILITARY_PENALTY_SET", "guild", guildId, { enabled });
     });
   },
 

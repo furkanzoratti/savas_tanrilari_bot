@@ -15,8 +15,8 @@ describe("kültür ve yerleşke kartı", () => {
   it("garnizon ve eğitilmiş askerleri gösterir fakat kurulu ordu kartlarını belgeye eklemez", () => {
     const emptyIncome = { building: 0, tax: 0, landTrade: 0, seaTrade: 0 };
     const document = {
-      guild: { current_turn: 3, turn_phase: "OPEN" },
-      country: { name: "Roma", treasury: 10_000, mobilization: "PEACE" },
+      guild: { current_turn: 3, turn_phase: "OPEN", culture_military_penalty_enabled: false },
+      country: { name: "Roma", treasury: 10_000, mobilization: "PEACE", primary_culture_group: "HELLENIC" },
       playerIds: ["123"], freePopulation: 100_000, militaryUsed: 2_000, militaryLimit: 7_500,
       characters: [
         { name: "Aurelius", role: "COMMANDER", skill_bonus: 0, assignment: "CURIA", assigned_settlement_name: "Ordusal" },
@@ -63,6 +63,9 @@ describe("kültür ve yerleşke kartı", () => {
     expect(fields.find((field) => field.name === "🚨 Aktif Yerleşke Olayları")?.value).toContain("Karaborsa");
     expect(fields.find((field) => field.name === "🚨 Aktif Yerleşke Olayları")?.value).toContain("Salgın");
     expect(fields.find((field) => field.name === "🏺 Kültür")?.value).toContain("İtalik");
+    expect(fields.find((field) => field.name === "🏺 Kültür")?.value).toContain("Toplam gelir: **×0,80**");
+    expect(fields.find((field) => field.name === "🏺 Kültür")?.value).toContain("hazırlık sürecinde • etkisiz");
+    expect(countryFields.find((field) => field.name === "🏺 Ana Kültür")?.value).toContain("Helenik");
     expect(fields.find((field) => field.name === "🛡️ Garnizon")?.value).toContain("**200** Ağır Piyade");
     expect(fields.find((field) => field.name === "🏗️ Binalar ve İnşaatlar")?.value).toContain("Akademi Sv1");
     expect(fields.find((field) => field.name === "🏗️ Binalar ve İnşaatlar")?.value).not.toContain("Kamu ve Altyapı");
