@@ -632,7 +632,7 @@ async function adminGamePayload(guildId: string, type: GreatGameType): Promise<A
       new ButtonBuilder().setCustomId("gg2|admin-home").setLabel("Ana Panel").setStyle(ButtonStyle.Secondary)
     );
     const running = view.tournament && ["BETTING", "FIGHTING"].includes(view.tournament.status);
-    if (data.season?.status === "OPEN" && !running && !view.finalCompleted) row.addComponents(
+    if (data.season && !["FINISHED","CANCELLED"].includes(data.season.status) && !running && !view.finalCompleted) row.addComponents(
       new ButtonBuilder().setCustomId("gg2|gladiator-start|GLADIATOR")
         .setLabel(view.qualifiersCompleted>=4?"12 Kişilik Finali Başlat":`${view.qualifiersCompleted+1}. Elemeyi Başlat`)
         .setEmoji("🎲").setStyle(ButtonStyle.Success)
@@ -754,25 +754,24 @@ async function publicGamePayload(guildId: string, type: GreatGameType, content?:
   const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(`gg2|public-refresh|${type}`).setLabel("Yenile").setEmoji("🔄").setStyle(ButtonStyle.Secondary)
   );
-  if (data.season?.status === "PUBLISHED" && activeForType) {
+  if(type==="GLADIATOR"&&gladiatorView?.tournament?.status==="BETTING"){
+    buttons.addComponents(
+      new ButtonBuilder().setCustomId("gg2|gladiator-bet|GLADIATOR").setLabel("Tekli Bahis").setEmoji("💰").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("gg2|gladiator-coupon-open|GLADIATOR").setLabel("Kupon Yap").setEmoji("🎟️").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId("gg2|gladiator-close|GLADIATOR").setLabel("Bahisleri Kapat").setEmoji("🔒").setStyle(ButtonStyle.Danger)
+    );
+  }else if(type==="GLADIATOR"&&gladiatorView?.tournament?.status==="FIGHTING"){
+    buttons.addComponents(
+      new ButtonBuilder().setCustomId("gg2|gladiator-fight|GLADIATOR").setLabel("Sıradaki Dövüşü Yap").setEmoji("🎲").setStyle(ButtonStyle.Danger)
+    );
+  }
+  if (type!=="GLADIATOR"&&data.season?.status === "PUBLISHED" && activeForType) {
     if (type === "CHARIOT") buttons.addComponents(new ButtonBuilder().setCustomId("gg2|bet|CHARIOT").setLabel("Bahis Yap").setEmoji("💰").setStyle(ButtonStyle.Primary));
     buttons.addComponents(new ButtonBuilder().setCustomId(`gg2|start|${type}`).setLabel("Oyunu Başlat").setEmoji("▶️").setStyle(ButtonStyle.Success));
   }
-  if (data.season?.status === "ACTIVE" && activeForType) {
-    if (type === "GLADIATOR" && gladiatorView?.tournament?.status === "BETTING") {
-      buttons.addComponents(
-        new ButtonBuilder().setCustomId("gg2|gladiator-bet|GLADIATOR").setLabel("Tekli Bahis").setEmoji("💰").setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId("gg2|gladiator-coupon-open|GLADIATOR").setLabel("Kupon Yap").setEmoji("🎟️").setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId("gg2|gladiator-close|GLADIATOR").setLabel("Bahisleri Kapat").setEmoji("🔒").setStyle(ButtonStyle.Danger)
-      );
-    } else if (type === "GLADIATOR" && gladiatorView?.tournament?.status === "FIGHTING") {
-      buttons.addComponents(
-        new ButtonBuilder().setCustomId("gg2|gladiator-fight|GLADIATOR").setLabel("Sıradaki Dövüşü Yap").setEmoji("🎲").setStyle(ButtonStyle.Danger)
-      );
-    } else {
-      if (type !== "AUCTION") buttons.addComponents(new ButtonBuilder().setCustomId(`gg2|action|${type}`).setLabel("Gizli Hamle Ver").setStyle(ButtonStyle.Primary));
-      buttons.addComponents(new ButtonBuilder().setCustomId(`gg2|resolve|${type}`).setLabel(type === "AUCTION" ? "Müzayedeyi Bitir" : "Aşamayı Çöz").setEmoji(type === "AUCTION" ? "🏁" : "🎲").setStyle(ButtonStyle.Danger));
-    }
+  if (type!=="GLADIATOR"&&data.season?.status === "ACTIVE" && activeForType) {
+    if (type !== "AUCTION") buttons.addComponents(new ButtonBuilder().setCustomId(`gg2|action|${type}`).setLabel("Gizli Hamle Ver").setStyle(ButtonStyle.Primary));
+    buttons.addComponents(new ButtonBuilder().setCustomId(`gg2|resolve|${type}`).setLabel(type === "AUCTION" ? "Müzayedeyi Bitir" : "Aşamayı Çöz").setEmoji(type === "AUCTION" ? "🏁" : "🎲").setStyle(ButtonStyle.Danger));
   }
   if (type === "GLADIATOR" && gladiatorView?.auctionStatus === "OPEN") {
     buttons.addComponents(
@@ -903,8 +902,13 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
   if (subcommand === "kurtar") {
     if (!isGameMaster(interaction)) throw new GameError("Bu komut yalnızca oyun yöneticileri tarafından kullanılabilir.");
     const data = await greatGamesService.dashboard(interaction.guildId);
-    const type = data.season?.current_game;
-    if (!type || !data.season || !["PUBLISHED", "ACTIVE"].includes(data.season.status)) throw new GameError("Kurtarılabilecek yayında veya etkin bir oyun bulunmuyor.");
+    let type=data.season?.current_game??null;
+    if(!type){
+      const capua=await greatGamesGladiatorService.view(interaction.guildId);
+      if(capua.tournament&&["BETTING","FIGHTING"].includes(capua.tournament.status))type="GLADIATOR";
+    }
+    if(!type||!data.season||(type!=="GLADIATOR"&&!["PUBLISHED","ACTIVE"].includes(data.season.status)))
+      throw new GameError("Kurtarılabilecek yayında veya etkin bir oyun bulunmuyor.");
     await interaction.reply(await publicGamePayload(interaction.guildId, type, "🛠️ Aktif oyun formu kayıtlar korunarak yeniden oluşturuldu."));
     return true;
   }
@@ -994,7 +998,12 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
     if (!isGameMaster(interaction)) throw new GameError("Oyunu yalnızca oyun yöneticisi kurtarabilir.");
     const type = gameId(rawType!);
     const data = await greatGamesService.dashboard(interaction.guildId);
-    if (!data.season || data.season.current_game !== type || !["PUBLISHED", "ACTIVE"].includes(data.season.status)) throw new GameError("Bu oyun artık kurtarılabilir durumda değil.");
+    if(type==="GLADIATOR"){
+      const capua=await greatGamesGladiatorService.view(interaction.guildId);
+      if(!capua.tournament||!["BETTING","FIGHTING"].includes(capua.tournament.status))
+        throw new GameError("Capua turnuvası artık kurtarılabilir durumda değil.");
+    }else if(!data.season||data.season.current_game!==type||!["PUBLISHED","ACTIVE"].includes(data.season.status))
+      throw new GameError("Bu oyun artık kurtarılabilir durumda değil.");
     await interaction.deferUpdate();
     await interaction.editReply(await adminGamePayload(interaction.guildId, type));
     await interaction.followUp({ ...(await publicGamePayload(interaction.guildId, type, "🛠️ Aktif oyun formu kayıtlar korunarak yeniden oluşturuldu.")), ephemeral: false });

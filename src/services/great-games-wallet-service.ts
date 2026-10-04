@@ -182,6 +182,11 @@ export const greatGamesWalletService = {
     return withTransaction(async (client) => {
       const season = await lockedSeason(client, guildId);
       if (season.status === "ACTIVE" || season.current_game) throw new GameError("Etkin bir oyun sürerken cüzdanlar kapatılamaz.");
+      const activeCapua=await client.query(
+        `SELECT 1 FROM great_games_gladiator_tournaments
+          WHERE season_id=$1 AND status IN ('BETTING','FIGHTING') LIMIT 1`,[season.id]
+      );
+      if(activeCapua.rowCount)throw new GameError("Capua turnuvası sürerken oyun cüzdanları kapatılamaz.");
       const prizePool = Number(season.prize_pool);
       const prizeAwards: Array<{ rank: number; countryName: string; points: number; amount: number }> = [];
       if (prizePool > 0) {

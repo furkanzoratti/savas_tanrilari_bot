@@ -762,6 +762,11 @@ export const greatGamesService = {
   async cancelSeason(guildId: string): Promise<number> {
     return withTransaction(async (client) => {
       const season = await lockedSeason(client, guildId);
+      const activeCapua=await client.query(
+        `SELECT 1 FROM great_games_gladiator_tournaments
+          WHERE season_id=$1 AND status IN ('BETTING','FIGHTING') LIMIT 1`,[season.id]
+      );
+      if(activeCapua.rowCount)throw new GameError("Capua turnuvası sürerken Büyük Oyunlar sezonu iptal edilemez.");
       const completed = await client.query("SELECT 1 FROM great_games_entries WHERE season_id=$1 AND status='FINISHED' LIMIT 1", [season.id]);
       if (completed.rowCount) throw new GameError("Tamamlanmış oyunların ödemeleri yapıldığı için sezon bütünüyle iptal edilemez.");
       const balances = (await client.query<{ country_id: string; game_type: GreatGameType; balance: number }>(

@@ -59,6 +59,7 @@ import { dynastyCoupleBirthAttemptsMigration } from "./dynasty-couple-birth-atte
 import { automaticCultureEffectsMigration } from "./automatic-culture-effects-migration.js";
 import { greatGamesGladiatorCouponsMigration } from "./great-games-gladiator-coupons-migration.js";
 import { greatGamesGladiatorQualifierRewardsMigration } from "./great-games-gladiator-qualifier-rewards-migration.js";
+import { greatGamesCapuaIndependentStateMigration } from "./great-games-capua-independent-state-migration.js";
 
 export const migrations = [
   {
@@ -2335,5 +2336,6 @@ export const migrations = [
   automaticCultureEffectsMigration,
   playerAutoPurchaseArmyModesMigration,
   greatGamesGladiatorCouponsMigration,
-  greatGamesGladiatorQualifierRewardsMigration
+  greatGamesGladiatorQualifierRewardsMigration,
+  greatGamesCapuaIndependentStateMigration
 ] as const;

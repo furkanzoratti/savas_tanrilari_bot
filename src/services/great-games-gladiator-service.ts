@@ -582,9 +582,8 @@ export const greatGamesGladiatorService = {
   }> {
     return withTransaction(async (client) => {
       const season = await lockedSeason(client, guildId);
-      if (season.status !== "OPEN" || season.current_game) {
-        throw new GameError("Başka bir Büyük Oyun sürerken Capua turnuvası başlatılamaz.");
-      }
+      if(["FINISHED","CANCELLED"].includes(season.status))
+        throw new GameError("Kapalı Büyük Oyun sezonunda Capua turnuvası başlatılamaz.");
       const active = await latestTournament(client, season.id, true);
       if (active && ["BETTING", "FIGHTING"].includes(active.status)) throw new GameError("Devam eden bir Capua turnuvası zaten var.");
       const registered = Number((await client.query<{ count: string }>(
@@ -631,7 +630,10 @@ export const greatGamesGladiatorService = {
         const fighterMap=new Map(byId.map((fighter)=>[fighter.id,fighter]));
         fighters=topTwelve.map((standing)=>fighterMap.get(standing.gladiator_id)!).filter(Boolean);
       }
-      const runNumber = Number(season.current_run ?? 0) + 1;
+      const runNumber=Number((await client.query<{run_number:number}>(
+        `SELECT COALESCE(MAX(run_number),0)+1 AS run_number
+           FROM great_games_gladiator_tournaments WHERE season_id=$1`,[season.id]
+      )).rows[0]?.run_number??1);
       const tournament = (await client.query<{ id: string }>(
         `INSERT INTO great_games_gladiator_tournaments(
            season_id,run_number,started_by,tournament_type,round_count
@@ -667,10 +669,6 @@ export const greatGamesGladiatorService = {
           );
         }
       }
-      await client.query(
-        "UPDATE great_games_seasons SET status='ACTIVE',current_game='GLADIATOR',current_round=1,current_run=$1,updated_at=NOW() WHERE id=$2",
-        [runNumber, season.id]
-      );
       return {tournamentId:tournament.id,runNumber,tournamentType,qualifierNumber};
     });
   },
@@ -678,7 +676,7 @@ export const greatGamesGladiatorService = {
   async closeBetting(guildId: string): Promise<{round:number;tournamentType:GladiatorTournamentType}> {
     return withTransaction(async (client) => {
       const season = await lockedSeason(client, guildId);
-      if (season.status !== "ACTIVE" || season.current_game !== "GLADIATOR") throw new GameError("Etkin bir Capua turnuvası bulunmuyor.");
+      if(["FINISHED","CANCELLED"].includes(season.status))throw new GameError("Büyük Oyun sezonu kapalı.");
       const tournament = await latestTournament(client, season.id, true);
       if (!tournament || tournament.status !== "BETTING") throw new GameError("Bu turun bahisleri zaten kapalı.");
       await client.query(
@@ -702,7 +700,7 @@ export const greatGamesGladiatorService = {
       }
       if (!Number.isSafeInteger(input.matchNumber) || input.matchNumber < 1) throw new GameError("Eşleşme numarası geçersiz.");
       const season = await lockedSeason(client, input.guildId);
-      if (season.status !== "ACTIVE" || season.current_game !== "GLADIATOR") throw new GameError("Etkin bir Capua turnuvası bulunmuyor.");
+      if(["FINISHED","CANCELLED"].includes(season.status))throw new GameError("Büyük Oyun sezonu kapalı.");
       const tournament = await latestTournament(client, season.id, true);
       if (!tournament || tournament.status !== "BETTING") throw new GameError("Bu turda bahis alımı kapalı.");
       const match = (await client.query<{
@@ -757,7 +755,7 @@ export const greatGamesGladiatorService = {
       const matchIds=input.selections.map((selection)=>selection.matchId);
       if(new Set(matchIds).size!==matchIds.length)throw new GameError("Bir kuponda aynı eşleşmeden yalnızca bir gladyatör seçilebilir.");
       const season=await lockedSeason(client,input.guildId);
-      if(season.status!=="ACTIVE"||season.current_game!=="GLADIATOR")throw new GameError("Etkin bir Capua turnuvası bulunmuyor.");
+      if(["FINISHED","CANCELLED"].includes(season.status))throw new GameError("Büyük Oyun sezonu kapalı.");
       const tournament=await latestTournament(client,season.id,true);
       if(!tournament||tournament.status!=="BETTING")throw new GameError("Bu turda kupon bahis alımı kapalı.");
       const matches=(await client.query<{
@@ -838,7 +836,7 @@ export const greatGamesGladiatorService = {
   }> {
     return withTransaction(async (client) => {
       const season = await lockedSeason(client, guildId);
-      if (season.status !== "ACTIVE" || season.current_game !== "GLADIATOR") throw new GameError("Etkin bir Capua turnuvası bulunmuyor.");
+      if(["FINISHED","CANCELLED"].includes(season.status))throw new GameError("Büyük Oyun sezonu kapalı.");
       const tournament = await latestTournament(client, season.id, true);
       if (!tournament || tournament.status !== "FIGHTING") throw new GameError("Önce bu turun bahislerini kapatmalısın.");
       const match = (await client.query<{
@@ -956,10 +954,6 @@ export const greatGamesGladiatorService = {
             WHERE id=$2`,
           [winnerId, tournament.id]
         );
-        await client.query(
-          "UPDATE great_games_seasons SET status='OPEN',current_game=NULL,current_round=0,updated_at=NOW() WHERE id=$1",
-          [season.id]
-        );
         const qualifiersCompleted=tournament.tournament_type==="QUALIFIER"
           ? Number((await client.query<{count:string}>(
               `SELECT COUNT(*)::text AS count FROM great_games_gladiator_tournaments
@@ -1034,10 +1028,6 @@ export const greatGamesGladiatorService = {
       await client.query(
         "UPDATE great_games_gladiator_tournaments SET status='BETTING',current_round=$1,updated_at=NOW() WHERE id=$2",
         [nextRound, tournament.id]
-      );
-      await client.query(
-        "UPDATE great_games_seasons SET current_round=$1,updated_at=NOW() WHERE id=$2",
-        [nextRound, season.id]
       );
       return {
         round: tournament.current_round,
