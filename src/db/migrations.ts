@@ -60,6 +60,8 @@ import { automaticCultureEffectsMigration } from "./automatic-culture-effects-mi
 import { greatGamesGladiatorCouponsMigration } from "./great-games-gladiator-coupons-migration.js";
 import { greatGamesGladiatorQualifierRewardsMigration } from "./great-games-gladiator-qualifier-rewards-migration.js";
 import { greatGamesCapuaIndependentStateMigration } from "./great-games-capua-independent-state-migration.js";
+import { greatGamesAuctionRunsMigration } from "./great-games-auction-runs-migration.js";
+import { greatGamesAuctionBidRulesMigration } from "./great-games-auction-bid-rules-migration.js";
 
 export const migrations = [
   {
@@ -2337,5 +2339,7 @@ export const migrations = [
   playerAutoPurchaseArmyModesMigration,
   greatGamesGladiatorCouponsMigration,
   greatGamesGladiatorQualifierRewardsMigration,
-  greatGamesCapuaIndependentStateMigration
+  greatGamesCapuaIndependentStateMigration,
+  greatGamesAuctionRunsMigration,
+  greatGamesAuctionBidRulesMigration
 ] as const;

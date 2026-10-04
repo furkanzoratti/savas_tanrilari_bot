@@ -3,8 +3,8 @@ export const GREAT_GAMES_RACE_ROUNDS = 6;
 export const RACE_TRACK_STEPS = 50;
 export const CHARIOT_TRACK_TARGET = 100;
 export const CARAVAN_TRACK_TARGET = 20;
-export const AUCTION_OPENING_BID = 500;
-export const AUCTION_BID_INCREMENT = 250;
+export const AUCTION_OPENING_BID = 1_000;
+export const AUCTION_BID_INCREMENT = 500;
 
 export function isValidAuctionBidAmount(amount: number): boolean {
   return Number.isSafeInteger(amount)
@@ -104,15 +104,14 @@ export const CARAVAN_ROLE_FOR_CHALLENGE: Record<CaravanChallenge, CaravanRole> =
 };
 
 export const AUCTION_REWARDS = {
-  CONSTRUCTION_HALF: "Bir inşaatın kalan süresini %50 azaltma",
-  CHARACTER_STAT: "Bir Akademi karakterine kalıcı +1 stat",
-  RESOURCE_CHANGE: "Bir yerleşkenin hammaddesini değiştirme",
-  EXTRA_TRADE: "Bir yerleşkeye kalıcı +1 ticaret hakkı",
-  CANCEL_MERCENARY: "Başka bir devletin paralı asker kontratını feshetme",
-  FREE_SIEGE: "Seçilen iki kuşatma aletini ücretsiz alma",
-  FREE_SHIPS: "Seçilen üç gemiyi ücretsiz ve anında alma",
-  POPULATION_ROLL: "1d10 × 1.000 tek seferlik özgür nüfus",
-  LAND_TRADE_ROLL: "Bir sonraki Alım Turunda 1d10 kadar Kara Ticareti bonusu"
+  IMPERIAL_REVENUE: "İmparatorluk Gelir İmtiyazı • Seçilen yerleşkeye kalıcı +2.000 Altın brüt dönem geliri",
+  GREAT_MIGRATION: "Büyük Göç Fermanı • Seçilen yerleşkeye 20.000 özgür nüfus",
+  GRAND_TRADE_CHARTER: "Büyük Ticaret İmtiyazı • Seçilen yerleşkeye kalıcı +2 ticaret hakkı",
+  MASTER_BUILDERS: "Usta Mimarlar Loncası • Devam eden bir bina veya yükseltmeyi anında tamamlama",
+  ROYAL_TUTOR: "Kraliyet Hocası • Bir etkin karaktere kalıcı +1 yetenek puanı",
+  RESOURCE_CONCESSION: "Kaynak İmtiyazı • Seçilen yerleşkenin hammaddesini standart bir hammaddeyle değiştirme",
+  ROYAL_FLEET_ORDER: "Kraliyet Donanma Emri • Kapasite uygunsa seçilen türlerden toplam 4 gemiyi ücretsiz ve anında alma",
+  GRAND_SIEGE_TRAIN: "Büyük Kuşatma Treni • Seçilen türlerden toplam 4 kuşatma aletini ücretsiz ve anında alma"
 } as const;
 
 export type AuctionRewardType = keyof typeof AUCTION_REWARDS;

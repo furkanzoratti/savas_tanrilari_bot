@@ -37,12 +37,13 @@ describe("rezervsiz Büyük Oyunlar müzayedesi", () => {
     });
 
     const result = await greatGamesAuctionService.bid({
-      guildId: "guild", countryId: "country", userId: "user", lotId: "lot", amount: 1_250
+      guildId: "guild", countryId: "country", userId: "user", lotId: "lot", amount: 1_500
     });
 
-    expect(result).toEqual({ phase: "FINAL", amount: 1_250, availableAfter: 1_750 });
+    expect(result).toEqual({ phase: "FINAL", amount: 1_500, availableAfter: 1_500 });
     expect(mocks.adjustWallet).not.toHaveBeenCalled();
     expect(mocks.query.mock.calls.some(([sql]) => String(sql).includes("VALUES($1,$2,$3,$4,$5,0)"))).toBe(true);
+    expect(mocks.query.mock.calls.some(([sql]) => String(sql).includes("run_number=$3"))).toBe(true);
   });
 
   it("kazanan bedelini yalnız müzayede bitirilirken tahsil eder", async () => {
@@ -67,5 +68,6 @@ describe("rezervsiz Büyük Oyunlar müzayedesi", () => {
     expect(mocks.adjustWallet).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       countryId: "country", amount: -1_500, kind: "AUCTION_PAYMENT"
     }));
+    expect(mocks.query.mock.calls.some(([sql]) => String(sql).includes("run_number=$2"))).toBe(true);
   });
 });

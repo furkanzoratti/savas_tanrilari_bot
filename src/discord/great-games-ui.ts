@@ -4,7 +4,7 @@ import {
   type ButtonInteraction, type ChatInputCommandInteraction, type ModalSubmitInteraction, type StringSelectMenuInteraction
 } from "discord.js";
 import {
-  CARAVAN_ROUTES, CHARIOT_TACTICS, GREAT_GAME_TYPES,
+  AUCTION_BID_INCREMENT, AUCTION_OPENING_BID, CARAVAN_ROUTES, CHARIOT_TACTICS, GREAT_GAME_TYPES,
   type CaravanRole, type CaravanRoute, type ChariotTactic, type GreatGameType, type KingsDecision
 } from "../domain/great-games.js";
 import { gold } from "../domain/format.js";
@@ -74,7 +74,7 @@ async function dashboardPayload(guildId: string, userId: string, gm: boolean) {
 }
 
 function gameRules(type: GreatGameType): string {
-  if (type === "AUCTION") return "Tek turlu açık artırmadır. Açılış 500 Altındır; her yeni teklif tam 250 Altın artırır. Üst teklif ve kazanılabilecek ödül sınırı yoktur. Kaybeden teklif ödemez; kazanan ödemeleri genel ödül havuzuna gider.";
+  if (type === "AUCTION") return `Tek turlu açık artırmadır. Açılış ${gold(AUCTION_OPENING_BID)}; her yeni teklif tam ${gold(AUCTION_BID_INCREMENT)} artırır. Üst teklif ve kazanılabilecek ödül sınırı yoktur. Kaybeden teklif ödemez; kazanan ödemeleri genel ödül havuzuna gider.`;
   if (type === "CHARIOT") return "Katılım 1.000 Altın. Üç etap oynanır; her etapta gizli sürüş taktiği seçilir. Katılım havuzu %65/%35 paylaşılır. İlk üç devlet 5/3/2 Büyük Oyunlar Puanı alır.";
   if (type === "CARAVAN") return "Yönetici oyunu başlattığında devletler 2–3 kişilik kervanlara ve görevlere otomatik ayrılır. Her devletten 1.000 Altın yatırım alınır. Üç aşama sonunda bütün yatırımlar takım ağırlıklarına göre geri dağıtılır.";
   if (type === "KINGS_BET") return "Katılım 1.000 Altın. Üç ikilemde İşbirliği veya İhanet ve rakibin kararı için tahmin gizlice seçilir. Rakipler her turun ardından yeniden karıştırılır; mümkün olduğu sürece aynı rakiple üst üste eşleşilmez. Havuz ilk üçe %50/%30/%20 dağıtılır.";
@@ -309,7 +309,7 @@ export async function handleGreatGamesSelect(interaction: StringSelectMenuIntera
   const lotId = interaction.values[0];
   if (!lotId) throw new GameError("Müzayede kalemi seçilmedi.");
   const modal = new ModalBuilder().setCustomId(`ggm|bid|${lotId}`).setTitle("Müzayede Teklifi").addComponents(
-    new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("amount").setLabel("Teklif (sıradaki 250 Altınlık bedel)").setStyle(TextInputStyle.Short).setRequired(true))
+    new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("amount").setLabel(`Teklif (sıradaki ${gold(AUCTION_BID_INCREMENT)} bedel)`).setStyle(TextInputStyle.Short).setRequired(true))
   );
   await interaction.showModal(modal);
   return true;

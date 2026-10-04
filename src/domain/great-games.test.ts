@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  ACTIVE_GREAT_GAME_TYPES, AUCTION_BID_INCREMENT, AUCTION_OPENING_BID, DIPLOMACY_SCENARIOS, GREAT_GAMES_RACE_ROUNDS,
+  ACTIVE_GREAT_GAME_TYPES, AUCTION_BID_INCREMENT, AUCTION_OPENING_BID, AUCTION_REWARDS, DIPLOMACY_SCENARIOS, GREAT_GAMES_RACE_ROUNDS,
   GREAT_GAMES_TURN,
   allocatePool, auctionAvailableBid, auctionNextMinimum, caravanMultiplier, isValidAuctionBidAmount,
   gladiatorOdds, parseCaravanRoute, parseChariotTactic, parseKingsDecision, pickNonRepeatingValue,
@@ -29,18 +29,27 @@ describe("30. Tur Büyük Oyunları", () => {
     expect(result.exchanges[0]).toMatchObject({ attacker: "A", hit: true, damage: 4 });
     expect(result.exchanges[1]).toMatchObject({ attacker: "B", hit: false, damage: 0 });
   });
-  it("müzayedede 500 Altından başlayan sınırsız 250'lik teklifleri doğrular", () => {
-    expect(AUCTION_OPENING_BID).toBe(500);
-    expect(AUCTION_BID_INCREMENT).toBe(250);
-    expect(isValidAuctionBidAmount(500)).toBe(true);
+  it("müzayedede 1.000 Altından başlayan sınırsız 500'lük teklifleri doğrular", () => {
+    expect(AUCTION_OPENING_BID).toBe(1_000);
+    expect(AUCTION_BID_INCREMENT).toBe(500);
+    expect(isValidAuctionBidAmount(1_000)).toBe(true);
     expect(isValidAuctionBidAmount(10_000)).toBe(true);
-    expect(isValidAuctionBidAmount(625)).toBe(false);
-    expect(isValidAuctionBidAmount(250)).toBe(false);
-    expect(auctionNextMinimum(0)).toBe(500);
-    expect(auctionNextMinimum(10_000)).toBe(10_250);
+    expect(isValidAuctionBidAmount(1_250)).toBe(false);
+    expect(isValidAuctionBidAmount(500)).toBe(false);
+    expect(auctionNextMinimum(0)).toBe(1_000);
+    expect(auctionNextMinimum(10_000)).toBe(10_500);
     expect(auctionAvailableBid(15_000, 0)).toBe(15_000);
     expect(auctionAvailableBid(15_000, 6_500)).toBe(8_500);
     expect(auctionAvailableBid(5_000, 7_000)).toBe(0);
+  });
+
+  it("müzayede kataloğunu sekiz güçlü ve doğrudan uygulanabilir etkiyle sınırlar", () => {
+    expect(Object.keys(AUCTION_REWARDS)).toHaveLength(8);
+    expect(new Set(Object.values(AUCTION_REWARDS)).size).toBe(8);
+    expect(AUCTION_REWARDS.IMPERIAL_REVENUE).toContain("kalıcı +2.000 Altın");
+    expect(AUCTION_REWARDS.GRAND_TRADE_CHARTER).toContain("kalıcı +2 ticaret hakkı");
+    expect(AUCTION_REWARDS.ROYAL_FLEET_ORDER).toContain("4 gemiyi");
+    expect(AUCTION_REWARDS.GRAND_SIEGE_TRAIN).toContain("4 kuşatma aletini");
   });
 
   it("Savaş Arabaları taktiklerini kaza, sıkıştırma ve temkin bonusuyla çözer", () => {

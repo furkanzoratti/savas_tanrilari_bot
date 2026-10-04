@@ -1,7 +1,7 @@
 import type { DbClient } from "../db/pool.js";
 import { pool, withTransaction } from "../db/pool.js";
 import {
-  AUCTION_REWARDS, CARAVAN_CHALLENGE_LABELS, CARAVAN_ROUTES, CHARIOT_TACTICS,
+  CARAVAN_CHALLENGE_LABELS, CARAVAN_ROUTES, CHARIOT_TACTICS,
   DIPLOMACY_DEVELOPMENTS, DIPLOMACY_SCENARIOS, GREAT_GAMES_RACE_ROUNDS, GREAT_GAMES_TURN, GREAT_GAME_TYPES,
   KINGS_DECISION_LABELS, allocatePool, caravanMultiplier, diplomacyGoalKey, resolveCaravanStage, resolveChariotRound,
   resolveDiplomacyGoalVote, resolveKingsRound, rollDie,
@@ -397,14 +397,6 @@ export const greatGamesService = {
            WHERE w.season_id=$1 AND w.closed_at IS NULL
            ON CONFLICT(season_id,game_type,country_id) DO NOTHING`,
           [season.id]
-        );
-      }
-      let order = 0;
-      for (const [rewardType, title] of Object.entries(AUCTION_REWARDS)) {
-        order += 1;
-        await client.query(
-          `INSERT INTO great_games_auction_lots(season_id,reward_type,title,lot_order) VALUES($1,$2,$3,$4)
-           ON CONFLICT(season_id,lot_order) DO NOTHING`, [season.id, rewardType, title, order]
         );
       }
       return season;

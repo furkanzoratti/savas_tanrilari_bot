@@ -4,7 +4,7 @@ import {
   type ButtonInteraction, type ChatInputCommandInteraction, type ModalSubmitInteraction, type StringSelectMenuInteraction
 } from "discord.js";
 import {
-  ACTIVE_GREAT_GAME_TYPES, AUCTION_OPENING_BID, CARAVAN_ROUTES, CARAVAN_TRACK_TARGET, CHARIOT_TACTICS, CHARIOT_TRACK_TARGET,
+  ACTIVE_GREAT_GAME_TYPES, AUCTION_BID_INCREMENT, AUCTION_OPENING_BID, CARAVAN_ROUTES, CARAVAN_TRACK_TARGET, CHARIOT_TACTICS, CHARIOT_TRACK_TARGET,
   GLADIATOR_COUPON_MAX_ODDS,GLADIATOR_COUPON_MAX_SELECTIONS,GLADIATOR_COUPON_MIN_SELECTIONS,
   GREAT_GAMES_RACE_ROUNDS, GREAT_GAME_TYPES, auctionNextMinimum, diplomacyGoalKey,
   gladiatorCouponOdds,parseCaravanRoute, parseChariotTactic, parseKingsDecision,
@@ -49,7 +49,7 @@ async function ownCountry(guildId: string | null, userId: string) {
 }
 
 function gameRules(type: GreatGameType): string {
-  if (type === "AUCTION") return "Tek turlu açık artırmadır. Teklif sırasında cüzdandan para düşmez; yalnız kazanılan kalemlerin bedeli oyun sonunda kesilir. Aynı anda lider olunan tekliflerin toplamı cüzdan bakiyesini aşamaz. Açılış 500 Altındır ve her yeni teklif tam 250 Altın artar.";
+  if (type === "AUCTION") return `Tek turlu açık artırmadır. Teklif sırasında cüzdandan para düşmez; yalnız kazanılan kalemlerin bedeli oyun sonunda kesilir. Aynı anda lider olunan tekliflerin toplamı cüzdan bakiyesini aşamaz. Açılış ${gold(AUCTION_OPENING_BID)} ve her yeni teklif tam ${gold(AUCTION_BID_INCREMENT)} artar.`;
   if (type === "CHARIOT") return `Katılım 1.000 Altın. Form yayınlandıktan sonra bahisler açılır. Yarış ${GREAT_GAMES_RACE_ROUNDS} etap sürer; her etapta gizli taktik verilir ve 50 kademeli pistteki atlar sonuçlarla birlikte ilerler. Katılım havuzu %65/%35 paylaşılır.`;
   if (type === "CARAVAN") return `Seçilen devletler 2–3 kişilik kervanlara ayrılır. ${GREAT_GAMES_RACE_ROUNDS} aşamanın her birinde, her kervandan yalnız bir takım üyesi ortak rotayı gizlice seçer. Her devletten oyun başlarken 1.000 Altın alınır; kervanların 50 kademeli pistteki sırası canlı değişir.`;
   if (type === "KINGS_BET") return "Katılım 1.000 Altın. Üç ikilemde İşbirliği veya İhanet ve rakibin kararı için tahmin gizlice seçilir. Rakipler her turun ardından yeniden karıştırılır; mümkün olduğu sürece aynı rakiple üst üste eşleşilmez.";
@@ -139,26 +139,51 @@ function caravanFields(entries: GreatGamesEntryRow[]) {
   });
 }
 
+const AUCTION_REWARD_EMOJIS: Record<string, string> = {
+  IMPERIAL_REVENUE: "💰",
+  GREAT_MIGRATION: "👥",
+  GRAND_TRADE_CHARTER: "🤝",
+  MASTER_BUILDERS: "🏗️",
+  ROYAL_TUTOR: "📚",
+  RESOURCE_CONCESSION: "⛏️",
+  ROYAL_FLEET_ORDER: "⚓",
+  GRAND_SIEGE_TRAIN: "🏰"
+};
+
+function auctionTitleParts(title: string): { name: string; effect: string } {
+  const [name, ...effectParts] = title.split(" • ");
+  return { name: name?.trim() || title, effect: effectParts.join(" • ").trim() };
+}
+
 function auctionFields(lots: Awaited<ReturnType<typeof greatGamesAuctionService.lots>>) {
   return lots.slice(0, 24).map((lot) => {
     const currentBid = Number(lot.current_bid ?? lot.winning_bid ?? 0);
+    const { name, effect } = auctionTitleParts(lot.title);
+    const emoji = AUCTION_REWARD_EMOJIS[lot.reward_type] ?? "🏺";
+    const effectLine = effect ? `*${effect}*\n` : "";
     if (lot.phase === "FINISHED") {
       return {
-        name: `🏆 ${lot.lot_order}. ${lot.title}`.slice(0, 256),
+        name: `🏆 ${lot.lot_order}. ${name}`.slice(0, 256),
         value: lot.winning_country_name
-          ? `**Kazanan:** ${lot.winning_country_name}\n**Son teklif:** ${gold(Number(lot.winning_bid ?? 0))}`
-          : "Bu ödüle teklif verilmedi.",
+          ? `${effectLine}👑 **${lot.winning_country_name}** • ${gold(Number(lot.winning_bid ?? 0))}`
+          : `${effectLine}— Teklif verilmedi.`,
         inline: false
       };
     }
     return {
-      name: `🔨 ${lot.lot_order}. ${lot.title}`.slice(0, 256),
+      name: `${emoji} ${lot.lot_order}. ${name}`.slice(0, 256),
       value: currentBid > 0
-        ? `**Lider:** ${lot.leading_country_name ?? "Bilinmiyor"}\n**Güncel teklif:** ${gold(currentBid)} • **Sıradaki teklif:** ${gold(auctionNextMinimum(currentBid))}\n**Teklif veren devlet:** ${lot.bid_count}`
-        : `**Teklif yok** • Açılış bedeli: **${gold(AUCTION_OPENING_BID)}**`,
+        ? `${effectLine}👑 **${lot.leading_country_name ?? "Bilinmiyor"}**\n💰 ${gold(currentBid)}  →  **${gold(auctionNextMinimum(currentBid))}**\n🔨 ${lot.bid_count} devlet teklif verdi`
+        : `${effectLine}💰 **${gold(AUCTION_OPENING_BID)}** ile açılıyor • Henüz teklif yok`,
       inline: false
     };
   });
+}
+
+function auctionOverview(lots: Awaited<ReturnType<typeof greatGamesAuctionService.lots>>): string {
+  const bidCount = lots.reduce((total, lot) => total + Number(lot.bid_count ?? 0), 0);
+  const leaders = new Set(lots.map((lot) => lot.leading_country_name).filter(Boolean)).size;
+  return `📦 **${lots.length} imtiyaz**  •  🔨 **${bidCount} teklif**  •  👑 **${leaders} lider devlet**`;
 }
 
 const GLADIATOR_ROUND_LABELS: Record<number, string> = {
@@ -695,8 +720,21 @@ async function publicGamePayload(guildId: string, type: GreatGameType, content?:
     embed.setFooter({ text: "Güç, can, sahiplik ve güncel müzayede teklifleri: /oyunlar gladyatorler" });
   } else if (type === "AUCTION") {
     const lots = await greatGamesAuctionService.lots(guildId);
+    const status = statusLabel(data, type, entries);
+    const statusIcon = data.season?.status === "ACTIVE" && activeForType
+      ? "🔔"
+      : lots.some((lot) => lot.phase === "FINISHED") ? "🏁" : "📣";
+    embed
+      .setTitle("🏺 Devletler Müzayedesi")
+      .setDescription(
+        `## ${statusIcon} ${status}\n` +
+        `${auctionOverview(lots)}\n\n` +
+        `💵 **Açılış:** ${gold(AUCTION_OPENING_BID)}  •  ⬆️ **Artış:** ${gold(AUCTION_BID_INCREMENT)}\n` +
+        `🔒 Teklif verirken para kesilmez; yalnız kazandığın kalemler kapanışta cüzdanından tahsil edilir.`
+      );
     if (lots.length) embed.addFields(...auctionFields(lots));
-    embed.setFooter({ text: "Teklifler görünürdür. Her yeni teklif güncel bedeli tam 250 Altın artırır; yönetici bitirene kadar müzayede açık kalır." });
+    else embed.addFields({ name: "📦 Müzayede Kalemleri", value: "Henüz müzayede kataloğu hazırlanmadı.", inline: false });
+    embed.setFooter({ text: "Aşağıdaki menüden imtiyazı seç; açılan teklif ekranındaki sıradaki bedeli onayla. Formu Yenile düğmesi güncel liderleri getirir." });
   } else if (type === "CARAVAN") {
     embed.addFields(...caravanFields(entries));
     embed.setFooter({ text: "Her aşama çözüldüğünde kervanlar 50 kademeli pistte yeni puanlarına göre ilerler." });
@@ -779,23 +817,26 @@ async function publicGamePayload(guildId: string, type: GreatGameType, content?:
       new ButtonBuilder().setCustomId("gg2|gladiator-auction-close|GLADIATOR").setLabel("Müzayedeyi Bitir").setEmoji("🏁").setStyle(ButtonStyle.Danger)
     );
   }
-  const components: Array<ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>> = [buttons];
+  const components: Array<ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>> = [];
   if (type === "AUCTION" && data.season?.status === "ACTIVE" && activeForType) {
     const lots = (await greatGamesAuctionService.lots(guildId)).filter((lot) => lot.phase === "FINAL");
     if (lots.length) components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
-      new StringSelectMenuBuilder().setCustomId("ggs2|auction-lot").setPlaceholder("Teklif verilecek ödülü seç")
+      new StringSelectMenuBuilder().setCustomId("ggs2|auction-lot").setPlaceholder("🏺 Teklif vereceğin imtiyazı seç")
         .addOptions(lots.slice(0, 25).map((lot) => {
           const currentBid = Number(lot.current_bid ?? 0);
+          const { name, effect } = auctionTitleParts(lot.title);
           return {
-            label: lot.title.slice(0, 100),
+            label: `${lot.lot_order}. ${name}`.slice(0, 100),
             value: lot.id,
             description: (currentBid > 0
               ? `Güncel ${gold(currentBid)} • Sıradaki ${gold(auctionNextMinimum(currentBid))}`
-              : `Açılış ${gold(AUCTION_OPENING_BID)}`).slice(0, 100)
+              : `Açılış ${gold(AUCTION_OPENING_BID)} • ${effect}`).slice(0, 100),
+            emoji: AUCTION_REWARD_EMOJIS[lot.reward_type] ?? "🏺"
           };
         }))
     ));
   }
+  components.push(buttons);
   return { content: content ?? "", embeds: [embed], components };
 }
 
@@ -1377,8 +1418,13 @@ export async function handleGreatGamesSelect(interaction: StringSelectMenuIntera
   if (interaction.customId !== "ggs2|auction-lot") return false;
   const lotId = interaction.values[0];
   if (!lotId) throw new GameError("Müzayede kalemi seçilmedi.");
-  await interaction.showModal(new ModalBuilder().setCustomId(`ggm2|bid|${lotId}`).setTitle("Müzayede Teklifi").addComponents(
-    new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("amount").setLabel("Teklif: Gösterilen sıradaki bedel").setPlaceholder("Örnek: 10.000").setMaxLength(15).setStyle(TextInputStyle.Short).setRequired(true))
+  if (!interaction.guildId) throw new GameError("Bu işlem yalnızca sunucuda kullanılabilir.");
+  const lot = (await greatGamesAuctionService.lots(interaction.guildId)).find((item) => item.id === lotId && item.phase === "FINAL");
+  if (!lot) throw new GameError("Seçilen müzayede kalemi artık teklif kabul etmiyor; formu yenileyin.");
+  const nextBid = auctionNextMinimum(Number(lot.current_bid ?? 0));
+  const { name } = auctionTitleParts(lot.title);
+  await interaction.showModal(new ModalBuilder().setCustomId(`ggm2|bid|${lotId}`).setTitle(`${name} • Teklif`.slice(0, 45)).addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("amount").setLabel(`Sıradaki teklif • ${gold(nextBid)}`.slice(0, 45)).setPlaceholder(nextBid.toLocaleString("tr-TR")).setValue(nextBid.toLocaleString("tr-TR")).setMaxLength(15).setStyle(TextInputStyle.Short).setRequired(true))
   ));
   return true;
 }

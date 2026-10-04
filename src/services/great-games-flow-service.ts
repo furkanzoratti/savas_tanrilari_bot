@@ -1,7 +1,7 @@
 import type { DbClient } from "../db/pool.js";
 import { pool, withTransaction } from "../db/pool.js";
 import {
-  DIPLOMACY_DEVELOPMENTS, DIPLOMACY_SCENARIOS, GREAT_GAMES_TURN, GREAT_GAME_TYPES,
+  AUCTION_REWARDS, DIPLOMACY_DEVELOPMENTS, DIPLOMACY_SCENARIOS, GREAT_GAMES_TURN, GREAT_GAME_TYPES,
   pickNonRepeatingValue,
   type GreatGameType
 } from "../domain/great-games.js";
@@ -34,6 +34,19 @@ async function lockedSeason(client: DbClient, guildId: string): Promise<GreatGam
   )).rows[0];
   if (!season) throw new GameError("30. Tur Büyük Oyunları henüz açılmadı.");
   return season;
+}
+
+async function createAuctionCatalog(client: DbClient, seasonId: string, runNumber: number): Promise<void> {
+  let lotOrder = 0;
+  for (const [rewardType, title] of Object.entries(AUCTION_REWARDS)) {
+    lotOrder += 1;
+    await client.query(
+      `INSERT INTO great_games_auction_lots(season_id,run_number,reward_type,title,lot_order,phase)
+       VALUES($1,$2,$3,$4,$5,'SEALED')
+       ON CONFLICT(season_id,run_number,lot_order) DO NOTHING`,
+      [seasonId, runNumber, rewardType, title, lotOrder]
+    );
+  }
 }
 
 async function gameEntries(client: DbClient, seasonId: string, gameType: GreatGameType): Promise<GreatGamesEntryRow[]> {
@@ -182,16 +195,7 @@ export const greatGamesFlowService = {
           await client.query("DELETE FROM great_games_bets WHERE season_id=$1", [season.id]);
         }
         if (input.gameType === "AUCTION") {
-          await client.query(
-            "DELETE FROM great_games_auction_bids WHERE lot_id IN (SELECT id FROM great_games_auction_lots WHERE season_id=$1)",
-            [season.id]
-          );
-          await client.query(
-            `UPDATE great_games_auction_lots
-               SET phase='SEALED',winning_country_id=NULL,winning_bid=NULL,metadata=metadata-'finalists',updated_at=NOW()
-             WHERE season_id=$1`,
-            [season.id]
-          );
+          await createAuctionCatalog(client, season.id, runNumber);
         }
         allEntries = await gameEntries(client, season.id, input.gameType);
       }
@@ -263,8 +267,8 @@ export const greatGamesFlowService = {
       validateSelection(gameType, selected.length);
       if (gameType === "AUCTION") {
         await client.query(
-          "UPDATE great_games_auction_lots SET phase='FINAL',metadata=metadata-'finalists',updated_at=NOW() WHERE season_id=$1",
-          [season.id]
+          "UPDATE great_games_auction_lots SET phase='FINAL',metadata=metadata-'finalists',updated_at=NOW() WHERE season_id=$1 AND run_number=$2",
+          [season.id, season.current_run]
         );
       }
 
