@@ -27,18 +27,19 @@ async function assertSettlement(client: DbClient, settlementId: string, countryI
 }
 
 async function assertSettlementResourceCapacity(client: DbClient, settlementId: string): Promise<void> {
-  const capacityRow = (await client.query<{ level: number; bonus: number; resource_type:string }>(
+  const capacityRow = (await client.query<{ level: number; bonus: number; resource_type:string; production_minimum:number|null }>(
     `SELECT
        COALESCE((SELECT level FROM buildings
          WHERE settlement_id=$1 AND building_type='raw_material'
            AND status IN ('ACTIVE','BUILDING') AND level>0
          LIMIT 1),0)::integer AS level,
        COALESCE((SELECT trade_capacity_bonus FROM settlements WHERE id=$1),0)::integer AS bonus,
-       COALESCE((SELECT resource_type FROM settlements WHERE id=$1),'') AS resource_type`,
+       COALESCE((SELECT resource_type FROM settlements WHERE id=$1),'') AS resource_type,
+       (SELECT resource_production_minimum FROM settlements WHERE id=$1) AS production_minimum`,
     [settlementId]
   )).rows[0];
   const resourceType=capacityRow&&isResourceType(capacityRow.resource_type)?capacityRow.resource_type:undefined;
-  const capacity = localResourceProduction(Number(capacityRow?.level ?? 0),resourceType) + Number(capacityRow?.bonus ?? 0);
+  const capacity = localResourceProduction(Number(capacityRow?.level ?? 0),resourceType,capacityRow?.production_minimum) + Number(capacityRow?.bonus ?? 0);
   const used = Number((await client.query<{ count: number }>(
     `SELECT COUNT(*)::integer AS count FROM trade_agreements
       WHERE status IN ('PENDING','ACTIVE')

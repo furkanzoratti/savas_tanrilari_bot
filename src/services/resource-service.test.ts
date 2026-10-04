@@ -33,11 +33,19 @@ describe("yerel hammadde ticaret tüketimi", () => {
     expect(localResourceProduction(1,"PURPLE_DYE")).toBe(4);
   });
 
+  it("yerleşkeye özel asgari üretim normal bina gelişimini engellemez",()=>{
+    expect(localResourceProduction(0,"SPICES",4)).toBe(4);
+    expect(localResourceProduction(2,"SPICES",4)).toBe(6);
+    expect(localResourceState(0,3,"SPICES",4)).toEqual({
+      production:4,activeTradeUsage:3,remaining:1,ownResourceActive:true
+    });
+  });
+
   it("tükenen yerel kaynağı kaldırırken ticaretle gelen kaynağı etkin tutar", async () => {
     const query = vi.fn()
       .mockResolvedValueOnce({ rows: [
-        { id: "a", resource_type: "IRON", raw_material_level: 0, active_trade_usage: 2 },
-        { id: "b", resource_type: "WINE", raw_material_level: 1, active_trade_usage: 2 }
+        { id: "a", resource_type: "IRON", resource_production_minimum:null, raw_material_level: 0, active_trade_usage: 2 },
+        { id: "b", resource_type: "WINE", resource_production_minimum:null, raw_material_level: 1, active_trade_usage: 2 }
       ] })
       .mockResolvedValueOnce({ rows: [
         { settlement_id: "a", resource_type: "TIMBER" },

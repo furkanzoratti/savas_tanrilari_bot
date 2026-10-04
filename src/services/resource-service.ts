@@ -11,21 +11,22 @@ export interface SettlementResourceState {
   resources: ResourceType[];
 }
 
-export function localResourceProduction(rawMaterialLevel:number,resourceType?:ResourceType):number {
+export function localResourceProduction(rawMaterialLevel:number,resourceType?:ResourceType,productionMinimum?:number|null):number {
   const standardProduction=rawMaterialProduction(rawMaterialLevel);
-  return resourceType==="PURPLE_DYE"?Math.max(3,standardProduction):standardProduction;
+  const resourceProduction=resourceType==="PURPLE_DYE"?Math.max(3,standardProduction):standardProduction;
+  return Math.max(resourceProduction,Math.max(0,Math.floor(productionMinimum??0)));
 }
 
-export function localResourceState(rawMaterialLevel: number, activeTradeUsage: number,resourceType?:ResourceType): Pick<SettlementResourceState, "production" | "activeTradeUsage" | "remaining" | "ownResourceActive"> {
-  const production = localResourceProduction(rawMaterialLevel,resourceType);
+export function localResourceState(rawMaterialLevel: number, activeTradeUsage: number,resourceType?:ResourceType,productionMinimum?:number|null): Pick<SettlementResourceState, "production" | "activeTradeUsage" | "remaining" | "ownResourceActive"> {
+  const production = localResourceProduction(rawMaterialLevel,resourceType,productionMinimum);
   const usage = Math.max(0, Math.floor(activeTradeUsage));
   const remaining = Math.max(0, production - usage);
   return { production, activeTradeUsage: usage, remaining, ownResourceActive: remaining > 0 };
 }
 
 export async function settlementResourceStates(client: DbClient, countryId: string): Promise<Map<string, SettlementResourceState>> {
-  const own = await client.query<{ id: string; resource_type: string; raw_material_level: number; active_trade_usage: number }>(
-    `SELECT s.id,s.resource_type,
+  const own = await client.query<{ id: string; resource_type: string; resource_production_minimum:number|null; raw_material_level: number; active_trade_usage: number }>(
+    `SELECT s.id,s.resource_type,s.resource_production_minimum,
             COALESCE((SELECT MAX(b.level) FROM buildings b
                        WHERE b.settlement_id=s.id AND b.building_type='raw_material'
                          AND b.status IN ('ACTIVE','BUILDING') AND b.level>0),0)::integer AS raw_material_level,
@@ -38,7 +39,7 @@ export async function settlementResourceStates(client: DbClient, countryId: stri
   const result = new Map<string, SettlementResourceState>();
   for (const row of own.rows) {
     if (!isResourceType(row.resource_type)) continue;
-    const availability = localResourceState(Number(row.raw_material_level), Number(row.active_trade_usage),row.resource_type);
+    const availability = localResourceState(Number(row.raw_material_level), Number(row.active_trade_usage),row.resource_type,row.resource_production_minimum);
     result.set(row.id, {
       localResource: row.resource_type,
       ...availability,
