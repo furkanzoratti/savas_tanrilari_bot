@@ -158,6 +158,18 @@ export function gladiatorOdds(powerA: number, powerB: number, maxHpA = 35, maxHp
   return { a: decimal(ratingA / total), b: decimal(ratingB / total) };
 }
 
+export const GLADIATOR_COUPON_MIN_SELECTIONS=2;
+export const GLADIATOR_COUPON_MAX_SELECTIONS=5;
+export const GLADIATOR_COUPON_MAX_ODDS=12;
+
+export function gladiatorCouponOdds(odds:readonly number[]):number{
+  if(odds.length<GLADIATOR_COUPON_MIN_SELECTIONS||odds.length>GLADIATOR_COUPON_MAX_SELECTIONS)
+    throw new Error(`Kupon ${GLADIATOR_COUPON_MIN_SELECTIONS}–${GLADIATOR_COUPON_MAX_SELECTIONS} seçim içermelidir.`);
+  if(!odds.every((value)=>Number.isFinite(value)&&value>=1))throw new Error("Kupon oranları geçerli olmalıdır.");
+  const combined=odds.reduce((product,value)=>product*value,1);
+  return Math.min(GLADIATOR_COUPON_MAX_ODDS,Math.round(combined*100)/100);
+}
+
 export function resolveGladiatorFight(
   powerA: number,
   powerB: number,

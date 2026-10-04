@@ -141,6 +141,7 @@ export const commandBuilders = [
     .addSubcommand((sub) => sub.setName("gladyatorler").setDescription("Capua dövüşçülerinin güç sıralamasını ve güncel turnuva ağacını gösterir"))
     .addSubcommand((sub) => sub.setName("gladyator-sahiplikleri").setDescription("Capua gladyatörlerini sahip devletlere göre gösterir"))
     .addSubcommand((sub) => sub.setName("gladyator-bahisleri").setDescription("Yalnızca yönetici: güncel Capua turunun bahislerini ve öngörülen kazançlarını gösterir"))
+    .addSubcommand((sub) => sub.setName("bahislerim").setDescription("Devletinin güncel Capua bahislerini ve kuponlarını gösterir"))
     .addSubcommand((sub) => sub.setName("gladyator-puanlari").setDescription("Capua dövüşçülerinin eleme puanlarını ve final sıralamasını gösterir"))
     .addSubcommand((sub) => sub.setName("cuzdan").setDescription("Oyun cüzdanı bakiyeni gösterir"))
     .addSubcommand((sub) => sub.setName("para-aktar").setDescription("Rastgele uygun bir yerleşkenden oyun cüzdanına Altın aktarır")

@@ -5,8 +5,9 @@ import {
 } from "discord.js";
 import {
   ACTIVE_GREAT_GAME_TYPES, AUCTION_OPENING_BID, CARAVAN_ROUTES, CARAVAN_TRACK_TARGET, CHARIOT_TACTICS, CHARIOT_TRACK_TARGET,
+  GLADIATOR_COUPON_MAX_ODDS,GLADIATOR_COUPON_MAX_SELECTIONS,GLADIATOR_COUPON_MIN_SELECTIONS,
   GREAT_GAMES_RACE_ROUNDS, GREAT_GAME_TYPES, auctionNextMinimum, diplomacyGoalKey,
-  parseCaravanRoute, parseChariotTactic, parseKingsDecision,
+  gladiatorCouponOdds,parseCaravanRoute, parseChariotTactic, parseKingsDecision,
   type CaravanRoute, type ChariotTactic, type GreatGameType, type KingsDecision
 } from "../domain/great-games.js";
 import { gold } from "../domain/format.js";
@@ -52,7 +53,7 @@ function gameRules(type: GreatGameType): string {
   if (type === "CHARIOT") return `Katılım 1.000 Altın. Form yayınlandıktan sonra bahisler açılır. Yarış ${GREAT_GAMES_RACE_ROUNDS} etap sürer; her etapta gizli taktik verilir ve 50 kademeli pistteki atlar sonuçlarla birlikte ilerler. Katılım havuzu %65/%35 paylaşılır.`;
   if (type === "CARAVAN") return `Seçilen devletler 2–3 kişilik kervanlara ayrılır. ${GREAT_GAMES_RACE_ROUNDS} aşamanın her birinde, her kervandan yalnız bir takım üyesi ortak rotayı gizlice seçer. Her devletten oyun başlarken 1.000 Altın alınır; kervanların 50 kademeli pistteki sırası canlı değişir.`;
   if (type === "KINGS_BET") return "Katılım 1.000 Altın. Üç ikilemde İşbirliği veya İhanet ve rakibin kararı için tahmin gizlice seçilir.";
-  if (type === "GLADIATOR") return "Capua sezonu dört adet 32 kişilik eleme ve 12 kişilik finalden oluşur. 64 gladyatörün her biri elemelere tam iki kez katılır; her turnuvada 1. sıra 32, son sıra 1 puan kazanır. Dört elemenin puan sıralamasındaki ilk 12 finale çıkar, ilk 4 doğrudan çeyrek finale geçer. Dövüşte taraflar sırayla saldırır: 1d20 + Güç/10 saldırı, 1d20 + Güç/12 savunma zarıdır. Saldırı savunmayı geçerse 1d10 + Güç/25 hasar verilir.";
+  if (type === "GLADIATOR") return "Capua sezonu dört adet 32 kişilik eleme ve 12 kişilik finalden oluşur. 64 gladyatörün her biri elemelere tam iki kez katılır; her turnuvada 1. sıra 32, son sıra 1 puan kazanır. Dört elemenin puan sıralamasındaki ilk 12 finale çıkar, ilk 4 doğrudan çeyrek finale geçer. Dövüşte taraflar sırayla saldırır: 1d20 + Güç/10 saldırı, 1d20 + Güç/12 savunma zarıdır. Saldırı savunmayı geçerse 1d10 + Güç/25 hasar verilir. Tekli bahsin yanında aynı turdan 2–5 eşleşmeli, en fazla 12.00x oranlı birleşik kupon hazırlanabilir.";
   return "Her masa üç devletten oluşur. Anlaşma yalnız bir ana ve en fazla bir ikincil kazanan çıkarabilir. Katılım 500 Altındır.";
 }
 
@@ -181,6 +182,124 @@ function gladiatorRoundLabel(tournament:GladiatorTournamentView["tournament"],ro
 const GLADIATOR_ROSTER_PAGE_SIZE=16;
 const GLADIATOR_OWNERSHIP_PAGE_SIZE=10;
 const GLADIATOR_BETS_PAGE_SIZE=10;
+const GLADIATOR_COUPON_MATCHES_PER_PAGE=8;
+
+interface GladiatorCouponDraft{
+  tournamentId:string;
+  round:number;
+  countryId:string;
+  amount:number|null;
+  selections:Map<string,string>;
+  updatedAt:number;
+}
+
+const gladiatorCouponDrafts=new Map<string,GladiatorCouponDraft>();
+
+function gladiatorCouponDraftKey(guildId:string,userId:string){
+  return `${guildId}:${userId}`;
+}
+
+function activeCouponMatches(view:GladiatorTournamentView){
+  return view.matches.filter((match)=>
+    match.round===view.tournament?.current_round&&match.status==="PENDING"&&
+    match.fighter_a_id&&match.fighter_b_id&&match.odds_a&&match.odds_b
+  );
+}
+
+function couponDraftFor(
+  guildId:string,userId:string,countryId:string,view:GladiatorTournamentView
+):GladiatorCouponDraft{
+  const tournament=view.tournament;
+  if(!tournament||tournament.status!=="BETTING")throw new GameError("Bu turda kupon bahis alımı kapalı.");
+  const key=gladiatorCouponDraftKey(guildId,userId);
+  const existing=gladiatorCouponDrafts.get(key);
+  if(existing&&existing.tournamentId===tournament.id&&existing.round===tournament.current_round&&existing.countryId===countryId){
+    existing.updatedAt=Date.now();
+    return existing;
+  }
+  const draft:GladiatorCouponDraft={
+    tournamentId:tournament.id,round:tournament.current_round,countryId,amount:null,selections:new Map(),updatedAt:Date.now()
+  };
+  gladiatorCouponDrafts.set(key,draft);
+  return draft;
+}
+
+function selectedCouponFighters(view:GladiatorTournamentView,draft:GladiatorCouponDraft){
+  const selected=activeCouponMatches(view).flatMap((match)=>{
+    const fighterId=draft.selections.get(match.id);
+    if(fighterId===match.fighter_a_id)return [{
+      matchId:match.id,fighterId,matchNumber:match.bracket_position,
+      fighterName:match.fighter_a_name!,fighterCode:"A",odds:Number(match.odds_a)
+    }];
+    if(fighterId===match.fighter_b_id)return [{
+      matchId:match.id,fighterId,matchNumber:match.bracket_position,
+      fighterName:match.fighter_b_name!,fighterCode:"B",odds:Number(match.odds_b)
+    }];
+    if(fighterId)draft.selections.delete(match.id);
+    return [];
+  });
+  return selected.sort((left,right)=>left.matchNumber-right.matchNumber);
+}
+
+async function gladiatorCouponPayload(
+  guildId:string,userId:string,countryId:string,requestedPage=0
+){
+  for(const [key,draft] of gladiatorCouponDrafts)
+    if(Date.now()-draft.updatedAt>30*60*1_000)gladiatorCouponDrafts.delete(key);
+  const view=await greatGamesGladiatorService.view(guildId);
+  const draft=couponDraftFor(guildId,userId,countryId,view);
+  const matches=activeCouponMatches(view);
+  if(!matches.length)throw new GameError("Bu turda kupona eklenebilecek eşleşme bulunmuyor.");
+  const pageCount=Math.max(1,Math.ceil(matches.length/GLADIATOR_COUPON_MATCHES_PER_PAGE));
+  const page=safePage(requestedPage,pageCount);
+  const pageMatches=matches.slice(page*GLADIATOR_COUPON_MATCHES_PER_PAGE,(page+1)*GLADIATOR_COUPON_MATCHES_PER_PAGE);
+  const selected=selectedCouponFighters(view,draft);
+  const combinedOdds=selected.length>=GLADIATOR_COUPON_MIN_SELECTIONS
+    ? gladiatorCouponOdds(selected.map((selection)=>selection.odds))
+    : null;
+  const possiblePayout=draft.amount&&combinedOdds?Math.floor(draft.amount*combinedOdds):null;
+  const selectedLines=selected.length?selected.map((selection)=>
+    `✅ **#${selection.matchNumber} ${selection.fighterName}** — ${selection.odds.toFixed(2)}x`
+  ).join("\n"):"Henüz seçim yapılmadı.";
+  const embed=new EmbedBuilder()
+    .setColor(0x6f4ab1)
+    .setTitle("🎟️ Capua • Birleşik Bahis Kuponu")
+    .setDescription(`Aynı turdan **${GLADIATOR_COUPON_MIN_SELECTIONS}–${GLADIATOR_COUPON_MAX_SELECTIONS} farklı eşleşme** seç. Kuponun kazanması için bütün seçimlerin doğru çıkması gerekir. Birleşik oran en fazla **${GLADIATOR_COUPON_MAX_ODDS.toFixed(2)}x** olabilir.\n\n**Eşleşme sayfası:** ${page+1}/${pageCount}`)
+    .addFields(
+      {name:`⚔️ Kupon Seçimleri • ${selected.length}/${GLADIATOR_COUPON_MAX_SELECTIONS}`,value:selectedLines,inline:false},
+      {name:"💰 Kupon Özeti",value:`**Bahis:** ${draft.amount?gold(draft.amount):"Henüz girilmedi"}\n**Birleşik oran:** ${combinedOdds?`${combinedOdds.toFixed(2)}x`:"En az iki seçim gerekli"}\n**Öngörülen kazanç:** ${possiblePayout?gold(possiblePayout):"—"}`,inline:false}
+    )
+    .setFooter({text:"Seçimlerini sayfalar arasında değiştirebilirsin; para yalnız kuponu onayladığında kesilir."});
+  const options=pageMatches.flatMap((match)=>[
+    {
+      label:`#${match.bracket_position} • ${match.fighter_a_name}`.slice(0,100),
+      description:`A tarafı • ${Number(match.odds_a).toFixed(2)}x • Rakip: ${match.fighter_b_name}`.slice(0,100),
+      value:`${match.id}:${match.fighter_a_id}`,
+      default:draft.selections.get(match.id)===match.fighter_a_id
+    },
+    {
+      label:`#${match.bracket_position} • ${match.fighter_b_name}`.slice(0,100),
+      description:`B tarafı • ${Number(match.odds_b).toFixed(2)}x • Rakip: ${match.fighter_a_name}`.slice(0,100),
+      value:`${match.id}:${match.fighter_b_id}`,
+      default:draft.selections.get(match.id)===match.fighter_b_id
+    }
+  ]);
+  const selector=new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`ggs2|gladiator-coupon|${page}`)
+      .setPlaceholder("Bu sayfadaki kupon seçimlerini düzenle")
+      .setMinValues(0).setMaxValues(Math.min(GLADIATOR_COUPON_MAX_SELECTIONS,options.length))
+      .addOptions(options)
+  );
+  const buttons=new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(`gg2|gladiator-coupon-page|${page-1}`).setLabel("Önceki").setEmoji("⬅️").setStyle(ButtonStyle.Secondary).setDisabled(page===0),
+    new ButtonBuilder().setCustomId(`gg2|gladiator-coupon-page|${page+1}`).setLabel("Sonraki").setEmoji("➡️").setStyle(ButtonStyle.Secondary).setDisabled(page===pageCount-1),
+    new ButtonBuilder().setCustomId("gg2|gladiator-coupon-amount|GLADIATOR").setLabel("Tutar Gir").setEmoji("💰").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("gg2|gladiator-coupon-confirm|GLADIATOR").setLabel("Kuponu Onayla").setEmoji("✅").setStyle(ButtonStyle.Success).setDisabled(selected.length<GLADIATOR_COUPON_MIN_SELECTIONS||!draft.amount),
+    new ButtonBuilder().setCustomId("gg2|gladiator-coupon-cancel|GLADIATOR").setLabel("İptal").setEmoji("🗑️").setStyle(ButtonStyle.Danger)
+  );
+  return {embeds:[embed],components:[selector,buttons]};
+}
 
 function safePage(requested:number,pageCount:number){
   return Math.min(Math.max(0,Number.isSafeInteger(requested)?requested:0),Math.max(0,pageCount-1));
@@ -334,34 +453,57 @@ function gladiatorBetStatus(status:"LOCKED"|"WON"|"LOST"|"REFUNDED"){
   return "🟡 Sonuç bekliyor";
 }
 
-async function gladiatorBetsPayload(guildId:string,requestedPage=0){
-  const ledger=await greatGamesGladiatorService.betLedger(guildId);
+async function gladiatorBetsPayload(guildId:string,requestedPage=0,countryId?:string){
+  const ledger=await greatGamesGladiatorService.betLedger(guildId,countryId);
   if(!ledger)throw new GameError("Henüz görüntülenebilecek bir Capua turnuvası bulunmuyor.");
-  const pageCount=Math.max(1,Math.ceil(ledger.bets.length/GLADIATOR_BETS_PAGE_SIZE));
+  const entries=[
+    ...ledger.bets.map((bet)=>{
+      const projected=Math.floor(bet.amount*bet.locked_odds);
+      const result=bet.status==="WON"?` • **Ödenen:** ${gold(bet.payout)}`:"";
+      return {
+        createdAt:new Date(bet.created_at).getTime(),
+        field:{
+          name:`🏛️ ${bet.country_name} • Tekli • Eşleşme #${bet.match_number}`.slice(0,256),
+          value:`⚔️ **${bet.fighter_name}** [${bet.fighter_code}]\n💰 **Bahis:** ${gold(bet.amount)} • **Oran:** ${bet.locked_odds.toFixed(2)}x\n🎯 **Öngörülen kazanç:** ${gold(projected)} • ${gladiatorBetStatus(bet.status)}${result}`,
+          inline:false as const
+        }
+      };
+    }),
+    ...ledger.coupons.map((coupon)=>{
+      const projected=Math.floor(coupon.amount*coupon.combined_odds);
+      const result=coupon.status==="WON"?` • **Ödenen:** ${gold(coupon.payout)}`:"";
+      const selections=coupon.selections.map((selection)=>{
+        const marker=selection.status==="WON"?"✅":selection.status==="LOST"?"❌":selection.status==="REFUNDED"?"↩️":"⏳";
+        return `${marker} **#${selection.match_number} ${selection.fighter_name}** [${selection.fighter_code}] — ${selection.locked_odds.toFixed(2)}x`;
+      }).join("\n");
+      return {
+        createdAt:new Date(coupon.created_at).getTime(),
+        field:{
+          name:`🎟️ ${coupon.country_name} • Kupon • ${coupon.selections.length} seçim`.slice(0,256),
+          value:`${selections}\n💰 **Bahis:** ${gold(coupon.amount)} • **Birleşik oran:** ${coupon.combined_odds.toFixed(2)}x\n🎯 **Öngörülen kazanç:** ${gold(projected)} • ${gladiatorBetStatus(coupon.status)}${result}`,
+          inline:false as const
+        }
+      };
+    })
+  ].sort((left,right)=>left.createdAt-right.createdAt);
+  const pageCount=Math.max(1,Math.ceil(entries.length/GLADIATOR_BETS_PAGE_SIZE));
   const page=safePage(requestedPage,pageCount);
-  const pageBets=ledger.bets.slice(page*GLADIATOR_BETS_PAGE_SIZE,(page+1)*GLADIATOR_BETS_PAGE_SIZE);
-  const totalStake=ledger.bets.reduce((sum,bet)=>sum+bet.amount,0);
-  const totalProjected=ledger.bets.reduce((sum,bet)=>sum+Math.floor(bet.amount*bet.locked_odds),0);
-  const fields=pageBets.map((bet)=>{
-    const projected=Math.floor(bet.amount*bet.locked_odds);
-    const result=bet.status==="WON"?` • **Ödenen:** ${gold(bet.payout)}`:"";
-    return {
-      name:`🏛️ ${bet.country_name} • Eşleşme #${bet.match_number}`.slice(0,256),
-      value:`⚔️ **${bet.fighter_name}** [${bet.fighter_code}]\n💰 **Bahis:** ${gold(bet.amount)} • **Oran:** ${bet.locked_odds.toFixed(2)}x\n🎯 **Öngörülen kazanç:** ${gold(projected)} • ${gladiatorBetStatus(bet.status)}${result}`,
-      inline:false as const
-    };
-  });
+  const fields=entries.slice(page*GLADIATOR_BETS_PAGE_SIZE,(page+1)*GLADIATOR_BETS_PAGE_SIZE).map((entry)=>entry.field);
+  const totalStake=ledger.bets.reduce((sum,bet)=>sum+bet.amount,0)+ledger.coupons.reduce((sum,coupon)=>sum+coupon.amount,0);
+  const totalProjected=ledger.bets.reduce((sum,bet)=>sum+Math.floor(bet.amount*bet.locked_odds),0)
+    +ledger.coupons.reduce((sum,coupon)=>sum+Math.floor(coupon.amount*coupon.combined_odds),0);
   const tournamentLabel=ledger.tournamentType==="FINAL"?"12 Kişilik Final":"Eleme Turnuvası";
   const embed=new EmbedBuilder()
     .setColor(0x6f4ab1)
-    .setTitle("💰 Capua • Gladyatör Bahis Dökümü")
-    .setDescription(`**Turnuva:** ${ledger.runNumber}. ${tournamentLabel} • **Aşama:** ${gladiatorRoundLabel({tournament_type:ledger.tournamentType} as GladiatorTournamentView["tournament"],ledger.round)}\n**Bahis:** ${ledger.bets.length} • **Toplam yatırılan:** ${gold(totalStake)} • **Toplam öngörülen kazanç:** ${gold(totalProjected)} • **Sayfa:** ${page+1}/${pageCount}\nÖngörülen kazanç, bahis sırasında kilitlenen oranla hesaplanan **brüt ödemedir**.`)
+    .setTitle(countryId?"🎟️ Capua • Bahislerim":"💰 Capua • Gladyatör Bahis Dökümü")
+    .setDescription(`**Turnuva:** ${ledger.runNumber}. ${tournamentLabel} • **Aşama:** ${gladiatorRoundLabel({tournament_type:ledger.tournamentType} as GladiatorTournamentView["tournament"],ledger.round)}\n**Tekli:** ${ledger.bets.length} • **Kupon:** ${ledger.coupons.length} • **Toplam yatırılan:** ${gold(totalStake)} • **Toplam öngörülen kazanç:** ${gold(totalProjected)} • **Sayfa:** ${page+1}/${pageCount}\nÖngörülen kazanç, bahis sırasında kilitlenen oranla hesaplanan **brüt ödemedir**.`)
     .addFields(...(fields.length?fields:[{name:"Bu turda bahis bulunmuyor",value:"Henüz hiçbir devlet bu aşamadaki eşleşmelere bahis yapmadı.",inline:false}]))
-    .setFooter({text:"Bu form yalnızca oyun yöneticilerine açıktır. Yenile düğmesi güncel bahis kayıtlarını getirir."});
+    .setFooter({text:countryId?"Bu form yalnızca sana görünür. Yenile düğmesi bahis sonuçlarını günceller.":"Bu form yalnızca oyun yöneticilerine açıktır. Yenile düğmesi güncel bahis kayıtlarını getirir."});
+  const pageAction=countryId?"gladiator-my-bets-page":"gladiator-bets-page";
   const navigation=new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(`gg2|gladiator-bets-page|${page-1}`).setLabel("Önceki").setEmoji("⬅️").setStyle(ButtonStyle.Secondary).setDisabled(page===0),
-    new ButtonBuilder().setCustomId(`gg2|gladiator-bets-page|${page}`).setLabel("Yenile").setEmoji("🔄").setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId(`gg2|gladiator-bets-page|${page+1}`).setLabel("Sonraki").setEmoji("➡️").setStyle(ButtonStyle.Secondary).setDisabled(page===pageCount-1)
+    new ButtonBuilder().setCustomId(`gg2|${pageAction}|${page-1}`).setLabel("Önceki").setEmoji("⬅️").setStyle(ButtonStyle.Secondary).setDisabled(page===0),
+    new ButtonBuilder().setCustomId(`gg2|${pageAction}|${page}`).setLabel("Yenile").setEmoji("🔄").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`gg2|${pageAction}|${page+1}`).setLabel("Sonraki").setEmoji("➡️").setStyle(ButtonStyle.Secondary).setDisabled(page===pageCount-1)
   );
   return {embeds:[embed],components:[navigation]};
 }
@@ -598,7 +740,8 @@ async function publicGamePayload(guildId: string, type: GreatGameType, content?:
   if (data.season?.status === "ACTIVE" && activeForType) {
     if (type === "GLADIATOR" && gladiatorView?.tournament?.status === "BETTING") {
       buttons.addComponents(
-        new ButtonBuilder().setCustomId("gg2|gladiator-bet|GLADIATOR").setLabel("Bahis Yap").setEmoji("💰").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId("gg2|gladiator-bet|GLADIATOR").setLabel("Tekli Bahis").setEmoji("💰").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId("gg2|gladiator-coupon-open|GLADIATOR").setLabel("Kupon Yap").setEmoji("🎟️").setStyle(ButtonStyle.Success),
         new ButtonBuilder().setCustomId("gg2|gladiator-close|GLADIATOR").setLabel("Bahisleri Kapat").setEmoji("🔒").setStyle(ButtonStyle.Danger)
       );
     } else if (type === "GLADIATOR" && gladiatorView?.tournament?.status === "FIGHTING") {
@@ -782,6 +925,13 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
     return true;
   }
   const country = await ownCountry(interaction.guildId, interaction.user.id);
+  if(subcommand==="bahislerim"){
+    await interaction.reply({
+      ...(await gladiatorBetsPayload(interaction.guildId,0,country.id)),
+      flags:MessageFlags.Ephemeral
+    });
+    return true;
+  }
   if (subcommand === "katil") {
     const result = await greatGamesWalletService.join(interaction.guildId, country.id, interaction.user.id);
     await interaction.reply({ content: result.created
@@ -849,6 +999,11 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
   if(action==="gladiator-bets-page"){
     if(!isGameMaster(interaction))throw new GameError("Gladyatör bahis dökümünü yalnızca oyun yöneticileri görebilir.");
     await interaction.update(await gladiatorBetsPayload(interaction.guildId,Number(rawType)));
+    return true;
+  }
+  if(action==="gladiator-my-bets-page"){
+    const country=await ownCountry(interaction.guildId,interaction.user.id);
+    await interaction.update(await gladiatorBetsPayload(interaction.guildId,Number(rawType),country.id));
     return true;
   }
   if(action==="gladiator-points-page"){
@@ -936,6 +1091,68 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
     } else {
       await interaction.editReply(await publicGamePayload(interaction.guildId, "GLADIATOR", notice));
     }
+    return true;
+  }
+  if(action==="gladiator-coupon-open"){
+    const country=await ownCountry(interaction.guildId,interaction.user.id);
+    await interaction.reply({
+      ...(await gladiatorCouponPayload(interaction.guildId,interaction.user.id,country.id,0)),
+      flags:MessageFlags.Ephemeral
+    });
+    return true;
+  }
+  if(action==="gladiator-coupon-page"){
+    const country=await ownCountry(interaction.guildId,interaction.user.id);
+    await interaction.update(await gladiatorCouponPayload(
+      interaction.guildId,interaction.user.id,country.id,Number(rawType)
+    ));
+    return true;
+  }
+  if(action==="gladiator-coupon-amount"){
+    const key=gladiatorCouponDraftKey(interaction.guildId,interaction.user.id);
+    const draft=gladiatorCouponDrafts.get(key);
+    if(!draft)throw new GameError("Önce kupon seçimlerini açmalısın.");
+    const amountInput=new TextInputBuilder()
+      .setCustomId("amount").setLabel("Kupon Bahsi: 100–5.000 Altın")
+      .setPlaceholder("1000").setMaxLength(10).setStyle(TextInputStyle.Short).setRequired(true);
+    if(draft.amount)amountInput.setValue(String(draft.amount));
+    await interaction.showModal(
+      new ModalBuilder().setCustomId("ggm2|gladiator-coupon-amount|GLADIATOR").setTitle("Capua Kupon Tutarı")
+        .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(amountInput))
+    );
+    return true;
+  }
+  if(action==="gladiator-coupon-confirm"){
+    const country=await ownCountry(interaction.guildId,interaction.user.id);
+    const key=gladiatorCouponDraftKey(interaction.guildId,interaction.user.id);
+    const draft=gladiatorCouponDrafts.get(key);
+    if(!draft||draft.countryId!==country.id)throw new GameError("Onaylanacak kupon taslağı bulunamadı.");
+    const view=await greatGamesGladiatorService.view(interaction.guildId);
+    if(view.tournament?.id!==draft.tournamentId||view.tournament.current_round!==draft.round||view.tournament.status!=="BETTING")
+      throw new GameError("Kuponun hazırlandığı bahis aşaması artık açık değil.");
+    const selections=selectedCouponFighters(view,draft);
+    if(!draft.amount)throw new GameError("Kuponu onaylamadan önce bahis tutarını girmelisin.");
+    await interaction.deferUpdate();
+    const result=await greatGamesGladiatorService.placeCoupon({
+      guildId:interaction.guildId,countryId:country.id,amount:draft.amount,sourceKey:`discord:${interaction.id}`,
+      selections:selections.map((selection)=>({matchId:selection.matchId,fighterId:selection.fighterId}))
+    });
+    gladiatorCouponDrafts.delete(key);
+    const selectionLines=result.selections.map((selection)=>
+      `✅ **#${selection.matchNumber} ${selection.fighterName}** [${selection.fighterCode}] — ${selection.odds.toFixed(2)}x`
+    ).join("\n");
+    await interaction.editReply({
+      content:"",
+      embeds:[new EmbedBuilder().setColor(0x3a9d62).setTitle("✅ Capua Kuponu Onaylandı")
+        .setDescription(`${selectionLines}\n\n💰 **Bahis:** ${gold(draft.amount)}\n🎟️ **Birleşik oran:** ${result.combinedOdds.toFixed(2)}x\n🎯 **Öngörülen kazanç:** ${gold(result.possiblePayout)}\n👛 **Kalan cüzdan:** ${gold(result.balance)}`)
+        .setFooter({text:"Bütün seçimler doğru çıkarsa ödeme son kupon eşleşmesi çözüldüğünde otomatik yapılır."})],
+      components:[]
+    });
+    return true;
+  }
+  if(action==="gladiator-coupon-cancel"){
+    gladiatorCouponDrafts.delete(gladiatorCouponDraftKey(interaction.guildId,interaction.user.id));
+    await interaction.update({content:"🗑️ Capua kupon taslağı iptal edildi; cüzdandan para kesilmedi.",embeds:[],components:[]});
     return true;
   }
   if (action === "gladiator-bet") {
@@ -1040,6 +1257,34 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
 }
 
 export async function handleGreatGamesSelect(interaction: StringSelectMenuInteraction): Promise<boolean> {
+  if(interaction.customId.startsWith("ggs2|gladiator-coupon|")){
+    if(!interaction.guildId)throw new GameError("Bu işlem yalnızca sunucuda kullanılabilir.");
+    const page=Number(interaction.customId.split("|")[2]??0);
+    const country=await ownCountry(interaction.guildId,interaction.user.id);
+    const view=await greatGamesGladiatorService.view(interaction.guildId);
+    const draft=couponDraftFor(interaction.guildId,interaction.user.id,country.id,view);
+    const matches=activeCouponMatches(view);
+    const pageCount=Math.max(1,Math.ceil(matches.length/GLADIATOR_COUPON_MATCHES_PER_PAGE));
+    const safe=safePage(page,pageCount);
+    const pageMatches=matches.slice(safe*GLADIATOR_COUPON_MATCHES_PER_PAGE,(safe+1)*GLADIATOR_COUPON_MATCHES_PER_PAGE);
+    const pageMatchById=new Map(pageMatches.map((match)=>[match.id,match]));
+    const nextSelections=new Map(draft.selections);
+    for(const match of pageMatches)nextSelections.delete(match.id);
+    for(const value of interaction.values){
+      const [matchId,fighterId]=value.split(":");
+      const match=matchId?pageMatchById.get(matchId):undefined;
+      if(!match||!fighterId||(fighterId!==match.fighter_a_id&&fighterId!==match.fighter_b_id))
+        throw new GameError("Kupon seçimi artık geçerli değil; formu yenileyip tekrar dene.");
+      if(nextSelections.has(match.id))throw new GameError("Aynı eşleşmeden iki gladyatör kupona eklenemez.");
+      nextSelections.set(match.id,fighterId);
+    }
+    if(nextSelections.size>GLADIATOR_COUPON_MAX_SELECTIONS)
+      throw new GameError(`Bir kuponda en fazla ${GLADIATOR_COUPON_MAX_SELECTIONS} eşleşme seçebilirsin.`);
+    draft.selections=nextSelections;
+    draft.updatedAt=Date.now();
+    await interaction.update(await gladiatorCouponPayload(interaction.guildId,interaction.user.id,country.id,safe));
+    return true;
+  }
   if (interaction.customId.startsWith("ggs2|gladiator-fighter|")) {
     if (!interaction.guildId) throw new GameError("Bu işlem yalnızca sunucuda kullanılabilir.");
     const fighterId = interaction.values[0];
@@ -1085,6 +1330,19 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
     return true;
   }
   const country = await ownCountry(interaction.guildId, interaction.user.id);
+  if(action==="gladiator-coupon-amount"){
+    const amount=Number(interaction.fields.getTextInputValue("amount").replaceAll(".","").trim());
+    if(!Number.isSafeInteger(amount)||amount<100||amount>5_000)
+      throw new GameError("Capua kupon bahsi 100–5.000 Altın arasında olmalıdır.");
+    const draft=gladiatorCouponDrafts.get(gladiatorCouponDraftKey(interaction.guildId,interaction.user.id));
+    if(!draft||draft.countryId!==country.id)throw new GameError("Güncellenecek kupon taslağı bulunamadı.");
+    draft.amount=amount;
+    draft.updatedAt=Date.now();
+    const payload=await gladiatorCouponPayload(interaction.guildId,interaction.user.id,country.id,0);
+    if(interaction.isFromMessage())await interaction.update(payload);
+    else await interaction.reply({...payload,flags:MessageFlags.Ephemeral});
+    return true;
+  }
   if (action === "gladiator-auction-bid") {
     const amount = Number(interaction.fields.getTextInputValue("amount").replaceAll(".", "").trim());
     const result = await greatGamesGladiatorAuctionService.bid({

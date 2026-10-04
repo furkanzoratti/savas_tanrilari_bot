@@ -1,6 +1,9 @@
 import type { DbClient } from "../db/pool.js";
 import { pool, withTransaction } from "../db/pool.js";
-import { GREAT_GAMES_TURN, gladiatorOdds, resolveGladiatorFight } from "../domain/great-games.js";
+import {
+  GLADIATOR_COUPON_MAX_SELECTIONS,GLADIATOR_COUPON_MIN_SELECTIONS,GREAT_GAMES_TURN,
+  gladiatorCouponOdds,gladiatorOdds,resolveGladiatorFight
+} from "../domain/great-games.js";
 import { GameError } from "./game-service.js";
 import { adjustGreatGamesWallet } from "./great-games-wallet-service.js";
 
@@ -98,6 +101,26 @@ export interface GladiatorBetLedger {
   round:number;
   tournamentStatus:GladiatorTournamentRow["status"];
   bets:GladiatorBetViewRow[];
+  coupons:GladiatorCouponViewRow[];
+}
+
+export interface GladiatorCouponSelectionViewRow{
+  match_number:number;
+  fighter_name:string;
+  fighter_code:string;
+  locked_odds:number;
+  status:"PENDING"|"WON"|"LOST"|"REFUNDED";
+}
+
+export interface GladiatorCouponViewRow{
+  id:string;
+  country_name:string;
+  amount:number;
+  combined_odds:number;
+  payout:number;
+  status:"LOCKED"|"WON"|"LOST"|"REFUNDED";
+  created_at:Date;
+  selections:GladiatorCouponSelectionViewRow[];
 }
 
 interface QualifierCandidate extends GladiatorRow {
@@ -278,6 +301,57 @@ async function ensureQualifierResults(client:DbClient,seasonId:string):Promise<v
   for(const tournament of missing)await saveQualifierResults(client,tournament,tournament.champion_id!);
 }
 
+async function settleCouponsForMatch(
+  client:DbClient,seasonId:string,matchId:string,winnerId:string
+):Promise<void>{
+  const affected=(await client.query<{coupon_id:string}>(
+    `UPDATE great_games_gladiator_coupon_selections
+        SET status=CASE WHEN fighter_id=$1 THEN 'WON' ELSE 'LOST' END,resolved_at=NOW()
+      WHERE match_id=$2 AND status='PENDING'
+      RETURNING coupon_id`,
+    [winnerId,matchId]
+  )).rows;
+  const couponIds=[...new Set(affected.map((item)=>item.coupon_id))];
+  if(!couponIds.length)return;
+  const lockedCoupons=(await client.query<{
+    id:string;bettor_country_id:string;amount:number;combined_odds:number;
+  }>(
+    `SELECT id,bettor_country_id,amount,combined_odds
+       FROM great_games_gladiator_coupons
+      WHERE id=ANY($1::uuid[]) AND status='LOCKED' FOR UPDATE`,
+    [couponIds]
+  )).rows;
+  const states=(await client.query<{coupon_id:string;pending_count:number;has_loss:boolean}>(
+    `SELECT coupon_id,COUNT(*) FILTER (WHERE status='PENDING')::integer AS pending_count,
+            BOOL_OR(status='LOST') AS has_loss
+       FROM great_games_gladiator_coupon_selections
+      WHERE coupon_id=ANY($1::uuid[]) GROUP BY coupon_id`,
+    [couponIds]
+  )).rows;
+  const stateByCoupon=new Map(states.map((state)=>[state.coupon_id,state]));
+  const coupons=lockedCoupons.map((coupon)=>({...coupon,...stateByCoupon.get(coupon.id)!}));
+  for(const coupon of coupons){
+    if(coupon.has_loss){
+      await client.query(
+        "UPDATE great_games_gladiator_coupons SET status='LOST',settled_at=NOW() WHERE id=$1",
+        [coupon.id]
+      );
+      continue;
+    }
+    if(Number(coupon.pending_count)>0)continue;
+    const payout=Math.floor(Number(coupon.amount)*Number(coupon.combined_odds));
+    await recordWalletMoney(client,{
+      seasonId,countryId:coupon.bettor_country_id,amount:payout,kind:"PAYOUT",
+      sourceKey:`GLADIATOR:coupon-payout:${coupon.id}`,
+      description:"Capua birleşik kupon bahis kazancı"
+    });
+    await client.query(
+      "UPDATE great_games_gladiator_coupons SET status='WON',payout=$1,settled_at=NOW() WHERE id=$2",
+      [payout,coupon.id]
+    );
+  }
+}
+
 export const greatGamesGladiatorService = {
   async view(guildId: string): Promise<GladiatorTournamentView> {
     const season = (await pool.query<{ id: string }>(
@@ -358,7 +432,7 @@ export const greatGamesGladiatorService = {
     }
   },
 
-  async betLedger(guildId:string):Promise<GladiatorBetLedger|null>{
+  async betLedger(guildId:string,countryId?:string):Promise<GladiatorBetLedger|null>{
     const season=(await pool.query<{id:string}>(
       "SELECT id FROM great_games_seasons WHERE guild_id=$1 AND game_turn=$2",
       [guildId,GREAT_GAMES_TURN]
@@ -377,8 +451,9 @@ export const greatGamesGladiatorService = {
            JOIN countries country ON country.id=bet.bettor_country_id
            JOIN great_games_gladiators gladiator ON gladiator.id=bet.fighter_id
           WHERE match.tournament_id=$1 AND match.round=$2
+            AND ($3::uuid IS NULL OR bet.bettor_country_id=$3)
           ORDER BY match.bracket_position,country.name,bet.created_at`,
-        [tournament.id,tournament.current_round]
+        [tournament.id,tournament.current_round,countryId??null]
       )).rows.map((bet)=>({
         ...bet,
         match_number:Number(bet.match_number),
@@ -386,12 +461,47 @@ export const greatGamesGladiatorService = {
         locked_odds:Number(bet.locked_odds),
         payout:Number(bet.payout)
       }));
+      const couponRows=(await client.query<Omit<GladiatorCouponViewRow,"selections">>(
+        `SELECT coupon.id,country.name AS country_name,coupon.amount,coupon.combined_odds,
+                coupon.payout,coupon.status,coupon.created_at
+           FROM great_games_gladiator_coupons coupon
+           JOIN countries country ON country.id=coupon.bettor_country_id
+          WHERE coupon.tournament_id=$1 AND coupon.round=$2
+            AND ($3::uuid IS NULL OR coupon.bettor_country_id=$3)
+          ORDER BY coupon.created_at,country.name`,
+        [tournament.id,tournament.current_round,countryId??null]
+      )).rows.map((coupon)=>({
+        ...coupon,amount:Number(coupon.amount),combined_odds:Number(coupon.combined_odds),payout:Number(coupon.payout)
+      }));
+      const couponSelections=couponRows.length?(await client.query<GladiatorCouponSelectionViewRow&{coupon_id:string}>(
+        `SELECT selection.coupon_id,match.bracket_position AS match_number,
+                gladiator.name AS fighter_name,gladiator.code AS fighter_code,
+                selection.locked_odds,selection.status
+           FROM great_games_gladiator_coupon_selections selection
+           JOIN great_games_gladiator_matches match ON match.id=selection.match_id
+           JOIN great_games_gladiators gladiator ON gladiator.id=selection.fighter_id
+          WHERE selection.coupon_id=ANY($1::uuid[])
+          ORDER BY selection.coupon_id,match.bracket_position`,
+        [couponRows.map((coupon)=>coupon.id)]
+      )).rows.map((selection)=>({
+        ...selection,match_number:Number(selection.match_number),locked_odds:Number(selection.locked_odds)
+      })):[];
+      const selectionsByCoupon=new Map<string,GladiatorCouponSelectionViewRow[]>();
+      for(const selection of couponSelections){
+        const list=selectionsByCoupon.get(selection.coupon_id)??[];
+        list.push(selection);
+        selectionsByCoupon.set(selection.coupon_id,list);
+      }
+      const coupons:GladiatorCouponViewRow[]=couponRows.map((coupon)=>({
+        ...coupon,selections:selectionsByCoupon.get(coupon.id)??[]
+      }));
       return {
         tournamentType:tournament.tournament_type,
         runNumber:Number(tournament.run_number),
         round:Number(tournament.current_round),
         tournamentStatus:tournament.status,
-        bets
+        bets,
+        coupons
       };
     }finally{
       client.release();
@@ -563,6 +673,82 @@ export const greatGamesGladiatorService = {
     });
   },
 
+  async placeCoupon(input:{
+    guildId:string;countryId:string;amount:number;sourceKey:string;
+    selections:Array<{matchId:string;fighterId:string}>;
+  }):Promise<{
+    selectionCount:number;combinedOdds:number;possiblePayout:number;balance:number;
+    selections:Array<{matchNumber:number;fighterName:string;fighterCode:string;odds:number}>;
+  }>{
+    return withTransaction(async(client)=>{
+      if(!Number.isSafeInteger(input.amount)||input.amount<100||input.amount>5_000)
+        throw new GameError("Capua kupon bahsi 100–5.000 Altın arasında olmalıdır.");
+      if(input.selections.length<GLADIATOR_COUPON_MIN_SELECTIONS||input.selections.length>GLADIATOR_COUPON_MAX_SELECTIONS)
+        throw new GameError(`Kupon ${GLADIATOR_COUPON_MIN_SELECTIONS}–${GLADIATOR_COUPON_MAX_SELECTIONS} seçim içermelidir.`);
+      const matchIds=input.selections.map((selection)=>selection.matchId);
+      if(new Set(matchIds).size!==matchIds.length)throw new GameError("Bir kuponda aynı eşleşmeden yalnızca bir gladyatör seçilebilir.");
+      const season=await lockedSeason(client,input.guildId);
+      if(season.status!=="ACTIVE"||season.current_game!=="GLADIATOR")throw new GameError("Etkin bir Capua turnuvası bulunmuyor.");
+      const tournament=await latestTournament(client,season.id,true);
+      if(!tournament||tournament.status!=="BETTING")throw new GameError("Bu turda kupon bahis alımı kapalı.");
+      const matches=(await client.query<{
+        id:string;bracket_position:number;fighter_a_id:string;fighter_b_id:string;
+        fighter_a_name:string;fighter_b_name:string;fighter_a_code:string;fighter_b_code:string;
+        odds_a:number;odds_b:number;
+      }>(
+        `SELECT match.id,match.bracket_position,match.fighter_a_id,match.fighter_b_id,
+                fighter_a.name AS fighter_a_name,fighter_b.name AS fighter_b_name,
+                fighter_a.code AS fighter_a_code,fighter_b.code AS fighter_b_code,
+                match.odds_a,match.odds_b
+           FROM great_games_gladiator_matches match
+           JOIN great_games_gladiators fighter_a ON fighter_a.id=match.fighter_a_id
+           JOIN great_games_gladiators fighter_b ON fighter_b.id=match.fighter_b_id
+          WHERE match.tournament_id=$1 AND match.round=$2
+            AND match.id=ANY($3::uuid[]) AND match.status='PENDING'
+          ORDER BY match.bracket_position FOR UPDATE OF match`,
+        [tournament.id,tournament.current_round,matchIds]
+      )).rows;
+      if(matches.length!==matchIds.length)throw new GameError("Kupondaki eşleşmelerden biri artık bahis almıyor.");
+      const selectionByMatch=new Map(input.selections.map((selection)=>[selection.matchId,selection.fighterId]));
+      const resolvedSelections=matches.map((match)=>{
+        const fighterId=selectionByMatch.get(match.id)!;
+        if(fighterId===match.fighter_a_id)return {
+          matchId:match.id,fighterId,matchNumber:Number(match.bracket_position),fighterName:match.fighter_a_name,
+          fighterCode:match.fighter_a_code,odds:Number(match.odds_a)
+        };
+        if(fighterId===match.fighter_b_id)return {
+          matchId:match.id,fighterId,matchNumber:Number(match.bracket_position),fighterName:match.fighter_b_name,
+          fighterCode:match.fighter_b_code,odds:Number(match.odds_b)
+        };
+        throw new GameError("Kupondaki gladyatör eşleşme kadrosunda bulunmuyor.");
+      });
+      const combinedOdds=gladiatorCouponOdds(resolvedSelections.map((selection)=>selection.odds));
+      const coupon=(await client.query<{id:string}>(
+        `INSERT INTO great_games_gladiator_coupons(
+           tournament_id,round,bettor_country_id,amount,combined_odds,source_key
+         ) VALUES($1,$2,$3,$4,$5,$6) RETURNING id`,
+        [tournament.id,tournament.current_round,input.countryId,input.amount,combinedOdds,input.sourceKey]
+      )).rows[0]!;
+      const balance=await recordWalletMoney(client,{
+        seasonId:season.id,countryId:input.countryId,amount:-input.amount,kind:"STAKE",
+        sourceKey:`GLADIATOR:coupon-stake:${coupon.id}`,
+        description:`${resolvedSelections.length} seçimli Capua birleşik kupon bahsi`
+      });
+      for(const selection of resolvedSelections){
+        await client.query(
+          `INSERT INTO great_games_gladiator_coupon_selections(coupon_id,match_id,fighter_id,locked_odds)
+           VALUES($1,$2,$3,$4)`,
+          [coupon.id,selection.matchId,selection.fighterId,selection.odds]
+        );
+      }
+      return {
+        selectionCount:resolvedSelections.length,combinedOdds,
+        possiblePayout:Math.floor(input.amount*combinedOdds),balance,
+        selections:resolvedSelections.map(({matchNumber,fighterName,fighterCode,odds})=>({matchNumber,fighterName,fighterCode,odds}))
+      };
+    });
+  },
+
   async resolveNextFight(guildId: string): Promise<{
     round: number;
     matchNumber: number;
@@ -662,6 +848,7 @@ export const greatGamesGladiatorService = {
           await client.query("UPDATE great_games_gladiator_bets SET status='LOST',settled_at=NOW() WHERE id=$1", [bet.id]);
         }
       }
+      await settleCouponsForMatch(client,season.id,match.id,winnerId);
       const pending = Number((await client.query<{ count: string }>(
         "SELECT COUNT(*)::text AS count FROM great_games_gladiator_matches WHERE tournament_id=$1 AND round=$2 AND status='PENDING'",
         [tournament.id, tournament.current_round]

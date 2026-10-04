@@ -57,6 +57,7 @@ import { carthageRepairTransferToIbossimMigration } from "./carthage-repair-tran
 import { greatGamesGladiatorChampionshipMigration } from "./great-games-gladiator-championship-migration.js";
 import { dynastyCoupleBirthAttemptsMigration } from "./dynasty-couple-birth-attempts-migration.js";
 import { automaticCultureEffectsMigration } from "./automatic-culture-effects-migration.js";
+import { greatGamesGladiatorCouponsMigration } from "./great-games-gladiator-coupons-migration.js";
 
 export const migrations = [
   {
@@ -2331,5 +2332,6 @@ export const migrations = [
   greatGamesGladiatorChampionshipMigration,
   dynastyCoupleBirthAttemptsMigration,
   automaticCultureEffectsMigration,
-  playerAutoPurchaseArmyModesMigration
+  playerAutoPurchaseArmyModesMigration,
+  greatGamesGladiatorCouponsMigration
 ] as const;
