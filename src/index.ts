@@ -13,6 +13,7 @@ import { renderWelcomeMessage, welcomeService } from "./services/welcome-service
 import { publishGreatPowerRanking } from "./discord/great-power-ui.js";
 import { movementLogService } from "./services/movement-log-service.js";
 import { refreshChangedBattleCards } from "./discord/battle-ui.js";
+import { processDueGreatGamesAuctions } from "./discord/great-games-ui-v2.js";
 
 function countWords(content: string): number {
   const cleaned = content
@@ -132,6 +133,10 @@ client.once("clientReady", async (readyClient) => {
   await sendScheduledGreatPowerRanking();
   await publishMovementLogs();
   await publishChangedBattleCards();
+  const auctionResult = await processDueGreatGamesAuctions(readyClient);
+  if (auctionResult.closed || auctionResult.published || auctionResult.failed) {
+    logger.info(auctionResult, "Süresi dolan Devletler Müzayedeleri işlendi");
+  }
 });
 
 async function publishMovementLogs():Promise<void>{
@@ -172,6 +177,13 @@ const battleCardRefreshTimer=setInterval(()=>{
   void publishChangedBattleCards().catch((error)=>logger.error(error,"Savaş kartı otomatik eşitlemesi başarısız"));
 },5_000);
 battleCardRefreshTimer.unref();
+const greatGamesAuctionTimer=setInterval(()=>{
+  if(!client.isReady())return;
+  void processDueGreatGamesAuctions(client).then((result)=>{
+    if(result.closed||result.published||result.failed)logger.info(result,"Devletler Müzayedesi zamanlayıcısı çalıştı");
+  }).catch((error)=>logger.error(error,"Devletler Müzayedesi zamanlayıcısı başarısız"));
+},15_000);
+greatGamesAuctionTimer.unref();
 const healthServer = startHealthServer(client);
 await client.login(config.DISCORD_TOKEN);
 
@@ -181,6 +193,7 @@ async function shutdown(signal: string) {
   clearInterval(greatPowerTimer);
   clearInterval(movementLogTimer);
   clearInterval(battleCardRefreshTimer);
+  clearInterval(greatGamesAuctionTimer);
   healthServer.close();
   client.destroy();
   await pool.end();

@@ -17,6 +17,12 @@ interface SelectionResult {
   rooms: string[];
 }
 
+export interface AuctionSchedule {
+  endsAt: Date;
+  channelId: string;
+  messageId: string;
+}
+
 export interface GreatGamesRoomReadiness {
   roomKey: string;
   countries: Array<{ countryName: string; submitted: boolean }>;
@@ -25,6 +31,19 @@ export interface GreatGamesRoomReadiness {
 export interface GreatGamesRoundReadiness {
   round: number;
   rooms: GreatGamesRoomReadiness[];
+}
+
+function auctionStatus(season: GreatGamesSeasonRow): NonNullable<GreatGamesSeasonRow["auction_status"]> {
+  if (season.auction_status) return season.auction_status;
+  if (season.current_game !== "AUCTION") return "IDLE";
+  if (season.status === "ACTIVE") return "ACTIVE";
+  if (season.status === "PUBLISHED") return "PUBLISHED";
+  if (season.status === "CANCELLED") return "CANCELLED";
+  return "PREPARED";
+}
+
+function auctionRun(season: GreatGamesSeasonRow): number {
+  return Math.max(0, Number(season.auction_run ?? (season.current_game === "AUCTION" ? season.current_run : 0)));
 }
 
 async function lockedSeason(client: DbClient, guildId: string): Promise<GreatGamesSeasonRow> {
@@ -142,13 +161,20 @@ export const greatGamesFlowService = {
     return withTransaction(async (client) => {
       if (input.gameType === "GLADIATOR") throw new GameError("Capua turnuvasında devlet seçilmez; 32 dövüşçüyü bot rastgele belirler.");
       const season = await lockedSeason(client, input.guildId);
-      if (season.status !== "OPEN") throw new GameError("Katılımcılar yalnızca başka bir oyun yayında veya etkin değilken seçilebilir.");
+      const independentAuction = input.gameType === "AUCTION";
+      if (!independentAuction && season.status !== "OPEN") throw new GameError("Katılımcılar yalnızca başka bir oyun yayında veya etkin değilken seçilebilir.");
+      if (independentAuction && ["FINISHED", "CANCELLED"].includes(season.status)) {
+        throw new GameError("Büyük Oyunlar sezonu kapalıyken müzayede hazırlanamaz.");
+      }
+      if (independentAuction && ["PUBLISHED", "ACTIVE"].includes(auctionStatus(season))) {
+        throw new GameError("Açık veya yayınlanmış müzayedenin katılımcıları değiştirilemez.");
+      }
       let allEntries = await gameEntries(client, season.id, input.gameType);
-      const continuingSelection = season.current_game === input.gameType
+      const continuingSelection = (independentAuction ? auctionStatus(season) === "PREPARED" : season.current_game === input.gameType)
         && allEntries.some((entry) => entry.status === "SELECTED");
       const runNumber = continuingSelection
-        ? Math.max(1, Number(season.current_run ?? 0))
-        : Number(season.current_run ?? 0) + 1;
+        ? Math.max(1, independentAuction ? auctionRun(season) : Number(season.current_run ?? 0))
+        : (independentAuction ? auctionRun(season) : Number(season.current_run ?? 0)) + 1;
 
       if (!continuingSelection) {
         if (input.gameType === "DIPLOMACY") {
@@ -220,8 +246,8 @@ export const greatGamesFlowService = {
       await client.query(
         `UPDATE great_games_entries SET status='REGISTERED',room_key=NULL,
            metadata=metadata-'selectionOrder',updated_at=NOW()
-         WHERE season_id=$1 AND status='SELECTED'`,
-        [season.id]
+         WHERE season_id=$1 AND game_type=$2 AND status='SELECTED'`,
+        [season.id, input.gameType]
       );
       for (let index = 0; index < selected.length; index += 1) {
         const entry = selected[index]!;
@@ -232,10 +258,21 @@ export const greatGamesFlowService = {
           [entry.room_key, JSON.stringify(entry.metadata), entry.id]
         );
       }
-      await client.query(
-        "UPDATE great_games_seasons SET current_game=$1,current_round=0,current_run=$2,updated_at=NOW() WHERE id=$3",
-        [input.gameType, runNumber, season.id]
-      );
+      if (independentAuction) {
+        await client.query(
+          `UPDATE great_games_seasons
+              SET auction_status='PREPARED',auction_run=$1,
+                  auction_ends_at=NULL,auction_channel_id=NULL,auction_message_id=NULL,
+                  auction_closed_at=NULL,auction_result_published_at=NULL,updated_at=NOW()
+            WHERE id=$2`,
+          [runNumber, season.id]
+        );
+      } else {
+        await client.query(
+          "UPDATE great_games_seasons SET current_game=$1,current_round=0,current_run=$2,updated_at=NOW() WHERE id=$3",
+          [input.gameType, runNumber, season.id]
+        );
+      }
       return { count: selected.length, countries: selected.map((entry) => entry.country_name), rooms: roomsOf(selected) };
     });
   },
@@ -244,31 +281,48 @@ export const greatGamesFlowService = {
     return withTransaction(async (client) => {
       if (gameType === "GLADIATOR") throw new GameError("Capua turnuvası başlatıldığında form doğrudan yayınlanır.");
       const season = await lockedSeason(client, guildId);
-      if (!["OPEN", "PUBLISHED"].includes(season.status) || season.current_game !== gameType) {
+      if (gameType === "AUCTION" && ["FINISHED", "CANCELLED"].includes(season.status)) throw new GameError("Büyük Oyunlar sezonu kapalı.");
+      const validState = gameType === "AUCTION"
+        ? ["PREPARED", "PUBLISHED"].includes(auctionStatus(season))
+        : ["OPEN", "PUBLISHED"].includes(season.status) && season.current_game === gameType;
+      if (!validState) {
         throw new GameError("Önce bu oyun için katılımcıları seçmelisiniz.");
       }
       const selected = (await gameEntries(client, season.id, gameType))
         .filter((entry) => entry.status === "SELECTED")
         .sort((left, right) => Number(left.metadata.selectionOrder ?? 0) - Number(right.metadata.selectionOrder ?? 0));
       validateSelection(gameType, selected.length);
-      if (season.status === "OPEN") await client.query("UPDATE great_games_seasons SET status='PUBLISHED',updated_at=NOW() WHERE id=$1", [season.id]);
+      if (gameType === "AUCTION") {
+        if (auctionStatus(season) === "PREPARED") {
+          await client.query("UPDATE great_games_seasons SET auction_status='PUBLISHED',updated_at=NOW() WHERE id=$1", [season.id]);
+        }
+      } else if (season.status === "OPEN") {
+        await client.query("UPDATE great_games_seasons SET status='PUBLISHED',updated_at=NOW() WHERE id=$1", [season.id]);
+      }
       return { count: selected.length, countries: selected.map((entry) => entry.country_name), rooms: roomsOf(selected) };
     });
   },
 
-  async startPublishedGame(guildId: string, gameType: GreatGameType): Promise<SelectionResult> {
+  async startPublishedGame(guildId: string, gameType: GreatGameType, auctionSchedule?: AuctionSchedule): Promise<SelectionResult> {
     return withTransaction(async (client) => {
       if (gameType === "GLADIATOR") throw new GameError("Capua turnuvası özel turnuva düğmesiyle başlatılır.");
       const season = await lockedSeason(client, guildId);
-      if (season.status !== "PUBLISHED" || season.current_game !== gameType) throw new GameError("Bu oyun henüz yayınlanmadı veya zaten başladı.");
+      if (gameType === "AUCTION" && ["FINISHED", "CANCELLED"].includes(season.status)) throw new GameError("Büyük Oyunlar sezonu kapalı.");
+      const published = gameType === "AUCTION"
+        ? auctionStatus(season) === "PUBLISHED"
+        : season.status === "PUBLISHED" && season.current_game === gameType;
+      if (!published) throw new GameError("Bu oyun henüz yayınlanmadı veya zaten başladı.");
       const selected = (await gameEntries(client, season.id, gameType))
         .filter((entry) => entry.status === "SELECTED")
         .sort((left, right) => Number(left.metadata.selectionOrder ?? 0) - Number(right.metadata.selectionOrder ?? 0));
       validateSelection(gameType, selected.length);
       if (gameType === "AUCTION") {
+        if (!auctionSchedule?.channelId || !auctionSchedule.messageId || auctionSchedule.endsAt.getTime() <= Date.now()) {
+          throw new GameError("Müzayede için geçerli bir otomatik kapanış zamanı ve mesaj hedefi bulunamadı.");
+        }
         await client.query(
           "UPDATE great_games_auction_lots SET phase='FINAL',metadata=metadata-'finalists',updated_at=NOW() WHERE season_id=$1 AND run_number=$2",
-          [season.id, season.current_run]
+          [season.id, auctionRun(season)]
         );
       }
 
@@ -331,10 +385,20 @@ export const greatGamesFlowService = {
           [JSON.stringify(entry.metadata), entry.id]
         );
       }
-      await client.query(
-        "UPDATE great_games_seasons SET status='ACTIVE',current_round=1,updated_at=NOW() WHERE id=$1",
-        [season.id]
-      );
+      if (gameType === "AUCTION") {
+        await client.query(
+          `UPDATE great_games_seasons
+              SET auction_status='ACTIVE',auction_ends_at=$1,auction_channel_id=$2,auction_message_id=$3,
+                  auction_closed_at=NULL,auction_result_published_at=NULL,updated_at=NOW()
+            WHERE id=$4`,
+          [auctionSchedule!.endsAt, auctionSchedule!.channelId, auctionSchedule!.messageId, season.id]
+        );
+      } else {
+        await client.query(
+          "UPDATE great_games_seasons SET status='ACTIVE',current_round=1,updated_at=NOW() WHERE id=$1",
+          [season.id]
+        );
+      }
       return { count: selected.length, countries: selected.map((entry) => entry.country_name), rooms: roomsOf(selected) };
     });
   },

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ACTIVE_GREAT_GAME_TYPES, AUCTION_BID_INCREMENT, AUCTION_OPENING_BID, AUCTION_REWARDS, DIPLOMACY_SCENARIOS, GREAT_GAMES_RACE_ROUNDS,
   GREAT_GAMES_TURN,
-  allocatePool, auctionAvailableBid, auctionNextMinimum, caravanMultiplier, isValidAuctionBidAmount,
+  allocatePool, auctionAvailableBid, auctionNextMinimum, caravanMultiplier, isValidAuctionBidAmount, nextIstanbulAuctionDeadline,
   gladiatorOdds, parseCaravanRoute, parseChariotTactic, parseKingsDecision, pickNonRepeatingValue,
   raceTrackPosition, resolveCaravanStage, resolveChariotRound,
   resolveDiplomacyGoalVote, resolveDiplomacyVote, resolveGladiatorFight, resolveKingsRound
@@ -41,6 +41,11 @@ describe("30. Tur Büyük Oyunları", () => {
     expect(auctionAvailableBid(15_000, 0)).toBe(15_000);
     expect(auctionAvailableBid(15_000, 6_500)).toBe(8_500);
     expect(auctionAvailableBid(5_000, 7_000)).toBe(0);
+  });
+
+  it("müzayede kapanışını İstanbul'daki sıradaki 23.00'a kurar", () => {
+    expect(nextIstanbulAuctionDeadline(new Date("2026-10-04T16:00:00.000Z")).toISOString()).toBe("2026-10-04T20:00:00.000Z");
+    expect(nextIstanbulAuctionDeadline(new Date("2026-10-04T20:01:00.000Z")).toISOString()).toBe("2026-10-05T20:00:00.000Z");
   });
 
   it("müzayede kataloğunu sekiz güçlü ve doğrudan uygulanabilir etkiyle sınırlar", () => {

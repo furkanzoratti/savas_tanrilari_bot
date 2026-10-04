@@ -62,6 +62,8 @@ import { greatGamesGladiatorQualifierRewardsMigration } from "./great-games-glad
 import { greatGamesCapuaIndependentStateMigration } from "./great-games-capua-independent-state-migration.js";
 import { greatGamesAuctionRunsMigration } from "./great-games-auction-runs-migration.js";
 import { greatGamesAuctionBidRulesMigration } from "./great-games-auction-bid-rules-migration.js";
+import { greatGamesIndependentAuctionMigration } from "./great-games-independent-auction-migration.js";
+import { greatGamesAuctionTimerMigration } from "./great-games-auction-timer-migration.js";
 
 export const migrations = [
   {
@@ -2341,5 +2343,7 @@ export const migrations = [
   greatGamesGladiatorQualifierRewardsMigration,
   greatGamesCapuaIndependentStateMigration,
   greatGamesAuctionRunsMigration,
-  greatGamesAuctionBidRulesMigration
+  greatGamesAuctionBidRulesMigration,
+  greatGamesIndependentAuctionMigration,
+  greatGamesAuctionTimerMigration
 ] as const;

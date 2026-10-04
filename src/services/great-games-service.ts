@@ -14,6 +14,13 @@ import { settleChariotBets } from "./great-games-bet-service.js";
 export interface GreatGamesSeasonRow {
   id: string; guild_id: string; game_turn: number; status: "OPEN" | "PUBLISHED" | "ACTIVE" | "FINISHED" | "CANCELLED";
   current_game: GreatGameType | null; current_round: number; current_run: number; prize_pool: number;
+  auction_status?: "IDLE" | "PREPARED" | "PUBLISHED" | "ACTIVE" | "FINISHED" | "CANCELLED";
+  auction_run?: number;
+  auction_ends_at?: Date | string | null;
+  auction_channel_id?: string | null;
+  auction_message_id?: string | null;
+  auction_closed_at?: Date | string | null;
+  auction_result_published_at?: Date | string | null;
 }
 
 export interface GreatGamesEntryRow {

@@ -4,7 +4,20 @@ import { AUCTION_BID_INCREMENT, AUCTION_OPENING_BID, auctionAvailableBid, auctio
 import { GameError } from "./game-service.js";
 import { adjustGreatGamesWallet } from "./great-games-wallet-service.js";
 
-interface Season { id: string; guild_id: string; game_turn: number; status: string; current_game: string | null; current_round: number; current_run: number; }
+interface Season {
+  id: string; guild_id: string; game_turn: number; status: string; current_game: string | null; current_round: number; current_run: number;
+  auction_status?: "IDLE" | "PREPARED" | "PUBLISHED" | "ACTIVE" | "FINISHED" | "CANCELLED";
+  auction_run?: number;
+  auction_ends_at?: Date | string | null;
+  auction_channel_id?: string | null;
+  auction_message_id?: string | null;
+}
+export interface DueGreatGamesAuction {
+  guildId: string;
+  status: "ACTIVE" | "FINISHED";
+  channelId: string;
+  messageId: string;
+}
 export interface AuctionLot {
   id: string; title: string; reward_type: string; lot_order: number; run_number: number; phase: "SEALED" | "FINAL" | "FINISHED" | "CANCELLED";
   winning_country_id: string | null; winning_country_name: string | null; winning_bid: number | null;
@@ -18,6 +31,15 @@ async function season(client: DbClient, guildId: string): Promise<Season> {
   )).rows[0];
   if (!row) throw new GameError("15. Tur Büyük Oyunları henüz açılmadı.");
   return row;
+}
+
+function activeAuctionRun(seasonRow: Season): number {
+  return Math.max(0, Number(seasonRow.auction_run ?? (seasonRow.current_game === "AUCTION" ? seasonRow.current_run : 0)));
+}
+
+function auctionIsActive(seasonRow: Season): boolean {
+  return seasonRow.auction_status === "ACTIVE"
+    || (!seasonRow.auction_status && seasonRow.status === "ACTIVE" && seasonRow.current_game === "AUCTION");
 }
 
 
@@ -56,6 +78,36 @@ async function refundBid(client: DbClient, seasonId: string, bid: { id: string; 
 }
 
 export const greatGamesAuctionService = {
+  async dueAutomaticClosures(): Promise<DueGreatGamesAuction[]> {
+    const rows = (await pool.query<{
+      guild_id: string; auction_status: "ACTIVE" | "FINISHED"; auction_channel_id: string; auction_message_id: string;
+    }>(
+      `SELECT guild_id,auction_status,auction_channel_id,auction_message_id
+         FROM great_games_seasons
+        WHERE game_turn=$1 AND auction_ends_at IS NOT NULL AND auction_ends_at<=NOW()
+          AND auction_result_published_at IS NULL
+          AND auction_status IN ('ACTIVE','FINISHED')
+          AND auction_channel_id IS NOT NULL AND auction_message_id IS NOT NULL
+        ORDER BY auction_ends_at`,
+      [GREAT_GAMES_TURN]
+    )).rows;
+    return rows.map((row) => ({
+      guildId: row.guild_id,
+      status: row.auction_status,
+      channelId: row.auction_channel_id,
+      messageId: row.auction_message_id
+    }));
+  },
+
+  async markResultPublished(guildId: string, messageId?: string): Promise<void> {
+    await pool.query(
+      `UPDATE great_games_seasons
+          SET auction_result_published_at=NOW(),auction_message_id=COALESCE($3,auction_message_id),updated_at=NOW()
+        WHERE guild_id=$1 AND game_turn=$2 AND auction_status='FINISHED'`,
+      [guildId, GREAT_GAMES_TURN, messageId ?? null]
+    );
+  },
+
   async lots(guildId: string, countryId?: string): Promise<AuctionLot[]> {
     return (await pool.query<AuctionLot>(
       `SELECT l.id,l.title,l.reward_type,l.lot_order,l.run_number,l.phase,l.winning_country_id,c.name AS winning_country_name,l.winning_bid,
@@ -81,7 +133,7 @@ export const greatGamesAuctionService = {
            WHERE b.lot_id=l.id
          ) stats ON TRUE
         WHERE s.guild_id=$1 AND s.game_turn=$2
-          AND l.run_number=CASE WHEN s.current_game='AUCTION' THEN s.current_run ELSE (
+          AND l.run_number=CASE WHEN s.auction_run>0 THEN s.auction_run ELSE (
             SELECT MAX(history.run_number) FROM great_games_auction_lots history WHERE history.season_id=s.id
           ) END
         ORDER BY l.lot_order`, [guildId, GREAT_GAMES_TURN, countryId ?? null]
@@ -91,7 +143,8 @@ export const greatGamesAuctionService = {
   async bid(input: { guildId: string; countryId: string; userId: string; lotId: string; amount: number }): Promise<{ phase: string; amount: number; availableAfter: number }> {
     return withTransaction(async (client) => {
       const active = await season(client, input.guildId);
-      if (active.status !== "ACTIVE" || active.current_game !== "AUCTION") throw new GameError("Müzayede şu anda teklif kabul etmiyor.");
+      if (!auctionIsActive(active)) throw new GameError("Müzayede şu anda teklif kabul etmiyor.");
+      const runNumber = activeAuctionRun(active);
       if (!isValidAuctionBidAmount(input.amount)) {
         throw new GameError(`${AUCTION_OPENING_BID.toLocaleString("tr-TR")} Altından başlayan teklifler ${AUCTION_BID_INCREMENT.toLocaleString("tr-TR")} Altınlık dilimlerle verilmelidir.`);
       }
@@ -101,7 +154,7 @@ export const greatGamesAuctionService = {
       );
       if (!participant.rowCount) throw new GameError("Bu devlet yayınlanan müzayedenin katılımcıları arasında değil.");
       const lot = (await client.query<{ id: string; title: string; phase: string; metadata: { finalists?: string[] } }>(
-        "SELECT id,title,phase,metadata FROM great_games_auction_lots WHERE id=$1 AND season_id=$2 AND run_number=$3 FOR UPDATE", [input.lotId, active.id, active.current_run]
+        "SELECT id,title,phase,metadata FROM great_games_auction_lots WHERE id=$1 AND season_id=$2 AND run_number=$3 FOR UPDATE", [input.lotId, active.id, runNumber]
       )).rows[0];
       if (!lot || lot.phase !== "FINAL") throw new GameError("Bu müzayede kalemi teklif kabul etmiyor.");
       const existing = (await client.query<{ id: string; amount: number; reserved_amount: number }>(
@@ -131,7 +184,7 @@ export const greatGamesAuctionService = {
            ) leader ON TRUE
           WHERE other_lot.season_id=$1 AND other_lot.run_number=$4 AND other_lot.id<>$2 AND other_lot.phase='FINAL'
             AND leader.country_id=$3`,
-        [active.id, lot.id, input.countryId, active.current_run]
+        [active.id, lot.id, input.countryId, runNumber]
       )).rows[0]?.amount ?? 0);
       const available = auctionAvailableBid(Number(wallet.balance), committedOnOtherLots);
       if (input.amount > available) {
@@ -153,9 +206,10 @@ export const greatGamesAuctionService = {
   async advance(guildId: string): Promise<{ phase: "FINAL" | "FINISHED"; summary: string[]; refunded: number }> {
     return withTransaction(async (client) => {
       const active = await season(client, guildId);
-      if (active.status !== "ACTIVE" || active.current_game !== "AUCTION") throw new GameError("Etkin müzayede bulunmuyor.");
+      if (!auctionIsActive(active)) throw new GameError("Etkin müzayede bulunmuyor.");
+      const runNumber = activeAuctionRun(active);
       const lots = (await client.query<{ id: string; title: string }>(
-        "SELECT id,title FROM great_games_auction_lots WHERE season_id=$1 AND run_number=$2 ORDER BY lot_order FOR UPDATE", [active.id, active.current_run]
+        "SELECT id,title FROM great_games_auction_lots WHERE season_id=$1 AND run_number=$2 ORDER BY lot_order FOR UPDATE", [active.id, runNumber]
       )).rows;
       if (!lots.length) throw new GameError("Müzayede kalemi bulunmuyor.");
 
@@ -190,7 +244,7 @@ export const greatGamesAuctionService = {
             countryId: winner.country_id,
             amount: -paymentDue,
             kind: "AUCTION_PAYMENT",
-            sourceKey: `auction:run:${Math.max(1, Number(active.current_run ?? 0))}:payment:${lot.id}:${winner.country_id}:${winner.amount}`,
+            sourceKey: `auction:run:${Math.max(1, runNumber)}:payment:${lot.id}:${winner.country_id}:${winner.amount}`,
             description: `${lot.title} müzayede kazanan ödemesi`
           });
         }
@@ -203,7 +257,15 @@ export const greatGamesAuctionService = {
         summary.push(`${lot.title}: **${winner.country_name}** — ${Number(winner.amount).toLocaleString("tr-TR")} Altın`);
       }
       await client.query(
-        "UPDATE great_games_seasons SET status='OPEN',current_game=NULL,current_round=0,prize_pool=prize_pool+$1,updated_at=NOW() WHERE id=$2",
+        `UPDATE great_games_seasons
+            SET auction_status='FINISHED',prize_pool=prize_pool+$1,
+                auction_closed_at=NOW(),
+                auction_ends_at=CASE WHEN auction_ends_at IS NULL OR auction_ends_at>NOW() THEN NOW() ELSE auction_ends_at END,
+                status=CASE WHEN current_game='AUCTION' THEN 'OPEN' ELSE status END,
+                current_game=CASE WHEN current_game='AUCTION' THEN NULL ELSE current_game END,
+                current_round=CASE WHEN current_game='AUCTION' THEN 0 ELSE current_round END,
+                updated_at=NOW()
+          WHERE id=$2`,
         [prizePool, active.id]
       );
       await client.query(

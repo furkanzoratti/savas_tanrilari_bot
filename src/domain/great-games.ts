@@ -6,6 +6,19 @@ export const CARAVAN_TRACK_TARGET = 20;
 export const AUCTION_OPENING_BID = 1_000;
 export const AUCTION_BID_INCREMENT = 500;
 
+export function nextIstanbulAuctionDeadline(now = new Date()): Date {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Istanbul", year: "numeric", month: "2-digit", day: "2-digit"
+  }).formatToParts(now);
+  const value = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((part) => part.type === type)?.value ?? 0);
+  const year = value("year");
+  const month = value("month");
+  const day = value("day");
+  let deadline = new Date(Date.UTC(year, month - 1, day, 20, 0, 0));
+  if (deadline.getTime() <= now.getTime()) deadline = new Date(deadline.getTime() + 24 * 60 * 60 * 1_000);
+  return deadline;
+}
+
 export function isValidAuctionBidAmount(amount: number): boolean {
   return Number.isSafeInteger(amount)
     && amount >= AUCTION_OPENING_BID

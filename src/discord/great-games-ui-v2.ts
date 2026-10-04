@@ -1,12 +1,12 @@
 import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, LabelBuilder, MessageFlags, ModalBuilder,
   StringSelectMenuBuilder, TextDisplayBuilder, TextInputBuilder, TextInputStyle,
-  type ButtonInteraction, type ChatInputCommandInteraction, type ModalSubmitInteraction, type StringSelectMenuInteraction
+  type ButtonInteraction, type ChatInputCommandInteraction, type Client, type ModalSubmitInteraction, type StringSelectMenuInteraction
 } from "discord.js";
 import {
   ACTIVE_GREAT_GAME_TYPES, AUCTION_BID_INCREMENT, AUCTION_OPENING_BID, CARAVAN_ROUTES, CARAVAN_TRACK_TARGET, CHARIOT_TACTICS, CHARIOT_TRACK_TARGET,
   GLADIATOR_COUPON_MAX_ODDS,GLADIATOR_COUPON_MAX_SELECTIONS,GLADIATOR_COUPON_MIN_SELECTIONS,
-  GREAT_GAMES_RACE_ROUNDS, GREAT_GAME_TYPES, auctionNextMinimum, diplomacyGoalKey,
+  GREAT_GAMES_RACE_ROUNDS, GREAT_GAME_TYPES, auctionNextMinimum, diplomacyGoalKey, nextIstanbulAuctionDeadline,
   gladiatorCouponOdds,parseCaravanRoute, parseChariotTactic, parseKingsDecision,
   type CaravanRoute, type ChariotTactic, type GreatGameType, type KingsDecision
 } from "../domain/great-games.js";
@@ -19,6 +19,7 @@ import { greatGamesWalletService } from "../services/great-games-wallet-service.
 import { greatGamesGladiatorService, type GladiatorMatchRow, type GladiatorTournamentView } from "../services/great-games-gladiator-service.js";
 import { greatGamesGladiatorAuctionService } from "../services/great-games-gladiator-auction-service.js";
 import { GameError, gameService } from "../services/game-service.js";
+import { logger } from "../logger.js";
 import { isGameMaster } from "./auth.js";
 
 interface AdminPanelPayload {
@@ -61,10 +62,29 @@ function chosenEntries(data: GreatGamesDashboard, type: GreatGameType): GreatGam
   return data.entries.filter((entry) => entry.game_type === type && ["SELECTED", "ACTIVE", "FINISHED"].includes(entry.status));
 }
 
+function auctionLifecycle(data: GreatGamesDashboard): "IDLE" | "PREPARED" | "PUBLISHED" | "ACTIVE" | "FINISHED" | "CANCELLED" {
+  const explicit = data.season?.auction_status;
+  if (explicit) return explicit;
+  if (data.season?.current_game !== "AUCTION") return "IDLE";
+  if (data.season.status === "ACTIVE") return "ACTIVE";
+  if (data.season.status === "PUBLISHED") return "PUBLISHED";
+  if (data.season.status === "CANCELLED") return "CANCELLED";
+  return "PREPARED";
+}
+
 function statusLabel(data: GreatGamesDashboard, type: GreatGameType, entries: GreatGamesEntryRow[]): string {
+  if (type === "AUCTION") {
+    const status = auctionLifecycle(data);
+    if (status === "PREPARED") return "Katılımcılar seçildi • Yayın bekliyor";
+    if (status === "PUBLISHED") return "Yayınlandı • Başlatılmayı bekliyor";
+    if (status === "ACTIVE") return "Açık artırma sürüyor";
+    if (status === "FINISHED") return "Tamamlandı";
+    if (status === "CANCELLED") return "İptal edildi";
+    return "Hazırlanmayı bekliyor";
+  }
   if (data.season?.current_game === type) {
     if (data.season.status === "PUBLISHED") return "Yayınlandı • Bahis/ön hazırlık açık";
-    if (data.season.status === "ACTIVE") return type === "AUCTION" ? "Açık artırma sürüyor" : `Devam ediyor • Aşama ${data.season.current_round}`;
+    if (data.season.status === "ACTIVE") return `Devam ediyor • Aşama ${data.season.current_round}`;
     if (data.season.status === "OPEN" && entries.some((entry) => entry.status === "SELECTED")) return "Katılımcılar seçildi • Yayın bekliyor";
   }
   if (entries.some((entry) => entry.status === "FINISHED")) return "Tamamlandı";
@@ -627,7 +647,7 @@ async function adminDashboardPayload(guildId: string): Promise<AdminPanelPayload
     ? `${data.season.status}${data.season.current_game ? ` • ${GREAT_GAME_TYPES[data.season.current_game].label}` : ""}`
     : "Henüz açılmadı";
   const embed = new EmbedBuilder().setColor(0xd6ad3c).setTitle("🏛️ 30. Tur Büyük Oyunları • Yönetici Paneli")
-    .setDescription(`**Oyun turu:** ${data.currentTurn} • **Durum:** ${status}\nOyuncular bu paneli göremez. Kayıtlı devletleri oyun bazında rastgele veya elle seçebilir, ardından herkese açık oyun formunu yayınlayabilirsin.`);
+    .setDescription(`**Oyun turu:** ${data.currentTurn} • **Ana oyun:** ${status}\n**Bağımsız müzayede:** ${statusLabel(data, "AUCTION", chosenEntries(data, "AUCTION"))}\nOyuncular bu paneli göremez. Capua ve Devletler Müzayedesi ana oyunlardan bağımsız ilerleyebilir.`);
   for (const type of ACTIVE_GREAT_GAME_TYPES) {
     const selected = chosenEntries(data, type);
     embed.addFields({
@@ -681,6 +701,7 @@ async function adminGamePayload(guildId: string, type: GreatGameType): Promise<A
     return { embeds: [embed], components: auctionRow.components.length ? [row, auctionRow] : [row] };
   }
   const entries = chosenEntries(data, type).filter((entry) => entry.status !== "FINISHED");
+  const auctionState = auctionLifecycle(data);
   const selectedNames = entries.length ? entries.map((entry, index) => `${index + 1}. ${entry.country_name}`).join("\n") : "Henüz katılımcı seçilmedi.";
   const embed = new EmbedBuilder().setColor(0xb78b32).setTitle(`${GREAT_GAME_TYPES[type].emoji} ${GREAT_GAME_TYPES[type].label} • Yönetim`)
     .setDescription(`${gameRules(type)}\n\n**Durum:** ${statusLabel(data, type, entries)}\n**Aday kayıt:** ${data.counts[type]}\n\n**Seçilen devletler**\n${clip(selectedNames, 3_800)}`);
@@ -688,16 +709,26 @@ async function adminGamePayload(guildId: string, type: GreatGameType): Promise<A
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId("gg2|admin-home").setLabel("Ana Panel").setStyle(ButtonStyle.Secondary)
   );
-  if (data.season?.status === "OPEN") {
+  const canChoose = type === "AUCTION"
+    ? Boolean(data.season) && !["PUBLISHED", "ACTIVE"].includes(auctionState)
+    : data.season?.status === "OPEN";
+  if (canChoose) {
     row.addComponents(new ButtonBuilder().setCustomId(`gg2|choose|${type}`).setLabel(type === "AUCTION" ? "Tüm Devletleri Ekle" : "Katılımcıları Seç").setEmoji("🎯").setStyle(ButtonStyle.Primary));
-    if (data.season.current_game === type && entries.length) row.addComponents(
+    const readyToPublish = type === "AUCTION" ? auctionState === "PREPARED" : data.season?.current_game === type;
+    if (readyToPublish && entries.length) row.addComponents(
       new ButtonBuilder().setCustomId(`gg2|publish|${type}`).setLabel("Oyunu Yayınla").setEmoji("📣").setStyle(ButtonStyle.Success)
     );
   }
-  if (data.season?.status === "PUBLISHED" && data.season.current_game === type) row.addComponents(
+  const publishedForType = type === "AUCTION"
+    ? auctionState === "PUBLISHED"
+    : data.season?.status === "PUBLISHED" && data.season.current_game === type;
+  if (publishedForType) row.addComponents(
     new ButtonBuilder().setCustomId(`gg2|publish|${type}`).setLabel("Formu Yeniden Yayınla").setEmoji("📣").setStyle(ButtonStyle.Success)
   );
-  if (data.season?.current_game === type && ["PUBLISHED", "ACTIVE"].includes(data.season.status)) row.addComponents(
+  const recoverable = type === "AUCTION"
+    ? ["PUBLISHED", "ACTIVE"].includes(auctionState)
+    : data.season?.current_game === type && ["PUBLISHED", "ACTIVE"].includes(data.season.status);
+  if (recoverable) row.addComponents(
     new ButtonBuilder().setCustomId(`gg2|recover|${type}`).setLabel("Formu Kurtar").setEmoji("🛠️").setStyle(ButtonStyle.Danger)
   );
   return { embeds: [embed], components: [row] };
@@ -706,7 +737,14 @@ async function adminGamePayload(guildId: string, type: GreatGameType): Promise<A
 async function publicGamePayload(guildId: string, type: GreatGameType, content?: string) {
   const data = await greatGamesService.dashboard(guildId);
   const entries = chosenEntries(data, type);
-  const activeForType = data.season?.current_game === type;
+  const auctionState = auctionLifecycle(data);
+  const activeForType = type === "AUCTION" ? auctionState !== "IDLE" : data.season?.current_game === type;
+  const publishedForType = type === "AUCTION"
+    ? auctionState === "PUBLISHED"
+    : data.season?.status === "PUBLISHED" && activeForType;
+  const runningForType = type === "AUCTION"
+    ? auctionState === "ACTIVE"
+    : data.season?.status === "ACTIVE" && activeForType;
   const gladiatorView = type === "GLADIATOR" ? await greatGamesGladiatorService.view(guildId) : null;
 
   const embed = new EmbedBuilder().setColor(type === "GLADIATOR" ? 0xb43b32 : type === "CARAVAN" ? 0xc88a3d : 0xd6ad3c)
@@ -721,7 +759,9 @@ async function publicGamePayload(guildId: string, type: GreatGameType, content?:
   } else if (type === "AUCTION") {
     const lots = await greatGamesAuctionService.lots(guildId);
     const status = statusLabel(data, type, entries);
-    const statusIcon = data.season?.status === "ACTIVE" && activeForType
+    const deadline = data.season?.auction_ends_at ? new Date(data.season.auction_ends_at) : null;
+    const deadlineUnix = deadline && Number.isFinite(deadline.getTime()) ? Math.floor(deadline.getTime() / 1_000) : null;
+    const statusIcon = runningForType
       ? "🔔"
       : lots.some((lot) => lot.phase === "FINISHED") ? "🏁" : "📣";
     embed
@@ -730,6 +770,7 @@ async function publicGamePayload(guildId: string, type: GreatGameType, content?:
         `## ${statusIcon} ${status}\n` +
         `${auctionOverview(lots)}\n\n` +
         `💵 **Açılış:** ${gold(AUCTION_OPENING_BID)}  •  ⬆️ **Artış:** ${gold(AUCTION_BID_INCREMENT)}\n` +
+        (deadlineUnix && runningForType ? `⏳ **Otomatik kapanış:** <t:${deadlineUnix}:F> • <t:${deadlineUnix}:R>\n` : "") +
         `🔒 Teklif verirken para kesilmez; yalnız kazandığın kalemler kapanışta cüzdanından tahsil edilir.`
       );
     if (lots.length) embed.addFields(...auctionFields(lots));
@@ -803,11 +844,11 @@ async function publicGamePayload(guildId: string, type: GreatGameType, content?:
       new ButtonBuilder().setCustomId("gg2|gladiator-fight|GLADIATOR").setLabel("Sıradaki Dövüşü Yap").setEmoji("🎲").setStyle(ButtonStyle.Danger)
     );
   }
-  if (type!=="GLADIATOR"&&data.season?.status === "PUBLISHED" && activeForType) {
+  if (type!=="GLADIATOR" && publishedForType) {
     if (type === "CHARIOT") buttons.addComponents(new ButtonBuilder().setCustomId("gg2|bet|CHARIOT").setLabel("Bahis Yap").setEmoji("💰").setStyle(ButtonStyle.Primary));
     buttons.addComponents(new ButtonBuilder().setCustomId(`gg2|start|${type}`).setLabel("Oyunu Başlat").setEmoji("▶️").setStyle(ButtonStyle.Success));
   }
-  if (type!=="GLADIATOR"&&data.season?.status === "ACTIVE" && activeForType) {
+  if (type!=="GLADIATOR" && runningForType) {
     if (type !== "AUCTION") buttons.addComponents(new ButtonBuilder().setCustomId(`gg2|action|${type}`).setLabel("Gizli Hamle Ver").setStyle(ButtonStyle.Primary));
     buttons.addComponents(new ButtonBuilder().setCustomId(`gg2|resolve|${type}`).setLabel(type === "AUCTION" ? "Müzayedeyi Bitir" : "Aşamayı Çöz").setEmoji(type === "AUCTION" ? "🏁" : "🎲").setStyle(ButtonStyle.Danger));
   }
@@ -818,7 +859,7 @@ async function publicGamePayload(guildId: string, type: GreatGameType, content?:
     );
   }
   const components: Array<ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>> = [];
-  if (type === "AUCTION" && data.season?.status === "ACTIVE" && activeForType) {
+  if (type === "AUCTION" && runningForType) {
     const lots = (await greatGamesAuctionService.lots(guildId)).filter((lot) => lot.phase === "FINAL");
     if (lots.length) components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
       new StringSelectMenuBuilder().setCustomId("ggs2|auction-lot").setPlaceholder("🏺 Teklif vereceğin imtiyazı seç")
@@ -838,6 +879,53 @@ async function publicGamePayload(guildId: string, type: GreatGameType, content?:
   }
   components.push(buttons);
   return { content: content ?? "", embeds: [embed], components };
+}
+
+let automaticAuctionProcessing = false;
+
+export async function processDueGreatGamesAuctions(client: Client): Promise<{ closed: number; published: number; failed: number }> {
+  if (automaticAuctionProcessing) return { closed: 0, published: 0, failed: 0 };
+  automaticAuctionProcessing = true;
+  let closed = 0;
+  let published = 0;
+  let failed = 0;
+  try {
+    for (const due of await greatGamesAuctionService.dueAutomaticClosures()) {
+      try {
+        let summary: string[] = [];
+        if (due.status === "ACTIVE") {
+          const result = await greatGamesAuctionService.advance(due.guildId);
+          summary = result.summary;
+          closed += 1;
+        }
+        const content = summary.length
+          ? `⏰ **Süre doldu; müzayede otomatik kapandı.**\n\n🏺 **Müzayede Sonuçları**\n${summary.join("\n")}`.slice(0, 2_000)
+          : "🏁 **Müzayede tamamlandı.** Sonuçlar aşağıdaki forma işlendi.";
+        const payload = await publicGamePayload(due.guildId, "AUCTION", content);
+        const channel = await client.channels.fetch(due.channelId);
+        if (!channel?.isTextBased() || channel.isDMBased()) throw new Error("Müzayede sonuç kanalı bulunamadı veya sunucu yazı kanalı değil.");
+
+        let publishedMessageId = due.messageId;
+        try {
+          const message = await channel.messages.fetch(due.messageId);
+          await message.edit(payload);
+        } catch (error) {
+          if (Number((error as { code?: number }).code ?? 0) !== 10_008) throw error;
+          if (!channel.isSendable()) throw new Error("Müzayede sonuç kanalı mesaj göndermeye uygun değil.");
+          const message = await channel.send(payload);
+          publishedMessageId = message.id;
+        }
+        await greatGamesAuctionService.markResultPublished(due.guildId, publishedMessageId);
+        published += 1;
+      } catch (error) {
+        failed += 1;
+        logger.error({ error, guildId: due.guildId, channelId: due.channelId }, "Süresi dolan Devletler Müzayedesi kapatılamadı veya yayımlanamadı");
+      }
+    }
+    return { closed, published, failed };
+  } finally {
+    automaticAuctionProcessing = false;
+  }
 }
 
 function diplomacyActionModal(data: GreatGamesDashboard, countryId: string): ModalBuilder {
@@ -965,11 +1053,13 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
     if (!isGameMaster(interaction)) throw new GameError("Bu komut yalnızca oyun yöneticileri tarafından kullanılabilir.");
     const data = await greatGamesService.dashboard(interaction.guildId);
     let type=data.season?.current_game??null;
+    if(!type&&["PUBLISHED","ACTIVE"].includes(auctionLifecycle(data)))type="AUCTION";
     if(!type){
       const capua=await greatGamesGladiatorService.view(interaction.guildId);
       if(capua.tournament&&["BETTING","FIGHTING"].includes(capua.tournament.status))type="GLADIATOR";
     }
-    if(!type||!data.season||(type!=="GLADIATOR"&&!["PUBLISHED","ACTIVE"].includes(data.season.status)))
+    const recoverableAuction=type==="AUCTION"&&["PUBLISHED","ACTIVE"].includes(auctionLifecycle(data));
+    if(!type||!data.season||(type!=="GLADIATOR"&&type!=="AUCTION"&&!["PUBLISHED","ACTIVE"].includes(data.season.status))||(type==="AUCTION"&&!recoverableAuction))
       throw new GameError("Kurtarılabilecek yayında veya etkin bir oyun bulunmuyor.");
     await interaction.reply(await publicGamePayload(interaction.guildId, type, "🛠️ Aktif oyun formu kayıtlar korunarak yeniden oluşturuldu."));
     return true;
@@ -1064,8 +1154,11 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
       const capua=await greatGamesGladiatorService.view(interaction.guildId);
       if(!capua.tournament||!["BETTING","FIGHTING"].includes(capua.tournament.status))
         throw new GameError("Capua turnuvası artık kurtarılabilir durumda değil.");
-    }else if(!data.season||data.season.current_game!==type||!["PUBLISHED","ACTIVE"].includes(data.season.status))
+    }else if(type==="AUCTION"){
+      if(!["PUBLISHED","ACTIVE"].includes(auctionLifecycle(data)))throw new GameError("Müzayede artık kurtarılabilir durumda değil.");
+    }else if(!data.season||data.season.current_game!==type||!["PUBLISHED","ACTIVE"].includes(data.season.status)){
       throw new GameError("Bu oyun artık kurtarılabilir durumda değil.");
+    }
     await interaction.deferUpdate();
     await interaction.editReply(await adminGamePayload(interaction.guildId, type));
     await interaction.followUp({ ...(await publicGamePayload(interaction.guildId, type, "🛠️ Aktif oyun formu kayıtlar korunarak yeniden oluşturuldu.")), ephemeral: false });
@@ -1309,8 +1402,16 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
     if (!isGameMaster(interaction)) throw new GameError("Oyunu yalnızca oyun yöneticisi başlatabilir.");
     const type = gameId(rawType!);
     await interaction.deferUpdate();
-    const result = await greatGamesFlowService.startPublishedGame(interaction.guildId, type);
-    await interaction.editReply(await publicGamePayload(interaction.guildId, type, `▶️ Oyun **${result.count} devletle** başladı.`));
+    const deadline = type === "AUCTION" ? nextIstanbulAuctionDeadline() : null;
+    const result = await greatGamesFlowService.startPublishedGame(interaction.guildId, type, deadline ? {
+      endsAt: deadline,
+      channelId: interaction.channelId,
+      messageId: interaction.message.id
+    } : undefined);
+    const notice = deadline
+      ? `▶️ Müzayede **${result.count} devletle** başladı. Otomatik kapanış: <t:${Math.floor(deadline.getTime() / 1_000)}:F>.`
+      : `▶️ Oyun **${result.count} devletle** başladı.`;
+    await interaction.editReply(await publicGamePayload(interaction.guildId, type, notice));
     return true;
   }
   if (action === "bet") {
@@ -1339,6 +1440,7 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
     if (type === "AUCTION") {
       const result = await greatGamesAuctionService.advance(interaction.guildId);
       await interaction.editReply(await publicGamePayload(interaction.guildId, type, `🏺 **Müzayede Sonuçları**\n${result.summary.join("\n")}`.slice(0, 2_000)));
+      await greatGamesAuctionService.markResultPublished(interaction.guildId, interaction.message.id);
     } else {
       const result = await greatGamesService.resolveRound(interaction.guildId);
       const resultContent = type === "CHARIOT"
