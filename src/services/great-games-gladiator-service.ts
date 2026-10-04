@@ -211,6 +211,16 @@ function shuffled<T>(items: readonly T[],random:()=>number):T[]{
   return result;
 }
 
+export function pairGladiatorWinners(
+  winnerIds:readonly string[],random:()=>number=Math.random
+):Array<[string,string]>{
+  if(!winnerIds.length||winnerIds.length%2!==0)throw new GameError("Üst tur için galip sayısı çift ve sıfırdan büyük olmalıdır.");
+  const randomized=shuffled(winnerIds,random);
+  const pairs:Array<[string,string]>=[];
+  for(let index=0;index<randomized.length;index+=2)pairs.push([randomized[index]!,randomized[index+1]!]);
+  return pairs;
+}
+
 export function selectQualifierFighters<T extends {qualifier_appearances:number}>(
   candidates:readonly T[],qualifierNumber:number,random:()=>number=Math.random
 ):T[]{
@@ -928,8 +938,7 @@ export const greatGamesGladiatorService = {
           [winnerByPosition.get(2)!,seeds[2]!.gladiator_id]
         );
       }else{
-        for(let index=0;index<winners.length;index+=2)
-          nextPairs.push([winners[index]!.winner_id,winners[index+1]!.winner_id]);
+        nextPairs.push(...pairGladiatorWinners(winners.map((winner)=>winner.winner_id)));
       }
       for (let index = 0; index < nextPairs.length; index += 1) {
         const [fighterAId,fighterBId]=nextPairs[index]!;
@@ -950,7 +959,7 @@ export const greatGamesGladiatorService = {
           `UPDATE great_games_gladiator_matches
               SET fighter_a_id=$1,fighter_b_id=$2,odds_a=$3,odds_b=$4,status='PENDING',updated_at=NOW()
             WHERE tournament_id=$5 AND round=$6 AND bracket_position=$7`,
-          [fighterAId, fighterBId, odds.a, odds.b, tournament.id, nextRound, index / 2 + 1]
+          [fighterAId, fighterBId, odds.a, odds.b, tournament.id, nextRound, index + 1]
         );
       }
       await client.query(
