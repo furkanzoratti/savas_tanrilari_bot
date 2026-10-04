@@ -899,6 +899,27 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
     );
     return true;
   }
+  if (subcommand === "cuzdan-duzenle") {
+    if (!isGameMaster(interaction)) throw new GameError("Bu komut yalnızca oyun yöneticileri tarafından kullanılabilir.");
+    const countryName = interaction.options.getString("ulke", true);
+    const amount = interaction.options.getInteger("miktar", true);
+    const description = interaction.options.getString("aciklama") ?? undefined;
+    const country = await gameService.countryByName(interaction.guildId, countryName);
+    if (!country) throw new GameError("Belirtilen ülke bulunamadı.");
+    const result = await greatGamesWalletService.adminAdjust({
+      guildId: interaction.guildId,
+      countryId: country.id,
+      amount,
+      ...(description ? { description } : {}),
+      sourceKey: `discord:wallet-adjust:${interaction.id}`
+    });
+    const operation = amount > 0 ? `+${gold(amount)}` : `−${gold(Math.abs(amount))}`;
+    await interaction.reply({
+      content: `${result.changed ? "✅" : "ℹ️"} **${country.name}** oyun cüzdanı ${operation} düzenlendi.\n**Önce:** ${gold(result.before)} • **Sonra:** ${gold(result.after)}${result.changed ? "" : "\nBu işlem daha önce uygulanmıştı; yeniden yazılmadı."}`,
+      flags: MessageFlags.Ephemeral
+    });
+    return true;
+  }
   if (subcommand === "kurtar") {
     if (!isGameMaster(interaction)) throw new GameError("Bu komut yalnızca oyun yöneticileri tarafından kullanılabilir.");
     const data = await greatGamesService.dashboard(interaction.guildId);

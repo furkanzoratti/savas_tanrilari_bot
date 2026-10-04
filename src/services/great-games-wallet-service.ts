@@ -136,6 +136,30 @@ export const greatGamesWalletService = {
     });
   },
 
+  async adminAdjust(input: {
+    guildId: string; countryId: string; amount: number; sourceKey: string; description?: string;
+  }): Promise<{ changed: boolean; before: number; after: number }> {
+    return withTransaction(async (client) => {
+      if (!Number.isSafeInteger(input.amount) || input.amount === 0) {
+        throw new GameError("Cüzdan düzenleme miktarı sıfırdan farklı bir tam sayı olmalıdır.");
+      }
+      const season = await lockedSeason(client, input.guildId);
+      const wallet = await walletForUpdate(client, season.id, input.countryId);
+      const description = input.description?.trim()
+        ? `Yönetici cüzdan düzenlemesi: ${input.description.trim()}`
+        : "Yönetici cüzdan düzenlemesi";
+      const result = await adjustGreatGamesWallet(client, {
+        seasonId: season.id,
+        countryId: input.countryId,
+        amount: input.amount,
+        kind: "ADMIN_GRANT",
+        sourceKey: input.sourceKey,
+        description
+      });
+      return { changed: result.changed, before: Number(wallet.balance), after: result.balance };
+    });
+  },
+
   async transferFromRandomSettlement(input: {
     guildId: string; countryId: string; amount: number; sourceKey: string;
   }): Promise<{ settlementName: string; walletBalance: number }> {
