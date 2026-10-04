@@ -5,7 +5,7 @@ vi.mock("./game-service.js", () => ({ GameError: class GameError extends Error {
 vi.mock("./great-games-bet-service.js", () => ({ settleChariotBets: vi.fn() }));
 vi.mock("./great-games-wallet-service.js", () => ({ adjustGreatGamesWallet: vi.fn() }));
 
-import { orderGreatGamesParticipants } from "./great-games-service.js";
+import { orderGreatGamesParticipants, reshuffleKingsBetPairings } from "./great-games-service.js";
 
 const countries = [
   { country_name: "Mısır" },
@@ -32,5 +32,33 @@ describe("Büyük Oyunlar eşleştirmesi", () => {
     expect(() => orderGreatGamesParticipants(countries, "MANUAL", ["Mısır"])).toThrow("tamamı tam bir kez");
     expect(() => orderGreatGamesParticipants(countries, "MANUAL", ["Mısır", "Mısır", "Persler", "Britanya"])).toThrow("birden fazla kez");
     expect(() => orderGreatGamesParticipants(countries, "MANUAL", ["Mısır", "Atrebatlar", "Persler", "Roma"])).toThrow("bulunmayan devlet");
+  });
+
+  it("Kralların Bahsinde yeni turu tüm devletleri koruyarak ve rövanş vermeden karıştırır", () => {
+    const participants = [
+      { id: "a", room_key: "KINGS_BET-1" }, { id: "b", room_key: "KINGS_BET-1" },
+      { id: "c", room_key: "KINGS_BET-2" }, { id: "d", room_key: "KINGS_BET-2" },
+      { id: "e", room_key: "KINGS_BET-3" }, { id: "f", room_key: "KINGS_BET-3" }
+    ];
+    const oldPairs = new Set(["a:b", "c:d", "e:f"]);
+    const pairings = reshuffleKingsBetPairings(participants, () => 0);
+    const ids = pairings.flatMap((pairing) => pairing.entries.map((entry) => entry.id));
+
+    expect(pairings.map((pairing) => pairing.roomKey)).toEqual(["KINGS_BET-1", "KINGS_BET-2", "KINGS_BET-3"]);
+    expect(new Set(ids)).toEqual(new Set(participants.map((entry) => entry.id)));
+    expect(pairings.every((pairing) => {
+      const pair = pairing.entries.map((entry) => entry.id).sort().join(":");
+      return !oldPairs.has(pair);
+    })).toBe(true);
+  });
+
+  it("yalnız iki devlet varsa kaçınılmaz rövanşı korur", () => {
+    const participants = [
+      { id: "a", room_key: "KINGS_BET-1" },
+      { id: "b", room_key: "KINGS_BET-1" }
+    ];
+    expect(reshuffleKingsBetPairings(participants)).toEqual([
+      { roomKey: "KINGS_BET-1", entries: participants }
+    ]);
   });
 });

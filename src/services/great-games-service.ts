@@ -91,6 +91,48 @@ export function orderGreatGamesParticipants<T extends { country_name: string }>(
   return result as T[];
 }
 
+export interface KingsBetRoundPair<T> {
+  roomKey: string;
+  entries: [T, T];
+}
+
+/**
+ * Creates the next Kralların Bahsi round without repeating the immediately
+ * previous opponent. Every existing room is treated as a pair and the pairs
+ * are crossed in a shuffled cycle. With only two participants a rematch is
+ * unavoidable, so their room is simply renewed.
+ */
+export function reshuffleKingsBetPairings<T extends { id: string; room_key: string | null }>(
+  participants: readonly T[], random = Math.random
+): Array<KingsBetRoundPair<T>> {
+  if (participants.length % 2 !== 0) throw new GameError("Kralların Bahsi katılımcıları ikili eşleştirilebilmelidir.");
+  if (!participants.length) return [];
+
+  const byRoom = new Map<string, T[]>();
+  for (const participant of participants) {
+    const roomKey = participant.room_key ?? "";
+    byRoom.set(roomKey, [...(byRoom.get(roomKey) ?? []), participant]);
+  }
+  const previousPairs = [...byRoom.values()];
+  if (previousPairs.some((pair) => pair.length !== 2)) throw new GameError("Kralların Bahsi mevcut eşleşmeleri bozuk; yeni tur oluşturulamadı.");
+  if (previousPairs.length === 1) {
+    return [{ roomKey: "KINGS_BET-1", entries: [previousPairs[0]![0]!, previousPairs[0]![1]!] }];
+  }
+
+  for (let index = previousPairs.length - 1; index > 0; index -= 1) {
+    const target = Math.floor(random() * (index + 1));
+    [previousPairs[index], previousPairs[target]] = [previousPairs[target]!, previousPairs[index]!];
+  }
+  for (const pair of previousPairs) {
+    if (random() < 0.5) [pair[0], pair[1]] = [pair[1]!, pair[0]!];
+  }
+
+  return previousPairs.map((pair, index) => ({
+    roomKey: `KINGS_BET-${index + 1}`,
+    entries: [pair[0]!, previousPairs[(index + 1) % previousPairs.length]![1]!]
+  }));
+}
+
 export interface GreatGamesDashboard {
   season: GreatGamesSeasonRow | null;
   currentTurn: number;
@@ -640,6 +682,15 @@ export const greatGamesService = {
         throw new GameError("Müzayede ayrı teklif çözüm ekranından yönetilir.");
       }
       await client.query("UPDATE great_games_actions SET resolved=TRUE,updated_at=NOW() WHERE season_id=$1 AND game_type=$2 AND round=$3", [season.id, gameType, season.current_round]);
+      if (gameType === "KINGS_BET" && season.current_round < 3) {
+        const nextRoundPairings = reshuffleKingsBetPairings(list);
+        for (const pairing of nextRoundPairings) {
+          for (const entry of pairing.entries) {
+            await client.query("UPDATE great_games_entries SET room_key=$1,updated_at=NOW() WHERE id=$2", [pairing.roomKey, entry.id]);
+          }
+        }
+        summary.push(`🔀 Sonraki tur eşleşmeleri: ${nextRoundPairings.map((pairing) => pairing.entries.map((entry) => entry.country_name).join(" — ")).join(" • ")}`);
+      }
       if (finished) {
         const ranked = (await entries(client, season.id, gameType)).filter((entry) => entry.status === "ACTIVE");
         const tieRolls = new Map<string, number>();

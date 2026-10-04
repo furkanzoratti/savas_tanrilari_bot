@@ -77,7 +77,7 @@ function gameRules(type: GreatGameType): string {
   if (type === "AUCTION") return "Tek turlu açık artırmadır. Açılış 500 Altındır; her yeni teklif tam 250 Altın artırır. Üst teklif ve kazanılabilecek ödül sınırı yoktur. Kaybeden teklif ödemez; kazanan ödemeleri genel ödül havuzuna gider.";
   if (type === "CHARIOT") return "Katılım 1.000 Altın. Üç etap oynanır; her etapta gizli sürüş taktiği seçilir. Katılım havuzu %65/%35 paylaşılır. İlk üç devlet 5/3/2 Büyük Oyunlar Puanı alır.";
   if (type === "CARAVAN") return "Yönetici oyunu başlattığında devletler 2–3 kişilik kervanlara ve görevlere otomatik ayrılır. Her devletten 1.000 Altın yatırım alınır. Üç aşama sonunda bütün yatırımlar takım ağırlıklarına göre geri dağıtılır.";
-  if (type === "KINGS_BET") return "Katılım 1.000 Altın. Üç ikilemde İşbirliği veya İhanet ve rakibin kararı için tahmin gizlice seçilir. Havuz ilk üçe %50/%30/%20 dağıtılır.";
+  if (type === "KINGS_BET") return "Katılım 1.000 Altın. Üç ikilemde İşbirliği veya İhanet ve rakibin kararı için tahmin gizlice seçilir. Rakipler her turun ardından yeniden karıştırılır; mümkün olduğu sürece aynı rakiple üst üste eşleşilmez. Havuz ilk üçe %50/%30/%20 dağıtılır.";
   return "Masalar tam üç devletten oluşur. Her devletin ana hedefi bağdaşmaz; anlaşma yalnız bir ana ve en fazla bir ikincil kazanan çıkarır. 500'er Altınlık 1.500 Altın havuz 1.000/500 veya 1.500/0 paylaşılır.";
 }
 
