@@ -198,7 +198,11 @@ export const greatGamesWalletService = {
   },
 
   async closeAll(guildId: string): Promise<{
-    total: number; countries: Array<{ countryName: string; settlementName: string; amount: number }>;
+    total: number;
+    discardedTotal: number;
+    countries: Array<{
+      countryName: string; settlementName: string; originalBalance: number; amount: number; discarded: number;
+    }>;
     prizePoolDistributed: number;
     prizeAwards: Array<{ rank: number; countryName: string; points: number; amount: number }>;
     remainingPrizePool: number;
@@ -260,15 +264,20 @@ export const greatGamesWalletService = {
          WHERE w.season_id=$1 AND w.closed_at IS NULL ORDER BY c.name FOR UPDATE`, [season.id]
       )).rows;
       if (!wallets.length) throw new GameError("Kapatılacak açık oyun cüzdanı bulunmuyor.");
-      const countries: Array<{ countryName: string; settlementName: string; amount: number }> = [];
+      const countries: Array<{
+        countryName: string; settlementName: string; originalBalance: number; amount: number; discarded: number;
+      }> = [];
       let total = 0;
+      let discardedTotal = 0;
       for (const wallet of wallets) {
         const settlements = (await client.query<{ id: string; name: string }>(
           "SELECT id,name FROM settlements WHERE country_id=$1 ORDER BY id FOR UPDATE", [wallet.country_id]
         )).rows;
         if (!settlements.length) throw new GameError(`${wallet.country_name} devletinin ödeme yapılabilecek yerleşkesi yok.`);
         const selected = settlements[Math.floor(Math.random() * settlements.length)]!;
-        const amount = Number(wallet.balance);
+        const originalBalance = Number(wallet.balance);
+        const amount = Math.floor(originalBalance * 30 / 100);
+        const discarded = originalBalance - amount;
         if (amount > 0) {
           const balance = Number((await client.query<{ local_treasury: number }>(
             "UPDATE settlements SET local_treasury=local_treasury+$1 WHERE id=$2 RETURNING local_treasury", [amount, selected.id]
@@ -276,21 +285,25 @@ export const greatGamesWalletService = {
           await client.query(
             `INSERT INTO transactions(country_id,settlement_id,turn,kind,amount,description,balance_after,details)
              VALUES($1,$2,$3,'GREAT_GAMES_WALLET_PAYOUT',$4,$5,$6,$7::jsonb)`,
-            [wallet.country_id, selected.id, GREAT_GAMES_TURN, amount, "Büyük Oyunlar cüzdan kapanış ödemesi", balance, JSON.stringify({ walletId: wallet.id })]
+            [wallet.country_id, selected.id, GREAT_GAMES_TURN, amount, "Büyük Oyunlar cüzdan kapanış ödemesi (%30)", balance,
+              JSON.stringify({ walletId: wallet.id, originalBalance, transferred: amount, discarded })]
           );
+        }
+        if (originalBalance > 0) {
           await client.query(
             `INSERT INTO great_games_wallet_movements(wallet_id,amount,balance_after,kind,source_key,description)
-             VALUES($1,$2,0,'FINAL_SETTLEMENT','final-settlement','Oyun sonunda rastgele yerleşkeye aktarıldı')`,
-            [wallet.id, -amount]
+             VALUES($1,$2,0,'FINAL_SETTLEMENT','final-settlement','Oyun sonunda bakiyenin %30’u devlete aktarıldı; kalanı sıfırlandı')`,
+            [wallet.id, -originalBalance]
           );
         }
         await client.query("UPDATE great_games_wallets SET balance=0,closed_at=NOW() WHERE id=$1", [wallet.id]);
         await client.query("UPDATE countries SET treasury=(SELECT COALESCE(SUM(local_treasury),0)::bigint FROM settlements WHERE country_id=$1) WHERE id=$1", [wallet.country_id]);
         total += amount;
-        countries.push({ countryName: wallet.country_name, settlementName: selected.name, amount });
+        discardedTotal += discarded;
+        countries.push({ countryName: wallet.country_name, settlementName: selected.name, originalBalance, amount, discarded });
       }
       await client.query("UPDATE great_games_seasons SET status='FINISHED',prize_pool=0,updated_at=NOW() WHERE id=$1", [season.id]);
-      return { total, countries, prizePoolDistributed: prizePool, prizeAwards, remainingPrizePool: 0 };
+      return { total, discardedTotal, countries, prizePoolDistributed: prizePool, prizeAwards, remainingPrizePool: 0 };
     });
   }
 };

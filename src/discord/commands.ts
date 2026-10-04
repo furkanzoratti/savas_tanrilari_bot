@@ -156,7 +156,7 @@ export const commandBuilders = [
       .addStringOption((o) => o.setName("aciklama").setDescription("Düzenleme gerekçesi").setMaxLength(300)))
     .addSubcommand((sub) => sub.setName("kurtar").setDescription("Yalnızca yönetici: aktif oyunun çalışır formunu yeniden yayımlar"))
     .addSubcommand((sub) => sub.setName("cuzdan-onar").setDescription("Yalnızca yönetici: biten Kervan oyununun eksik cüzdan ödemelerini tamamlar"))
-    .addSubcommand((sub) => sub.setName("yonetici-bitir").setDescription("Yalnızca yönetici: ödül havuzunu dağıtır, cüzdanları ülkelere aktarır ve oyunları kapatır")),
+    .addSubcommand((sub) => sub.setName("yonetici-bitir").setDescription("Yalnızca yönetici: cüzdanların %30'unu devletlere aktarır, kalanını siler ve oyunları kapatır")),
   new SlashCommandBuilder()
     .setName("hazine-hareketleri").setDescription("Yalnızca yönetici: bir ülkenin tur içindeki bütün mali hareketlerini gösterir")
     .addStringOption((o) => o.setName("ulke").setDescription("Mali dökümü görüntülenecek ülke").setRequired(true))

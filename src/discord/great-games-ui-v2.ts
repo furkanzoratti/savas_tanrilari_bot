@@ -1081,7 +1081,15 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
         `${award.rank}. **${award.countryName}** — ${award.points} puan • +${gold(award.amount)}`
       ).join("\n")}`
       : "";
-    await interaction.editReply(clip(`🏛️ Büyük Oyunlar kapatıldı. Ödül havuzu önce dereceye giren cüzdanlara dağıtıldı; ardından bütün cüzdanlardan toplam **${gold(result.total)}** ülke yerleşkelerine aktarıldı.${awards}`, 1_990));
+    const countries = result.countries.map((item) =>
+      `• **${item.countryName}:** ${gold(item.originalBalance)} → devlete **${gold(item.amount)}** • sıfırlanan ${gold(item.discarded)}`
+    ).join("\n");
+    await interaction.editReply(clip(
+      `🏛️ Büyük Oyunlar kapatıldı. Ödül havuzu önce dereceye giren cüzdanlara dağıtıldı. ` +
+      `Ardından her cüzdanın **%30’u** devlete aktarıldı, kalan **%70** sıfırlandı.\n\n${countries}\n\n` +
+      `**Toplam aktarılan:** ${gold(result.total)} • **Toplam sıfırlanan:** ${gold(result.discardedTotal)}${awards}`,
+      1_990
+    ));
     return true;
   }
   if (subcommand === "gladyatorler") {

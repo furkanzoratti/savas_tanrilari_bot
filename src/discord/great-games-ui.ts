@@ -198,9 +198,11 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
     if (!isGameMaster(interaction)) throw new GameError("Bu komut yalnızca oyun yöneticileri tarafından kullanılabilir.");
     await interaction.deferReply();
     const result = await greatGamesWalletService.closeAll(interaction.guildId);
-    const lines = result.countries.map((item) => `• ${item.countryName}: ${gold(item.amount)} → ${item.settlementName}`);
+    const lines = result.countries.map((item) =>
+      `• ${item.countryName}: ${gold(item.originalBalance)} → ${gold(item.amount)} (%30) • sıfırlanan ${gold(item.discarded)}`
+    );
     const warning = result.remainingPrizePool > 0 ? `\n⚠️ Genel müzayede ödül havuzunda ayrıca ${gold(result.remainingPrizePool)} bekliyor.` : "";
-    await interaction.editReply(`🏛️ **Büyük Oyun cüzdanları kapatıldı**\n${lines.join("\n")}\n\nToplam: **${gold(result.total)}**${warning}`.slice(0, 2_000));
+    await interaction.editReply(`🏛️ **Büyük Oyun cüzdanları kapatıldı**\n${lines.join("\n")}\n\nDevletlere aktarılan: **${gold(result.total)}** • Sıfırlanan: **${gold(result.discardedTotal)}**${warning}`.slice(0, 2_000));
     return true;
   }
   const country = await ownCountry(interaction.guildId, interaction.user.id);

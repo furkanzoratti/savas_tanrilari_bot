@@ -88,4 +88,53 @@ describe("Büyük Oyunlar cüzdanı", () => {
     })).resolves.toEqual({ changed: true, before: 15_000, after: 12_000 });
     expect(walletRead).toBe(2);
   });
+
+  it("oyun kapanışında bakiyenin yalnız yüzde 30'unu devlete aktarır ve kalanını sıfırlar", async () => {
+    const client = clientWith((sql, values) => {
+      if (sql.startsWith("SELECT id,status,current_game")) {
+        return { rows: [{ id: "season-1", status: "OPEN", current_game: null, prize_pool: 0 }], rowCount: 1 };
+      }
+      if (sql.includes("FROM great_games_gladiator_tournaments")) return { rows: [], rowCount: 0 };
+      if (sql.includes("SELECT w.*,c.name AS country_name")) {
+        return { rows: [{
+          id: "wallet-1", season_id: "season-1", country_id: "country-1", country_name: "Atina",
+          balance: 10_001, initial_grant: 5_000, joined_by: "user", joined_at: new Date(), closed_at: null
+        }], rowCount: 1 };
+      }
+      if (sql.startsWith("SELECT id,name FROM settlements")) {
+        return { rows: [{ id: "settlement-1", name: "Atina" }], rowCount: 1 };
+      }
+      if (sql.startsWith("UPDATE settlements SET local_treasury")) {
+        expect(values).toEqual([3_000, "settlement-1"]);
+        return { rows: [{ local_treasury: 8_000 }], rowCount: 1 };
+      }
+      if (sql.includes("INSERT INTO transactions")) {
+        expect(values?.[3]).toBe(3_000);
+        expect(JSON.parse(String(values?.[6]))).toEqual({
+          walletId: "wallet-1", originalBalance: 10_001, transferred: 3_000, discarded: 7_001
+        });
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.includes("INSERT INTO great_games_wallet_movements")) {
+        expect(values).toEqual(["wallet-1", -10_001]);
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.startsWith("UPDATE great_games_wallets SET balance=0")) return { rows: [], rowCount: 1 };
+      if (sql.startsWith("UPDATE countries SET treasury")) return { rows: [], rowCount: 1 };
+      if (sql.startsWith("UPDATE great_games_seasons SET status='FINISHED'")) return { rows: [], rowCount: 1 };
+      throw new Error(`Beklenmeyen sorgu: ${sql}`);
+    });
+    vi.mocked(withTransaction).mockImplementationOnce(async (work) => work(client));
+
+    await expect(greatGamesWalletService.closeAll("guild-1")).resolves.toEqual({
+      total: 3_000,
+      discardedTotal: 7_001,
+      countries: [{
+        countryName: "Atina", settlementName: "Atina", originalBalance: 10_001, amount: 3_000, discarded: 7_001
+      }],
+      prizePoolDistributed: 0,
+      prizeAwards: [],
+      remainingPrizePool: 0
+    });
+  });
 });
