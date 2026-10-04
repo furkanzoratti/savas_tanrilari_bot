@@ -7,6 +7,8 @@ import {
 import { GameError } from "./game-service.js";
 import { adjustGreatGamesWallet } from "./great-games-wallet-service.js";
 
+const GLADIATOR_QUALIFIER_CHAMPION_REWARD=10_000;
+
 export interface GladiatorRow {
   id: string;
   code: string;
@@ -204,6 +206,25 @@ async function recordWalletMoney(client: DbClient, input: {
     description: input.description
   });
   return movement.balance;
+}
+
+async function awardQualifierChampion(
+  client:DbClient,seasonId:string,tournamentId:string,runNumber:number,winnerId:string,winnerName:string
+):Promise<string|null>{
+  const owner=(await client.query<{country_id:string;country_name:string}>(
+    `SELECT ownership.country_id,country.name AS country_name
+       FROM great_games_gladiator_ownerships ownership
+       JOIN countries country ON country.id=ownership.country_id
+      WHERE ownership.season_id=$1 AND ownership.gladiator_id=$2`,
+    [seasonId,winnerId]
+  )).rows[0];
+  if(!owner)return null;
+  await recordWalletMoney(client,{
+    seasonId,countryId:owner.country_id,amount:GLADIATOR_QUALIFIER_CHAMPION_REWARD,kind:"PAYOUT",
+    sourceKey:`GLADIATOR:qualifier-champion:${tournamentId}`,
+    description:`${winnerName} • ${runNumber}. Capua eleme turnuvası şampiyonluk ödülü`
+  });
+  return owner.country_name;
 }
 
 function numeric(value: number | string | null): number | null {
@@ -812,6 +833,8 @@ export const greatGamesGladiatorService = {
     nextRound: number | null;
     tournamentType:GladiatorTournamentType;
     qualifiersCompleted:number;
+    championRewardCountry?:string|null;
+    championReward?:number|undefined;
   }> {
     return withTransaction(async (client) => {
       const season = await lockedSeason(client, guildId);
@@ -920,7 +943,13 @@ export const greatGamesGladiatorService = {
         };
       }
       if (tournament.current_round === tournament.round_count) {
-        if(tournament.tournament_type==="QUALIFIER")await saveQualifierResults(client,tournament,winnerId);
+        let championRewardCountry:string|null=null;
+        if(tournament.tournament_type==="QUALIFIER"){
+          await saveQualifierResults(client,tournament,winnerId);
+          championRewardCountry=await awardQualifierChampion(
+            client,season.id,tournament.id,Number(tournament.run_number),winnerId,winnerName
+          );
+        }
         await client.query(
           `UPDATE great_games_gladiator_tournaments
               SET status='COMPLETED',champion_id=$1,completed_at=NOW(),updated_at=NOW()
@@ -951,7 +980,9 @@ export const greatGamesGladiatorService = {
           tournamentCompleted: true,
           nextRound: null,
           tournamentType:tournament.tournament_type,
-          qualifiersCompleted
+          qualifiersCompleted,
+          championRewardCountry,
+          championReward:tournament.tournament_type==="QUALIFIER"?GLADIATOR_QUALIFIER_CHAMPION_REWARD:undefined
         };
       }
       const nextRound = tournament.current_round + 1;

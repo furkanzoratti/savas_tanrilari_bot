@@ -627,7 +627,7 @@ async function adminGamePayload(guildId: string, type: GreatGameType): Promise<A
     const view = await greatGamesGladiatorService.view(guildId);
     const embed = new EmbedBuilder().setColor(0xb43b32).setTitle("⚔️ Capua Gladyatör Dövüşleri • Yönetim")
       .setDescription(`${gameRules(type)}\n\n**Durum:** ${gladiatorStatus(view)}\n**Gladyatör müzayedesi:** ${view.auctionStatus === "OPEN" ? "Tekliflere açık" : view.auctionStatus === "FINISHED" ? "Tamamlandı" : "Henüz açılmadı"}\n**Etkinliğe kayıtlı devlet:** ${view.registeredCountries}\n**Tamamlanan eleme:** ${view.qualifiersCompleted}/4${view.finalCompleted ? " • Final tamamlandı" : ""}`)
-      .addFields(...gladiatorStandingFields(view),...gladiatorBracketFields(view));
+      .addFields(...gladiatorBracketFields(view));
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId("gg2|admin-home").setLabel("Ana Panel").setStyle(ButtonStyle.Secondary)
     );
@@ -691,7 +691,7 @@ async function publicGamePayload(guildId: string, type: GreatGameType, content?:
       : `${gameRules(type)}\n\n**Durum:** ${statusLabel(data, type, entries)} • **Katılımcı:** ${entries.length}`);
 
   if (type === "GLADIATOR" && gladiatorView) {
-    embed.addFields(...gladiatorStandingFields(gladiatorView),...gladiatorBracketFields(gladiatorView));
+    embed.addFields(...gladiatorBracketFields(gladiatorView));
     embed.setFooter({ text: "Güç, can, sahiplik ve güncel müzayede teklifleri: /oyunlar gladyatorler" });
   } else if (type === "AUCTION") {
     const lots = await greatGamesAuctionService.lots(guildId);
@@ -1098,10 +1098,13 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
     if (!isGameMaster(interaction)) throw new GameError("Capua dövüşlerini yalnızca oyun yöneticisi çözebilir.");
     await interaction.deferUpdate();
     const result = await greatGamesGladiatorService.resolveNextFight(interaction.guildId);
+    const championRewardNotice=result.championRewardCountry&&result.championReward
+      ? ` 🪙 **${result.championRewardCountry}** oyun cüzdanına **${gold(result.championReward)}** şampiyonluk ödülü aktarıldı.`
+      : "";
     const resultHeadline = result.tournamentCompleted
       ? result.tournamentType==="FINAL"
         ? `👑 **Capua Büyük Şampiyonu: ${result.winner}!** Büyük Final ${result.combatTurns} hücum turu ve ${result.successfulHits} başarılı vuruş sürdü. Kalan can: ${result.score}. Capua sezonu tamamlandı.`
-        : `🏆 **${result.qualifiersCompleted}. Eleme Turnuvası Şampiyonu: ${result.winner}!** Final ${result.combatTurns} hücum turu ve ${result.successfulHits} başarılı vuruş sürdü. Kalan can: ${result.score}. ${result.qualifiersCompleted<4?"Sıradaki eleme turnuvası açılabilir.":"Dört eleme tamamlandı; 12 kişilik final turnuvası açılabilir."}`
+        : `🏆 **${result.qualifiersCompleted}. Eleme Turnuvası Şampiyonu: ${result.winner}!** Final ${result.combatTurns} hücum turu ve ${result.successfulHits} başarılı vuruş sürdü. Kalan can: ${result.score}.${championRewardNotice} ${result.qualifiersCompleted<4?"Sıradaki eleme turnuvası açılabilir.":"Dört eleme tamamlandı; 12 kişilik final turnuvası açılabilir."}`
       : result.roundCompleted
         ? `⚔️ **${result.fighterA} — ${result.fighterB}:** Kazanan **${result.winner}** • ${result.combatTurns} hücum turu • ${result.successfulHits} başarılı vuruş • Kalan can ${result.score}\n✅ Tur tamamlandı. **${result.tournamentType==="FINAL"?(GLADIATOR_FINAL_ROUND_LABELS[result.nextRound!]??`Final Turu ${result.nextRound}`):(GLADIATOR_ROUND_LABELS[result.nextRound!]??`Tur ${result.nextRound}`)} bahisleri açıldı.**`
         : `⚔️ **${result.fighterA} — ${result.fighterB}:** Kazanan **${result.winner}** • ${result.combatTurns} hücum turu • ${result.successfulHits} başarılı vuruş • Kalan can ${result.score}`;
