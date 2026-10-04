@@ -79,6 +79,27 @@ export interface GladiatorStandingRow {
   best_placement: number;
 }
 
+export interface GladiatorBetViewRow {
+  id:string;
+  country_name:string;
+  fighter_name:string;
+  fighter_code:string;
+  match_number:number;
+  amount:number;
+  locked_odds:number;
+  payout:number;
+  status:"LOCKED"|"WON"|"LOST"|"REFUNDED";
+  created_at:Date;
+}
+
+export interface GladiatorBetLedger {
+  tournamentType:GladiatorTournamentType;
+  runNumber:number;
+  round:number;
+  tournamentStatus:GladiatorTournamentRow["status"];
+  bets:GladiatorBetViewRow[];
+}
+
 interface QualifierCandidate extends GladiatorRow {
   qualifier_appearances: number;
 }
@@ -333,6 +354,46 @@ export const greatGamesGladiatorService = {
       return { roster, tournament, matches: tournamentMatches, registeredCountries, auctionStatus,
         standings:qualifierStandings,qualifiersCompleted,finalCompleted };
     } finally {
+      client.release();
+    }
+  },
+
+  async betLedger(guildId:string):Promise<GladiatorBetLedger|null>{
+    const season=(await pool.query<{id:string}>(
+      "SELECT id FROM great_games_seasons WHERE guild_id=$1 AND game_turn=$2",
+      [guildId,GREAT_GAMES_TURN]
+    )).rows[0];
+    if(!season)return null;
+    const client=await pool.connect();
+    try{
+      const tournament=await latestTournament(client,season.id);
+      if(!tournament)return null;
+      const bets=(await client.query<GladiatorBetViewRow>(
+        `SELECT bet.id,country.name AS country_name,gladiator.name AS fighter_name,
+                gladiator.code AS fighter_code,match.bracket_position AS match_number,
+                bet.amount,bet.locked_odds,bet.payout,bet.status,bet.created_at
+           FROM great_games_gladiator_bets bet
+           JOIN great_games_gladiator_matches match ON match.id=bet.match_id
+           JOIN countries country ON country.id=bet.bettor_country_id
+           JOIN great_games_gladiators gladiator ON gladiator.id=bet.fighter_id
+          WHERE match.tournament_id=$1 AND match.round=$2
+          ORDER BY match.bracket_position,country.name,bet.created_at`,
+        [tournament.id,tournament.current_round]
+      )).rows.map((bet)=>({
+        ...bet,
+        match_number:Number(bet.match_number),
+        amount:Number(bet.amount),
+        locked_odds:Number(bet.locked_odds),
+        payout:Number(bet.payout)
+      }));
+      return {
+        tournamentType:tournament.tournament_type,
+        runNumber:Number(tournament.run_number),
+        round:Number(tournament.current_round),
+        tournamentStatus:tournament.status,
+        bets
+      };
+    }finally{
       client.release();
     }
   },

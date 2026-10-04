@@ -180,6 +180,7 @@ function gladiatorRoundLabel(tournament:GladiatorTournamentView["tournament"],ro
 
 const GLADIATOR_ROSTER_PAGE_SIZE=16;
 const GLADIATOR_OWNERSHIP_PAGE_SIZE=10;
+const GLADIATOR_BETS_PAGE_SIZE=10;
 
 function safePage(requested:number,pageCount:number){
   return Math.min(Math.max(0,Number.isSafeInteger(requested)?requested:0),Math.max(0,pageCount-1));
@@ -322,6 +323,45 @@ async function gladiatorOwnershipPayload(guildId:string,requestedPage=0){
     new ButtonBuilder().setCustomId(`gg2|gladiator-owners-page|${page-1}`).setLabel("Önceki").setEmoji("⬅️").setStyle(ButtonStyle.Secondary).setDisabled(page===0),
     new ButtonBuilder().setCustomId(`gg2|gladiator-owners-page|${page}`).setLabel("Yenile").setEmoji("🔄").setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId(`gg2|gladiator-owners-page|${page+1}`).setLabel("Sonraki").setEmoji("➡️").setStyle(ButtonStyle.Secondary).setDisabled(page===pageCount-1)
+  );
+  return {embeds:[embed],components:[navigation]};
+}
+
+function gladiatorBetStatus(status:"LOCKED"|"WON"|"LOST"|"REFUNDED"){
+  if(status==="WON")return "✅ Kazandı";
+  if(status==="LOST")return "❌ Kaybetti";
+  if(status==="REFUNDED")return "↩️ İade edildi";
+  return "🟡 Sonuç bekliyor";
+}
+
+async function gladiatorBetsPayload(guildId:string,requestedPage=0){
+  const ledger=await greatGamesGladiatorService.betLedger(guildId);
+  if(!ledger)throw new GameError("Henüz görüntülenebilecek bir Capua turnuvası bulunmuyor.");
+  const pageCount=Math.max(1,Math.ceil(ledger.bets.length/GLADIATOR_BETS_PAGE_SIZE));
+  const page=safePage(requestedPage,pageCount);
+  const pageBets=ledger.bets.slice(page*GLADIATOR_BETS_PAGE_SIZE,(page+1)*GLADIATOR_BETS_PAGE_SIZE);
+  const totalStake=ledger.bets.reduce((sum,bet)=>sum+bet.amount,0);
+  const totalProjected=ledger.bets.reduce((sum,bet)=>sum+Math.floor(bet.amount*bet.locked_odds),0);
+  const fields=pageBets.map((bet)=>{
+    const projected=Math.floor(bet.amount*bet.locked_odds);
+    const result=bet.status==="WON"?` • **Ödenen:** ${gold(bet.payout)}`:"";
+    return {
+      name:`🏛️ ${bet.country_name} • Eşleşme #${bet.match_number}`.slice(0,256),
+      value:`⚔️ **${bet.fighter_name}** [${bet.fighter_code}]\n💰 **Bahis:** ${gold(bet.amount)} • **Oran:** ${bet.locked_odds.toFixed(2)}x\n🎯 **Öngörülen kazanç:** ${gold(projected)} • ${gladiatorBetStatus(bet.status)}${result}`,
+      inline:false as const
+    };
+  });
+  const tournamentLabel=ledger.tournamentType==="FINAL"?"12 Kişilik Final":"Eleme Turnuvası";
+  const embed=new EmbedBuilder()
+    .setColor(0x6f4ab1)
+    .setTitle("💰 Capua • Gladyatör Bahis Dökümü")
+    .setDescription(`**Turnuva:** ${ledger.runNumber}. ${tournamentLabel} • **Aşama:** ${gladiatorRoundLabel({tournament_type:ledger.tournamentType} as GladiatorTournamentView["tournament"],ledger.round)}\n**Bahis:** ${ledger.bets.length} • **Toplam yatırılan:** ${gold(totalStake)} • **Toplam öngörülen kazanç:** ${gold(totalProjected)} • **Sayfa:** ${page+1}/${pageCount}\nÖngörülen kazanç, bahis sırasında kilitlenen oranla hesaplanan **brüt ödemedir**.`)
+    .addFields(...(fields.length?fields:[{name:"Bu turda bahis bulunmuyor",value:"Henüz hiçbir devlet bu aşamadaki eşleşmelere bahis yapmadı.",inline:false}]))
+    .setFooter({text:"Bu form yalnızca oyun yöneticilerine açıktır. Yenile düğmesi güncel bahis kayıtlarını getirir."});
+  const navigation=new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(`gg2|gladiator-bets-page|${page-1}`).setLabel("Önceki").setEmoji("⬅️").setStyle(ButtonStyle.Secondary).setDisabled(page===0),
+    new ButtonBuilder().setCustomId(`gg2|gladiator-bets-page|${page}`).setLabel("Yenile").setEmoji("🔄").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`gg2|gladiator-bets-page|${page+1}`).setLabel("Sonraki").setEmoji("➡️").setStyle(ButtonStyle.Secondary).setDisabled(page===pageCount-1)
   );
   return {embeds:[embed],components:[navigation]};
 }
@@ -732,6 +772,11 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
     await interaction.reply(await gladiatorOwnershipPayload(interaction.guildId));
     return true;
   }
+  if(subcommand==="gladyator-bahisleri"){
+    if(!isGameMaster(interaction))throw new GameError("Gladyatör bahis dökümünü yalnızca oyun yöneticileri görebilir.");
+    await interaction.reply({...await gladiatorBetsPayload(interaction.guildId),flags:MessageFlags.Ephemeral});
+    return true;
+  }
   if(subcommand==="gladyator-puanlari"){
     await interaction.reply(await gladiatorPointsPayload(interaction.guildId));
     return true;
@@ -799,6 +844,11 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
   }
   if(action==="gladiator-owners-page"){
     await interaction.update(await gladiatorOwnershipPayload(interaction.guildId,Number(rawType)));
+    return true;
+  }
+  if(action==="gladiator-bets-page"){
+    if(!isGameMaster(interaction))throw new GameError("Gladyatör bahis dökümünü yalnızca oyun yöneticileri görebilir.");
+    await interaction.update(await gladiatorBetsPayload(interaction.guildId,Number(rawType)));
     return true;
   }
   if(action==="gladiator-points-page"){
