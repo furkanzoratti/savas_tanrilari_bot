@@ -6,6 +6,6 @@ describe("oyuncu Capua bahisleri komutu",()=>{
     const command=commandBuilders.find((item)=>item.name==="oyunlar");
     const subcommand=command?.options?.find((option)=>option.name==="bahislerim");
 
-    expect(subcommand?.description).toContain("Devletinin güncel Capua bahislerini");
+    expect(subcommand?.description).toContain("güncel ve geçmiş Capua bahislerini");
   });
 });

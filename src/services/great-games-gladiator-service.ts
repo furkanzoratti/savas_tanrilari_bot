@@ -100,8 +100,16 @@ export interface GladiatorBetLedger {
   runNumber:number;
   round:number;
   tournamentStatus:GladiatorTournamentRow["status"];
+  availableRounds:GladiatorBetRoundOption[];
   bets:GladiatorBetViewRow[];
   coupons:GladiatorCouponViewRow[];
+}
+
+export interface GladiatorBetRoundOption{
+  tournamentType:GladiatorTournamentType;
+  runNumber:number;
+  round:number;
+  tournamentStatus:GladiatorTournamentRow["status"];
 }
 
 export interface GladiatorCouponSelectionViewRow{
@@ -209,6 +217,20 @@ function shuffled<T>(items: readonly T[],random:()=>number):T[]{
     [result[index],result[other]]=[result[other]!,result[index]!];
   }
   return result;
+}
+
+export function gladiatorBetRoundOptions(
+  tournaments:readonly Pick<GladiatorTournamentRow,"run_number"|"current_round"|"round_count"|"status"|"tournament_type">[]
+):GladiatorBetRoundOption[]{
+  return tournaments.flatMap((tournament)=>{
+    const openedRounds=Math.min(Number(tournament.current_round),Number(tournament.round_count));
+    return Array.from({length:Math.max(0,openedRounds)},(_,index)=>({
+      tournamentType:tournament.tournament_type,
+      runNumber:Number(tournament.run_number),
+      round:index+1,
+      tournamentStatus:tournament.status
+    }));
+  });
 }
 
 export function pairGladiatorWinners(
@@ -442,7 +464,9 @@ export const greatGamesGladiatorService = {
     }
   },
 
-  async betLedger(guildId:string,countryId?:string):Promise<GladiatorBetLedger|null>{
+  async betLedger(
+    guildId:string,countryId?:string,selection?:{runNumber:number;round:number}
+  ):Promise<GladiatorBetLedger|null>{
     const season=(await pool.query<{id:string}>(
       "SELECT id FROM great_games_seasons WHERE guild_id=$1 AND game_turn=$2",
       [guildId,GREAT_GAMES_TURN]
@@ -450,8 +474,21 @@ export const greatGamesGladiatorService = {
     if(!season)return null;
     const client=await pool.connect();
     try{
-      const tournament=await latestTournament(client,season.id);
-      if(!tournament)return null;
+      const tournaments=(await client.query<GladiatorTournamentRow>(
+        `SELECT tournament.*,champion.name AS champion_name
+           FROM great_games_gladiator_tournaments tournament
+           LEFT JOIN great_games_gladiators champion ON champion.id=tournament.champion_id
+          WHERE tournament.season_id=$1
+          ORDER BY tournament.run_number`,[season.id]
+      )).rows;
+      if(!tournaments.length)return null;
+      const availableRounds=gladiatorBetRoundOptions(tournaments);
+      const latest=tournaments.at(-1)!;
+      const selectedRun=selection?.runNumber??Number(latest.run_number);
+      const selectedRound=selection?.round??Number(latest.current_round);
+      const tournament=tournaments.find((item)=>Number(item.run_number)===selectedRun);
+      const validRound=availableRounds.some((item)=>item.runNumber===selectedRun&&item.round===selectedRound);
+      if(!tournament||!validRound)throw new GameError("Seçilen Capua bahis turu bulunamadı veya henüz açılmadı.");
       const bets=(await client.query<GladiatorBetViewRow>(
         `SELECT bet.id,country.name AS country_name,gladiator.name AS fighter_name,
                 gladiator.code AS fighter_code,match.bracket_position AS match_number,
@@ -463,7 +500,7 @@ export const greatGamesGladiatorService = {
           WHERE match.tournament_id=$1 AND match.round=$2
             AND ($3::uuid IS NULL OR bet.bettor_country_id=$3)
           ORDER BY match.bracket_position,country.name,bet.created_at`,
-        [tournament.id,tournament.current_round,countryId??null]
+        [tournament.id,selectedRound,countryId??null]
       )).rows.map((bet)=>({
         ...bet,
         match_number:Number(bet.match_number),
@@ -479,7 +516,7 @@ export const greatGamesGladiatorService = {
           WHERE coupon.tournament_id=$1 AND coupon.round=$2
             AND ($3::uuid IS NULL OR coupon.bettor_country_id=$3)
           ORDER BY coupon.created_at,country.name`,
-        [tournament.id,tournament.current_round,countryId??null]
+        [tournament.id,selectedRound,countryId??null]
       )).rows.map((coupon)=>({
         ...coupon,amount:Number(coupon.amount),combined_odds:Number(coupon.combined_odds),payout:Number(coupon.payout)
       }));
@@ -508,8 +545,9 @@ export const greatGamesGladiatorService = {
       return {
         tournamentType:tournament.tournament_type,
         runNumber:Number(tournament.run_number),
-        round:Number(tournament.current_round),
+        round:selectedRound,
         tournamentStatus:tournament.status,
+        availableRounds,
         bets,
         coupons
       };
