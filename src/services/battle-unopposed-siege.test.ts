@@ -41,6 +41,7 @@ describe("unopposed siege publication",()=>{
       if(sql.includes("SELECT bs.*,c.name AS country_name"))return {rows:sides,rowCount:2};
       if(sql.includes("SELECT bsp.*,c.name AS country_name"))return {rows:participants,rowCount:2};
       if(sql.includes("FROM battle_rolls"))return {rows:[],rowCount:0};
+      if(sql.includes("FROM battle_rounds"))return {rows:[],rowCount:0};
       if(sql.includes("COUNT(bb.battle_id)::integer AS used"))return {rows:[{current_turn:24,army_composition_activation_turn:null,used:0}],rowCount:1};
       if(sql.includes("FROM settlement_policies"))return {rows:[],rowCount:0};
       if(sql.includes("SELECT c.active_formable_key"))return {rows:[{active_formable_key:null,curia_level:0}],rowCount:1};

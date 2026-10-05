@@ -123,7 +123,26 @@ export interface CasualtyApplication {
   mercenary_loss_applied: number; population_loss_applied: number; population_shortfall: number;
 }
 
-export interface BattleView { battle: BattleRow; sides: Record<BattleSideKey, BattleSideRow>; rolls: BattleRollRow[] }
+export interface BattleRoundSummary {
+  roundNumber: number;
+  tier: string;
+  winner: BattleSideKey | null;
+  lossA: number;
+  lossB: number;
+  pressureA: number;
+  pressureB: number;
+  orderA: string;
+  orderB: string;
+  wallDamage: number;
+  gateDamage: number;
+}
+
+export interface BattleView {
+  battle: BattleRow;
+  sides: Record<BattleSideKey, BattleSideRow>;
+  rolls: BattleRollRow[];
+  lastRound?: BattleRoundSummary | null;
+}
 
 export interface BattleRoundResult {
   tier: string; winner: BattleSideKey | null; lossA: number; lossB: number; orderA: string; orderB: string;
@@ -464,6 +483,32 @@ async function loadView(client: DbClient, battleId: string, lock = false): Promi
     "SELECT side_key,roller_user_id,clash_total,damage_total,is_proxy,manual,wall_damage,gate_damage,detail FROM battle_rolls WHERE battle_id=$1 AND round_number=$2 ORDER BY created_at",
     [battleId, battle.round_number]
   )).rows;
+  const lastRoundRow = (await client.query<{
+    round_number: number; tier: string; winner_side: BattleSideKey | null;
+    loss_a: number; loss_b: number; pressure_a: number; pressure_b: number;
+    order_a: string; order_b: string; wall_damage: number; gate_damage: number;
+  }>(
+    `SELECT round_number,tier,winner_side,loss_a,loss_b,pressure_a,pressure_b,
+            order_a,order_b,wall_damage,gate_damage
+       FROM battle_rounds
+      WHERE battle_id=$1
+      ORDER BY round_number DESC
+      LIMIT 1`,
+    [battleId]
+  )).rows[0];
+  const lastRound: BattleRoundSummary | null = lastRoundRow ? {
+    roundNumber: Number(lastRoundRow.round_number),
+    tier: lastRoundRow.tier,
+    winner: lastRoundRow.winner_side,
+    lossA: Number(lastRoundRow.loss_a),
+    lossB: Number(lastRoundRow.loss_b),
+    pressureA: Number(lastRoundRow.pressure_a),
+    pressureB: Number(lastRoundRow.pressure_b),
+    orderA: lastRoundRow.order_a,
+    orderB: lastRoundRow.order_b,
+    wallDamage: Number(lastRoundRow.wall_damage),
+    gateDamage: Number(lastRoundRow.gate_damage)
+  } : null;
   const bombardmentState = (await client.query<{ current_turn: number; army_composition_activation_turn: number | null; used: number }>(
     `SELECT g.current_turn,g.army_composition_activation_turn,COUNT(bb.battle_id)::integer AS used
        FROM battles b JOIN guilds g ON g.discord_id=b.guild_id
@@ -473,7 +518,7 @@ async function loadView(client: DbClient, battleId: string, lock = false): Promi
   battle.game_turn = bombardmentState?.current_turn ?? 0;
   battle.bombardments_this_turn = bombardmentState?.used ?? 0;
   battle.army_composition_activation_turn = bombardmentState?.army_composition_activation_turn ?? null;
-  return { battle, sides: { A: rows.find((row) => row.side_key === "A")!, B: rows.find((row) => row.side_key === "B")! }, rolls };
+  return { battle, sides: { A: rows.find((row) => row.side_key === "A")!, B: rows.find((row) => row.side_key === "B")! }, rolls, lastRound };
 }
 async function activeInChannel(client: DbClient, guildId: string, channelId: string): Promise<BattleRow | null> {
   return (await client.query<BattleRow>("SELECT * FROM battles WHERE guild_id=$1 AND channel_id=$2 AND status NOT IN ('FINISHED','CANCELLED') ORDER BY created_at DESC LIMIT 1", [guildId, channelId])).rows[0] ?? null;

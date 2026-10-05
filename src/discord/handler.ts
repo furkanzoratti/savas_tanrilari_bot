@@ -484,6 +484,13 @@ async function handleTurn(interaction: ChatInputCommandInteraction): Promise<voi
     movementSummary = result.movement;
     const characterAutomation = await processDueCharacterSystems(interaction.client, interaction.guildId, result.turn, result.acquisition);
     characterAutomationWarnings = characterAutomation.warnings;
+    if(interaction.guild){
+      for(const detail of result.lastStandDetails){
+        if(detail.kind==="FAILED"&&detail.discordRoleId){
+          await deleteCountryRole(interaction.guild,detail.discordRoleId,`Son Direniş süresi doldu • Tur ${result.turn}`).catch(()=>false);
+        }
+      }
+    }
     await refreshActiveBattleCards(interaction.client, interaction.guildId);
     embed = turnAnnouncement({
       kind: "ADVANCE", turn: result.turn, acquisition: result.acquisition,
@@ -507,7 +514,8 @@ async function handleTurn(interaction: ChatInputCommandInteraction): Promise<voi
       mercenaryUnpaidDetails: result.mercenaryUnpaidDetails,
       mercenaryEndedDetails: result.mercenaryEndedDetails,
       assimilatedSettlementDetails: result.assimilatedSettlementDetails,
-      christianSpreadDetails:result.christianSpreadDetails
+      christianSpreadDetails:result.christianSpreadDetails,
+      lastStandDetails:result.lastStandDetails
     });
   } else {
     const phase = sub === "ac" ? "OPEN" : sub === "durdur" ? "RESOLVING" : "CLOSED";
@@ -910,7 +918,20 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
       sourceCountryId: source.id, targetCountryId: target.id, settlementId: settlement.id,
       conqueredTurn: interaction.options.getInteger("fetih-turu")
     });
-    await interaction.editReply(`🏳️ **${result.settlementName}**, **${result.sourceName}** devletinden **${result.targetName}** devletine aktarıldı ve **Tur ${result.conqueredTurn} fethi** olarak işaretlendi.\n⛓️ Köleleştirilen eski garnizon: **${number(result.enslavedGarrison)}**\n🛡️ Ordularda korunan asker: **${number(result.preservedArmyPersonnel)}**\n🚶 Şehir nüfusundan ayrılan saha askeri: **${number(result.evacuatedArmyPopulation)}**\n🧹 Silinen eski askerî varlıklar: **${number(result.removedArmyPersonnel)} asker** • **${number(result.removedShips)} gemi** • **${number(result.removedSiegeAssets)} kuşatma aleti** • **${result.destroyedMercenaryContracts} paralı asker sözleşmesi**\n🛡️ Yeni garnizon emri: **${number(result.newGarrisonPersonnel)} asker** • **${number(result.newGarrisonCost)} Altın**${result.newGarrisonCompletionTurn ? ` • Tur **${result.newGarrisonCompletionTurn}**` : ""}\n⚔️ İptal edilen aktif asker alımı: **${result.cancelledRecruitmentOrders}**\n🤝 Feshedilen/bekleyen ticaret: **${result.endedTrades}**`);
+    if(interaction.guild){
+      for(const detail of result.lastStandDetails){
+        if(detail.kind==="FAILED"&&detail.discordRoleId){
+          await deleteCountryRole(interaction.guild,detail.discordRoleId,`Son Direniş başarısız • Yönetici: ${interaction.user.id}`).catch(()=>false);
+        }
+      }
+    }
+    const lastStandText=result.lastStandDetails.map((detail)=>{
+      if(detail.kind==="STARTED")return `\n⚔️ **${detail.countryName} Son Direniş'e geçti.** Hazine: **0 Altın** • Saha ordusu: **${number(detail.armyPersonnel)}** • Son gün: **Tur ${detail.deadlineTurn}**.`;
+      if(detail.kind==="RECOVERED")return `\n🏛️ **${detail.countryName}**, **${detail.settlementName}** yerleşkesini geri alarak Son Direniş'i başarıyla tamamladı.`;
+      if(detail.kind==="FAILED")return `\n🏴 **${detail.countryName} yok edildi.** ${detail.reason}`;
+      return "";
+    }).join("");
+    await interaction.editReply(`🏳️ **${result.settlementName}**, **${result.sourceName}** devletinden **${result.targetName}** devletine aktarıldı ve **Tur ${result.conqueredTurn} fethi** olarak işaretlendi.\n⛓️ Köleleştirilen eski garnizon: **${number(result.enslavedGarrison)}**\n🛡️ Ordularda korunan asker: **${number(result.preservedArmyPersonnel)}**\n🚶 Şehir nüfusundan ayrılan saha askeri: **${number(result.evacuatedArmyPopulation)}**\n🧹 Silinen eski askerî varlıklar: **${number(result.removedArmyPersonnel)} asker** • **${number(result.removedShips)} gemi** • **${number(result.removedSiegeAssets)} kuşatma aleti** • **${result.destroyedMercenaryContracts} paralı asker sözleşmesi**\n🛡️ Yeni garnizon emri: **${number(result.newGarrisonPersonnel)} asker** • **${number(result.newGarrisonCost)} Altın**${result.newGarrisonCompletionTurn ? ` • Tur **${result.newGarrisonCompletionTurn}**` : ""}\n⚔️ İptal edilen aktif asker alımı: **${result.cancelledRecruitmentOrders}**\n🤝 Feshedilen/bekleyen ticaret: **${result.endedTrades}**${lastStandText}`);
   } else if (sub === "oyuncu-ata") {
     const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
     if (!country) throw new GameError("Ülke bulunamadı.");
@@ -997,6 +1018,13 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
   } else if (sub === "tur-ilerlet") {
     const result = await gameService.advanceTurn(interaction.guildId, interaction.user.id);
     const characterAutomation = await processDueCharacterSystems(interaction.client, interaction.guildId, result.turn, result.acquisition);
+    if(interaction.guild){
+      for(const detail of result.lastStandDetails){
+        if(detail.kind==="FAILED"&&detail.discordRoleId){
+          await deleteCountryRole(interaction.guild,detail.discordRoleId,`Son Direniş süresi doldu • Tur ${result.turn}`).catch(()=>false);
+        }
+      }
+    }
     await refreshActiveBattleCards(interaction.client, interaction.guildId);
     await interaction.editReply({ embeds: [turnAnnouncement({
       kind: "ADVANCE", turn: result.turn, acquisition: result.acquisition,
@@ -1020,7 +1048,8 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
       mercenaryUnpaidDetails: result.mercenaryUnpaidDetails,
       mercenaryEndedDetails: result.mercenaryEndedDetails,
       assimilatedSettlementDetails: result.assimilatedSettlementDetails,
-      christianSpreadDetails:result.christianSpreadDetails
+      christianSpreadDetails:result.christianSpreadDetails,
+      lastStandDetails:result.lastStandDetails
     })], files: [new AttachmentBuilder(TURN_BANNER_PATH, { name: TURN_BANNER_NAME })] });
     if (characterAutomation.warnings.length) {
       await interaction.followUp({content:"⚠️ **Karakter otomasyonu:** "+characterAutomation.warnings.join("\n⚠️ "),ephemeral:true});

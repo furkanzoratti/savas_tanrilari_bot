@@ -68,6 +68,7 @@ import { greatGamesAuctionRewardsTurn15Migration } from "./great-games-auction-r
 import { christianityMigration } from "./christianity-migration.js";
 import { christianBorderSpreadMigration } from "./christian-border-spread-migration.js";
 import { portAccessMigration } from "./port-access-migration.js";
+import { countryLastStandMigration } from "./country-last-stand-migration.js";
 
 export const migrations = [
   {
@@ -2353,5 +2354,6 @@ export const migrations = [
   greatGamesAuctionRewardsTurn15Migration,
   christianityMigration,
   christianBorderSpreadMigration,
-  portAccessMigration
+  portAccessMigration,
+  countryLastStandMigration
 ] as const;

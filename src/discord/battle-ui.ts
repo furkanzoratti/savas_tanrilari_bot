@@ -152,6 +152,21 @@ ${accessNote}` }
         value: `**Saldıran:** Çarpışma ×${factor(roundResult.attackerClashMultiplier ?? 1)} • Hasar ×${factor(roundResult.attackerDamageMultiplier ?? 1)}\n**Savunucu ham zar:** Çarpışma **${number(roundResult.defenderRawClash)}** • Hasar **${number(roundResult.defenderRawDamage)}**\n**Savunucu nihai:** Çarpışma **${number(roundResult.defenderEffectiveClash)}** (×${factor(roundResult.defenderClashMultiplier)}) • Hasar **${number(roundResult.defenderEffectiveDamage)}** (×${factor(roundResult.defenderDamageMultiplier)})\n**Rezerv:** ${number(roundResult.defenderReserveTiers ?? 0)}/5 kademe • Alınan Hasar ×${factor(roundResult.defenderIncomingDamageMultiplier ?? 1)}\n*Baskı, tahkimat ve rezerv çarpanlarından önceki Çarpışma sonuçlarıyla hesaplanır.*`
       });
     }
+  } else if (view.lastRound) {
+    const lastRound = view.lastRound;
+    const pressureLimit = view.battle.terrain === "SIEGE" ? SIEGE_PRESSURE_LIMIT : FIELD_BATTLE_PRESSURE_LIMIT;
+    const winner = lastRound.winner ? view.sides[lastRound.winner].country_name : "Yok";
+    const structureDamage = [
+      lastRound.wallDamage ? `Surlara verilen hasar: **${number(lastRound.wallDamage)}**` : null,
+      lastRound.gateDamage ? `Kapıya verilen hasar: **${number(lastRound.gateDamage)}**` : null
+    ].filter(Boolean).join("\n");
+    const resultValue = view.battle.terrain === "NAVAL"
+      ? `Değerlendirme üstünlüğü: **${winner}**\n${view.sides.A.country_name}: **-${number(lastRound.lossA)} gemi**\n${view.sides.B.country_name}: **-${number(lastRound.lossB)} gemi**`
+      : `Kayıp hesabındaki üstün taraf: **${winner}**\n${view.sides.A.country_name}: **-${number(lastRound.lossA)}** • Baskı **${number(lastRound.pressureA)}/${pressureLimit}** • ${orderLabels[lastRound.orderA] ?? lastRound.orderA}\n${view.sides.B.country_name}: **-${number(lastRound.lossB)}** • Baskı **${number(lastRound.pressureB)}/${pressureLimit}** • ${orderLabels[lastRound.orderB] ?? lastRound.orderB}${structureDamage ? `\n${structureDamage}` : ""}`;
+    embed.addFields({
+      name: `⚔️ Son Çözümlenen Tur • Tur ${lastRound.roundNumber} — ${tierLabels[lastRound.tier] ?? lastRound.tier}`,
+      value: `${resultValue}\n*Bu sonuç, sonraki savaş turu çözümlenene kadar kartta kalır.*`
+    });
   }
   if (view.battle.status === "FINISHED") embed.addFields({ name: "🏁 Savaş Sonu", value: `${view.battle.winner_side ? `Galip: **${view.sides[view.battle.winner_side].country_name}**` : "Sonuç: **Berabere / kararsız**"}\n${view.battle.finish_reason ?? ""}` });
   return embed;

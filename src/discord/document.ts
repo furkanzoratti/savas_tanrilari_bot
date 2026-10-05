@@ -133,6 +133,10 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
     ].join("\n"))
     .setImage(TEMPLE_BANNER_URL)
     .addFields(
+      ...(document.lastStand?.status==="ACTIVE"?[{
+        name:"⚔️ Son Direniş",
+        value:spacedSection(`Devletin toprağı kalmadı.\nSaha orduları kullanılabilir • Hazine: **0 Altın**\nSon gün: **Tur ${document.lastStand.deadlineTurn}** • Kalan: **${Math.max(0,document.lastStand.deadlineTurn-document.guild.current_turn+1)} tur**`)
+      }]:[]),
       { name: "👑 Yönetim", value: spacedSection(document.playerIds.length ? document.playerIds.map((id) => `<@${id}>`).join(" • ") : "Oyuncu atanmamış.") },
       { name: "🏺 Ana Kültür", value: spacedSection(`**${primaryCulture}**\nÖzgür nüfus çoğunluğuna göre otomatik belirlenir.`) },
       { name: "🏦 Hazine", value: spacedSection(`**${gold(document.country.treasury)}**`), inline: true },

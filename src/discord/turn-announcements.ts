@@ -36,6 +36,11 @@ export interface TurnAnnouncementInput {
     beforeCatholicPercent:number;afterCatholicPercent:number;
     conversionPercent:number;completed:boolean;
   }>;
+  lastStandDetails?:Array<{
+    kind:"STARTED"|"ONGOING"|"RECOVERED"|"FAILED";
+    countryName:string;deadlineTurn:number;remainingTurns:number;armyPersonnel:number;
+    settlementName:string|null;reason:string|null;
+  }>;
 }
 
 function fieldValue(lines: string[]): string {
@@ -113,6 +118,15 @@ export function turnAnnouncement(input: TurnAnnouncementInput): EmbedBuilder {
     value:fieldValue(input.christianSpreadDetails.map((item)=>
       `• **${item.targetCountryName} / ${item.targetSettlementName}** — Hristiyanlık %${item.beforePercent} → **%${item.afterPercent}** • Katoliklik %${item.beforeCatholicPercent} → **%${item.afterCatholicPercent}**${item.conversionPercent>0?` • Dönüşüm: +${item.conversionPercent} puan`:""}${item.completed?" • ✅ %70 hedefi tamamlandı; süreç durduruldu":""}`
     ))
+  });
+  if(input.lastStandDetails?.length)embed.addFields({
+    name:"⚔️ Son Direniş Durumu",
+    value:fieldValue(input.lastStandDetails.map((item)=>{
+      if(item.kind==="ONGOING")return `• **${item.countryName}** — ${item.armyPersonnel.toLocaleString("tr-TR")} saha askeri • **${item.remainingTurns} tur** kaldı • Son gün Tur ${item.deadlineTurn}`;
+      if(item.kind==="RECOVERED")return `• 🏛️ **${item.countryName}** — ${item.settlementName??"Eski yerleşke"} geri alındı; devlet yeniden toprak sahibi oldu.`;
+      if(item.kind==="FAILED")return `• 🏴 **${item.countryName}** — ${item.reason??"Son Direniş başarısız oldu."}`;
+      return `• ⚔️ **${item.countryName}** — Son Direniş başladı; son gün Tur ${item.deadlineTurn}.`;
+    }))
   });
   if (input.unrestDetails?.length) embed.addFields({
     name: "⚠️ Huzursuzluk Olayları",

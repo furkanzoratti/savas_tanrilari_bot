@@ -30,6 +30,7 @@ import { dominantReligionFromDistributions, religionBeliefShares, religionDistri
 import { fallbackReligionDistribution, loadReligionDistributions, loadSettlementReligionModifiers, resetSettlementReligionDistribution } from "./religion-service.js";
 import { applyCultureIncomeEffect, cultureMilitaryPopulation } from "../domain/culture-effects.js";
 import { syncCountryPrimaryCulture, syncGuildPrimaryCultures } from "./culture-service.js";
+import { processLastStandsForTurn, recordSettlementClaim, recoverLastStand, startLastStand, type LastStandEvent } from "./country-last-stand-service.js";
 import {
   CHRISTIAN_BORDER_TARGET_PERCENT,
   christianCatholicPercent,
@@ -230,6 +231,7 @@ export interface CountryDocument {
   totalUpkeep: number;
   netIncome: number;
   dominantReligion: { key: ReligionKey; sharePercent: number } | null;
+  lastStand?:{startedTurn:number;deadlineTurn:number;status:"ACTIVE"|"RECOVERED"|"FAILED"}|null;
   tradeAgreements: Array<{ id: string; route: "LAND" | "SEA"; status: "PENDING" | "ACTIVE"; partner_name: string; proposer_settlement_name: string; receiver_settlement_name: string; proposer_resource: ResourceType; receiver_resource: ResourceType }>;
   settlements: Array<SettlementRow & {
     grossIncome: number;
@@ -321,6 +323,7 @@ export interface TurnAdvanceResult {
   mercenaryEndedDetails: Array<{ countryName: string; companyName: string; reason: string }>;
   assimilatedSettlementDetails: Array<{ countryName: string; settlementName: string; diplomatName: string | null }>;
   christianSpreadDetails: ChristianPassiveSpreadDetail[];
+  lastStandDetails: LastStandEvent[];
 }
 
 async function ensureGuild(client: DbClient, guildId: string): Promise<GuildRow> {
@@ -760,6 +763,7 @@ export const gameService = {
         [input.guildId, input.countryName.trim()]
       )).rows[0];
       if (!country) throw new GameError("YOK EDİLDİ durumunda belirtilen ülke bulunamadı.");
+      await client.query("DELETE FROM country_last_stands WHERE country_id=$1",[country.id]);
       const restored = (await client.query<CountryRow>(
         `UPDATE countries
             SET status='ACTIVE',destroyed_turn=NULL,destroyed_reason=NULL,destroyed_by=NULL,destroyed_at=NULL,discord_role_id=NULL
@@ -1547,7 +1551,7 @@ export const gameService = {
     });
   },
 
-  async transferSettlement(input: { guildId: string; actorId: string; sourceCountryId: string; targetCountryId: string; settlementId: string; conqueredTurn?: number | null }): Promise<{ settlementName: string; sourceName: string; targetName: string; conqueredTurn: number; cancelledRecruitmentOrders: number; endedTrades: number; enslavedGarrison: number; removedArmyPersonnel: number; preservedArmyPersonnel: number; evacuatedArmyPopulation: number; removedShips: number; removedSiegeAssets: number; destroyedMercenaryContracts: number; newGarrisonPersonnel: number; newGarrisonCost: number; newGarrisonCompletionTurn: number | null }> {
+  async transferSettlement(input: { guildId: string; actorId: string; sourceCountryId: string; targetCountryId: string; settlementId: string; conqueredTurn?: number | null }): Promise<{ settlementName: string; sourceName: string; targetName: string; conqueredTurn: number; cancelledRecruitmentOrders: number; endedTrades: number; enslavedGarrison: number; removedArmyPersonnel: number; preservedArmyPersonnel: number; evacuatedArmyPopulation: number; removedShips: number; removedSiegeAssets: number; destroyedMercenaryContracts: number; newGarrisonPersonnel: number; newGarrisonCost: number; newGarrisonCompletionTurn: number | null; lastStandDetails: LastStandEvent[] }> {
     return withTransaction(async (client) => {
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`turn:${input.guildId}`]);
       if (input.sourceCountryId === input.targetCountryId) throw new GameError("Kaynak ve hedef ülke aynı olamaz.");
@@ -1585,6 +1589,8 @@ export const gameService = {
       if (!Number.isInteger(conqueredTurn) || conqueredTurn < 0 || conqueredTurn > guild.current_turn) {
         throw new GameError(`Fetih turu 0 ile mevcut Tur ${guild.current_turn} arasında bir tam sayı olmalıdır.`);
       }
+      await recordSettlementClaim(client,source.id,settlement.id,conqueredTurn);
+      await recordSettlementClaim(client,target.id,settlement.id,conqueredTurn);
       const cancelledSiege = await client.query("UPDATE siege_orders SET status='CANCELLED' WHERE settlement_id=$1 AND status='BUILDING' RETURNING id", [settlement.id]);
       await client.query("DELETE FROM settlement_policies WHERE settlement_id=$1", [settlement.id]);
       const interruptedSpies = (await client.query<{ spy_character_id: string }>(
@@ -1611,20 +1617,17 @@ export const gameService = {
       const remainingGarrison = remainingGarrisonRows.reduce((sum, row) => sum + Number(row.quantity), 0);
       const enslavedExistingGarrison = Math.min(Number(settlement.population), remainingGarrison);
       const enslavedGarrison = enslavedExistingGarrison + cancelledGarrisonTrainees;
-      if (remainingSourceSettlements === 0) {
-        await client.query("DELETE FROM army_units WHERE army_id IN (SELECT id FROM armies WHERE country_id=$1)",[source.id]);
-        await client.query("DELETE FROM army_siege_assets WHERE army_id IN (SELECT id FROM armies WHERE country_id=$1)",[source.id]);
-        await client.query("DELETE FROM fleet_ships WHERE fleet_id IN (SELECT id FROM fleets WHERE country_id=$1)",[source.id]);
+      if (remainingSourceSettlements > 0) {
+        await client.query("DELETE FROM army_siege_assets WHERE settlement_id=$1", [settlement.id]);
+        await client.query("DELETE FROM fleet_ships WHERE settlement_id=$1", [settlement.id]);
       }
-      await client.query("DELETE FROM army_siege_assets WHERE settlement_id=$1", [settlement.id]);
-      await client.query("DELETE FROM fleet_ships WHERE settlement_id=$1", [settlement.id]);
       const removedStacks = (await client.query<{ quantity: number; force_type: "ARMY" | "GARRISON" }>(
         "DELETE FROM unit_stacks WHERE settlement_id=$1 RETURNING quantity,force_type", [settlement.id]
       )).rows;
       const removedArmyStock = removedStacks
         .filter((row) => row.force_type === "ARMY")
         .reduce((sum, row) => sum + Number(row.quantity), 0);
-      const preservedArmyPersonnel = remainingSourceSettlements > 0 ? assignedFromSettlement : 0;
+      const preservedArmyPersonnel = assignedFromSettlement;
       const removedArmyPersonnel = Math.max(0,removedArmyStock-preservedArmyPersonnel);
       const evacuatedArmyPopulation = conquestArmyPopulationDeparture(
         settlement.population,enslavedExistingGarrison,preservedArmyPersonnel
@@ -1654,6 +1657,18 @@ export const gameService = {
       await syncCountryTreasury(client, target.id);
       await syncCountryPrimaryCulture(client, source.id);
       await syncCountryPrimaryCulture(client, target.id);
+      const lastStandDetails:LastStandEvent[]=[];
+      const recovered=await recoverLastStand(client,{
+        countryId:target.id,settlementId:settlement.id,settlementName:settlement.name,
+        turn:conqueredTurn,actorId:input.actorId,guildId:input.guildId
+      });
+      if(recovered)lastStandDetails.push(recovered);
+      if(remainingSourceSettlements===0){
+        lastStandDetails.push(await startLastStand(client,{
+          guildId:input.guildId,countryId:source.id,countryName:source.name,turn:conqueredTurn,
+          actorId:input.actorId,discordRoleId:source.discord_role_id
+        }));
+      }
       await audit(client, input.guildId, input.actorId, "SETTLEMENT_TRANSFER", "settlement", settlement.id, {
         fromCountryId: source.id, toCountryId: target.id, cancelledRecruitmentOrders: activeOrders.rows.length, cancelledNavalOrders: cancelledNaval.rowCount ?? 0, cancelledSiegeOrders: cancelledSiege.rowCount ?? 0, endedTrades: trades.rowCount ?? 0, conqueredTurn,
         enslavedGarrison, removedArmyPersonnel, preservedArmyPersonnel, evacuatedArmyPopulation, remainingSourceSettlements, removedShips, removedSiegeAssets, destroyedMercenaryContracts: mercenaryContracts.length,
@@ -1665,7 +1680,7 @@ export const gameService = {
         conqueredTurn,
         removedArmyPersonnel, preservedArmyPersonnel, evacuatedArmyPopulation, removedShips, removedSiegeAssets, destroyedMercenaryContracts: mercenaryContracts.length,
         newGarrisonPersonnel: newGarrison?.personnel ?? 0, newGarrisonCost: newGarrison?.cost ?? 0,
-        newGarrisonCompletionTurn: newGarrison?.completionTurn ?? null
+        newGarrisonCompletionTurn: newGarrison?.completionTurn ?? null,lastStandDetails
       };
     });
   },
@@ -1675,6 +1690,10 @@ export const gameService = {
       await syncCountryPrimaryCulture(client, countryId);
       const country = await getCountry(client, countryId);
       const guild = await getGuild(client, country.guild_id);
+      const lastStandRow=(await client.query<{started_turn:number;deadline_turn:number;status:"ACTIVE"|"RECOVERED"|"FAILED"}>(
+        "SELECT started_turn,deadline_turn,status FROM country_last_stands WHERE country_id=$1",[countryId]
+      )).rows[0]??null;
+      const lastStand=lastStandRow?{startedTurn:Number(lastStandRow.started_turn),deadlineTurn:Number(lastStandRow.deadline_turn),status:lastStandRow.status}:null;
       const playerIds = (await client.query<{ discord_user_id: string }>("SELECT discord_user_id FROM country_members WHERE country_id=$1 ORDER BY discord_user_id", [countryId])).rows.map((row) => row.discord_user_id);
       const specialUnitUnlocks = (await client.query<{ unit_type: SpecialUnitType }>("SELECT unit_type FROM country_special_unit_unlocks WHERE country_id=$1 ORDER BY unit_type", [countryId])).rows.map((row) => row.unit_type);
       const settlements = (await client.query<SettlementRow>("SELECT * FROM settlements WHERE country_id = $1 ORDER BY name", [countryId])).rows;
@@ -2043,6 +2062,7 @@ export const gameService = {
         totalUpkeep,
         netIncome: totalPayableIncome - totalUpkeep,
         dominantReligion: dominantReligionProfile,
+        lastStand,
         tradeAgreements,
         settlements: enriched
       };
@@ -2917,6 +2937,11 @@ export const gameService = {
       const eventKey = `TURN_ADVANCE:${newTurn}`;
       const claimed = await client.query("INSERT INTO processed_events(guild_id,event_key) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING event_key", [guildId, eventKey]);
       if (!claimed.rowCount) throw new GameError("Bu tur daha önce işlenmiş.");
+      const lastStandProcess=await processLastStandsForTurn(client,{guildId,newTurn,actorId});
+      if(lastStandProcess.blocked.length){
+        throw new GameError(`Son Direniş süresi dolan ${lastStandProcess.blocked.join(", ")} devletinin açık savaşı bulunuyor. Turu ilerletmeden önce bu savaşları sonuçlandırın.`);
+      }
+      const lastStandDetails=lastStandProcess.events;
       const christianSpreadDetails=await processChristianPassiveSpread(client,guildId,newTurn,actorId);
 
       const mercenaryArrivalDetails: Array<{ countryName: string; settlementName: string; companyName: string; upkeep: number }> = [];
@@ -3308,7 +3333,7 @@ export const gameService = {
         mercenaryArrivals: mercenaryArrivalDetails.length, mercenaryUpkeep: mercenaryUpkeepDetails,
         mercenaryUnpaid: mercenaryUnpaidDetails, mercenaryEnded: mercenaryEndedDetails,
         assimilatedSettlements: assimilatedSettlementDetails,
-        christianPassiveSpread: christianSpreadDetails
+        christianPassiveSpread: christianSpreadDetails,lastStandDetails
       });
       return {
         turn: newTurn, acquisition, movement,
@@ -3335,7 +3360,7 @@ export const gameService = {
         mercenaryUnpaidDetails,
         mercenaryEndedDetails,
         assimilatedSettlementDetails,
-        christianSpreadDetails
+        christianSpreadDetails,lastStandDetails
       };
     });
   },

@@ -109,6 +109,31 @@ describe("kuşatma bilgi gizliliği", () => {
     expect(json).toContain("Savunucu: **Tekdüze Ordu**");
     expect(json).not.toContain("0,85");
   });
+
+  it("kart yenilendiğinde son çözümlenen turun kayıplarını göstermeye devam eder", () => {
+    const view = siegeView();
+    view.battle.round_number = 6;
+    view.lastRound = {
+      roundNumber: 5,
+      tier: "CLEAR",
+      winner: "B",
+      lossA: 1_820,
+      lossB: 740,
+      pressureA: 6,
+      pressureB: 2,
+      orderA: "WORN",
+      orderB: "ORDERED",
+      wallDamage: 900,
+      gateDamage: 250
+    };
+
+    const json = JSON.stringify(battleEmbed(view).toJSON());
+
+    expect(json).toContain("Son Çözümlenen Tur • Tur 5");
+    expect(json).toContain("1.820");
+    expect(json).toContain("740");
+    expect(json).toContain("sonraki savaş turu çözümlenene kadar");
+  });
 });
 
 describe("panel sonrası Discord savaş kartı eşitlemesi", () => {
