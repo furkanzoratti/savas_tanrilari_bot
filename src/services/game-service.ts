@@ -114,8 +114,8 @@ function settlementStarvationBonus(buildings: Array<{ buildingType: string; leve
     farmLevel: farm,
     aqueductLevel: aqueduct,
     garrisonReinforcement: policies.includes("GARRISON_REINFORCEMENT"),
-    formableBonus: formableModifiers(formableKey).starvationBonus
-  }) + religionBonus;
+    formableBonus: (formableModifiers(formableKey).starvationBonus ?? 0) + religionBonus
+  });
 }
 
 function settlementUnrestChance(buildings: Array<{ buildingType: string; level: number }>, resources: readonly ResourceType[], policies: readonly CityPolicyKey[], formableKey?: FormableCountryKey | null, religionReduction = 0): number {
