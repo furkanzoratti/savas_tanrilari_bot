@@ -64,7 +64,7 @@ export function calculateCategorizedIncome(input: {
   merchantSkillBonus?: number;
   merchantAgoraMaster?: boolean;
   formableKey?: FormableCountryKey | null;
-  religion?: Pick<ReligionModifiers, "taxIncomePercent" | "landTradeIncomePercent" | "seaTradeIncomePercent" | "foreignTradeIncomePercent">;
+  religion?: Pick<ReligionModifiers, "taxIncomePercent" | "landTradeIncomePercent" | "seaTradeIncomePercent" | "foreignTradeIncomePercent" | "settlementIncomePercent">;
 }): { gross: IncomeBreakdown; payable: IncomeBreakdown; buildingUpkeep: number; buildingBonuses: IncomeBreakdown } {
   const resources = input.resources ?? [];
   const policies = new Set(input.activePolicies ?? []);
@@ -76,7 +76,7 @@ export function calculateCategorizedIncome(input: {
     landTrade: Math.max(0, input.settlementIncome + input.landTradeIncome + Math.floor((input.agreementLandIncome ?? 0) * foreignTradeMultiplier)),
     seaTrade: Math.max(0, input.seaTradeIncome + Math.floor((input.agreementSeaIncome ?? 0) * foreignTradeMultiplier))
   };
-  let globalIncomePercent = input.manualIncomePercent;
+  let globalIncomePercent = input.manualIncomePercent + Math.max(0,input.religion?.settlementIncomePercent ?? 0);
   let landTradeIncomePercent = input.religion?.landTradeIncomePercent ?? 0;
   let taxIncomePercent = input.religion?.taxIncomePercent ?? 0;
   let seaIncomePercent = input.religion?.seaTradeIncomePercent ?? 0;

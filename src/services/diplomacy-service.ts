@@ -38,6 +38,18 @@ export interface VassalageView {
   ended_turn: number | null;
 }
 
+export interface PortAccessView {
+  id:string;
+  guild_id:string;
+  requester_country_id:string;
+  requester_country_name:string;
+  grantor_country_id:string;
+  grantor_country_name:string;
+  status:"PENDING"|"ACTIVE"|"REJECTED"|"ENDED"|"CANCELLED";
+  channel_id:string|null;
+  message_id:string|null;
+}
+
 export interface VassalAnnexationResult {
   overlordName: string;
   vassalName: string;
@@ -102,6 +114,13 @@ const allianceViewSql = `SELECT alliance.id,alliance.guild_id,alliance.proposer_
   FROM country_alliances alliance
   JOIN countries proposer ON proposer.id=alliance.proposer_country_id
   JOIN countries receiver ON receiver.id=alliance.receiver_country_id`;
+
+const portAccessViewSql=`SELECT access.id,access.guild_id,access.requester_country_id,
+  requester.name AS requester_country_name,access.grantor_country_id,
+  grantor.name AS grantor_country_name,access.status,access.channel_id,access.message_id
+  FROM country_port_access access
+  JOIN countries requester ON requester.id=access.requester_country_id
+  JOIN countries grantor ON grantor.id=access.grantor_country_id`;
 
 const pactViewSql = `SELECT pact.id,pact.guild_id,pact.founder_country_id,
   founder.name AS founder_country_name,pact.name,pact.purpose,pact.description,
@@ -197,6 +216,10 @@ async function assertPactMemberCapacity(client: DbClient, pactId: string): Promi
 
 async function allianceById(client: DbClient, id: string): Promise<AllianceView | null> {
   return (await client.query<AllianceView>(`${allianceViewSql} WHERE alliance.id=$1`, [id])).rows[0] ?? null;
+}
+
+async function portAccessById(client:DbClient,id:string):Promise<PortAccessView|null>{
+  return (await client.query<PortAccessView>(`${portAccessViewSql} WHERE access.id=$1`,[id])).rows[0]??null;
 }
 
 async function invitationById(client: DbClient, id: string): Promise<PactInvitationView | null> {
@@ -592,6 +615,99 @@ export const diplomacyService = {
       const id = result.rows[0].id;
       await audit(client, input.guildId, input.actorId, "ALLIANCE_END", "alliance", id, input);
       return (await allianceById(client, id))!;
+    });
+  },
+
+  async offerPortAccess(input:{guildId:string;actorId:string;requesterCountryId:string;grantorCountryId:string}):Promise<PortAccessView>{
+    if(input.requesterCountryId===input.grantorCountryId)throw new GameError("Bir devlet kendisinden liman erişimi talep edemez.");
+    return withTransaction(async(client)=>{
+      await lockCountries(client,[input.requesterCountryId,input.grantorCountryId]);
+      await verifyCountry(client,input.guildId,input.requesterCountryId);
+      await verifyCountry(client,input.guildId,input.grantorCountryId);
+      const existing=(await client.query<{status:string}>(
+        `SELECT status FROM country_port_access
+          WHERE guild_id=$1 AND requester_country_id=$2 AND grantor_country_id=$3
+            AND status IN ('PENDING','ACTIVE')`,
+        [input.guildId,input.requesterCountryId,input.grantorCountryId]
+      )).rows[0];
+      if(existing?.status==="ACTIVE")throw new GameError("Bu devletin hedef devletin limanlarına zaten erişimi bulunuyor.");
+      if(existing)throw new GameError("Bu yönde zaten bekleyen bir liman erişimi teklifi bulunuyor.");
+      const id=(await client.query<{id:string}>(
+        `INSERT INTO country_port_access(guild_id,requester_country_id,grantor_country_id,offered_by)
+         VALUES($1,$2,$3,$4) RETURNING id`,
+        [input.guildId,input.requesterCountryId,input.grantorCountryId,input.actorId]
+      )).rows[0]!.id;
+      await audit(client,input.guildId,input.actorId,"PORT_ACCESS_OFFER","port_access",id,input);
+      return (await portAccessById(client,id))!;
+    });
+  },
+
+  async attachPortAccessMessage(id:string,channelId:string,messageId:string):Promise<void>{
+    await pool.query("UPDATE country_port_access SET channel_id=$2,message_id=$3 WHERE id=$1",[id,channelId,messageId]);
+  },
+
+  async cancelPortAccessOffer(guildId:string,id:string):Promise<void>{
+    await pool.query(
+      "UPDATE country_port_access SET status='CANCELLED',ended_at=NOW() WHERE id=$1 AND guild_id=$2 AND status='PENDING'",
+      [id,guildId]
+    );
+  },
+
+  async getPortAccess(id:string):Promise<PortAccessView|null>{
+    return (await pool.query<PortAccessView>(`${portAccessViewSql} WHERE access.id=$1`,[id])).rows[0]??null;
+  },
+
+  async respondPortAccess(input:{guildId:string;actorId:string;grantorCountryId:string;accessId:string;accept:boolean}):Promise<PortAccessView>{
+    return withTransaction(async(client)=>{
+      const preview=(await client.query<{requester_country_id:string;grantor_country_id:string}>(
+        "SELECT requester_country_id,grantor_country_id FROM country_port_access WHERE id=$1 AND guild_id=$2",
+        [input.accessId,input.guildId]
+      )).rows[0];
+      if(!preview)throw new GameError("Liman erişimi teklifi bulunamadı.");
+      await lockCountries(client,[preview.requester_country_id,preview.grantor_country_id]);
+      const row=(await client.query<{grantor_country_id:string;status:string}>(
+        "SELECT grantor_country_id,status FROM country_port_access WHERE id=$1 AND guild_id=$2 FOR UPDATE",
+        [input.accessId,input.guildId]
+      )).rows[0];
+      if(!row)throw new GameError("Liman erişimi teklifi bulunamadı.");
+      if(row.grantor_country_id!==input.grantorCountryId)throw new GameError("Bu teklifi yalnızca liman erişimi istenen devlet yanıtlayabilir.");
+      if(row.status!=="PENDING")throw new GameError("Bu liman erişimi teklifi daha önce sonuçlandırılmış.");
+      await client.query(
+        "UPDATE country_port_access SET status=$2,responded_by=$3,responded_at=NOW() WHERE id=$1",
+        [input.accessId,input.accept?"ACTIVE":"REJECTED",input.actorId]
+      );
+      await audit(client,input.guildId,input.actorId,input.accept?"PORT_ACCESS_ACCEPT":"PORT_ACCESS_REJECT","port_access",input.accessId,input);
+      return (await portAccessById(client,input.accessId))!;
+    });
+  },
+
+  async portAccessList(countryId:string):Promise<PortAccessView[]>{
+    return (await pool.query<PortAccessView>(
+      `${portAccessViewSql}
+        WHERE (access.requester_country_id=$1 OR access.grantor_country_id=$1)
+          AND access.status IN ('PENDING','ACTIVE')
+        ORDER BY CASE access.status WHEN 'PENDING' THEN 0 ELSE 1 END,access.created_at DESC`,
+      [countryId]
+    )).rows;
+  },
+
+  async endPortAccess(input:{
+    guildId:string;actorId:string;countryId:string;targetCountryId:string;direction:"RECEIVED"|"GRANTED";
+  }):Promise<PortAccessView>{
+    return withTransaction(async(client)=>{
+      await lockCountries(client,[input.countryId,input.targetCountryId]);
+      const requester=input.direction==="RECEIVED"?input.countryId:input.targetCountryId;
+      const grantor=input.direction==="RECEIVED"?input.targetCountryId:input.countryId;
+      const result=await client.query<{id:string}>(
+        `UPDATE country_port_access SET status='ENDED',ended_at=NOW(),responded_by=$4
+          WHERE guild_id=$1 AND requester_country_id=$2 AND grantor_country_id=$3 AND status='ACTIVE'
+          RETURNING id`,
+        [input.guildId,requester,grantor,input.actorId]
+      );
+      const id=result.rows[0]?.id;
+      if(!id)throw new GameError("Belirtilen yönde etkin liman erişimi bulunmuyor.");
+      await audit(client,input.guildId,input.actorId,"PORT_ACCESS_END","port_access",id,input);
+      return (await portAccessById(client,id))!;
     });
   },
 

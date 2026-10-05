@@ -5,7 +5,7 @@ import {
 import { RESOURCES } from "../domain/resources.js";
 import {
   diplomacyService,
-  type AllianceView, type PactDetails, type PactInvitationView, type PublicCountryProfile
+  type AllianceView, type PactDetails, type PactInvitationView, type PortAccessView, type PublicCountryProfile
 } from "../services/diplomacy-service.js";
 import { gameService, GameError } from "../services/game-service.js";
 import { isGameMaster, requireGameMaster, resolveCountry } from "./auth.js";
@@ -13,6 +13,7 @@ import { addCountryRoleToMember, deleteCountryRole, ensureCountryRole } from "./
 import { playerMentionPayload } from "./player-mentions.js";
 import {
   PACT_BANNER_NAME, PACT_BANNER_PATH, PACT_BANNER_URL,
+  PORT_ACCESS_BANNER_NAME, PORT_ACCESS_BANNER_PATH, PORT_ACCESS_BANNER_URL,
   STATE_PROFILE_BANNER_NAME, STATE_PROFILE_BANNER_PATH, STATE_PROFILE_BANNER_URL
 } from "./assets.js";
 
@@ -20,9 +21,10 @@ function embedValue(text: string): string {
   return `${text.slice(0, 1022)}\n\u200B`;
 }
 
-export function diplomacyReplyIsPublic(command: "ittifak" | "pakt" | "devlet-bilgisi", action = ""): boolean {
+export function diplomacyReplyIsPublic(command: "ittifak" | "pakt" | "liman-erisimi" | "devlet-bilgisi", action = ""): boolean {
   return command === "devlet-bilgisi"
     || (command === "ittifak" && action === "teklif")
+    || (command === "liman-erisimi" && action === "teklif")
     || (command === "pakt" && ["bilgi", "liste", "davet"].includes(action));
 }
 
@@ -102,7 +104,21 @@ function pactInviteEmbed(invitation: PactInvitationView): EmbedBuilder {
     .setFooter({ text: "Yalnızca hedef devletin oyuncuları veya oyun yöneticisi yanıtlayabilir." });
 }
 
-function responseButtons(kind: "alliance" | "pact", id: string): ActionRowBuilder<ButtonBuilder> {
+export function portAccessInviteEmbed(access:PortAccessView):EmbedBuilder{
+  return new EmbedBuilder()
+    .setColor(0x2f7f8f)
+    .setTitle("⚓ Liman Erişimi Talebi")
+    .setDescription(`**${access.requester_country_name}**, **${access.grantor_country_name}** devletinden liman ve tersane erişimi talep ediyor.`)
+    .addFields(
+      {name:"📤 Erişim Talep Eden",value:access.requester_country_name,inline:true},
+      {name:"📥 Limanlarını Açacak Devlet",value:access.grantor_country_name,inline:true},
+      {name:"🔧 Sağlanan Hak",value:"Kabul edilirse talep eden devlet, hasarlı filolarını erişim veren devletin etkin Tersanelerinde tamire gönderebilir."}
+    )
+    .setImage(PORT_ACCESS_BANNER_URL)
+    .setFooter({text:"Yalnızca liman erişimi istenen devletin oyuncuları veya oyun yöneticisi yanıtlayabilir."});
+}
+
+function responseButtons(kind: "alliance" | "pact" | "port", id: string): ActionRowBuilder<ButtonBuilder> {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(`dip_${kind}_accept|${id}`).setLabel("Kabul Et").setEmoji("✅").setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(`dip_${kind}_reject|${id}`).setLabel("Reddet").setEmoji("❌").setStyle(ButtonStyle.Danger)
@@ -112,7 +128,7 @@ function responseButtons(kind: "alliance" | "pact", id: string): ActionRowBuilde
 async function requireDiplomacyChannel(interaction: ChatInputCommandInteraction): Promise<TextChannel> {
   if (!interaction.guildId) throw new GameError("Bu işlem yalnızca bir Discord sunucusunda kullanılabilir.");
   const configured = await diplomacyService.channel(interaction.guildId);
-  if (!configured) throw new GameError("Önce yönetici /diplomasi-kanali komutuyla ittifak ve pakt kanalını seçmelidir.");
+  if (!configured) throw new GameError("Önce yönetici /diplomasi-kanali komutuyla diplomasi kanalını seçmelidir.");
   if (configured !== interaction.channelId) throw new GameError(`Diplomasi işlemleri yalnızca <#${configured}> kanalında kullanılabilir.`);
   if (!interaction.channel || interaction.channel.type !== ChannelType.GuildText) throw new GameError("Diplomasi kanalına mesaj gönderilemiyor.");
   return interaction.channel;
@@ -174,6 +190,58 @@ async function handleAlliance(interaction: ChatInputCommandInteraction): Promise
     throw error;
   }
   return;
+}
+
+async function handlePortAccess(interaction:ChatInputCommandInteraction):Promise<void>{
+  const action=interaction.options.getSubcommand();
+  await interaction.deferReply({ephemeral:!diplomacyReplyIsPublic("liman-erisimi",action)});
+  const channel=await requireDiplomacyChannel(interaction);
+  const country=await resolveCountry(interaction,interaction.options.getString("ulke"));
+
+  if(action==="liste"){
+    const accesses=await diplomacyService.portAccessList(country.id);
+    const lines=accesses.map((access)=>{
+      const received=access.requester_country_id===country.id;
+      const partner=received?access.grantor_country_name:access.requester_country_name;
+      const direction=received?"📥 Alınan erişim":"📤 Verilen erişim";
+      const status=access.status==="ACTIVE"?"✅ Aktif":"⏳ Bekliyor";
+      const link=access.status==="PENDING"&&access.channel_id&&access.message_id
+        ?` • [Teklifi görüntüle](https://discord.com/channels/${interaction.guildId}/${access.channel_id}/${access.message_id})`:"";
+      return `${status} • ${direction} • **${partner}**${link}`;
+    });
+    await interaction.editReply(lines.length?lines.join("\n"):"Etkin veya bekleyen liman erişimi bulunmuyor.");
+    return;
+  }
+
+  const target=await findCountry(interaction,"hedef-ulke");
+  if(action==="kaldir"){
+    const direction=interaction.options.getString("yon",true) as "RECEIVED"|"GRANTED";
+    const ended=await diplomacyService.endPortAccess({
+      guildId:interaction.guildId!,actorId:interaction.user.id,countryId:country.id,targetCountryId:target.id,direction
+    });
+    await interaction.editReply(
+      `✅ **${ended.requester_country_name}** devletinin **${ended.grantor_country_name}** limanlarına erişimi sona erdirildi.`
+    );
+    return;
+  }
+
+  const access=await diplomacyService.offerPortAccess({
+    guildId:interaction.guildId!,actorId:interaction.user.id,
+    requesterCountryId:country.id,grantorCountryId:target.id
+  });
+  try{
+    const players=await gameService.playerIds(target.id);
+    const notification=playerMentionPayload(players,`**${target.name}** • Oyuncu atanmamış; oyun yöneticisi yanıtlayabilir.`);
+    const message=await interaction.editReply({
+      content:notification.content,embeds:[portAccessInviteEmbed(access)],components:[responseButtons("port",access.id)],
+      files:[new AttachmentBuilder(PORT_ACCESS_BANNER_PATH,{name:PORT_ACCESS_BANNER_NAME})],
+      allowedMentions:notification.allowedMentions
+    });
+    await diplomacyService.attachPortAccessMessage(access.id,channel.id,message.id);
+  }catch(error){
+    await diplomacyService.cancelPortAccessOffer(interaction.guildId!,access.id).catch(()=>undefined);
+    throw error;
+  }
 }
 
 async function handlePact(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -281,7 +349,7 @@ async function handlePact(interaction: ChatInputCommandInteraction): Promise<voi
 }
 
 export async function handleDiplomacyCommand(interaction: ChatInputCommandInteraction): Promise<boolean> {
-  if (!["diplomasi-kanali", "devlet-bilgisi", "ittifak", "pakt", "vassallik"].includes(interaction.commandName)) return false;
+  if (!["diplomasi-kanali", "devlet-bilgisi", "ittifak", "pakt", "liman-erisimi", "vassallik"].includes(interaction.commandName)) return false;
   if (!interaction.guildId) throw new GameError("Bu işlem yalnızca bir Discord sunucusunda kullanılabilir.");
 
   if (interaction.commandName === "vassallik") {
@@ -343,8 +411,8 @@ export async function handleDiplomacyCommand(interaction: ChatInputCommandIntera
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     await diplomacyService.setChannel({ guildId: interaction.guildId, actorId: interaction.user.id, channelId: action === "set" ? channel!.id : null });
     await interaction.editReply(action === "set"
-      ? `✅ İttifak ve pakt davetleri artık ${channel} kanalında yürütülecek. Davetler, katılımlar ve bilgi kartları herkese açık yayımlanır.`
-      : "✅ Diplomasi kanalı kapatıldı. Yeniden kanal seçilinceye kadar ittifak ve pakt işlemleri durduruldu.");
+      ? `✅ İttifak, pakt ve liman erişimi teklifleri artık ${channel} kanalında yürütülecek. Davetler, katılımlar ve bilgi kartları herkese açık yayımlanır.`
+      : "✅ Diplomasi kanalı kapatıldı. Yeniden kanal seçilinceye kadar diplomasi teklifleri durduruldu.");
     return true;
   }
 
@@ -359,12 +427,13 @@ export async function handleDiplomacyCommand(interaction: ChatInputCommandIntera
   }
 
   if (interaction.commandName === "ittifak") await handleAlliance(interaction);
+  else if(interaction.commandName==="liman-erisimi")await handlePortAccess(interaction);
   else await handlePact(interaction);
   return true;
 }
 
 export async function handleDiplomacyButton(interaction: ButtonInteraction): Promise<boolean> {
-  const match = /^dip_(alliance|pact)_(accept|reject)\|(.+)$/.exec(interaction.customId);
+  const match = /^dip_(alliance|pact|port)_(accept|reject)\|(.+)$/.exec(interaction.customId);
   if (!match) return false;
   if (!interaction.guildId) throw new GameError("Bu davet yalnızca sunucu içinde yanıtlanabilir.");
   const kind = match[1]!;
@@ -398,6 +467,38 @@ export async function handleDiplomacyButton(interaction: ButtonInteraction): Pro
       await interaction.followUp({
         content: `📣 **${result.proposer_country_name}** ile **${result.receiver_country_name}** arasındaki ittifak resmen yürürlüğe girdi.`,
         ephemeral: false, allowedMentions: { parse: [] }
+      });
+    }
+    return true;
+  }
+
+  if(kind==="port"){
+    await interaction.deferReply({flags:MessageFlags.Ephemeral});
+    const offer=await diplomacyService.getPortAccess(invitationId);
+    if(!offer||offer.guild_id!==interaction.guildId)throw new GameError("Liman erişimi teklifi bulunamadı.");
+    if(!isGameMaster(interaction)){
+      const country=await gameService.countryForUser(interaction.guildId,interaction.user.id);
+      if(!country||country.id!==offer.grantor_country_id)throw new GameError("Bu teklifi yalnızca liman erişimi istenen devletin oyuncuları yanıtlayabilir.");
+    }
+    const result=await diplomacyService.respondPortAccess({
+      guildId:interaction.guildId,actorId:interaction.user.id,
+      grantorCountryId:offer.grantor_country_id,accessId:offer.id,accept:accepted
+    });
+    const embed=EmbedBuilder.from(interaction.message.embeds[0]!)
+      .setColor(accepted?0x2e8b57:0xb22222)
+      .setTitle(accepted?"✅ Liman Erişimi Kabul Edildi":"❌ Liman Erişimi Reddedildi")
+      .setFooter({text:`${interaction.user.username} tarafından sonuçlandırıldı.`});
+    await interaction.message.edit({
+      content:accepted
+        ?`✅ **${result.requester_country_name}**, artık **${result.grantor_country_name}** devletinin etkin Tersanelerini kullanabilir.`
+        :`❌ **${result.grantor_country_name}**, **${result.requester_country_name}** devletinin liman erişimi talebini reddetti.`,
+      embeds:[embed],components:[],allowedMentions:{parse:[]}
+    });
+    await interaction.editReply("✅ Liman erişimi teklifi sonuçlandırıldı.");
+    if(accepted){
+      await interaction.followUp({
+        content:`⚓ **${result.requester_country_name}** devletine **${result.grantor_country_name}** limanları ve etkin Tersaneleri için erişim verildi.`,
+        ephemeral:false,allowedMentions:{parse:[]}
       });
     }
     return true;

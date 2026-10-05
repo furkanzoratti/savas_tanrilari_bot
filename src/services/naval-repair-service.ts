@@ -122,6 +122,36 @@ export async function completeDueFleetRepairs(
 }
 
 export const navalRepairService={
+  async listEligibleShipyards(guildId:string,countryId:string):Promise<Array<{
+    id:string;name:string;ownerCountryId:string;ownerCountryName:string;shipyardLevel:number;foreign:boolean;
+  }>>{
+    const rows=await pool.query<{
+      id:string;name:string;owner_country_id:string;owner_country_name:string;shipyard_level:number;
+    }>(
+      `SELECT settlement.id,settlement.name,owner.id AS owner_country_id,
+              owner.name AS owner_country_name,building.level::integer AS shipyard_level
+         FROM settlements settlement
+         JOIN countries owner ON owner.id=settlement.country_id
+         JOIN buildings building ON building.settlement_id=settlement.id
+        WHERE owner.guild_id=$1 AND owner.status='ACTIVE' AND settlement.is_coastal=TRUE
+          AND building.building_type='shipyard' AND building.status='ACTIVE' AND building.level>0
+          AND (
+            settlement.country_id=$2 OR EXISTS(
+              SELECT 1 FROM country_port_access access
+               WHERE access.guild_id=$1 AND access.requester_country_id=$2
+                 AND access.grantor_country_id=settlement.country_id AND access.status='ACTIVE'
+            )
+          )
+        ORDER BY CASE WHEN owner.id=$2 THEN 0 ELSE 1 END,owner.name,settlement.name`,
+      [guildId,countryId]
+    );
+    return rows.rows.map((row)=>({
+      id:row.id,name:row.name,ownerCountryId:row.owner_country_id,
+      ownerCountryName:row.owner_country_name,shipyardLevel:Number(row.shipyard_level),
+      foreign:row.owner_country_id!==countryId
+    }));
+  },
+
   async listCountry(countryId:string,includeTransferred=false):Promise<RepairFleetView[]>{
     const client=await pool.connect();
     try{
@@ -138,13 +168,24 @@ export const navalRepairService={
         [input.fleetId,input.countryId,input.guildId])).rows[0];
       if(!fleet)throw new GameError("Filo bulunamadı veya bu devlete ait değil.");
       await assertFleetCanChange(client,fleet.id);
-      const dock=(await client.query<{id:string;name:string;shipyard_level:number}>(
-        `SELECT settlement.id,settlement.name,building.level::integer AS shipyard_level
-           FROM settlements settlement JOIN buildings building ON building.settlement_id=settlement.id
-          WHERE settlement.id=$1 AND settlement.country_id=$2 AND settlement.is_coastal=TRUE
+      const dock=(await client.query<{id:string;name:string;shipyard_level:number;owner_country_id:string}>(
+        `SELECT settlement.id,settlement.name,building.level::integer AS shipyard_level,
+                owner.id AS owner_country_id
+           FROM settlements settlement
+           JOIN countries owner ON owner.id=settlement.country_id
+           JOIN buildings building ON building.settlement_id=settlement.id
+          WHERE settlement.id=$1 AND owner.guild_id=$3 AND owner.status='ACTIVE'
+            AND settlement.is_coastal=TRUE
             AND building.building_type='shipyard' AND building.status='ACTIVE' AND building.level>0
-          FOR UPDATE OF settlement,building`,[input.repairSettlementId,input.countryId])).rows[0];
-      if(!dock)throw new GameError("Tamir için bu devlete ait, kıyıdaki aktif bir Tersane seçilmelidir.");
+            AND (
+              settlement.country_id=$2 OR EXISTS(
+                SELECT 1 FROM country_port_access access
+                 WHERE access.guild_id=$3 AND access.requester_country_id=$2
+                   AND access.grantor_country_id=settlement.country_id AND access.status='ACTIVE'
+              )
+            )
+          FOR UPDATE OF settlement,building`,[input.repairSettlementId,input.countryId,input.guildId])).rows[0];
+      if(!dock)throw new GameError("Seçilen yerleşkede kullanılabilir bir Tersane bulunmuyor veya devletinizin bu limana erişimi yok.");
       if(!["DISABLED_ONLY","ALL_DAMAGED"].includes(input.scope))throw new GameError("Geçersiz tamir kapsamı.");
       const damaged=(await client.query<{
         id:string;settlement_id:string;ship_type:NavalUnitType;max_hp:number;current_hp:number;

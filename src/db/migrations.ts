@@ -65,6 +65,9 @@ import { greatGamesAuctionBidRulesMigration } from "./great-games-auction-bid-ru
 import { greatGamesIndependentAuctionMigration } from "./great-games-independent-auction-migration.js";
 import { greatGamesAuctionTimerMigration } from "./great-games-auction-timer-migration.js";
 import { greatGamesAuctionRewardsTurn15Migration } from "./great-games-auction-rewards-turn-15-migration.js";
+import { christianityMigration } from "./christianity-migration.js";
+import { christianBorderSpreadMigration } from "./christian-border-spread-migration.js";
+import { portAccessMigration } from "./port-access-migration.js";
 
 export const migrations = [
   {
@@ -2347,5 +2350,8 @@ export const migrations = [
   greatGamesAuctionBidRulesMigration,
   greatGamesIndependentAuctionMigration,
   greatGamesAuctionTimerMigration,
-  greatGamesAuctionRewardsTurn15Migration
+  greatGamesAuctionRewardsTurn15Migration,
+  christianityMigration,
+  christianBorderSpreadMigration,
+  portAccessMigration
 ] as const;

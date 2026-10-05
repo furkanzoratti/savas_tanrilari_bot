@@ -32,6 +32,9 @@ describe("yönetim komutları", () => {
     const culturePenalty = commandBuilders.find((command) => command.name === "kultur-askeri-ceza");
     expect(culturePenalty?.description).toContain("Yalnızca yönetici");
     expect(culturePenalty?.options?.find((option) => option.name === "aktif")).toMatchObject({ required: true });
+    const christianBorder = commandBuilders.find((command) => command.name === "hristiyan-sinir");
+    expect(christianBorder?.description).toContain("Yalnızca yönetici");
+    expect(christianBorder?.options?.find((option) => option.name === "yerleske")).toMatchObject({ required: true, autocomplete: true });
   });
 
   it("yok edilmiş devletleri listeleme, geri getirme ve vassallık yönetimini kaydeder", () => {

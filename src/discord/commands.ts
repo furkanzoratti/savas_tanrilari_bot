@@ -407,10 +407,10 @@ export const commandBuilders = [
     .setName("devlet-bilgisi").setDescription("Bir devletin herkese açık, askerî ve ekonomik bilgi içermeyen profilini gösterir")
     .addStringOption((option) => option.setName("ulke").setDescription("Görüntülenecek devletin adı").setRequired(true)),
   new SlashCommandBuilder()
-    .setName("diplomasi-kanali").setDescription("Yalnızca yönetici: ittifak ve pakt davet kanalını ayarlar")
+    .setName("diplomasi-kanali").setDescription("Yalnızca yönetici: ittifak, pakt ve liman erişimi teklif kanalını ayarlar")
     .addStringOption((option) => option.setName("islem").setDescription("Kanal işlemi").setRequired(true)
       .addChoices({ name: "Ayarla", value: "set" }, { name: "Kapat", value: "clear" }))
-    .addChannelOption((option) => option.setName("kanal").setDescription("İttifak ve pakt davetlerinin gönderileceği metin kanalı")
+    .addChannelOption((option) => option.setName("kanal").setDescription("Diplomatik tekliflerin gönderileceği metin kanalı")
       .addChannelTypes(ChannelType.GuildText)),
   new SlashCommandBuilder()
     .setName("savas-ilan-kanali").setDescription("Yalnızca yönetici: resmî savaş ve barış duyurularının kanalını ayarlar")
@@ -531,6 +531,20 @@ export const commandBuilders = [
       .addStringOption(countryOption))
     .addSubcommand((sub) => sub.setName("feshet").setDescription("Başka bir devletle mevcut ittifakı sona erdirir")
       .addStringOption((option) => option.setName("hedef-ulke").setDescription("İttifakı sona erecek devlet").setRequired(true))
+      .addStringOption(countryOption)),
+  new SlashCommandBuilder()
+    .setName("liman-erisimi").setDescription("Başka devletlerin tersanelerini kullanmak için liman erişimini yönetir")
+    .addSubcommand((sub)=>sub.setName("teklif").setDescription("Başka bir devletten liman ve tersane erişimi talep eder")
+      .addStringOption((option)=>option.setName("hedef-ulke").setDescription("Liman erişimi istenecek devlet").setRequired(true))
+      .addStringOption(countryOption))
+    .addSubcommand((sub)=>sub.setName("liste").setDescription("Etkin ve bekleyen liman erişimlerini gösterir")
+      .addStringOption(countryOption))
+    .addSubcommand((sub)=>sub.setName("kaldir").setDescription("Alınan erişimden vazgeçer veya verilen erişimi geri çeker")
+      .addStringOption((option)=>option.setName("hedef-ulke").setDescription("Erişimin diğer tarafındaki devlet").setRequired(true))
+      .addStringOption((option)=>option.setName("yon").setDescription("Kaldırılacak erişimin yönü").setRequired(true).addChoices(
+        {name:"Aldığımız erişim",value:"RECEIVED"},
+        {name:"Verdiğimiz erişim",value:"GRANTED"}
+      ))
       .addStringOption(countryOption)),
   new SlashCommandBuilder()
     .setName("pakt").setDescription("Birden fazla devletin katılabileceği diplomatik paktları yönetir")
@@ -993,6 +1007,13 @@ export const commandBuilders = [
     .addBooleanOption((option) => option
       .setName("aktif")
       .setDescription("Yabancı kültürlü nüfus askerî limite ×0,80 katkı sağlasın mı?")
+      .setRequired(true)),
+  new SlashCommandBuilder()
+    .setName("hristiyan-sinir").setDescription("Yalnızca yönetici: yerleşkede %70'e kadar otomatik Hristiyan yayılımı başlatır")
+    .addStringOption((option)=>option
+      .setName("yerleske")
+      .setDescription("Her tur Hristiyanlık yayılımı uygulanacak yerleşke")
+      .setAutocomplete(true)
       .setRequired(true)),
   new SlashCommandBuilder()
     .setName("yonetim").setDescription("Oyun yöneticisi komutları")

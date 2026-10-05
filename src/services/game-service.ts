@@ -30,6 +30,13 @@ import { dominantReligionFromDistributions, religionBeliefShares, religionDistri
 import { fallbackReligionDistribution, loadReligionDistributions, loadSettlementReligionModifiers, resetSettlementReligionDistribution } from "./religion-service.js";
 import { applyCultureIncomeEffect, cultureMilitaryPopulation } from "../domain/culture-effects.js";
 import { syncCountryPrimaryCulture, syncGuildPrimaryCultures } from "./culture-service.js";
+import {
+  CHRISTIAN_BORDER_TARGET_PERCENT,
+  christianCatholicPercent,
+  christianPrimaryPercent,
+  processChristianPassiveSpread,
+  type ChristianPassiveSpreadDetail
+} from "./christian-passive-spread-service.js";
 
 export class GameError extends Error {}
 
@@ -313,6 +320,7 @@ export interface TurnAdvanceResult {
   mercenaryUnpaidDetails: Array<{ countryName: string; companyName: string; amount: number }>;
   mercenaryEndedDetails: Array<{ countryName: string; companyName: string; reason: string }>;
   assimilatedSettlementDetails: Array<{ countryName: string; settlementName: string; diplomatName: string | null }>;
+  christianSpreadDetails: ChristianPassiveSpreadDetail[];
 }
 
 async function ensureGuild(client: DbClient, guildId: string): Promise<GuildRow> {
@@ -2909,6 +2917,7 @@ export const gameService = {
       const eventKey = `TURN_ADVANCE:${newTurn}`;
       const claimed = await client.query("INSERT INTO processed_events(guild_id,event_key) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING event_key", [guildId, eventKey]);
       if (!claimed.rowCount) throw new GameError("Bu tur daha önce işlenmiş.");
+      const christianSpreadDetails=await processChristianPassiveSpread(client,guildId,newTurn,actorId);
 
       const mercenaryArrivalDetails: Array<{ countryName: string; settlementName: string; companyName: string; upkeep: number }> = [];
       const mercenaryUpkeepDetails: Array<{ countryName: string; companyName: string; amount: number }> = [];
@@ -3298,7 +3307,8 @@ export const gameService = {
         from: guild.current_turn, to: newTurn, acquisition, garrisonUpgrades, startedGarrisons: garrisonReplenishmentStartedDetails, incomePenaltyDetails,
         mercenaryArrivals: mercenaryArrivalDetails.length, mercenaryUpkeep: mercenaryUpkeepDetails,
         mercenaryUnpaid: mercenaryUnpaidDetails, mercenaryEnded: mercenaryEndedDetails,
-        assimilatedSettlements: assimilatedSettlementDetails
+        assimilatedSettlements: assimilatedSettlementDetails,
+        christianPassiveSpread: christianSpreadDetails
       });
       return {
         turn: newTurn, acquisition, movement,
@@ -3324,7 +3334,8 @@ export const gameService = {
         mercenaryUpkeepDetails,
         mercenaryUnpaidDetails,
         mercenaryEndedDetails,
-        assimilatedSettlementDetails
+        assimilatedSettlementDetails,
+        christianSpreadDetails
       };
     });
   },
@@ -3371,12 +3382,77 @@ export const gameService = {
     });
   },
 
+  async searchActiveSettlements(guildId:string,query:string):Promise<Array<{id:string;name:string;countryName:string}>> {
+    const pattern=`%${query.trim()}%`;
+    const rows=await pool.query<{id:string;name:string;country_name:string}>(
+      `SELECT settlement.id,settlement.name,country.name AS country_name
+         FROM settlements settlement
+         JOIN countries country ON country.id=settlement.country_id
+        WHERE country.guild_id=$1 AND country.status='ACTIVE'
+          AND ($2='%%' OR settlement.name ILIKE $2 OR country.name ILIKE $2)
+        ORDER BY CASE WHEN settlement.name ILIKE $3 THEN 0 ELSE 1 END,
+                 settlement.name,country.name
+        LIMIT 25`,
+      [guildId,pattern,`${query.trim()}%`]
+    );
+    return rows.rows.map((row)=>({id:row.id,name:row.name,countryName:row.country_name}));
+  },
+
+  async startChristianBorderSpread(input:{guildId:string;actorId:string;settlementId:string}):Promise<{
+    countryName:string;settlementName:string;christianPercent:number;catholicPercent:number;startedTurn:number;
+  }> {
+    return withTransaction(async(client)=>{
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))",[`turn:${input.guildId}`]);
+      const row=(await client.query<{
+        id:string;name:string;country_name:string;current_turn:number;
+        religion_key:ReligionKey;religion_adherence_percent:number;spread_status:string|null;
+      }>(
+        `SELECT settlement.id,settlement.name,country.name AS country_name,guild.current_turn,
+                settlement.religion_key,settlement.religion_adherence_percent,
+                spread.status AS spread_status
+           FROM settlements settlement
+           JOIN countries country ON country.id=settlement.country_id
+           JOIN guilds guild ON guild.discord_id=country.guild_id
+           LEFT JOIN christian_border_spreads spread
+             ON spread.guild_id=country.guild_id AND spread.settlement_id=settlement.id
+          WHERE settlement.id::text=$1 AND country.guild_id=$2 AND country.status='ACTIVE'
+          FOR UPDATE OF settlement`,
+        [input.settlementId,input.guildId]
+      )).rows[0];
+      if(!row)throw new GameError("Aktif yerleşke bulunamadı; listeden yeniden seçin.");
+      if(row.spread_status==="ACTIVE")throw new GameError(`${row.name} için Hristiyan sınır yayılımı zaten aktif.`);
+      const distributions=await loadReligionDistributions(client,[row.id]);
+      const shares=distributions.get(row.id)??fallbackReligionDistribution(row);
+      const christianPercent=christianPrimaryPercent(shares);
+      const catholicPercent=christianCatholicPercent(shares);
+      if(christianPercent>=CHRISTIAN_BORDER_TARGET_PERCENT) {
+        throw new GameError(`${row.name} zaten %${CHRISTIAN_BORDER_TARGET_PERCENT} Hristiyanlığa ulaştı.`);
+      }
+      await client.query(
+        `INSERT INTO christian_border_spreads(
+           guild_id,settlement_id,status,started_turn,completed_turn,started_by_user_id,updated_at
+         ) VALUES($1,$2,'ACTIVE',$3,NULL,$4,NOW())
+         ON CONFLICT(guild_id,settlement_id) DO UPDATE SET
+           status='ACTIVE',started_turn=EXCLUDED.started_turn,completed_turn=NULL,
+           started_by_user_id=EXCLUDED.started_by_user_id,updated_at=NOW()`,
+        [input.guildId,row.id,row.current_turn,input.actorId]
+      );
+      await audit(client,input.guildId,input.actorId,"CHRISTIAN_BORDER_SPREAD_STARTED","settlement",row.id,{
+        settlementName:row.name,countryName:row.country_name,startedTurn:row.current_turn,
+        christianPercent,catholicPercent,targetPercent:CHRISTIAN_BORDER_TARGET_PERCENT
+      });
+      return {countryName:row.country_name,settlementName:row.name,christianPercent,catholicPercent,startedTurn:row.current_turn};
+    });
+  },
+
   async resetGame(guildId: string, actorId: string): Promise<{ deletedCountries: number }> {
     return withTransaction(async (client) => {
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`turn:${guildId}`]);
       await ensureGuild(client, guildId);
       await client.query("DELETE FROM battles WHERE guild_id=$1", [guildId]);
       await client.query("DELETE FROM settlement_event_draws WHERE guild_id=$1", [guildId]);
+      await client.query("DELETE FROM christian_passive_spread_runs WHERE guild_id=$1", [guildId]);
+      await client.query("DELETE FROM christian_border_spreads WHERE guild_id=$1", [guildId]);
       const deleted = await client.query("DELETE FROM countries WHERE guild_id=$1 RETURNING id", [guildId]);
       await client.query("DELETE FROM processed_events WHERE guild_id=$1", [guildId]);
       await client.query("UPDATE guilds SET current_turn=0,turn_phase='CLOSED',updated_at=NOW() WHERE discord_id=$1", [guildId]);

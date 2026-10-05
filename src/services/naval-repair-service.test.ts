@@ -24,7 +24,7 @@ describe("naval repair scope and withdrawal",()=>{
       queries.push({sql,params});
       if(sql.includes("SELECT id,name,country_id FROM fleets"))return {rows:[{id:"fleet-1",name:"Royal Navy",country_id:"country-1"}],rowCount:1};
       if(unlocked(sql))return {rows:[],rowCount:0};
-      if(sql.includes("FROM settlements settlement JOIN buildings"))return {rows:[{id:"port-1",name:"Londra",shipyard_level:2}],rowCount:1};
+      if(sql.includes("FROM settlements settlement")&&sql.includes("JOIN buildings building"))return {rows:[{id:"port-1",name:"Londra",shipyard_level:2,owner_country_id:"country-1"}],rowCount:1};
       if(sql.includes("SELECT id,settlement_id,ship_type,max_hp,current_hp FROM naval_ship_damage"))return {
         rows:[{id:"damage-disabled",settlement_id:"port-1",ship_type:"trireme",max_hp:75,current_hp:20}],rowCount:1
       };
@@ -54,6 +54,10 @@ describe("naval repair scope and withdrawal",()=>{
     const selection=queries.find(({sql})=>sql.includes("SELECT id,settlement_id,ship_type,max_hp,current_hp FROM naval_ship_damage"));
     expect(selection?.sql).toContain("status='DISABLED'");
     expect(selection?.params).toEqual(["fleet-1","DISABLED_ONLY"]);
+    const shipyardSelection=queries.find(({sql})=>sql.includes("FROM country_port_access access"));
+    expect(shipyardSelection?.sql).toContain("access.requester_country_id=$2");
+    expect(shipyardSelection?.sql).toContain("access.status='ACTIVE'");
+    expect(shipyardSelection?.params).toEqual(["port-1","country-1","guild-1"]);
     const audit=queries.find(({sql})=>sql.includes("'fleet.repair.start'"));
     expect(String(audit?.params?.[3])).toContain('"scope":"DISABLED_ONLY"');
   });

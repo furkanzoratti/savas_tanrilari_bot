@@ -8,7 +8,7 @@ export type ReligionKey =
   | "ANATOLIAN_FAITHS" | "ARMENIAN_FAITH" | "CAUCASIAN_FAITH" | "PHOENICIAN_CANAANITE_FAITH"
   | "JUDAISM" | "MESOPOTAMIAN_FAITH" | "EGYPTIAN_FAITH" | "KUSH_NUBIAN_FAITH"
   | "NABATAEAN_FAITH" | "SOUTH_ARABIAN_FAITH" | "ZOROASTRIANISM" | "HELLENO_IRANIAN_SYNCRETISM"
-  | "BRAHMANISM" | "BUDDHISM" | "JAINISM" | "DRAVIDIAN_FAITHS";
+  | "BRAHMANISM" | "BUDDHISM" | "JAINISM" | "DRAVIDIAN_FAITHS" | "CHRISTIANITY";
 
 export type ReligionUnitType = keyof typeof UNITS;
 
@@ -25,6 +25,7 @@ export interface ReligionModifiers {
   landTradeIncomePercent: number;
   seaTradeIncomePercent: number;
   foreignTradeIncomePercent: number;
+  settlementIncomePercent: number;
   populationGrowthPercent: number;
   buildingCostDiscount: number;
   academyBuildingCostDiscount: number;
@@ -39,16 +40,17 @@ export interface ReligionModifiers {
   landRaidIncomePercent: number;
   spyDefenseBonus: number;
   diplomatTaskBonus: number;
+  missionaryTaskBonus: number;
   merchantTaskBonus: number;
 }
 
 const emptyModifiers = (): ReligionModifiers => ({
   taxIncomePercent: 0, landTradeIncomePercent: 0, seaTradeIncomePercent: 0,
-  foreignTradeIncomePercent: 0, populationGrowthPercent: 0,
+  foreignTradeIncomePercent: 0, settlementIncomePercent: 0, populationGrowthPercent: 0,
   buildingCostDiscount: 0, academyBuildingCostDiscount: 0, siegeAssetCostDiscount: 0,
   unitPurchaseDiscounts: [], unitUpkeepDiscounts: [], shipPurchaseDiscount: 0, shipUpkeepDiscount: 0,
   unrestReduction: 0, negativeEventRiskReduction: 0, starvationBonus: 0,
-  landRaidIncomePercent: 0, spyDefenseBonus: 0, diplomatTaskBonus: 0, merchantTaskBonus: 0
+  landRaidIncomePercent: 0, spyDefenseBonus: 0, diplomatTaskBonus: 0, missionaryTaskBonus: 0, merchantTaskBonus: 0
 });
 
 const ALL_LAND = [
@@ -132,7 +134,8 @@ export const RELIGIONS: Record<ReligionKey, ReligionDefinition> = {
   BRAHMANISM: { label:"Brahmanizm",localEffect:"Halk vergisi geliri +%6",nationalEffect:"Yerleşke huzursuzluğu -3 puan",local:{taxIncomePercent:.06},national:{unrestReduction:3} },
   BUDDHISM: { label:"Budizm",localEffect:"Olumsuz yerleşke olayı ihtimali -5 puan",nationalEffect:"Diplomat görevlerine +1",local:{negativeEventRiskReduction:5},national:{diplomatTaskBonus:1} },
   JAINISM: { label:"Jainizm",localEffect:"Kara ticareti +%8",nationalEffect:"Tüccar görevlerine +1",local:{landTradeIncomePercent:.08},national:{merchantTaskBonus:1} },
-  DRAVIDIAN_FAITHS: { label:"Dravid İnançları",localEffect:"Liman geliri +%8",nationalEffect:"Gemi bakım maliyeti -%3",local:{seaTradeIncomePercent:.08},national:{shipUpkeepDiscount:.03} }
+  DRAVIDIAN_FAITHS: { label:"Dravid İnançları",localEffect:"Liman geliri +%8",nationalEffect:"Gemi bakım maliyeti -%3",local:{seaTradeIncomePercent:.08},national:{shipUpkeepDiscount:.03} },
+  CHRISTIANITY: { label:"Hristiyanlık",localEffect:"Yerleşke toplam geliri +%5",nationalEffect:"Bina maliyeti -%5; Misyoner ve Diplomat görevlerine +1",local:{settlementIncomePercent:.05},national:{buildingCostDiscount:.05,diplomatTaskBonus:1,missionaryTaskBonus:1} }
 };
 
 export const SECONDARY_RELIGIONS: Record<ReligionKey, SecondaryReligionDefinition> = {
@@ -164,7 +167,8 @@ export const SECONDARY_RELIGIONS: Record<ReligionKey, SecondaryReligionDefinitio
   BRAHMANISM: { key:"BRAHMANIC_BHAGAVATA_TRADITION",label:"Bhagavata Geleneği",effect:"Bina maliyeti -%2",modifiers:{buildingCostDiscount:.02} },
   BUDDHISM: { key:"BUDDHIST_STHAVIRA_TRADITION",label:"Sthavira Geleneği",effect:"Olumsuz yerleşke olayı ihtimali -2 puan",modifiers:{negativeEventRiskReduction:2} },
   JAINISM: { key:"JAIN_SRAMANA_COMMUNITY",label:"Şramana Cemaati",effect:"Dış ticaret geliri +%2",modifiers:{foreignTradeIncomePercent:.02} },
-  DRAVIDIAN_FAITHS: { key:"DRAVIDIAN_MURUGAN_CULT",label:"Murugan Kültü",effect:"Mızraklı birlik alım maliyeti -%2",modifiers:{unitPurchaseDiscounts:[{discount:.02,units:SPEAR_RANGED}]} }
+  DRAVIDIAN_FAITHS: { key:"DRAVIDIAN_MURUGAN_CULT",label:"Murugan Kültü",effect:"Mızraklı birlik alım maliyeti -%2",modifiers:{unitPurchaseDiscounts:[{discount:.02,units:SPEAR_RANGED}]} },
+  CHRISTIANITY: { key:"CHRISTIAN_CATHOLICISM",label:"Katoliklik",effect:"Olumsuz yerleşke olayı ihtimali -5 puan",modifiers:{negativeEventRiskReduction:5} }
 };
 
 export type SecondaryReligionKey = (typeof SECONDARY_RELIGIONS)[ReligionKey]["key"];
@@ -188,10 +192,10 @@ export function secondaryReligionEffectScale(adherencePercent: number): number {
 }
 
 function addModifiers(target: ReligionModifiers, source: PartialModifiers, scale = 1): void {
-  const numeric = ["taxIncomePercent","landTradeIncomePercent","seaTradeIncomePercent","foreignTradeIncomePercent",
+  const numeric = ["taxIncomePercent","landTradeIncomePercent","seaTradeIncomePercent","foreignTradeIncomePercent","settlementIncomePercent",
     "populationGrowthPercent","buildingCostDiscount","academyBuildingCostDiscount","siegeAssetCostDiscount",
     "shipPurchaseDiscount","shipUpkeepDiscount","unrestReduction","negativeEventRiskReduction","starvationBonus",
-    "landRaidIncomePercent","spyDefenseBonus","diplomatTaskBonus","merchantTaskBonus"] as const;
+    "landRaidIncomePercent","spyDefenseBonus","diplomatTaskBonus","missionaryTaskBonus","merchantTaskBonus"] as const;
   for (const key of numeric) target[key] += Number(source[key] ?? 0) * scale;
   for (const item of source.unitPurchaseDiscounts ?? []) target.unitPurchaseDiscounts.push({...item,discount:item.discount*scale});
   for (const item of source.unitUpkeepDiscounts ?? []) target.unitUpkeepDiscounts.push({...item,discount:item.discount*scale});
@@ -294,6 +298,14 @@ export function convertReligionDistribution(
   targetReligionKey:ReligionKey,
   successMargin:number
 ):ReligionFamilyShare[] {
+  return convertReligionDistributionByPercent(shares,targetReligionKey,religionConversionPercent(successMargin));
+}
+
+export function convertReligionDistributionByPercent(
+  shares:ReadonlyArray<ReligionFamilyShare>,
+  targetReligionKey:ReligionKey,
+  conversionPercent:number
+):ReligionFamilyShare[] {
   const converted=shares.map((share)=>({
     religionKey:share.religionKey,
     primaryPercent:boundedPercent(share.primaryPercent),
@@ -304,7 +316,7 @@ export function convertReligionDistribution(
     target={religionKey:targetReligionKey,primaryPercent:0,secondaryPercent:0};
     converted.push(target);
   }
-  const requested=religionConversionPercent(successMargin);
+  const requested=boundedPercent(conversionPercent);
   const available=converted.filter((share)=>share!==target).reduce((sum,share)=>sum+share.primaryPercent+share.secondaryPercent,0);
   let remaining=Math.min(requested,available);
   const actual=remaining;

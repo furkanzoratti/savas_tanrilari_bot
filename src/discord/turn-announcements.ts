@@ -30,6 +30,12 @@ export interface TurnAnnouncementInput {
   mercenaryUnpaidDetails?: Array<{ countryName: string; companyName: string; amount: number }>;
   mercenaryEndedDetails?: Array<{ countryName: string; companyName: string; reason: string }>;
   assimilatedSettlementDetails?: Array<{ countryName: string; settlementName: string; diplomatName: string | null }>;
+  christianSpreadDetails?: Array<{
+    targetCountryName:string;targetSettlementName:string;
+    beforePercent:number;afterPercent:number;
+    beforeCatholicPercent:number;afterCatholicPercent:number;
+    conversionPercent:number;completed:boolean;
+  }>;
 }
 
 function fieldValue(lines: string[]): string {
@@ -100,6 +106,12 @@ export function turnAnnouncement(input: TurnAnnouncementInput): EmbedBuilder {
     name: "🤝 Tamamlanan Asimilasyonlar",
     value: fieldValue(input.assimilatedSettlementDetails.map((item) =>
       `• **${item.countryName} / ${item.settlementName}**${item.diplomatName ? ` — Diplomat: ${item.diplomatName}` : ""}`
+    ))
+  });
+  if (input.christianSpreadDetails?.length) embed.addFields({
+    name:"✝️ Hristiyan Sınır Yayılımı",
+    value:fieldValue(input.christianSpreadDetails.map((item)=>
+      `• **${item.targetCountryName} / ${item.targetSettlementName}** — Hristiyanlık %${item.beforePercent} → **%${item.afterPercent}** • Katoliklik %${item.beforeCatholicPercent} → **%${item.afterCatholicPercent}**${item.conversionPercent>0?` • Dönüşüm: +${item.conversionPercent} puan`:""}${item.completed?" • ✅ %70 hedefi tamamlandı; süreç durduruldu":""}`
     ))
   });
   if (input.unrestDetails?.length) embed.addFields({

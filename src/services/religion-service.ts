@@ -87,3 +87,18 @@ export async function resetSettlementReligionDistribution(
     [settlementId,religionKey,normalized,100-normalized]
   );
 }
+
+export async function replaceSettlementReligionDistribution(
+  client:DbClient,
+  settlementId:string,
+  shares:ReadonlyArray<ReligionFamilyShare>
+):Promise<void> {
+  await client.query("DELETE FROM settlement_religion_shares WHERE settlement_id=$1",[settlementId]);
+  for (const share of shares) {
+    await client.query(
+      `INSERT INTO settlement_religion_shares(settlement_id,religion_key,primary_percent,secondary_percent)
+       VALUES($1,$2,$3,$4)`,
+      [settlementId,share.religionKey,share.primaryPercent,share.secondaryPercent]
+    );
+  }
+}

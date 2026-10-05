@@ -506,7 +506,8 @@ async function handleTurn(interaction: ChatInputCommandInteraction): Promise<voi
       mercenaryUpkeepDetails: result.mercenaryUpkeepDetails,
       mercenaryUnpaidDetails: result.mercenaryUnpaidDetails,
       mercenaryEndedDetails: result.mercenaryEndedDetails,
-      assimilatedSettlementDetails: result.assimilatedSettlementDetails
+      assimilatedSettlementDetails: result.assimilatedSettlementDetails,
+      christianSpreadDetails:result.christianSpreadDetails
     });
   } else {
     const phase = sub === "ac" ? "OPEN" : sub === "durdur" ? "RESOLVING" : "CLOSED";
@@ -1018,7 +1019,8 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
       mercenaryUpkeepDetails: result.mercenaryUpkeepDetails,
       mercenaryUnpaidDetails: result.mercenaryUnpaidDetails,
       mercenaryEndedDetails: result.mercenaryEndedDetails,
-      assimilatedSettlementDetails: result.assimilatedSettlementDetails
+      assimilatedSettlementDetails: result.assimilatedSettlementDetails,
+      christianSpreadDetails:result.christianSpreadDetails
     })], files: [new AttachmentBuilder(TURN_BANNER_PATH, { name: TURN_BANNER_NAME })] });
     if (characterAutomation.warnings.length) {
       await interaction.followUp({content:"⚠️ **Karakter otomasyonu:** "+characterAutomation.warnings.join("\n⚠️ "),ephemeral:true});
@@ -1255,6 +1257,22 @@ async function handleGreatPowerCommand(interaction: ChatInputCommandInteraction)
   await interaction.editReply(`✅ Güncel **${snapshot.rows.length} devletlik Büyük Güçler sıralaması** <#${channelId}> kanalında paylaşıldı.`);
 }
 async function handleCommand(interaction: ChatInputCommandInteraction): Promise<void> {
+  if (interaction.commandName === "hristiyan-sinir") {
+    requireGameMaster(interaction);
+    if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const result=await gameService.startChristianBorderSpread({
+      guildId:interaction.guildId,
+      actorId:interaction.user.id,
+      settlementId:interaction.options.getString("yerleske",true)
+    });
+    await interaction.editReply(
+      `✅ **${result.countryName} / ${result.settlementName}** için Hristiyan sınır yayılımı başlatıldı.\n`+
+      `Mevcut: **Hristiyanlık %${detailPercent(result.christianPercent)} • Katoliklik %${detailPercent(result.catholicPercent)}**\n`+
+      "Her tur toplam **2 yüzde puanı** dönüştürülür; standart dağılımla Hristiyanlığa 1,5 ve Katolikliğe 0,5 puan eklenir. Ana Hristiyanlık oranı **%70** olduğunda süreç otomatik tamamlanır."
+    );
+    return;
+  }
   if (interaction.commandName === "kultur-askeri-ceza") {
     requireGameMaster(interaction);
     if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
@@ -1812,6 +1830,15 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
   if (await handleEspionageAutocomplete(interaction)) return;
   if (await handleCityAutocomplete(interaction)) return;
   const focused = interaction.options.getFocused(true);
+  if (interaction.commandName==="hristiyan-sinir"&&focused.name==="yerleske") {
+    if(!interaction.guildId||!isGameMaster(interaction)){await interaction.respond([]);return;}
+    const rows=await gameService.searchActiveSettlements(interaction.guildId,String(focused.value));
+    await interaction.respond(rows.map((row)=>({
+      name:`${row.name} • ${row.countryName}`.slice(0,100),
+      value:row.id
+    })));
+    return;
+  }
   if (interaction.commandName === "savas" && interaction.options.getSubcommand(false) === "birlik-ayarla" && focused.name === "birim") {
     const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
     await interaction.respond(Object.entries(BATTLE_UNIT_STATS)
@@ -2055,6 +2082,15 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
         const fleet = await fleetService.get(country.id,fleetValue);
         const settlements = [...new Map(fleet.ships.map((ship) => [ship.settlement_id,ship.settlement_name])).entries()];
         await interaction.respond(settlements.filter(([,name]) => !query || name.toLocaleLowerCase("tr-TR").includes(query)).slice(0,25).map(([value,name]) => ({ name,value })));
+      } else if(sub==="tamir") {
+        const shipyards=await navalRepairService.listEligibleShipyards(interaction.guildId,country.id);
+        await interaction.respond(shipyards
+          .filter((shipyard)=>!query||`${shipyard.name} ${shipyard.ownerCountryName}`.toLocaleLowerCase("tr-TR").includes(query))
+          .slice(0,25)
+          .map((shipyard)=>({
+            name:`${shipyard.foreign?"🤝":"⚓"} ${shipyard.name} • ${shipyard.ownerCountryName} • Tersane Sv${shipyard.shipyardLevel}`.slice(0,100),
+            value:shipyard.id
+          })));
       } else {
         const settlements = await gameService.listSettlements(country.id);
         await interaction.respond(settlements.filter((settlement) => settlement.is_coastal && (!query || settlement.name.toLocaleLowerCase("tr-TR").includes(query))).slice(0,25)

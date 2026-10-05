@@ -8,8 +8,8 @@ vi.hoisted(() => {
 
 import { existsSync } from "node:fs";
 import { commandBuilders } from "./commands.js";
-import { PACT_BANNER_PATH, PACT_BANNER_URL, STATE_PROFILE_BANNER_PATH, STATE_PROFILE_BANNER_URL } from "./assets.js";
-import { diplomacyReplyIsPublic, renderPublicCountryProfile, renderPublicPactProfile } from "./diplomacy-ui.js";
+import { PACT_BANNER_PATH, PACT_BANNER_URL, PORT_ACCESS_BANNER_PATH, PORT_ACCESS_BANNER_URL, STATE_PROFILE_BANNER_PATH, STATE_PROFILE_BANNER_URL } from "./assets.js";
+import { diplomacyReplyIsPublic, portAccessInviteEmbed, renderPublicCountryProfile, renderPublicPactProfile } from "./diplomacy-ui.js";
 
 describe("ittifak, pakt ve herkese açık devlet profili", () => {
   it("diplomasi kanalını yönetim alt komut sınırını aşmadan ayrı komut olarak kaydeder", () => {
@@ -22,6 +22,23 @@ describe("ittifak, pakt ve herkese açık devlet profili", () => {
   it("ittifak daveti, listeleme ve karşılıklı fesih komutlarını sunar", () => {
     const command = commandBuilders.find((item) => item.name === "ittifak");
     expect(command?.options?.map((option) => option.name)).toEqual(["teklif", "liste", "feshet"]);
+  });
+
+  it("liman erişimi teklifi, listeleme ve yönlü kaldırma komutlarını sunar",()=>{
+    const command=commandBuilders.find((item)=>item.name==="liman-erisimi");
+    expect(command?.options?.map((option)=>option.name)).toEqual(["teklif","liste","kaldir"]);
+    expect(command?.options?.find((option)=>option.name==="kaldir")?.options?.find((option)=>option.name==="yon")?.choices?.map((choice)=>choice.value))
+      .toEqual(["RECEIVED","GRANTED"]);
+  });
+
+  it("liman erişimi teklifini özel görsele bağlar",()=>{
+    const embed=portAccessInviteEmbed({
+      id:"access",guild_id:"guild",requester_country_id:"britanya",requester_country_name:"Büyük Britanya",
+      grantor_country_id:"roma",grantor_country_name:"Roma",status:"PENDING",channel_id:null,message_id:null
+    }).toJSON();
+    expect(embed.image?.url).toBe(PORT_ACCESS_BANNER_URL);
+    expect(PORT_ACCESS_BANNER_URL).toBe("attachment://ancient-port-access-banner.png");
+    expect(existsSync(PORT_ACCESS_BANNER_PATH)).toBe(true);
   });
 
   it("pakt oluşturma, davet, herkese açık bilgi ve liderlik yönetimini sunar", () => {
@@ -89,8 +106,10 @@ describe("ittifak, pakt ve herkese açık devlet profili", () => {
     expect(diplomacyReplyIsPublic("pakt", "liste")).toBe(true);
     expect(diplomacyReplyIsPublic("pakt", "davet")).toBe(true);
     expect(diplomacyReplyIsPublic("ittifak", "teklif")).toBe(true);
+    expect(diplomacyReplyIsPublic("liman-erisimi","teklif")).toBe(true);
     expect(diplomacyReplyIsPublic("devlet-bilgisi")).toBe(true);
     expect(diplomacyReplyIsPublic("pakt", "davetlerim")).toBe(false);
     expect(diplomacyReplyIsPublic("ittifak", "liste")).toBe(false);
+    expect(diplomacyReplyIsPublic("liman-erisimi","liste")).toBe(false);
   });
 });

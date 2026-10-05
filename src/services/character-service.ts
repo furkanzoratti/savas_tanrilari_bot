@@ -1072,13 +1072,17 @@ export async function processCharacterTurn(
   return withTransaction(async (client) => {
     await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", ["character-turn:"+guildId+":"+turn]);
     const logs: string[] = [];
-    const religionBonusCache = new Map<string,{merchant:number;diplomat:number}>();
+    const religionBonusCache = new Map<string,{merchant:number;diplomat:number;missionary:number}>();
     const countryReligionBonuses = async (countryId:string) => {
       const cached=religionBonusCache.get(countryId);
       if(cached)return cached;
       const profile=await loadCountryReligionProfile(client,countryId);
       const national=profile.dominant?RELIGIONS[profile.dominant.key].national:null;
-      const bonuses={merchant:national?.merchantTaskBonus??0,diplomat:national?.diplomatTaskBonus??0};
+      const bonuses={
+        merchant:national?.merchantTaskBonus??0,
+        diplomat:national?.diplomatTaskBonus??0,
+        missionary:national?.missionaryTaskBonus??0
+      };
       religionBonusCache.set(countryId,bonuses);
       return bonuses;
     };
@@ -1572,7 +1576,7 @@ export async function processCharacterTurn(
       }
       const attackRoll=randomInt(1,21);
       const defenseRoll=randomInt(1,21);
-      const attackBonus=MISSIONARY_TASK_BONUS;
+      const attackBonus=MISSIONARY_TASK_BONUS+(await countryReligionBonuses(operation.country_id)).missionary;
       const populationBonus=culturePopulationResistance(Number(operation.population));
       const templeBonus=await pantheonBonus(client,operation.target_settlement_id);
       const defenseBonus=populationBonus+templeBonus;

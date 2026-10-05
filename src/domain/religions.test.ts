@@ -1,5 +1,5 @@
 import {describe,expect,it} from "vitest";
-import {convertReligionDistribution,dominantReligion,dominantReligionFromDistributions,leadingReligionFamily,RELIGIONS,SECONDARY_RELIGIONS,religionBeliefShares,religionConversionPercent,religionDistributionModifiers,religionEffectScale,religionModifiers,religionUnitDiscount,secondaryReligionEffectScale} from "./religions.js";
+import {convertReligionDistribution,convertReligionDistributionByPercent,dominantReligion,dominantReligionFromDistributions,leadingReligionFamily,RELIGIONS,SECONDARY_RELIGIONS,religionBeliefShares,religionConversionPercent,religionDistributionModifiers,religionEffectScale,religionModifiers,religionUnitDiscount,secondaryReligionEffectScale} from "./religions.js";
 import {calculatePopulationGain,calculateShipUpkeep,calculateUnitUpkeep} from "./economy.js";
 import {calculateCategorizedIncome} from "./income.js";
 
@@ -77,6 +77,31 @@ describe("din sistemi",()=>{
     ],"ROMAN_FAITH",5)).toEqual([
       {religionKey:"HELLENIC_FAITH",primaryPercent:69,secondaryPercent:23},
       {religionKey:"ROMAN_FAITH",primaryPercent:6,secondaryPercent:2}
+    ]);
+  });
+  it("Hristiyanlık ve Katoliklik nihai etkilerini uygular",()=>{
+    const modifiers=religionModifiers("CHRISTIANITY",80,"CHRISTIANITY");
+    expect(modifiers.settlementIncomePercent).toBeCloseTo(.05);
+    expect(modifiers.buildingCostDiscount).toBeCloseTo(.05);
+    expect(modifiers.diplomatTaskBonus).toBe(1);
+    expect(modifiers.missionaryTaskBonus).toBe(1);
+    expect(modifiers.negativeEventRiskReduction).toBe(2.5);
+    const catholic=religionDistributionModifiers([
+      {religionKey:"CHRISTIANITY",primaryPercent:75,secondaryPercent:25}
+    ],"CHRISTIANITY","CHRISTIANITY");
+    expect(catholic.negativeEventRiskReduction).toBe(5);
+    const income=calculateCategorizedIncome({
+      settlementIncome:0,taxIncome:1_000,landTradeIncome:1_000,seaTradeIncome:0,
+      manualFlatIncome:0,manualIncomePercent:0,buildings:[],ruinStage:0,religion:modifiers
+    });
+    expect(income.gross.building+income.gross.tax+income.gross.landTrade).toBe(2_100);
+  });
+  it("pasif yayılımın iki puanını Hristiyanlık ve Katolikliğe 75/25 dağıtır",()=>{
+    expect(convertReligionDistributionByPercent([
+      {religionKey:"HELLENIC_FAITH",primaryPercent:75,secondaryPercent:25}
+    ],"CHRISTIANITY",2)).toEqual([
+      {religionKey:"HELLENIC_FAITH",primaryPercent:73.5,secondaryPercent:24.5},
+      {religionKey:"CHRISTIANITY",primaryPercent:1.5,secondaryPercent:.5}
     ]);
   });
 });
