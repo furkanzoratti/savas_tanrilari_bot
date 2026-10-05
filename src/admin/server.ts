@@ -143,14 +143,16 @@ const server = createServer(async (request, response) => {
       if (!requireSession(request, response)) return;
       return json(response, 200, await adminPanelService.battleManualRosters(battleManualRostersMatch[1]!));
     }
-    if (request.method === "GET" && url.pathname === "/api/sieges") {
+    if (request.method === "GET" && (url.pathname === "/api/active-battles" || url.pathname === "/api/sieges")) {
       if (!requireSession(request, response)) return;
-      return json(response, 200, await adminPanelService.activeSieges());
+      return json(response, 200, await adminPanelService.activeBattles());
     }
-    const siegeRosterOptionsMatch = request.method === "GET" ? url.pathname.match(/^\/api\/sieges\/([0-9a-f-]+)\/roster-options$/iu) : null;
-    if (siegeRosterOptionsMatch) {
+    const battleRosterOptionsMatch = request.method === "GET"
+      ? url.pathname.match(/^\/api\/(?:battles|sieges)\/([0-9a-f-]+)\/roster-options$/iu)
+      : null;
+    if (battleRosterOptionsMatch) {
       if (!requireSession(request, response)) return;
-      return json(response, 200, await adminPanelService.activeSiegeRosterOptions(siegeRosterOptionsMatch[1]!));
+      return json(response, 200, await adminPanelService.activeBattleRosterOptions(battleRosterOptionsMatch[1]!));
     }
     const armyDetailMatch = request.method === "GET" ? url.pathname.match(/^\/api\/armies\/([0-9a-f-]+)$/iu) : null;
     if (armyDetailMatch) {
@@ -273,17 +275,21 @@ const server = createServer(async (request, response) => {
       if (!session) return;
       return json(response, 200, await adminPanelService.cancelCharacterAssignment(session.sub, characterCancelMatch[1]!));
     }
-    const siegeParticipantMatch = request.method === "POST" ? url.pathname.match(/^\/api\/admin\/sieges\/([0-9a-f-]+)\/participants$/iu) : null;
-    if (siegeParticipantMatch) {
+    const battleParticipantMatch = request.method === "POST"
+      ? url.pathname.match(/^\/api\/admin\/(?:battles|sieges)\/([0-9a-f-]+)\/participants$/iu)
+      : null;
+    if (battleParticipantMatch) {
       const session = requireMutation(request, response);
       if (!session) return;
-      return json(response, 200, await adminPanelService.mutateActiveSiegeParticipant(session.sub, siegeParticipantMatch[1]!, await body(request)));
+      return json(response, 200, await adminPanelService.mutateActiveBattleParticipant(session.sub, battleParticipantMatch[1]!, await body(request)));
     }
-    const siegeArmyMatch = request.method === "POST" ? url.pathname.match(/^\/api\/admin\/sieges\/([0-9a-f-]+)\/armies$/iu) : null;
-    if (siegeArmyMatch) {
+    const battleArmyMatch = request.method === "POST"
+      ? url.pathname.match(/^\/api\/admin\/(?:battles|sieges)\/([0-9a-f-]+)\/armies$/iu)
+      : null;
+    if (battleArmyMatch) {
       const session = requireMutation(request, response);
       if (!session) return;
-      return json(response, 200, await adminPanelService.mutateActiveSiegeArmy(session.sub, siegeArmyMatch[1]!, await body(request)));
+      return json(response, 200, await adminPanelService.mutateActiveBattleArmy(session.sub, battleArmyMatch[1]!, await body(request)));
     }
     const battleManualRosterRemoveMatch = request.method === "POST" ? url.pathname.match(/^\/api\/admin\/battles\/([0-9a-f-]+)\/manual-rosters\/remove$/iu) : null;
     if (battleManualRosterRemoveMatch) {

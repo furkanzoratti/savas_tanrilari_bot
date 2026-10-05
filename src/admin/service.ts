@@ -130,13 +130,13 @@ const armyUnitUpdateSchema = z.object({
   quantity: z.coerce.number().int().min(0).max(10_000_000)
 });
 
-const siegeParticipantMutationSchema = z.object({
+const battleParticipantMutationSchema = z.object({
   countryId: z.string().uuid(),
   side: z.enum(["A", "B"]),
   action: z.enum(["ADD", "REMOVE"])
 });
 
-const siegeArmyMutationSchema = z.object({
+const battleArmyMutationSchema = z.object({
   armyId: z.string().uuid(),
   side: z.enum(["A", "B"]),
   action: z.enum(["ADD", "REMOVE"])
@@ -1135,10 +1135,10 @@ export const adminPanelService = {
     return { army, units: units.rows, settlements: settlements.rows, commanders: commanders.rows };
   },
 
-  async activeSieges() {
+  async activeBattles() {
     const [battleRows, participantRows, armyRows] = await Promise.all([
       adminPool.query(
-        `SELECT battle.id,battle.status,battle.round_number,battle.siege_phase,battle.updated_at,
+        `SELECT battle.id,battle.terrain,battle.status,battle.round_number,battle.siege_phase,battle.updated_at,
                 settlement.name AS settlement_name,
                 side_a.country_id AS country_a_id,country_a.name AS country_a_name,
                 side_b.country_id AS country_b_id,country_b.name AS country_b_name
@@ -1148,7 +1148,7 @@ export const adminPanelService = {
            JOIN countries country_a ON country_a.id=side_a.country_id
            JOIN battle_sides side_b ON side_b.battle_id=battle.id AND side_b.side_key='B'
            JOIN countries country_b ON country_b.id=side_b.country_id
-          WHERE battle.guild_id=$1 AND battle.terrain='SIEGE'
+          WHERE battle.guild_id=$1 AND battle.terrain<>'NAVAL'
             AND battle.status NOT IN ('FINISHED','CANCELLED')
           ORDER BY battle.updated_at DESC`, [adminConfig.guildId]
       ),
@@ -1158,7 +1158,7 @@ export const adminPanelService = {
            FROM battle_side_participants participant
            JOIN battles battle ON battle.id=participant.battle_id
            JOIN countries country ON country.id=participant.country_id
-          WHERE battle.guild_id=$1 AND battle.terrain='SIEGE'
+          WHERE battle.guild_id=$1 AND battle.terrain<>'NAVAL'
             AND battle.status NOT IN ('FINISHED','CANCELLED')
           ORDER BY participant.battle_id,participant.side_key,participant.is_primary DESC,country.name`, [adminConfig.guildId]
       ),
@@ -1172,7 +1172,7 @@ export const adminPanelService = {
            JOIN countries country ON country.id=army.country_id
            LEFT JOIN army_units unit ON unit.army_id=army.id
            LEFT JOIN settlements origin ON origin.id=unit.settlement_id
-          WHERE battle.guild_id=$1 AND battle.terrain='SIEGE'
+          WHERE battle.guild_id=$1 AND battle.terrain<>'NAVAL'
             AND battle.status NOT IN ('FINISHED','CANCELLED')
           ORDER BY battle.updated_at DESC,assignment.side_key,country.name,army.name,origin.name,unit.unit_type`, [adminConfig.guildId]
       )
@@ -1204,7 +1204,7 @@ export const adminPanelService = {
     return (battleRows.rows as Array<Record<string, unknown>>).map((battle) => {
       const battleId = String(battle.id);
       return {
-        id:battleId,status:battle.status,roundNumber:battle.round_number,siegePhase:battle.siege_phase,
+        id:battleId,terrain:battle.terrain,status:battle.status,roundNumber:battle.round_number,siegePhase:battle.siege_phase,
         settlementName:battle.settlement_name,countryAId:battle.country_a_id,countryAName:battle.country_a_name,
         countryBId:battle.country_b_id,countryBName:battle.country_b_name,
         participants:participantsByBattle.get(battleId) ?? [],armies:[...(armiesByBattle.get(battleId)?.values() ?? [])]
@@ -1212,13 +1212,13 @@ export const adminPanelService = {
     });
   },
 
-  async activeSiegeRosterOptions(battleId: string) {
-    if (!z.string().uuid().safeParse(battleId).success) throw new Error("Geçersiz kuşatma kimliği.");
+  async activeBattleRosterOptions(battleId: string) {
+    if (!z.string().uuid().safeParse(battleId).success) throw new Error("Geçersiz savaş kimliği.");
     const battle = (await adminPool.query(
-      `SELECT id,status FROM battles WHERE id=$1 AND guild_id=$2 AND terrain='SIEGE'
+      `SELECT id,terrain,status FROM battles WHERE id=$1 AND guild_id=$2 AND terrain<>'NAVAL'
         AND status NOT IN ('FINISHED','CANCELLED')`, [battleId,adminConfig.guildId]
     )).rows[0];
-    if (!battle) throw new Error("Aktif kuşatma bulunamadı.");
+    if (!battle) throw new Error("Düzenlenebilir aktif kara savaşı bulunamadı.");
     const [countries,armies] = await Promise.all([
       adminPool.query(
         `SELECT country.id,country.name,participant.side_key,COALESCE(participant.is_primary,FALSE) AS is_primary
@@ -1258,18 +1258,18 @@ export const adminPanelService = {
           ORDER BY country.name,army.name`, [battleId,adminConfig.guildId]
       )
     ]);
-    return { battleId,status:battle.status,countries:countries.rows,armies:armies.rows };
+    return { battleId,terrain:battle.terrain,status:battle.status,countries:countries.rows,armies:armies.rows };
   },
 
-  async mutateActiveSiegeParticipant(actorId: string, battleId: string, rawInput: unknown) {
-    if (!z.string().uuid().safeParse(battleId).success) throw new Error("Geçersiz kuşatma kimliği.");
-    const input = siegeParticipantMutationSchema.parse(rawInput);
+  async mutateActiveBattleParticipant(actorId: string, battleId: string, rawInput: unknown) {
+    if (!z.string().uuid().safeParse(battleId).success) throw new Error("Geçersiz savaş kimliği.");
+    const input = battleParticipantMutationSchema.parse(rawInput);
     return withAdminTransaction(async (client) => {
       const battle = (await client.query<{ id:string;status:string }>(
-        `SELECT id,status FROM battles WHERE id=$1 AND guild_id=$2 AND terrain='SIEGE'
+        `SELECT id,status FROM battles WHERE id=$1 AND guild_id=$2 AND terrain<>'NAVAL'
           AND status NOT IN ('FINISHED','CANCELLED') FOR UPDATE`, [battleId,adminConfig.guildId]
       )).rows[0];
-      if (!battle) throw new Error("Aktif kuşatma bulunamadı.");
+      if (!battle) throw new Error("Düzenlenebilir aktif kara savaşı bulunamadı.");
       const country = (await client.query<{ id:string;name:string }>(
         "SELECT id,name FROM countries WHERE id=$1 AND guild_id=$2 AND status='ACTIVE' FOR UPDATE",
         [input.countryId,adminConfig.guildId]
@@ -1294,13 +1294,16 @@ export const adminPanelService = {
            VALUES($1,$2,$3,FALSE,'{}'::jsonb,'{}'::jsonb)`, [battle.id,input.side,country.id]
         );
       } else {
-        if (!existing || existing.side_key !== input.side) throw new Error("Bu devlet seçilen kuşatma tarafında bulunmuyor.");
-        if (existing.is_primary) throw new Error("Kuşatmanın ana taraf devletleri çıkarılamaz.");
+        if (!existing || existing.side_key !== input.side) throw new Error("Bu devlet seçilen savaş tarafında bulunmuyor.");
+        if (existing.is_primary) throw new Error("Savaşın ana taraf devletleri çıkarılamaz.");
         if (compositionTotal(existing.composition) || compositionTotal(existing.initial_composition)) {
           throw new Error("Devletin savaş mevcudu boş değil. Önce bağlı orduları çıkarın.");
         }
         if ((await client.query("SELECT 1 FROM battle_army_assignments WHERE battle_id=$1 AND country_id=$2 LIMIT 1",[battle.id,country.id])).rowCount) {
           throw new Error("Devleti çıkarmadan önce bağlı orduları çıkarın.");
+        }
+        if ((await client.query("SELECT 1 FROM battle_fleet_assignments WHERE battle_id=$1 AND country_id=$2 LIMIT 1",[battle.id,country.id])).rowCount) {
+          throw new Error("Devleti çıkarmadan önce bağlı filoları çıkarın.");
         }
         if ((await client.query(
           `SELECT 1 FROM battle_mercenary_assignments assignment JOIN mercenary_contracts contract ON contract.id=assignment.contract_id
@@ -1317,15 +1320,15 @@ export const adminPanelService = {
     });
   },
 
-  async mutateActiveSiegeArmy(actorId: string, battleId: string, rawInput: unknown) {
-    if (!z.string().uuid().safeParse(battleId).success) throw new Error("Geçersiz kuşatma kimliği.");
-    const input = siegeArmyMutationSchema.parse(rawInput);
+  async mutateActiveBattleArmy(actorId: string, battleId: string, rawInput: unknown) {
+    if (!z.string().uuid().safeParse(battleId).success) throw new Error("Geçersiz savaş kimliği.");
+    const input = battleArmyMutationSchema.parse(rawInput);
     return withAdminTransaction(async (client) => {
-      const battle = (await client.query<{ id:string;status:string }>(
-        `SELECT id,status FROM battles WHERE id=$1 AND guild_id=$2 AND terrain='SIEGE'
+      const battle = (await client.query<{ id:string;status:string;terrain:string }>(
+        `SELECT id,status,terrain FROM battles WHERE id=$1 AND guild_id=$2 AND terrain<>'NAVAL'
           AND status NOT IN ('FINISHED','CANCELLED') FOR UPDATE`, [battleId,adminConfig.guildId]
       )).rows[0];
-      if (!battle) throw new Error("Aktif kuşatma bulunamadı.");
+      if (!battle) throw new Error("Düzenlenebilir aktif kara savaşı bulunamadı.");
       const army = (await client.query<{ id:string;name:string;country_id:string;country_name:string }>(
         `SELECT army.id,army.name,army.country_id,country.name AS country_name
            FROM armies army JOIN countries country ON country.id=army.country_id
@@ -1337,7 +1340,7 @@ export const adminPanelService = {
         `SELECT side_key,composition,initial_composition FROM battle_side_participants
           WHERE battle_id=$1 AND country_id=$2 FOR UPDATE`, [battle.id,army.country_id]
       )).rows[0];
-      if (!participant || participant.side_key !== input.side) throw new Error("Ordunun devleti önce seçilen kuşatma tarafına eklenmelidir.");
+      if (!participant || participant.side_key !== input.side) throw new Error("Ordunun devleti önce seçilen savaş tarafına eklenmelidir.");
       const side = (await client.query<{
         composition:unknown;initial_composition:unknown;support_assets:unknown;support_enhanced:unknown;support_targets:Record<string,SiegeTarget>;
         initial_total:number;current_total:number;total_losses:number;
@@ -1346,7 +1349,7 @@ export const adminPanelService = {
                 initial_total,current_total,total_losses
            FROM battle_sides WHERE battle_id=$1 AND side_key=$2 FOR UPDATE`, [battle.id,input.side]
       )).rows[0];
-      if (!side) throw new Error("Kuşatma tarafı bulunamadı.");
+      if (!side) throw new Error("Savaş tarafı bulunamadı.");
       const assignment = (await client.query<{
         initial_composition:unknown;initial_assets:unknown;initial_enhanced:unknown;created_at:Date;
       }>(
@@ -1355,14 +1358,14 @@ export const adminPanelService = {
       )).rows[0];
 
       if (input.action === "REMOVE") {
-        if (!assignment) throw new Error("Bu ordu kuşatmaya bağlı değil.");
+        if (!assignment) throw new Error("Bu ordu savaşa bağlı değil.");
         const laterCombat = await client.query(
           `SELECT 1 FROM battle_rounds WHERE battle_id=$1 AND created_at>=$2
            UNION ALL
            SELECT 1 FROM battle_rolls WHERE battle_id=$1 AND created_at>=$2 LIMIT 1`, [battle.id,assignment.created_at]
         );
         if (battle.status !== "DRAFT" && laterCombat.rowCount) {
-          throw new Error("Ordu kuşatmaya katıldıktan sonra savaş zarı veya değerlendirme işlendiği için güvenle çıkarılamaz.");
+          throw new Error("Ordu savaşa katıldıktan sonra savaş zarı veya değerlendirme işlendiği için güvenle çıkarılamaz.");
         }
         const nextParticipant = subtractBattleComposition(participant.composition,assignment.initial_composition);
         const nextParticipantInitial = subtractBattleComposition(participant.initial_composition,assignment.initial_composition);
@@ -1393,7 +1396,7 @@ export const adminPanelService = {
         return { battleId:battle.id,armyId:army.id,armyName:army.name,countryName:army.country_name,side:input.side,action:input.action,total:compositionTotal(assignment.initial_composition) };
       }
 
-      if (assignment) throw new Error("Bu ordu kuşatmaya zaten bağlı.");
+      if (assignment) throw new Error("Bu ordu savaşa zaten bağlı.");
       if ((await client.query(
         `SELECT 1 FROM battle_rolls roll
           JOIN battles current_battle ON current_battle.id=roll.battle_id
@@ -1408,7 +1411,7 @@ export const adminPanelService = {
         [army.id,battle.id]
       )).rowCount) throw new Error("Bu ordu başka bir etkin savaşa bağlı.");
       if ((await client.query("SELECT 1 FROM land_raids WHERE army_id=$1 AND status='WAITING_ROLL' LIMIT 1",[army.id])).rowCount) {
-        throw new Error("Yağma sonucu bekleyen ordu kuşatmaya eklenemez.");
+        throw new Error("Yağma sonucu bekleyen ordu savaşa eklenemez.");
       }
       if ((await client.query(
         `SELECT 1 FROM fleet_cargo_armies WHERE army_id=$1
@@ -1416,7 +1419,7 @@ export const adminPanelService = {
          SELECT 1 FROM battle_side_participants participant JOIN battles active ON active.id=participant.battle_id
           WHERE participant.embarked_army_id=$1 AND active.id<>$2 AND active.status NOT IN ('FINISHED','CANCELLED') LIMIT 1`,
         [army.id,battle.id]
-      )).rowCount) throw new Error("Gemide taşınan ordu karaya çıkmadan kuşatmaya eklenemez.");
+      )).rowCount) throw new Error("Gemide taşınan ordu karaya çıkmadan kara savaşına eklenemez.");
       const existingCountryAssignments = await client.query(
         "SELECT 1 FROM battle_army_assignments WHERE battle_id=$1 AND country_id=$2 LIMIT 1",[battle.id,army.country_id]
       );
@@ -1429,7 +1432,7 @@ export const adminPanelService = {
       )).rows.map((row) => [row.unit_type,Number(row.quantity)]));
       const total = compositionTotal(composition);
       if (!total) throw new Error("Orduda kuşatmaya sokulabilecek asker bulunmuyor.");
-      const assetRows = input.side === "A" ? (await client.query<{ asset_type:SiegeAssetType;quantity:number;enhanced:number }>(
+      const assetRows = battle.terrain === "SIEGE" && input.side === "A" ? (await client.query<{ asset_type:SiegeAssetType;quantity:number;enhanced:number }>(
         `SELECT asset_type,COALESCE(SUM(quantity),0)::integer AS quantity,
                 COALESCE(SUM(enhanced_quantity),0)::integer AS enhanced
            FROM army_siege_assets WHERE army_id=$1 GROUP BY asset_type HAVING SUM(quantity)>0`, [army.id]
