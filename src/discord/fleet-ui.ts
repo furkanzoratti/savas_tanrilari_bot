@@ -1,4 +1,4 @@
-import type { ChatInputCommandInteraction } from "discord.js";
+import { MessageFlags, type ChatInputCommandInteraction } from "discord.js";
 import type { NavalUnitType } from "../domain/battle.js";
 import { fleetService } from "../services/fleet-service.js";
 import { navalRepairService } from "../services/naval-repair-service.js";
@@ -7,6 +7,7 @@ import { resolveCountry } from "./auth.js";
 import { queueCharacterLog } from "./character-ui.js";
 import { renderFleetEmbed } from "./fleet-embed.js";
 import { renderRepairFleetEmbed } from "./repair-fleet-embed.js";
+import { batchDocumentEmbeds } from "./document.js";
 
 async function logCommanderAssignment(interaction:ChatInputCommandInteraction,countryName:string,entry:string):Promise<void>{
   await queueCharacterLog({client:interaction.client,guildId:interaction.guildId!,interactionId:interaction.id,
@@ -32,7 +33,11 @@ export async function handleFleetCommand(interaction: ChatInputCommandInteractio
     const selected = interaction.options.getString("filo");
     const fleets = selected ? [await fleetService.get(country.id,selected)] : await fleetService.listCountry(country.id);
     if (!fleets.length) throw new GameError("Devletinizde kurulmuş bir filo bulunmuyor.");
-    await interaction.editReply({ embeds:fleets.slice(0,10).map(renderFleetEmbed) });
+    const pages=batchDocumentEmbeds(fleets.map(renderFleetEmbed));
+    await interaction.editReply({ embeds:pages[0]??[] });
+    for(const page of pages.slice(1)){
+      await interaction.followUp({embeds:page,flags:MessageFlags.Ephemeral});
+    }
     return;
   }
   if(sub==="tamir-bilgi"){
@@ -40,7 +45,11 @@ export async function handleFleetCommand(interaction: ChatInputCommandInteractio
     const repairs=await navalRepairService.listCountry(country.id);
     const visible=selected?repairs.filter((repair)=>repair.id===selected):repairs;
     if(!visible.length)throw new GameError("Devletinizde etkin bir tamir filosu bulunmuyor.");
-    await interaction.editReply({embeds:visible.slice(0,10).map(renderRepairFleetEmbed)});
+    const pages=batchDocumentEmbeds(visible.map(renderRepairFleetEmbed));
+    await interaction.editReply({embeds:pages[0]??[]});
+    for(const page of pages.slice(1)){
+      await interaction.followUp({embeds:page,flags:MessageFlags.Ephemeral});
+    }
     return;
   }
   if(sub==="tamir"){

@@ -9,6 +9,7 @@ import { GameError } from "../services/game-service.js";
 import { resolveCountry } from "./auth.js";
 import { renderArmyEmbed } from "./army-embed.js";
 import { queueCharacterLog } from "./character-ui.js";
+import { batchDocumentEmbeds } from "./document.js";
 
 const musterStatus:Record<string,string>={SUBMITTED:"Emir verildi",IN_PROGRESS:"Yolda",BLOCKED:"Yönetici bekleniyor",
   WAITING_ARMY:"Orduyu bekliyor",COMPLETED:"Katıldı",CANCELLED:"İptal"};
@@ -39,7 +40,11 @@ export async function handleArmyCommand(interaction: ChatInputCommandInteraction
     const selected = interaction.options.getString("ordu");
     const armies = selected ? [await armyService.get(country.id, selected)] : await armyService.listCountry(country.id);
     if (!armies.length) throw new GameError("Devletinizde kurulmuş bir ordu bulunmuyor.");
-    await interaction.editReply({ embeds: armies.slice(0, 10).map(renderArmyEmbed) });
+    const pages = batchDocumentEmbeds(armies.map(renderArmyEmbed));
+    await interaction.editReply({ embeds: pages[0] ?? [] });
+    for (const page of pages.slice(1)) {
+      await interaction.followUp({ embeds: page, flags: MessageFlags.Ephemeral });
+    }
     return;
   }
   if (sub === "toplama-emirleri") {

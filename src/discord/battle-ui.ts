@@ -12,6 +12,7 @@ import { battlefieldAsset } from "./assets.js";
 import { renderArmyEmbed } from "./army-embed.js";
 import { renderFleetEmbed } from "./fleet-embed.js";
 import { publishCharacterTurnLogs } from "./character-ui.js";
+import { batchDocumentEmbeds } from "./document.js";
 
 const statusLabels: Record<string, string> = {
   DRAFT: "Taslak", WAITING_FIRST_ROLL: "İlk tarafın zarı bekleniyor", WAITING_SECOND_ROLL: "İkinci tarafın zarı bekleniyor",
@@ -791,10 +792,14 @@ export async function handleBattleButton(interaction: ButtonInteraction): Promis
     const armies = await armyService.listBattleCountry(interaction.guildId, country.id, battleId);
     const fleets = await fleetService.listBattleCountry(interaction.guildId,country.id,battleId);
     if (!armies.length && !fleets.length) throw new GameError("Bu savaşta devletinize ait kalıcı bir ordu veya filo bulunmuyor.");
+    const pages=batchDocumentEmbeds([...armies.map(renderArmyEmbed),...fleets.map(renderFleetEmbed)]);
     await interaction.editReply({
       content:fleets.length ? "⚓ Savaş kayıpları işlendi. Bu savaşa katılan filolarınızın ve taşıma kapasitelerinin güncel hâli:" : "⚔️ Savaş kayıpları işlendi. Bu savaşa katılan ordularınızın ve kompozisyonlarının güncel hâli:",
-      embeds:[...armies.map(renderArmyEmbed),...fleets.map(renderFleetEmbed)].slice(0,10)
+      embeds:pages[0]??[]
     });
+    for(const page of pages.slice(1)){
+      await interaction.followUp({embeds:page,flags:MessageFlags.Ephemeral});
+    }
   } else if (interaction.customId.startsWith("battle_roll|")) {
     await interaction.deferReply();
     const result = await battleService.roll({ guildId: interaction.guildId, channelId: interaction.channelId, battleId, actorId: interaction.user.id, isGameMaster: isGameMaster(interaction) });
