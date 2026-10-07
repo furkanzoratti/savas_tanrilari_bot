@@ -11,6 +11,34 @@ export const REBEL_FACTION_LABELS: Record<RebelFactionType, string> = {
 
 export interface StabilityFactor { label: string; adjustment: number }
 
+export interface RebellionPressureInput {
+  prosperity: number;
+  unrestActive: boolean;
+  conquered: boolean;
+  foreignCulture: boolean;
+  activeMissionary: boolean;
+  strictTaxation: boolean;
+  epidemicActive: boolean;
+  famineActive: boolean;
+  besieged: boolean;
+  ruinStage: number;
+  slaveCampLevel: number;
+  slaveRatio: number;
+  recentRaid: boolean;
+  warExhaustion: number;
+  curiaLevel: number;
+  innsBathsLevel: number;
+  hasPantheon: boolean;
+}
+
+export interface RebellionPressureAssessment {
+  factors: StabilityFactor[];
+  risk: number;
+  eligible: boolean;
+  scores: Record<RebelFactionType, number>;
+  recommendedFaction: RebelFactionType;
+}
+
 export function prosperityTier(prosperity: number): { label: string; incomeMultiplier: number; populationMultiplier: number; unrestAdjustment: number } {
   const value = Math.max(0, Math.min(100, Math.floor(prosperity)));
   if (value === 100) return { label: "Altın Çağ", incomeMultiplier: 1.10, populationMultiplier: 1.10, unrestAdjustment: -10 };
@@ -24,11 +52,79 @@ export function rebellionRisk(factors: readonly StabilityFactor[]): number {
   return Math.max(0, Math.min(75, factors.reduce((sum, factor) => sum + factor.adjustment, 0)));
 }
 
+export function assessRebellionPressure(input: RebellionPressureInput): RebellionPressureAssessment {
+  const factors: StabilityFactor[] = [{ label: "Temel gerilim", adjustment: 5 }];
+  const add = (label: string, adjustment: number): void => { if (adjustment) factors.push({ label, adjustment }); };
+  add("Aktif huzursuzluk", input.unrestActive ? 15 : 0);
+  add("Fethedilmiş yerleşke", input.conquered ? 15 : 0);
+  add("Yabancı kültür", input.foreignCulture ? 10 : 0);
+  add("Misyoner faaliyeti", input.activeMissionary ? 15 : 0);
+  add("Vergi sıkılaştırması", input.strictTaxation ? 10 : 0);
+  add("Salgın", input.epidemicActive ? 10 : 0);
+  add("Kıtlık", input.famineActive ? 15 : 0);
+  add("Kuşatma", input.besieged ? 10 : 0);
+  add("Haraplık", input.ruinStage === 2 ? 10 : input.ruinStage === 1 ? 5 : 0);
+  add("Köle kampı", Math.max(0, input.slaveCampLevel) * 6);
+  add("Köle nüfusu", input.slaveRatio >= 0.25 ? 15 : input.slaveRatio >= 0.15 ? 8 : 0);
+  add("Yakın yağma", input.recentRaid ? 10 : 0);
+  add("Savaş yorgunluğu", Math.min(15, Math.floor(Math.max(0, input.warExhaustion) / 10)));
+  add(`Refah: ${prosperityTier(input.prosperity).label}`, prosperityTier(input.prosperity).unrestAdjustment);
+  add("Curia", -Math.max(0, input.curiaLevel) * 2);
+  add("Hanlar ve Hamamlar", -(input.innsBathsLevel >= 3 ? 10 : input.innsBathsLevel === 2 ? 6 : input.innsBathsLevel === 1 ? 3 : 0));
+  add("Panteon", input.hasPantheon ? -10 : 0);
+
+  const scores: Record<RebelFactionType, number> = {
+    POPULAR: 5 + (input.unrestActive ? 15 : 0) + (input.strictTaxation ? 10 : 0),
+    SEPARATIST: (input.conquered ? 25 : 0) + (input.foreignCulture ? 20 : 0),
+    RELIGIOUS: input.activeMissionary ? 35 : 0,
+    SLAVE: Math.round(Math.max(0, input.slaveRatio) * 100) + Math.max(0, input.slaveCampLevel) * 8
+  };
+  const eligible = input.unrestActive || input.conquered || input.foreignCulture || input.activeMissionary || input.besieged ||
+    input.epidemicActive || input.famineActive || input.slaveRatio >= 0.15 || input.recentRaid || input.warExhaustion >= 20;
+  return { factors, risk: rebellionRisk(factors), eligible, scores, recommendedFaction: chooseRebelFaction(scores) };
+}
+
+export function projectRebellionTurn(input: {
+  before: number;
+  active: boolean;
+  immune: boolean;
+  pressure: Pick<RebellionPressureAssessment, "eligible" | "risk">;
+}): { onSuccess: number; onFailure: number; expected: number; successChance: number } {
+  if (input.active) return { onSuccess: 100, onFailure: 100, expected: 100, successChance: 0 };
+  const successChance = input.immune || !input.pressure.eligible ? 0 : input.pressure.risk;
+  const onSuccess = nextRebellionProgress({
+    before: input.before, eligible: input.pressure.eligible, risk: input.pressure.risk,
+    roll: successChance > 0 ? 1 : null, immune: input.immune
+  });
+  const onFailure = nextRebellionProgress({
+    before: input.before, eligible: input.pressure.eligible, risk: input.pressure.risk,
+    roll: successChance > 0 ? 100 : null, immune: input.immune
+  });
+  const expected = Math.round(onSuccess * successChance / 100 + onFailure * (100 - successChance) / 100);
+  return { onSuccess, onFailure, expected, successChance };
+}
+
 export function nextRebellionProgress(input: { before: number; eligible: boolean; risk: number; roll: number | null; immune: boolean }): number {
   if (input.immune) return Math.max(0, input.before - 20);
   if (!input.eligible) return Math.max(0, input.before - 20);
-  if (input.roll !== null && input.roll <= input.risk) return Math.min(100, input.before + 20);
-  return input.risk < 25 ? Math.max(0, input.before - 10) : input.before;
+  const successful=input.roll!==null&&input.roll<=input.risk;
+  if(input.risk>=25)return Math.min(100,input.before+(successful?30:10));
+  if(successful)return Math.min(100,input.before+20);
+  if(input.risk<15)return Math.max(0,input.before-10);
+  return input.before;
+}
+
+export function rebelFactionName(input:{
+  type:RebelFactionType;settlementName:string;restorationCountryName?:string|null;religionLabel?:string|null;
+}):string{
+  if(input.type==="SEPARATIST")return input.restorationCountryName
+    ?`${input.restorationCountryName} Gönüllüleri`
+    :`${input.settlementName} Özgürlük Birliği`;
+  if(input.type==="RELIGIOUS")return input.religionLabel
+    ?`${input.religionLabel} Muhafızları`
+    :`${input.settlementName} İnanç Muhafızları`;
+  if(input.type==="SLAVE")return `${input.settlementName} Zincirkıranları`;
+  return `${input.settlementName} Halk Birliği`;
 }
 
 export function chooseRebelFaction(scores: Record<RebelFactionType, number>): RebelFactionType {

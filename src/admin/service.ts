@@ -27,6 +27,7 @@ import {
   auditEntityTypeLabel,
   collectAuditUuids
 } from "./audit-presenter.js";
+import { resolveArmyUnitTargetQuantity } from "./army-unit-update.js";
 
 const usableUnitTypes = (Object.keys(BATTLE_UNIT_STATS) as BattleUnitType[]).filter((unitType) => unitType !== "militia");
 const usableUnitTypeSet = new Set<string>(usableUnitTypes);
@@ -127,7 +128,8 @@ const armyUnitUpdateSchema = z.object({
   armyId: z.string().uuid(),
   settlementId: z.string().uuid(),
   unitType: z.string().refine((value) => usableUnitTypeSet.has(value), "Geçersiz birlik türü."),
-  quantity: z.coerce.number().int().min(0).max(10_000_000)
+  quantity: z.coerce.number().int().min(0).max(10_000_000),
+  operation: z.enum(["SET", "ADD"]).default("SET")
 });
 
 const battleParticipantMutationSchema = z.object({
@@ -1979,6 +1981,7 @@ export const adminPanelService = {
         [input.armyId, input.settlementId, input.unitType]
       )).rows[0];
       const previousQuantity = Number(existing?.quantity ?? 0);
+      const targetQuantity = resolveArmyUnitTargetQuantity(previousQuantity, input.quantity, input.operation);
       const settlement = (await client.query<{ id: string; name: string; country_id: string }>(
         "SELECT id,name,country_id FROM settlements WHERE id=$1 FOR UPDATE", [input.settlementId]
       )).rows[0];
@@ -1998,22 +2001,22 @@ export const adminPanelService = {
           ORDER BY battle.updated_at DESC LIMIT 1 FOR UPDATE OF assignment,side`,
         [input.armyId]
       )).rows[0];
-      if (assignment && input.quantity > previousQuantity) {
+      if (assignment && targetQuantity > previousQuantity) {
         throw new Error("Aktif savaştaki orduya panelden asker eklenemez; yalnız asker çıkarılabilir.");
       }
 
-      if (input.quantity === 0) {
+      if (targetQuantity === 0) {
         await client.query("DELETE FROM army_units WHERE army_id=$1 AND settlement_id=$2 AND unit_type=$3", [input.armyId, input.settlementId, input.unitType]);
       } else if (existing) {
-        await client.query("UPDATE army_units SET quantity=$1 WHERE army_id=$2 AND settlement_id=$3 AND unit_type=$4", [input.quantity, input.armyId, input.settlementId, input.unitType]);
+        await client.query("UPDATE army_units SET quantity=$1 WHERE army_id=$2 AND settlement_id=$3 AND unit_type=$4", [targetQuantity, input.armyId, input.settlementId, input.unitType]);
       } else {
         await client.query(
           `INSERT INTO army_units(army_id,settlement_id,origin_settlement_name,unit_type,quantity)
-           VALUES($1,$2,$3,$4,$5)`, [input.armyId, input.settlementId, settlement.name, input.unitType, input.quantity]
+           VALUES($1,$2,$3,$4,$5)`, [input.armyId, input.settlementId, settlement.name, input.unitType, targetQuantity]
         );
       }
 
-      if (input.quantity > previousQuantity) {
+      if (targetQuantity > previousQuantity) {
         const allocated = Number((await client.query<{ quantity: number }>(
           "SELECT COALESCE(SUM(quantity),0)::integer AS quantity FROM army_units WHERE settlement_id=$1 AND unit_type=$2",
           [input.settlementId, input.unitType]
@@ -2034,8 +2037,8 @@ export const adminPanelService = {
         }
       }
 
-      if (assignment && input.quantity < previousQuantity) {
-        const removed = previousQuantity - input.quantity;
+      if (assignment && targetQuantity < previousQuantity) {
+        const removed = previousQuantity - targetQuantity;
         const assignmentAvailable = Number(assignment.assignment_composition?.[input.unitType] ?? 0);
         const battleRemoved = Math.min(removed, assignmentAvailable);
         if (battleRemoved > 0) {
@@ -2057,7 +2060,8 @@ export const adminPanelService = {
         }
       }
       await client.query("UPDATE armies SET updated_at=NOW() WHERE id=$1", [input.armyId]);
-      const result = { ...input, previousQuantity, activeBattleId: assignment?.battle_id ?? null };
+      const { quantity: requestedQuantity, ...auditInput } = input;
+      const result = { ...auditInput, requestedQuantity, previousQuantity, targetQuantity, activeBattleId: assignment?.battle_id ?? null };
       await writeAdminAudit(client, actorId, "admin.panel.army.unit.update", "army", input.armyId, result);
       return result;
     });

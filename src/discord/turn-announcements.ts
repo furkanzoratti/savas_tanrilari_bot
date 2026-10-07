@@ -44,7 +44,7 @@ export interface TurnAnnouncementInput {
   stability?:{
     enabled:boolean;
     warExhaustion:Array<{countryName:string;before:number;after:number;activeWars:number;newBattleLosses:number;raidsSuffered:number;settlementsLost:number}>;
-    settlements:Array<{countryName:string;settlementName:string;prosperityBefore:number;prosperityAfter:number;rebellionBefore:number;rebellionAfter:number;unrestRisk:number;roll:number|null;factionType:string|null;outbreak:boolean;rebelPersonnel:number;rebelMilitaryPower:number}>;
+    settlements:Array<{countryName:string;settlementName:string;prosperityBefore:number;prosperityAfter:number;rebellionBefore:number;rebellionAfter:number;unrestRisk:number;roll:number|null;factionType:string|null;factionName:string|null;outbreak:boolean;rebelPersonnel:number;rebelMilitaryPower:number}>;
   };
 }
 
@@ -143,7 +143,7 @@ export function turnAnnouncement(input: TurnAnnouncementInput): EmbedBuilder {
   if(outbreaks.length)embed.addFields({
     name:"🔥 İsyanlar",
     value:fieldValue(outbreaks.map((item)=>
-      `• **${item.countryName} / ${item.settlementName}** — ${item.factionType??"İsyancı"} • ${item.rebelPersonnel.toLocaleString("tr-TR")} eğitimli asker • Güç ${item.rebelMilitaryPower.toLocaleString("tr-TR")}`
+      `• **${item.factionName??`${item.settlementName} İsyancıları`}** — ${item.countryName} / ${item.settlementName} • ${item.rebelPersonnel.toLocaleString("tr-TR")} eğitimli asker • Güç ${item.rebelMilitaryPower.toLocaleString("tr-TR")}`
     ))
   });
   const escalations=input.stability?.settlements.filter((item)=>!item.outbreak&&item.rebellionAfter!==item.rebellionBefore)??[];

@@ -1,4 +1,4 @@
-const state = { session: null, csrf: "", countries: [], catalog: [], characterCatalog: null, religionCatalog: null, previewToken: null, selectedCountry: null, editor: null };
+const state = { session: null, csrf: "", countries: [], catalog: [], characterCatalog: null, religionCatalog: null, rebellionData: null, previewToken: null, selectedCountry: null, editor: null };
 const page = document.getElementById("page");
 const app = document.getElementById("app");
 const login = document.getElementById("login");
@@ -88,6 +88,9 @@ const aiOrderKindLabels = {
 const aiBattlePostureLabels = { AGGRESSIVE: "Saldırgan", BALANCED: "Dengeli", CAUTIOUS: "Temkinli", WITHDRAW: "Geri çekil" };
 const aiNavalOrderLabels = { BALANCED: "Dengeli", RAM: "Mahmuz hücumu", DEFENSIVE: "Savunma düzeni", FLANK: "Kanat manevrası", RETREAT: "Geri çekil", CONTROLLED_RETREAT: "Kontrollü geri çekil" };
 const siegePhaseLabels = { BOMBARDMENT: "Bombardıman", ASSAULT: "Hücum" };
+const rebellionFactionLabels = { POPULAR: "Halk Ayaklanması", SEPARATIST: "Bağımsızlık Yanlıları", RELIGIOUS: "Dinî İsyancılar", SLAVE: "Köle İsyanı" };
+const rebellionFactionStatusLabels = { ORGANIZING: "Örgütleniyor", ACTIVE: "Ayaklanma", OCCUPYING: "İşgal ediyor", SUPPRESSED: "Bastırıldı", ENFORCED: "Taleplerini kabul ettirdi" };
+const rebellionOutcomeLabels = { OUTBREAK: "İsyan çıktı", IMMUNE: "Koruma altında", ESCALATED: "Gerilim arttı", CALMED: "Gerilim azaldı", UNCHANGED: "Değişmedi" };
 const roleLabel = (row) => row.is_admiral ? "Amiral" : (roleLabels[row.role] || row.role);
 const characterStatusLabel = (value) => characterStatusLabels[value] || value;
 const developmentLabel = (value) => {
@@ -397,6 +400,110 @@ async function battlesPage() {
   }));
 }
 
+function rebellionProgressMarkup(value, tone = "") {
+  const progress = Math.max(0, Math.min(100, Number(value) || 0));
+  return `<div class="rebellion-progress ${tone}"><span style="width:${progress}%"></span></div>`;
+}
+
+function rebellionArmyMarkup(item, live = false) {
+  const faction = live ? item.liveFaction : item.predictedFaction;
+  if (!faction?.type) return '<div class="empty compact-empty">Henüz isyancı tipi belirlenmedi.</div>';
+  const composition = Object.entries(faction.composition || {}).filter(([, quantity]) => Number(quantity) > 0);
+  return `<div class="rebel-army"><div class="rebel-army-head"><div><small>${live ? "SAHADAKİ İSYANCI GRUP" : "İSYAN ÇIKARSA OLUŞACAK GRUP"}</small><strong>${escapeHtml(faction.name || faction.label || "İsyancılar")}</strong></div><span class="pill ${live ? "danger" : "neutral"}">${escapeHtml(faction.label || rebellionFactionLabels[faction.type] || faction.type)}</span></div><div class="rebel-army-stats"><span><small>Personel</small><strong>${number(faction.personnel)}</strong></span><span><small>Askerî güç</small><strong>${number(faction.militaryPower)}</strong></span>${live ? `<span><small>Durum</small><strong>${escapeHtml(rebellionFactionStatusLabels[faction.status] || faction.status)}</strong></span>` : ""}</div><div class="rebel-composition">${composition.map(([unit, quantity]) => `<span>${escapeHtml(item.unitLabels?.[unit] || unit)} <b>${number(quantity)}</b></span>`).join("")}</div></div>`;
+}
+
+function rebellionCard(item) {
+  const active = item.rebellionActive || item.liveFaction;
+  const critical = !active && item.rebellionProgress >= 70;
+  const tone = active ? "danger" : critical ? "warning" : item.risk >= 25 ? "warning" : "";
+  const projection = item.projection;
+  const delta = projection.expected - item.rebellionProgress;
+  const projectionText = item.rebellionActive ? "Açık isyan"
+    : item.immuneNextTurn ? `Koruma: Tur ${number(item.recentUprisingUntilTurn)}`
+      : `${number(projection.expected)}/100 ${delta > 0 ? `(+${number(delta)})` : delta < 0 ? `(${number(delta)})` : "(±0)"}`;
+  return `<article class="card rebellion-card ${tone}" data-rebellion-card="${item.id}" data-country="${escapeHtml(item.countryName)}" data-status="${active ? "ACTIVE" : critical ? "CRITICAL" : item.risk >= 25 ? "THREATENED" : "STABLE"}" data-faction="${item.factionType || "NONE"}"><div class="rebellion-card-head"><div><span class="rebellion-country">${escapeHtml(item.countryName)}</span><h3>${escapeHtml(item.name)}</h3><div class="rebellion-badges"><span class="pill ${active ? "danger" : critical ? "warning" : "neutral"}">${active ? "🔥 Açık isyan" : critical ? "⚠ Kritik gerilim" : item.risk >= 25 ? "Yüksek risk" : "İzleniyor"}</span>${item.factionLabel ? `<span class="pill neutral">${escapeHtml(item.factionLabel)}</span>` : ""}</div></div><button class="button primary compact" data-open-rebellion="${item.id}">Ayrıntı & Müdahale</button></div><div class="rebellion-meter-head"><span>İsyan gerilimi <strong>${number(item.rebellionProgress)}/100</strong></span><span>Tur riski <strong>%${number(item.risk)}</strong></span></div>${rebellionProgressMarkup(item.rebellionProgress,tone)}<div class="rebellion-forecast"><span><small>Gelecek tur beklentisi</small><strong>${projectionText}</strong></span><span><small>Başarılı risk zarı</small><strong>${number(projection.onSuccess)}/100</strong></span><span><small>Başarısız risk zarı</small><strong>${number(projection.onFailure)}/100</strong></span><span><small>İsyan çıkma ihtimali</small><strong>%${number(projection.outbreakChance)}</strong></span></div><div class="rebellion-card-split"><div><small>Refah</small><strong>${number(item.prosperity)}/100 · ${escapeHtml(item.prosperityTier)}</strong><span>Sonraki tur: ${number(projection.prosperityOnFailure)}–${number(projection.prosperityOnSuccess)}</span></div><div><small>Başlıca etkenler</small><div class="factor-chips">${item.factors.slice().sort((a,b)=>Math.abs(b.adjustment)-Math.abs(a.adjustment)).slice(0,5).map((factor)=>`<span class="${factor.adjustment > 0 ? "bad" : "good"}">${factor.adjustment > 0 ? "+" : ""}${number(factor.adjustment)} ${escapeHtml(factor.label)}</span>`).join("")}</div></div></div>${rebellionArmyMarkup(item,Boolean(item.liveFaction))}</article>`;
+}
+
+function bindRebellionFilters() {
+  const render = () => {
+    const query = document.getElementById("rebellion-search").value.trim().toLocaleLowerCase("tr-TR");
+    const country = document.getElementById("rebellion-country-filter").value;
+    const status = document.getElementById("rebellion-status-filter").value;
+    const faction = document.getElementById("rebellion-faction-filter").value;
+    const rows = state.rebellionData.settlements.filter((item) => {
+      const itemStatus = item.rebellionActive || item.liveFaction ? "ACTIVE" : item.rebellionProgress >= 70 ? "CRITICAL" : item.risk >= 25 ? "THREATENED" : "STABLE";
+      return (!query || `${item.countryName} ${item.name} ${item.predictedFaction?.name || ""}`.toLocaleLowerCase("tr-TR").includes(query)) &&
+        (!country || item.countryName === country) && (!status || itemStatus === status) && (!faction || item.factionType === faction);
+    });
+    document.getElementById("rebellion-results").innerHTML = rows.map(rebellionCard).join("") || '<div class="card empty">Filtrelere uyan yerleşke bulunamadı.</div>';
+    document.getElementById("rebellion-result-count").textContent = `${number(rows.length)} yerleşke`;
+    document.querySelectorAll("[data-open-rebellion]").forEach((button) => button.addEventListener("click", () => {
+      openRebellionEditor(button.dataset.openRebellion).catch((error) => toast(error.message,"error"));
+    }));
+  };
+  ["rebellion-search","rebellion-country-filter","rebellion-status-filter","rebellion-faction-filter"].forEach((id) => document.getElementById(id).addEventListener(id === "rebellion-search" ? "input" : "change",render));
+  render();
+}
+
+async function rebellionsPage() {
+  setActiveRoute("rebellions"); loading();
+  const data = await api("/api/rebellions");
+  state.rebellionData = data;
+  const countries = [...new Set(data.settlements.map((item)=>item.countryName))].sort((a,b)=>a.localeCompare(b,"tr"));
+  page.innerHTML = `<div class="page-head"><div><h1>İsyanlar Komuta Merkezi</h1><p>Mevcut gerilim, gerçek tur hesabı, isyancı kuvvet önizlemesi ve yönetici müdahaleleri</p></div><div class="actions"><span class="pill ${data.settlements[0]?.systemEnabled === false ? "warning" : ""}">${data.settlements[0]?.systemEnabled === false ? "Sistem kapalı" : "Sistem aktif"}</span><button class="button" data-refresh-rebellions>↻ Yenile</button></div></div><section class="kpi-grid rebellion-kpis"><div class="card kpi danger"><span>Açık isyan</span><strong>${number(data.summary.active)}</strong><small>Sahada etkin grup</small></div><div class="card kpi warning"><span>Kritik gerilim</span><strong>${number(data.summary.critical)}</strong><small>70+ ilerleme</small></div><div class="card kpi"><span>Yüksek risk</span><strong>${number(data.summary.threatened)}</strong><small>%25+ tur riski</small></div><div class="card kpi"><span>Gelecek tur patlama</span><strong>${number(data.summary.projectedOutbreaks)}</strong><small>Sıfırdan büyük ihtimal</small></div></section><section class="card rebellion-toolbar"><label>Yerleşke veya grup ara<input id="rebellion-search" placeholder="Örn. Baktriya Gönüllüleri…"></label><label>Devlet<select id="rebellion-country-filter"><option value="">Tüm devletler</option>${countries.map((country)=>`<option value="${escapeHtml(country)}">${escapeHtml(country)}</option>`).join("")}</select></label><label>Durum<select id="rebellion-status-filter"><option value="">Tüm durumlar</option><option value="ACTIVE">Açık isyan</option><option value="CRITICAL">Kritik</option><option value="THREATENED">Yüksek risk</option><option value="STABLE">İzleniyor</option></select></label><label>İsyan türü<select id="rebellion-faction-filter"><option value="">Tüm türler</option>${Object.entries(rebellionFactionLabels).map(([value,label])=>`<option value="${value}">${escapeHtml(label)}</option>`).join("")}</select></label></section><div class="section-title"><h2>Yerleşke İstikrar Dosyaları</h2><span id="rebellion-result-count"></span></div><section id="rebellion-results" class="rebellion-grid"></section>`;
+  document.querySelector("[data-refresh-rebellions]").addEventListener("click",rebellionsPage);
+  bindRebellionFilters();
+}
+
+function rebellionHistoryMarkup(history) {
+  if (!history?.length) return '<div class="empty compact-empty">Henüz tur kaydı yok.</div>';
+  return `<div class="table-wrap"><table><thead><tr><th>Tur</th><th>Refah</th><th>Gerilim</th><th>Risk / Zar</th><th>Sonuç</th></tr></thead><tbody>${history.map((row)=>`<tr><td>${number(row.game_turn)}</td><td>${number(row.prosperity_before)} → ${number(row.prosperity_after)}</td><td>${number(row.rebellion_before)} → ${number(row.rebellion_after)}</td><td>%${number(row.unrest_risk)} / ${row.rebellion_roll === null ? "—" : number(row.rebellion_roll)}</td><td>${escapeHtml(rebellionOutcomeLabels[row.outcome] || row.outcome)}</td></tr>`).join("")}</tbody></table></div>`;
+}
+
+async function runRebellionAction(item, action) {
+  const warnings = {
+    OUTBREAK: `${item.name} yerleşkesinde isyan hemen başlatılacak ve öngörülen isyancı kuvvet oluşturulacak. Devam edilsin mi?`,
+    SUPPRESS: `${item.name} isyanı bastırılacak, grup kapatılacak ve 3 tur koruma verilecek. Devam edilsin mi?`,
+    ESCALATE: `${item.name} isyan gerilimi 20 puan artırılsın mı?`,
+    CALM: `${item.name} isyan gerilimi 20 puan azaltılsın mı?`,
+    CLEAR_PROTECTION: `${item.name} için yeni ayaklanma koruması kaldırılsın mı?`
+  };
+  if (!window.confirm(warnings[action])) return;
+  await api(`/api/admin/rebellions/${item.id}/action`,{method:"POST",body:JSON.stringify({action})});
+  closeEditor();
+  toast(action === "OUTBREAK" ? "İsyan ve isyancı kuvvet oluşturuldu." : action === "SUPPRESS" ? "İsyan bastırıldı ve koruma başladı." : "İsyan durumu güncellendi.");
+  await rebellionsPage();
+}
+
+async function openRebellionEditor(settlementId) {
+  const item = await api(`/api/rebellions/${settlementId}`);
+  const projection=item.projection;
+  const active=Boolean(item.liveFaction||item.rebellionActive);
+  const factionOptions=`<option value="">Otomatik belirle</option>${Object.entries(rebellionFactionLabels).map(([value,label])=>`<option value="${value}" ${selected(value,item.factionType)}>${escapeHtml(label)}</option>`).join("")}`;
+  const factorRows=item.factors.slice().sort((a,b)=>b.adjustment-a.adjustment).map((factor)=>`<div class="factor-row ${factor.adjustment>0?"bad":"good"}"><span>${escapeHtml(factor.label)}</span><strong>${factor.adjustment>0?"+":""}${number(factor.adjustment)}</strong></div>`).join("");
+  const liveFields=item.liveFaction?`<div class="section-title"><h2>Sahadaki isyancı grup</h2><span>Canlı kayıt</span></div><div class="form-grid"><label>Grup adı<input id="edit-rebel-live-name" minlength="2" maxlength="100" value="${escapeHtml(item.liveFaction.name)}"></label><label>Durum<select id="edit-rebel-live-status">${["ORGANIZING","ACTIVE","OCCUPYING"].map((value)=>`<option value="${value}" ${selected(value,item.liveFaction.status)}>${escapeHtml(rebellionFactionStatusLabels[value])}</option>`).join("")}</select></label><label>Personel<input id="edit-rebel-live-personnel" type="number" min="1000" max="250000" step="100" value="${Number(item.liveFaction.personnel)}"><small>Kaydedildiğinde birlik dağılımı ve askerî güç yeniden hesaplanır.</small></label></div>`:"";
+  openEditor("İsyan dosyasını yönet",`${item.countryName} · ${item.name} · Tur ${number(item.currentTurn)}`,`<div class="rebellion-detail-hero ${active?"danger":item.rebellionProgress>=70?"warning":""}"><div><span>${active?"🔥 AÇIK İSYAN":"⚑ İSYAN GERİLİMİ"}</span><strong>${number(item.rebellionProgress)}/100</strong></div><div><span>TUR RİSKİ</span><strong>%${number(item.risk)}</strong></div><div><span>GELECEK TUR BEKLENTİSİ</span><strong>${number(projection.expected)}/100</strong><small>${number(projection.onFailure)}–${number(projection.onSuccess)} olası aralık</small></div><div><span>İSYAN ÇIKIŞI</span><strong>%${number(projection.outbreakChance)}</strong></div></div><div class="rebellion-detail-grid"><section><div class="section-title"><h2>Risk hesabı</h2><span>${item.eligible?"Gerilim üretmeye uygun":"Aktif tetikleyici yok"}</span></div><div class="factor-list">${factorRows}</div><div class="condition-grid">${Object.entries(item.conditions).map(([key,value])=>`<span><small>${escapeHtml({conquered:"Fethedilmiş",foreignCulture:"Yabancı kültür",missionary:"Misyoner",besieged:"Kuşatma",epidemic:"Salgın",famine:"Kıtlık",recentRaid:"Yakın yağma",strictTaxation:"Sıkı vergi",ruinStage:"Haraplık",warExhaustion:"Savaş yorgunluğu",slaveRatio:"Köle oranı"}[key]||key)}</small><strong>${typeof value==="boolean"?(value?"Var":"Yok"):key==="slaveRatio"?`%${number(value)}`:number(value)}</strong></span>`).join("")}</div></section><section><div class="section-title"><h2>Gelecek tur senaryosu</h2><span>Tur ${number(projection.nextTurn)}</span></div><div class="scenario-grid"><div><span>Risk zarı başarılı · %${number(projection.successChance)}</span><strong>Gerilim ${number(projection.onSuccess)}/100</strong><small>Refah ${number(projection.prosperityOnSuccess)}/100</small></div><div><span>Risk zarı başarısız · %${number(100-projection.successChance)}</span><strong>Gerilim ${number(projection.onFailure)}/100</strong><small>Refah ${number(projection.prosperityOnFailure)}/100</small></div></div>${rebellionArmyMarkup(item,active)}</section></div><div class="section-title"><h2>Son tur kayıtları</h2><span>${number(item.history.length)} kayıt</span></div>${rebellionHistoryMarkup(item.history)}<div class="section-title"><h2>Doğrudan durum düzenleme</h2><span>Kaydet ile uygulanır</span></div><div class="form-grid"><label>Refah<input id="edit-rebellion-prosperity" type="number" min="0" max="100" step="1" value="${Number(item.prosperity)}"></label><label>İsyan gerilimi<input id="edit-rebellion-progress" type="number" min="0" max="100" step="1" value="${Number(item.rebellionProgress)}"></label><label>İsyan türü<select id="edit-rebellion-faction">${factionOptions}</select></label><label>Koruma bitiş turu<input id="edit-rebellion-protection" type="number" min="0" step="1" value="${item.recentUprisingUntilTurn??""}" placeholder="Koruma yok"></label></div><label class="check"><input id="edit-rebellion-unrest" type="checkbox" ${item.unrestActive?"checked":""}> Aktif huzursuzluk</label><div class="section-title"><h2>Bir sonraki isyancı oluşumu</h2><span>Boş bırakırsan sistem hesaplar</span></div><div class="form-grid"><label>Özel grup adı<input id="edit-rebellion-planned-name" minlength="2" maxlength="100" value="${item.predictedFaction.nameOverridden?escapeHtml(item.predictedFaction.name):""}" placeholder="${escapeHtml(item.predictedFaction.name||"Otomatik ad")}"></label><label>Özel personel<input id="edit-rebellion-planned-personnel" type="number" min="1000" max="250000" step="100" value="${item.predictedFaction.personnelOverridden?Number(item.predictedFaction.personnel):""}" placeholder="Otomatik: ${number(item.predictedFaction.personnel)}"><small>Boşsa nüfus, isyan türü ve savaş yorgunluğuna göre hesaplanır.</small></label></div>${liveFields}<div class="section-title"><h2>Hızlı müdahaleler</h2><span>Her işlem ayrıca denetim kaydı oluşturur</span></div><div class="rebellion-actions"><button type="button" class="button" data-rebellion-action="CALM" ${active?"disabled":""}>−20 Gerilimi azalt</button><button type="button" class="button warning" data-rebellion-action="ESCALATE" ${active?"disabled":""}>+20 Gerilimi yükselt</button><button type="button" class="button danger" data-rebellion-action="OUTBREAK" ${active?"disabled":""}>İsyanı şimdi başlat</button><button type="button" class="button danger" data-rebellion-action="SUPPRESS" ${active?"":"disabled"}>İsyanı bastır</button><button type="button" class="button" data-rebellion-action="CLEAR_PROTECTION" ${item.recentUprisingUntilTurn===null?"disabled":""}>Korumayı kaldır</button></div>`,async()=>{
+    await api(`/api/admin/rebellions/${item.id}`,{method:"PATCH",body:JSON.stringify({
+      prosperity:Number(document.getElementById("edit-rebellion-prosperity").value),
+      rebellionProgress:Number(document.getElementById("edit-rebellion-progress").value),
+      factionType:document.getElementById("edit-rebellion-faction").value||null,
+      unrestActive:document.getElementById("edit-rebellion-unrest").checked,
+      recentUprisingUntilTurn:document.getElementById("edit-rebellion-protection").value===""?null:Number(document.getElementById("edit-rebellion-protection").value),
+      plannedFactionName:document.getElementById("edit-rebellion-planned-name").value.trim()||null,
+      plannedFactionPersonnel:document.getElementById("edit-rebellion-planned-personnel").value===""?null:Number(document.getElementById("edit-rebellion-planned-personnel").value),
+      liveFactionName:item.liveFaction?document.getElementById("edit-rebel-live-name").value:undefined,
+      liveFactionPersonnel:item.liveFaction?Number(document.getElementById("edit-rebel-live-personnel").value):undefined,
+      liveFactionStatus:item.liveFaction?document.getElementById("edit-rebel-live-status").value:undefined
+    })});
+    closeEditor();toast("Yerleşkenin isyan durumu ve isyancı kaydı güncellendi.");await rebellionsPage();
+  });
+  editorModal.querySelector(".modal").classList.add("wide");
+  document.querySelectorAll("[data-rebellion-action]").forEach((button)=>button.addEventListener("click",async()=>{
+    button.disabled=true;
+    try{await runRebellionAction(item,button.dataset.rebellionAction);}catch(error){toast(error.message,"error");button.disabled=false;}
+  }));
+}
+
 async function openBattleRosterManager(battle) {
   if (!battle) return;
   const data = await api(`/api/battles/${battle.id}/manual-rosters`);
@@ -672,6 +779,7 @@ function openEditor(title, subtitle, content, submit) {
 
 function closeEditor() {
   editorModal.hidden = true;
+  editorModal.querySelector(".modal").classList.remove("wide");
   state.editor = null;
   document.body.style.overflow = "";
 }
@@ -717,14 +825,14 @@ async function openArmyEditor(armyId) {
   const commanderOptions = `<option value="">Atanmamış</option>${data.commanders.map((item) => `<option value="${item.id}" ${selected(item.id, army.commander_character_id)}>${escapeHtml(item.name)} (+${number(item.skill_bonus)})${item.army_name || item.fleet_name ? ` · ${escapeHtml(item.army_name || item.fleet_name)}` : ""}</option>`).join("")}`;
   const settlementOptions = data.settlements.map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("");
   const unitOptions = state.catalog.map((item) => `<option value="${item.value}">${escapeHtml(item.label)}</option>`).join("");
-  openEditor("Orduyu düzenle", `${army.country_name} · ${army.name}`, `<div class="form-grid"><label>Ordu adı<input id="edit-army-name" value="${escapeHtml(army.name)}" required minlength="2" maxlength="60"></label><label>Komutan<select id="edit-army-commander">${commanderOptions}</select></label></div>${active ? `<div class="preview-warning"><strong>Aktif ${escapeHtml(terrainLabels[army.active_battle_terrain] || army.active_battle_terrain)} savaşı</strong><span>Asker azaltmaları savaş formuna da anında işlenir. Aktif savaş bitmeden asker eklenemez.</span></div>` : ""}<div class="section-title"><h2>Birlikler</h2><span>Yeni miktarı yaz</span></div><div class="army-unit-editor">${data.units.map((unit, index) => `<div class="army-unit-line"><div><strong>${escapeHtml(state.catalog.find((item) => item.value === unit.unit_type)?.label || unit.unit_type)}</strong><small>${escapeHtml(unit.settlement_name || "Köken yok")}</small></div><input class="edit-army-unit" type="number" min="0" step="1" value="${Number(unit.quantity)}" data-original="${Number(unit.quantity)}" data-settlement="${unit.settlement_id}" data-unit="${unit.unit_type}" aria-label="Yeni miktar ${index + 1}"></div>`).join("") || '<div class="empty">Bu orduda birlik yok.</div>'}</div>${active ? "" : `<div class="section-title"><h2>Yeni birlik ekle</h2><span>Yönetici eklemesi stok kaydını da tamamlar</span></div><div class="form-grid"><label>Köken yerleşke<select id="edit-army-new-settlement">${settlementOptions}</select></label><label>Birlik türü<select id="edit-army-new-unit">${unitOptions}</select></label><label>Miktar<input id="edit-army-new-quantity" type="number" min="0" step="1" value="0"></label></div>`}`, async () => {
+  openEditor("Orduyu düzenle", `${army.country_name} · ${army.name}`, `<div class="form-grid"><label>Ordu adı<input id="edit-army-name" value="${escapeHtml(army.name)}" required minlength="2" maxlength="60"></label><label>Komutan<select id="edit-army-commander">${commanderOptions}</select></label></div>${active ? `<div class="preview-warning"><strong>Aktif ${escapeHtml(terrainLabels[army.active_battle_terrain] || army.active_battle_terrain)} savaşı</strong><span>Asker azaltmaları savaş formuna da anında işlenir. Aktif savaş bitmeden asker eklenemez.</span></div>` : ""}<div class="section-title"><h2>Birlikler</h2><span>Yeni toplam mevcudu yaz</span></div><div class="army-unit-editor">${data.units.map((unit, index) => `<div class="army-unit-line"><div><strong>${escapeHtml(state.catalog.find((item) => item.value === unit.unit_type)?.label || unit.unit_type)}</strong><small>${escapeHtml(unit.settlement_name || "Köken yok")}</small></div><input class="edit-army-unit" type="number" min="0" step="1" value="${Number(unit.quantity)}" data-original="${Number(unit.quantity)}" data-settlement="${unit.settlement_id}" data-unit="${unit.unit_type}" aria-label="Yeni toplam miktar ${index + 1}"></div>`).join("") || '<div class="empty">Bu orduda birlik yok.</div>'}</div>${active ? "" : `<div class="section-title"><h2>Yeni asker ekle</h2><span>Girilen miktar mevcut birliğe eklenir; eksik stok otomatik tamamlanır</span></div><div class="form-grid"><label>Köken yerleşke<select id="edit-army-new-settlement">${settlementOptions}</select></label><label>Birlik türü<select id="edit-army-new-unit">${unitOptions}</select></label><label>Eklenecek miktar<input id="edit-army-new-quantity" type="number" min="0" step="1" value="0"></label></div>`}`, async () => {
     await api(`/api/admin/armies/${armyId}`, { method: "PATCH", body: JSON.stringify({ name: document.getElementById("edit-army-name").value, commanderId: document.getElementById("edit-army-commander").value || null }) });
     for (const input of document.querySelectorAll(".edit-army-unit")) {
       const quantity = Number(input.value);
       if (quantity !== Number(input.dataset.original)) await api("/api/admin/army-units", { method: "POST", body: JSON.stringify({ armyId, settlementId: input.dataset.settlement, unitType: input.dataset.unit, quantity }) });
     }
     const newQuantity = Number(document.getElementById("edit-army-new-quantity")?.value || 0);
-    if (newQuantity > 0) await api("/api/admin/army-units", { method: "POST", body: JSON.stringify({ armyId, settlementId: document.getElementById("edit-army-new-settlement").value, unitType: document.getElementById("edit-army-new-unit").value, quantity: newQuantity }) });
+    if (newQuantity > 0) await api("/api/admin/army-units", { method: "POST", body: JSON.stringify({ armyId, settlementId: document.getElementById("edit-army-new-settlement").value, unitType: document.getElementById("edit-army-new-unit").value, quantity: newQuantity, operation: "ADD" }) });
     closeEditor(); toast(active ? "Ordu ve aktif savaş mevcudu güncellendi." : "Ordu güncellendi.");
     const route = document.querySelector("[data-route].active")?.dataset.route || "armies";
     await navigate(route);
@@ -766,6 +874,7 @@ async function navigate(route) {
     if (route === "assignments") return assignmentsPage();
     if (route === "ai-governance") return aiGovernancePage();
     if (route === "battles") return battlesPage();
+    if (route === "rebellions") return rebellionsPage();
     if (route === "audit") return auditPage();
     return overview();
   } catch (error) { showPageError(error); }

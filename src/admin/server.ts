@@ -13,6 +13,7 @@ import {
   type AdminSession
 } from "./auth.js";
 import { adminPanelService } from "./service.js";
+import { adminRebellionService } from "./rebellion-service.js";
 import { aiCountryGovernanceService } from "../services/ai-country-governance-service.js";
 
 const logger = pino({ level: adminConfig.logLevel });
@@ -138,6 +139,15 @@ const server = createServer(async (request, response) => {
       if (!requireSession(request, response)) return;
       return json(response, 200, await adminPanelService.battles());
     }
+    if (request.method === "GET" && url.pathname === "/api/rebellions") {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await adminRebellionService.dashboard());
+    }
+    const rebellionDetailMatch = request.method === "GET" ? url.pathname.match(/^\/api\/rebellions\/([0-9a-f-]+)$/iu) : null;
+    if (rebellionDetailMatch) {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await adminRebellionService.detail(rebellionDetailMatch[1]!));
+    }
     const battleManualRostersMatch = request.method === "GET" ? url.pathname.match(/^\/api\/battles\/([0-9a-f-]+)\/manual-rosters$/iu) : null;
     if (battleManualRostersMatch) {
       if (!requireSession(request, response)) return;
@@ -209,6 +219,18 @@ const server = createServer(async (request, response) => {
       const session = requireMutation(request, response);
       if (!session) return;
       return json(response, 200, await adminPanelService.updateSettlement(session.sub, settlementUpdateMatch[1]!, await body(request)));
+    }
+    const rebellionUpdateMatch = request.method === "PATCH" ? url.pathname.match(/^\/api\/admin\/rebellions\/([0-9a-f-]+)$/iu) : null;
+    if (rebellionUpdateMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminRebellionService.update(session.sub, rebellionUpdateMatch[1]!, await body(request)));
+    }
+    const rebellionActionMatch = request.method === "POST" ? url.pathname.match(/^\/api\/admin\/rebellions\/([0-9a-f-]+)\/action$/iu) : null;
+    if (rebellionActionMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminRebellionService.action(session.sub, rebellionActionMatch[1]!, await body(request)));
     }
     const characterUpdateMatch = request.method === "PATCH" ? url.pathname.match(/^\/api\/admin\/characters\/([0-9a-f-]+)$/iu) : null;
     if (characterUpdateMatch) {

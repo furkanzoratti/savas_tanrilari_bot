@@ -5,7 +5,7 @@ import { stabilityRebellionMigration } from "./stability-rebellion-migration.js"
 describe("stability rebellion migration",()=>{
   it("is registered as migration 140",()=>{
     expect(stabilityRebellionMigration.version).toBe(140);
-    expect(migrations.at(-1)).toBe(stabilityRebellionMigration);
+    expect(migrations.find((migration)=>migration.version===140)).toBe(stabilityRebellionMigration);
   });
 
   it("creates persistent history, turn snapshots and rebel armies",()=>{

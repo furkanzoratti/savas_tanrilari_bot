@@ -258,7 +258,7 @@ export interface CountryDocument {
     constructionLimit: number;
     isBesieged?: boolean;
     incomePenalty?: SettlementIncomePenaltyRow | null;
-    rebelFaction: null | { faction_type: string; personnel: number; military_power: number; composition: Record<string,number>; restoration_country_name: string | null };
+    rebelFaction: null | { faction_type: string; display_name:string; personnel: number; military_power: number; composition: Record<string,number>; restoration_country_name: string | null };
     rebellionRisk: number;
     unrestRisk: number;
     starvationBonus: number;
@@ -1771,8 +1771,8 @@ export const gameService = {
         [settlementIds]
       )).rows.map((row) => row.settlement_id) : []);
       const rebelFactions=settlementIds.length?(await client.query<{
-        settlement_id:string;faction_type:string;personnel:number;military_power:number;composition:Record<string,number>;restoration_country_name:string|null;
-      }>(`SELECT faction.settlement_id,faction.faction_type,faction.personnel,faction.military_power,faction.composition,
+        settlement_id:string;faction_type:string;display_name:string;personnel:number;military_power:number;composition:Record<string,number>;restoration_country_name:string|null;
+      }>(`SELECT faction.settlement_id,faction.faction_type,faction.display_name,faction.personnel,faction.military_power,faction.composition,
                  restoration.name AS restoration_country_name
             FROM rebel_factions faction LEFT JOIN countries restoration ON restoration.id=faction.restoration_country_id
            WHERE faction.settlement_id=ANY($1::uuid[]) AND faction.status IN ('ORGANIZING','ACTIVE','OCCUPYING')`,[settlementIds])).rows:[];

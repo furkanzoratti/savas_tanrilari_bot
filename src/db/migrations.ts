@@ -70,6 +70,8 @@ import { christianBorderSpreadMigration } from "./christian-border-spread-migrat
 import { portAccessMigration } from "./port-access-migration.js";
 import { countryLastStandMigration } from "./country-last-stand-migration.js";
 import { stabilityRebellionMigration } from "./stability-rebellion-migration.js";
+import { namedRebelFactionsMigration } from "./named-rebel-factions-migration.js";
+import { rebellionAdminOverridesMigration } from "./rebellion-admin-overrides-migration.js";
 
 export const migrations = [
   {
@@ -2357,5 +2359,7 @@ export const migrations = [
   christianBorderSpreadMigration,
   portAccessMigration,
   countryLastStandMigration,
-  stabilityRebellionMigration
+  stabilityRebellionMigration,
+  namedRebelFactionsMigration,
+  rebellionAdminOverridesMigration
 ] as const;

@@ -55,7 +55,7 @@ export function renderSettlementsOverview(document:CountryDocument):EmbedBuilder
           `🏺 **Kültür:** ${culture} • ${cultureCompatible?"✅ Uyumlu":"⚠️ Yabancı"}`,
           `⛩️ **Din ve Mezhep:** ${dominantBelief(settlement)}`,
           `🌿 **Refah:** ${settlement.prosperity}/100 • ${prosperity.label}`,
-          `🔥 **İsyan Durumu:** ${settlement.rebellion_progress}/100 • **Tur Riski:** %${number(settlement.rebellionRisk)}`
+          `🔥 **İsyan Durumu:** ${settlement.rebellion_progress}/100 • **Tur Riski:** %${number(settlement.rebellionRisk)}${settlement.rebelFaction?` • **${settlement.rebelFaction.display_name}**`:""}`
         ].join("\n");
     });
     embed.setDescription([summary,...settlementBlocks].join("\n\n"));

@@ -292,9 +292,9 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
         .map(([unit,quantity])=>`• **${number(Number(quantity))}** ${UNITS[unit as keyof typeof UNITS]?.name??unit}`)
         .join("\n");
       embed.addFields({
-        name:"🔥 İsyancı Ordu",
+        name:`🔥 ${settlement.rebelFaction.display_name}`,
         value:spacedSection([
-          `Fraksiyon: **${rebellionLabel}**`,
+          `İsyan Türü: **${rebellionLabel}**`,
           `Personel: **${number(settlement.rebelFaction.personnel)}** • Askerî Güç: **${number(settlement.rebelFaction.military_power)}**`,
           ...(settlement.rebelFaction.restoration_country_name?[`Hedef: **${settlement.rebelFaction.restoration_country_name} devletini geri kurmak**`]:[]),
           composition

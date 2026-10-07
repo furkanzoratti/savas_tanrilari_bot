@@ -1,10 +1,11 @@
 import { randomInt } from "node:crypto";
 import type { DbClient } from "../db/pool.js";
 import {
-  REBEL_FACTION_LABELS, chooseRebelFaction, nextRebellionProgress, prosperityTier,
-  rebelComposition, rebelMilitaryPower, rebelPersonnel, rebellionRisk,
-  type RebelFactionType, type StabilityFactor
+  REBEL_FACTION_LABELS, assessRebellionPressure, nextRebellionProgress, prosperityTier,
+  rebelComposition, rebelFactionName, rebelMilitaryPower, rebelPersonnel,
+  type RebelFactionType
 } from "../domain/stability.js";
+import {RELIGIONS,type ReligionKey} from "../domain/religions.js";
 
 interface CountryStabilityRow {
   id: string; name: string; primary_culture_group: string; war_exhaustion: number;
@@ -15,9 +16,11 @@ interface SettlementStabilityRow {
   id: string; country_id: string; country_name: string; name: string;
   population: number; slave_population: number; culture_group: string;
   prosperity: number; rebellion_progress: number; rebellion_faction_type: RebelFactionType | null;
+  rebellion_name_override: string | null; rebellion_personnel_override: number | null;
   recent_uprising_until_turn: number | null; ruin_stage: number; is_conquered: boolean;
   unrest_active: boolean; rebellion_active: boolean; epidemic_active: boolean; famine_active: boolean;
   tax_rate_percent: number; war_exhaustion: number; primary_culture_group: string;
+  religion_key:ReligionKey;
   live_faction_id: string | null;
 }
 
@@ -31,7 +34,7 @@ export interface SettlementStabilityTurnDetail {
   prosperityBefore: number; prosperityAfter: number;
   rebellionBefore: number; rebellionAfter: number;
   unrestRisk: number; roll: number | null;
-  factionType: RebelFactionType | null; outbreak: boolean;
+  factionType: RebelFactionType | null; factionName:string|null; outbreak: boolean;
   rebelPersonnel: number; rebelMilitaryPower: number;
 }
 
@@ -101,13 +104,14 @@ async function processWarExhaustion(client: DbClient, guildId: string, newTurn: 
   return details;
 }
 
-async function restorationCountry(client: DbClient, settlementId: string, currentCountryId: string): Promise<string | null> {
-  return (await client.query<{ previous_country_id: string }>(
-    `SELECT previous_country_id FROM settlement_ownership_history
-      WHERE settlement_id=$1 AND previous_country_id IS NOT NULL AND previous_country_id<>$2
-        AND change_type IN ('CONQUEST','PEACE_TRANSFER','VASSAL_INTEGRATION','REBELLION')
-      ORDER BY acquired_turn DESC,created_at DESC LIMIT 1`, [settlementId,currentCountryId]
-  )).rows[0]?.previous_country_id ?? null;
+async function restorationCountry(client: DbClient, settlementId: string, currentCountryId: string): Promise<{id:string;name:string}|null> {
+  return (await client.query<{ id:string;name:string }>(
+    `SELECT previous.id,previous.name FROM settlement_ownership_history history
+       JOIN countries previous ON previous.id=history.previous_country_id
+      WHERE history.settlement_id=$1 AND history.previous_country_id IS NOT NULL AND history.previous_country_id<>$2
+        AND history.change_type IN ('CONQUEST','PEACE_TRANSFER','VASSAL_INTEGRATION','REBELLION')
+      ORDER BY history.acquired_turn DESC,history.created_at DESC LIMIT 1`, [settlementId,currentCountryId]
+  )).rows[0]??null;
 }
 
 export async function processStabilityTurn(client: DbClient, guildId: string, newTurn: number, actorId: string): Promise<StabilityTurnResult> {
@@ -118,9 +122,10 @@ export async function processStabilityTurn(client: DbClient, guildId: string, ne
   const warExhaustion = await processWarExhaustion(client,guildId,newTurn);
   const settlements = (await client.query<SettlementStabilityRow>(
     `SELECT s.id,s.country_id,c.name AS country_name,s.name,s.population,s.slave_population,s.culture_group,
-            s.prosperity,s.rebellion_progress,s.rebellion_faction_type,s.recent_uprising_until_turn,
+            s.prosperity,s.rebellion_progress,s.rebellion_faction_type,s.rebellion_name_override,
+            s.rebellion_personnel_override,s.recent_uprising_until_turn,
             s.ruin_stage,s.is_conquered,s.unrest_active,s.rebellion_active,s.epidemic_active,s.famine_active,
-            s.tax_rate_percent,c.war_exhaustion,c.primary_culture_group,
+            s.tax_rate_percent,c.war_exhaustion,c.primary_culture_group,s.religion_key,
             (SELECT rf.id FROM rebel_factions rf WHERE rf.settlement_id=s.id
               AND rf.status IN ('ORGANIZING','ACTIVE','OCCUPYING') LIMIT 1) AS live_faction_id
        FROM settlements s JOIN countries c ON c.id=s.country_id
@@ -156,64 +161,50 @@ export async function processStabilityTurn(client: DbClient, guildId: string, ne
     )).rowCount);
     const slaveRatio = Number(settlement.slave_population)/Math.max(1,Number(settlement.population)+Number(settlement.slave_population));
     const foreignCulture = settlement.culture_group!==settlement.primary_culture_group;
-    const factors: StabilityFactor[] = [{label:"Temel gerilim",adjustment:5}];
-    const add=(label:string,adjustment:number)=>{if(adjustment)factors.push({label,adjustment});};
-    add("Aktif huzursuzluk",settlement.unrest_active?15:0);
-    add("Fethedilmiş yerleşke",settlement.is_conquered?15:0);
-    add("Yabancı kültür",foreignCulture?10:0);
-    add("Misyoner faaliyeti",activeMissionary?15:0);
-    add("Vergi sıkılaştırması",policies.has("STRICT_TAXATION")?10:0);
-    add("Salgın",settlement.epidemic_active?10:0);
-    add("Kıtlık",settlement.famine_active?15:0);
-    add("Kuşatma",besieged?10:0);
-    add("Haraplık",settlement.ruin_stage===2?10:settlement.ruin_stage===1?5:0);
-    add("Köle kampı",(buildings.get("slave_camp")??0)*6);
-    add("Köle nüfusu",slaveRatio>=0.25?15:slaveRatio>=0.15?8:0);
-    add("Yakın yağma",landRaid||navalRaid?10:0);
-    add("Savaş yorgunluğu",Math.min(15,Math.floor(Number(settlement.war_exhaustion)/10)));
-    add(`Refah: ${prosperityTier(settlement.prosperity).label}`,prosperityTier(settlement.prosperity).unrestAdjustment);
-    add("Curia",-(buildings.get("curia")??0)*2);
-    const inns=buildings.get("inns_baths")??0;
-    add("Hanlar ve Hamamlar",-(inns>=3?10:inns===2?6:inns===1?3:0));
-    add("Panteon",buildings.has("pantheon")?-10:0);
-    const risk=rebellionRisk(factors);
+    const pressure=assessRebellionPressure({
+      prosperity:Number(settlement.prosperity),unrestActive:settlement.unrest_active,conquered:settlement.is_conquered,
+      foreignCulture,activeMissionary:Boolean(activeMissionary),strictTaxation:policies.has("STRICT_TAXATION"),
+      epidemicActive:settlement.epidemic_active,famineActive:settlement.famine_active,besieged,
+      ruinStage:Number(settlement.ruin_stage),slaveCampLevel:buildings.get("slave_camp")??0,slaveRatio,
+      recentRaid:Boolean(landRaid)||navalRaid,warExhaustion:Number(settlement.war_exhaustion),
+      curiaLevel:buildings.get("curia")??0,innsBathsLevel:buildings.get("inns_baths")??0,
+      hasPantheon:buildings.has("pantheon")
+    });
+    const {factors,risk,eligible,scores}=pressure;
     const immune=settlement.recent_uprising_until_turn!==null && settlement.recent_uprising_until_turn>=newTurn;
-    const eligible=settlement.unrest_active||settlement.is_conquered||foreignCulture||Boolean(activeMissionary)||besieged
-      ||settlement.epidemic_active||settlement.famine_active||slaveRatio>=0.15||Boolean(landRaid)||navalRaid||Number(settlement.war_exhaustion)>=20;
     const beforeProgress=Number(settlement.rebellion_progress);
     const roll=eligible&&!immune&&!settlement.rebellion_active?randomInt(1,101):null;
     const afterProgress=settlement.rebellion_active?100:nextRebellionProgress({before:beforeProgress,eligible,risk,roll,immune});
-    const scores:Record<RebelFactionType,number>={
-      POPULAR:5+(settlement.unrest_active?15:0)+(policies.has("STRICT_TAXATION")?10:0),
-      SEPARATIST:(settlement.is_conquered?25:0)+(foreignCulture?20:0),
-      RELIGIOUS:activeMissionary?35:0,
-      SLAVE:Math.round(slaveRatio*100)+(buildings.get("slave_camp")??0)*8
-    };
-    const factionType=settlement.rebellion_faction_type??(afterProgress>=40?chooseRebelFaction(scores):null);
+    const factionType=settlement.rebellion_faction_type??(afterProgress>=40?pressure.recommendedFaction:null);
     let prosperityAfter=Number(settlement.prosperity);
     if(settlement.rebellion_active||settlement.ruin_stage===2||settlement.is_conquered)prosperityAfter=0;
     else if(besieged)prosperityAfter=clamp(prosperityAfter-10,0,100);
     else if(landRaid||navalRaid)prosperityAfter=clamp(prosperityAfter-(landRaid?.result_tier==="TOP"?25:15),0,100);
     else if(afterProgress>=60)prosperityAfter=clamp(prosperityAfter-5,0,100);
     else if(!activeMissionary&&!settlement.epidemic_active&&!settlement.famine_active&&afterProgress<40)prosperityAfter=clamp(prosperityAfter+10,0,100);
-    let outbreak=false,rebelCount=0,rebelPower=0;
+    let outbreak=false,rebelCount=0,rebelPower=0,factionName:string|null=null;
     if(afterProgress>=100&&!settlement.live_faction_id&&!settlement.rebellion_active&&factionType){
       outbreak=true;
       const restoration=factionType==="SEPARATIST"?await restorationCountry(client,settlement.id,settlement.country_id):null;
-      rebelCount=rebelPersonnel({type:factionType,population:Number(settlement.population),slavePopulation:Number(settlement.slave_population),warExhaustion:Number(settlement.war_exhaustion)});
+      factionName=settlement.rebellion_name_override?.trim()||rebelFactionName({
+        type:factionType,settlementName:settlement.name,restorationCountryName:restoration?.name??null,
+        religionLabel:factionType==="RELIGIOUS"?RELIGIONS[settlement.religion_key].label:null
+      });
+      rebelCount=settlement.rebellion_personnel_override??rebelPersonnel({type:factionType,population:Number(settlement.population),slavePopulation:Number(settlement.slave_population),warExhaustion:Number(settlement.war_exhaustion)});
       const composition=rebelComposition(factionType,rebelCount);
       rebelPower=rebelMilitaryPower(composition);
       await client.query(
-        `INSERT INTO rebel_factions(guild_id,settlement_id,against_country_id,faction_type,restoration_country_id,
+        `INSERT INTO rebel_factions(guild_id,settlement_id,against_country_id,faction_type,display_name,restoration_country_id,
            target_religion_key,target_culture_group,status,started_turn,outbreak_turn,personnel,military_power,composition,cause_snapshot)
-         VALUES($1,$2,$3,$4,$5,$6,$7,'ACTIVE',$8,$8,$9,$10,$11::jsonb,$12::jsonb)`,
-        [guildId,settlement.id,settlement.country_id,factionType,restoration,activeMissionary?.religion_key??null,
-          factionType==="SEPARATIST"?settlement.culture_group:null,newTurn,rebelCount,rebelPower,JSON.stringify(composition),
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,'ACTIVE',$9,$9,$10,$11,$12::jsonb,$13::jsonb)`,
+        [guildId,settlement.id,settlement.country_id,factionType,factionName,restoration?.id??null,
+          factionType==="RELIGIOUS"?settlement.religion_key:null,factionType==="SEPARATIST"?settlement.culture_group:null,
+          newTurn,rebelCount,rebelPower,JSON.stringify(composition),
           JSON.stringify({risk,roll,factors,warExhaustion:settlement.war_exhaustion,prosperity:settlement.prosperity})]
       );
       prosperityAfter=0;
       await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'REBELLION_OUTBREAK','settlement',$3,$4::jsonb)",
-        [guildId,actorId,settlement.id,JSON.stringify({factionType,factionLabel:REBEL_FACTION_LABELS[factionType],personnel:rebelCount,militaryPower:rebelPower,composition,restorationCountryId:restoration})]);
+        [guildId,actorId,settlement.id,JSON.stringify({factionType,factionName,factionLabel:REBEL_FACTION_LABELS[factionType],personnel:rebelCount,militaryPower:rebelPower,composition,restorationCountryId:restoration?.id??null})]);
     }
     await client.query(
       `INSERT INTO settlement_stability_turns(settlement_id,game_turn,prosperity_before,prosperity_after,unrest_risk,
@@ -225,12 +216,14 @@ export async function processStabilityTurn(client: DbClient, guildId: string, ne
     await client.query(
       `UPDATE settlements SET prosperity=$1,rebellion_progress=$2,rebellion_faction_type=$3,
          rebellion_active=CASE WHEN $4::boolean THEN TRUE ELSE rebellion_active END,
-         unrest_active=CASE WHEN $4::boolean THEN TRUE ELSE unrest_active END WHERE id=$5`,
+         unrest_active=CASE WHEN $4::boolean THEN TRUE ELSE unrest_active END,
+         rebellion_name_override=CASE WHEN $4::boolean THEN NULL ELSE rebellion_name_override END,
+         rebellion_personnel_override=CASE WHEN $4::boolean THEN NULL ELSE rebellion_personnel_override END WHERE id=$5`,
       [prosperityAfter,afterProgress,factionType,outbreak,settlement.id]
     );
     if(outbreak||beforeProgress!==afterProgress||Number(settlement.prosperity)!==prosperityAfter)results.push({
       countryName:settlement.country_name,settlementName:settlement.name,prosperityBefore:Number(settlement.prosperity),prosperityAfter,
-      rebellionBefore:beforeProgress,rebellionAfter:afterProgress,unrestRisk:risk,roll,factionType,outbreak,
+      rebellionBefore:beforeProgress,rebellionAfter:afterProgress,unrestRisk:risk,roll,factionType,factionName,outbreak,
       rebelPersonnel:rebelCount,rebelMilitaryPower:rebelPower
     });
   }
