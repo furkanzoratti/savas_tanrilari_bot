@@ -6,20 +6,16 @@ export const rebelSiegeTrainMigration={
       ADD COLUMN IF NOT EXISTS siege_assets JSONB NOT NULL DEFAULT '{}'::jsonb;
 
     WITH profiles AS (
-      SELECT faction.id,faction.faction_type,faction.personnel,faction.composition,
+      SELECT faction.id,faction.faction_type,faction.personnel,
              COALESCE(MAX(building.level) FILTER (WHERE building.building_type='engineering'
-               AND building.status IN ('ACTIVE','BUILDING')),0)::integer AS engineering_level,
-             COALESCE((faction.composition->>'light_infantry')::integer,0)
-               +COALESCE((faction.composition->>'spear')::integer,0)
-               +COALESCE((faction.composition->>'heavy_infantry')::integer,0)
-               +COALESCE((faction.composition->>'militia')::integer,0) AS infantry
+               AND building.status IN ('ACTIVE','BUILDING')),0)::integer AS engineering_level
         FROM rebel_factions faction
         LEFT JOIN buildings building ON building.settlement_id=faction.settlement_id
        WHERE faction.status IN ('ORGANIZING','ACTIVE','OCCUPYING')
-       GROUP BY faction.id,faction.faction_type,faction.personnel,faction.composition
+       GROUP BY faction.id,faction.faction_type,faction.personnel
     ), calculated AS (
       SELECT id,jsonb_strip_nulls(jsonb_build_object(
-        'ladder_group',NULLIF(LEAST(8,CEIL(infantry/2000.0)::integer),0),
+        'ladder_group',NULLIF(LEAST(8,CEIL(personnel/2000.0)::integer),0),
         'ram',CASE WHEN personnel>=4000 THEN 1 END,
         'mantlet',NULLIF(LEAST(5,FLOOR(personnel/4000.0)::integer),0),
         'ballista',NULLIF((CASE WHEN engineering_level>=1 THEN 1 ELSE 0 END)

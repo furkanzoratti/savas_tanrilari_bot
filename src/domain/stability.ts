@@ -176,12 +176,10 @@ export function rebelSiegeTrain(input: {
   composition: Readonly<Record<string, number>>;
   engineeringLevel: number;
 }): RebelSiegeTrain {
-  const infantry = ["light_infantry", "spear", "heavy_infantry", "militia"]
-    .reduce((sum, unit) => sum + Math.max(0, Math.floor(Number(input.composition[unit] ?? 0))), 0);
   const personnel = Math.max(0, Math.floor(input.personnel));
   const engineering = Math.max(0, Math.min(3, Math.floor(input.engineeringLevel)));
   const result: RebelSiegeTrain = {};
-  const ladders = Math.min(8, Math.ceil(infantry / 2_000));
+  const ladders = Math.min(8, Math.ceil(personnel / 2_000));
   const mantlets = Math.min(5, Math.floor(personnel / 4_000));
   const ballistae = (engineering >= 1 ? 1 : 0) + (input.type === "SEPARATIST" ? 1 : 0);
   if (ladders > 0) result.ladder_group = ladders;

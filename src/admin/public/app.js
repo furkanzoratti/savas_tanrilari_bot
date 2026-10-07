@@ -507,18 +507,9 @@ async function openRebellionEditor(settlementId) {
   document.querySelector("[data-recalculate-rebel-siege]")?.addEventListener("click",()=>{
     const personnel=Math.max(0,Number(document.getElementById("edit-rebel-live-personnel")?.value||0));
     const type=document.getElementById("edit-rebellion-faction")?.value||item.liveFaction?.type||"POPULAR";
-    const weights={
-      POPULAR:{light_infantry:25,spear:25,archer:15,heavy_infantry:20,light_cavalry:10,heavy_cavalry:5},
-      SEPARATIST:{light_infantry:15,spear:20,archer:15,heavy_infantry:25,light_cavalry:15,heavy_cavalry:10},
-      RELIGIOUS:{light_infantry:20,spear:25,archer:20,heavy_infantry:20,light_cavalry:10,heavy_cavalry:5},
-      SLAVE:{light_infantry:30,spear:30,slinger:15,archer:10,heavy_infantry:10,light_cavalry:5}
-    }[type];
-    const composition=Object.fromEntries(Object.entries(weights).map(([unit,percent])=>[unit,Math.floor(personnel*percent/100)]));
-    composition[Object.keys(weights)[0]]+=personnel-Object.values(composition).reduce((sum,quantity)=>sum+quantity,0);
-    const infantry=["light_infantry","spear","heavy_infantry","militia"].reduce((sum,unit)=>sum+Number(composition[unit]||0),0);
     const engineering=Math.max(0,Math.min(3,Number(item.engineeringLevel||0)));
     const calculated={
-      ladder_group:Math.min(8,Math.ceil(infantry/2000)),
+      ladder_group:Math.min(8,Math.ceil(personnel/2000)),
       ram:personnel>=4000?1:0,
       mantlet:Math.min(5,Math.floor(personnel/4000)),
       ballista:(engineering>=1?1:0)+(type==="SEPARATIST"?1:0),

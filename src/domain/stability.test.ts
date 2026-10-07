@@ -36,13 +36,18 @@ describe("stability domain",()=>{
   it("builds a persistent siege train from personnel and engineering",()=>{
     const composition=rebelComposition("SEPARATIST",12_000);
     expect(rebelSiegeTrain({type:"SEPARATIST",personnel:12_000,composition,engineeringLevel:2})).toEqual({
-      ladder_group:4,ram:1,mantlet:3,ballista:2,catapult:1
+      ladder_group:6,ram:1,mantlet:3,ballista:2,catapult:1
     });
   });
 
   it("does not grant heavy siege engines to a small popular revolt",()=>{
     const composition=rebelComposition("POPULAR",2_000);
     expect(rebelSiegeTrain({type:"POPULAR",personnel:2_000,composition,engineeringLevel:0})).toEqual({ladder_group:1});
+  });
+
+  it("grants one ladder group per two thousand total rebels",()=>{
+    const composition=rebelComposition("POPULAR",6_000);
+    expect(rebelSiegeTrain({type:"POPULAR",personnel:6_000,composition,engineeringLevel:0}).ladder_group).toBe(3);
   });
 
   it("uses the same pressure assessment for panel forecasts and turn resolution",()=>{
