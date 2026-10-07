@@ -564,13 +564,15 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
     requireGameMaster(interaction);
     const countryName = interaction.options.getString("ulke", true);
     const sourceSettlement = interaction.options.getString("yerleske");
-    const view = await battleService.setRoster({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id, naval: false, countryName, sourceSettlement, preserveSpecialUnits: true,
-      composition: {
+    const composition: BattleComposition = {
         light_infantry: interaction.options.getInteger("hafif-piyade", true), slinger: interaction.options.getInteger("sapanci", true),
         spear: interaction.options.getInteger("mizrakli", true), archer: interaction.options.getInteger("okcu", true),
         heavy_infantry: interaction.options.getInteger("agir-piyade", true), light_cavalry: interaction.options.getInteger("hafif-suvari", true),
         heavy_cavalry: interaction.options.getInteger("agir-suvari", true), militia: interaction.options.getInteger("milis") ?? 0
-      } });
+      };
+    const basicRosterTotal = Object.values(composition).reduce((sum, quantity) => sum + Number(quantity ?? 0), 0);
+    const view = await battleService.setRoster({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id, naval: false, countryName, sourceSettlement, preserveSpecialUnits: true,
+      allowEmptyForSpecialSelection: basicRosterTotal === 0, composition });
     const side = (["A","B"] as const).find((sideKey) => view.sides[sideKey].participants
       .some((item) => item.country_name.toLocaleLowerCase("tr-TR") === countryName.trim().toLocaleLowerCase("tr-TR")));
     if (!side) throw new GameError("Kadro kaydedildi ancak savaş tarafı yanıtı oluşturulamadı; savaş belgesini kontrol edin.");
@@ -596,7 +598,7 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
         )]
       : [];
     await interaction.editReply({
-      content: `✅ **${countryName}** ülkesinin bütün kara kadrosu tek işlemde kaydedildi. Açık toplam: **${number(view.sides[side].initial_total)}**\n📍 Kayıp kaynağı: ${lossSource}\n\n${availableSpecialUnits.length ? "⚔️ Bu ülkenin sahip olduğu özel birlikleri aşağıdaki menüden aynı kadro ekranında düzenleyebilirsin." : "ℹ️ Seçilen kaynakta kullanılabilir özel birlik bulunmuyor."}`,
+      content: `${basicRosterTotal === 0 ? `⚔️ **${countryName}** için temel kadro boş bırakıldı; özel birlik seçimi bekleniyor.` : `✅ **${countryName}** ülkesinin bütün kara kadrosu tek işlemde kaydedildi.`} Açık toplam: **${number(view.sides[side].initial_total)}**\n📍 Kayıp kaynağı: ${lossSource}\n\n${availableSpecialUnits.length ? "⚔️ Bu ülkenin sahip olduğu özel birlikleri aşağıdaki menüden aynı kadro ekranında düzenleyebilirsin." : "ℹ️ Seçilen kaynakta kullanılabilir özel birlik bulunmuyor."}`,
       components: specialComponents,
     });
   } else if (sub === "gemi-ayarla") {

@@ -326,6 +326,36 @@ async function validateSourceSettlement(
   return source;
 }
 
+async function participantSpecialUnitAvailability(
+  client: DbClient,
+  participant: BattleParticipantRow,
+  sourceSettlementId: string | null
+): Promise<Array<{ unitType: BattleUnitType; available: number; selected: number }>> {
+  const stocks = (await client.query<{ unit_type: string; quantity: number }>(
+    `SELECT u.unit_type,COALESCE(SUM(u.quantity),0)::integer AS quantity
+       FROM unit_stacks u JOIN settlements s ON s.id=u.settlement_id
+      WHERE s.country_id=$1
+        AND ($2::uuid IS NULL OR u.settlement_id=$2)
+        AND u.force_type='ARMY'
+      GROUP BY u.unit_type`,
+    [participant.country_id, sourceSettlementId],
+  )).rows;
+  const allocations = (await client.query<{ unit_type: string; quantity: number }>(
+    `SELECT au.unit_type,COALESCE(SUM(au.quantity),0)::integer AS quantity
+       FROM army_units au JOIN armies army ON army.id=au.army_id
+      WHERE army.country_id=$1 AND ($2::uuid IS NULL OR au.settlement_id=$2)
+      GROUP BY au.unit_type`,
+    [participant.country_id, sourceSettlementId],
+  )).rows;
+  const stock = new Map(stocks.map((row) => [row.unit_type, Number(row.quantity)]));
+  const allocated = new Map(allocations.map((row) => [row.unit_type, Number(row.quantity)]));
+  return SPECIAL_UNIT_TYPES.map((unitType) => ({
+    unitType,
+    available: Math.max(0, (stock.get(unitType) ?? 0) - (allocated.get(unitType) ?? 0)),
+    selected: participant.composition[unitType] ?? 0,
+  })).filter((item) => item.available > 0 || item.selected > 0);
+}
+
 async function validateNavalParticipantAvailability(
   client:DbClient,participant:BattleParticipantRow,composition:BattleComposition
 ):Promise<void> {
@@ -2002,33 +2032,11 @@ export const battleService = {
       const battle = await activeInChannel(client, input.guildId, input.channelId);
       if (!battle || battle.status !== "DRAFT") throw new GameError("Bu kanalda düzenlenebilir bir savaş taslağı yok.");
       const participant = await resolveParticipant(client, battle.id, input.side, input.countryName);
-      const stocks = (await client.query<{ unit_type: string; quantity: number }>(
-        `SELECT u.unit_type,COALESCE(SUM(u.quantity),0)::integer AS quantity
-           FROM unit_stacks u JOIN settlements s ON s.id=u.settlement_id
-          WHERE s.country_id=$1
-            AND ($2::uuid IS NULL OR u.settlement_id=$2)
-            AND u.force_type='ARMY'
-          GROUP BY u.unit_type`,
-        [participant.country_id, participant.source_settlement_id],
-      )).rows;
-      const allocations = (await client.query<{ unit_type: string; quantity: number }>(
-        `SELECT au.unit_type,COALESCE(SUM(au.quantity),0)::integer AS quantity
-           FROM army_units au JOIN armies army ON army.id=au.army_id
-          WHERE army.country_id=$1 AND ($2::uuid IS NULL OR au.settlement_id=$2)
-          GROUP BY au.unit_type`,
-        [participant.country_id, participant.source_settlement_id],
-      )).rows;
-      const stock = new Map(stocks.map((row) => [row.unit_type, Number(row.quantity)]));
-      const allocated = new Map(allocations.map((row) => [row.unit_type, Number(row.quantity)]));
-      return SPECIAL_UNIT_TYPES.map((unitType) => ({
-        unitType,
-        available: Math.max(0, (stock.get(unitType) ?? 0) - (allocated.get(unitType) ?? 0)),
-        selected: participant.composition[unitType] ?? 0,
-      })).filter((item) => item.available > 0 || item.selected > 0);
+      return participantSpecialUnitAvailability(client, participant, participant.source_settlement_id);
     });
   },
 
-  async setRoster(input: { guildId: string; channelId: string; actorId: string; side?: BattleSideKey; composition: BattleComposition; naval: boolean; countryName?: string | null; sourceSettlement?: string | null; preserveSpecialUnits?: boolean }): Promise<BattleView> {
+  async setRoster(input: { guildId: string; channelId: string; actorId: string; side?: BattleSideKey; composition: BattleComposition; naval: boolean; countryName?: string | null; sourceSettlement?: string | null; preserveSpecialUnits?: boolean; allowEmptyForSpecialSelection?: boolean }): Promise<BattleView> {
     return withTransaction(async (client) => {
       const battle = await activeInChannel(client, input.guildId, input.channelId);
       if (!battle || battle.status !== "DRAFT") throw new GameError("Bu kanalda düzenlenebilir bir savaş taslağı yok.");
@@ -2048,14 +2056,28 @@ export const battleService = {
           if (quantity > 0) clean[unitType] = quantity;
         }
       }
-      if (!compositionTotal(clean)) throw new GameError("Kadroda en az bir birlik veya gemi bulunmalıdır.");
+      const emptyRoster = !compositionTotal(clean);
+      if (emptyRoster && (input.naval || !input.allowEmptyForSpecialSelection)) {
+        throw new GameError("Kadroda en az bir birlik veya gemi bulunmalıdır.");
+      }
       const participantSide = participant.side_key;
       if (await participantUsesArmies(client, battle.id, participant.country_id)) throw new GameError("Bu ülke savaşa kalıcı orduyla eklenmiş. Manuel kadro düzenlemek için önce orduları taslaktan çıkarın.");
       if (await participantUsesFleets(client, battle.id, participant.country_id)) throw new GameError("Bu ülke savaşa kalıcı filoyla eklenmiş. Manuel kadro düzenlemek için önce filoları taslaktan çıkarın.");
       let sourceSettlementId: string | null = participant.source_settlement_id;
       if (!input.naval) {
-        sourceSettlementId = input.sourceSettlement?.trim() ? (await validateSourceSettlement(client, battle, participant, input.sourceSettlement, clean)).id : null;
+        const sourceSettlement = input.sourceSettlement?.trim()
+          || (emptyRoster && battle.terrain === "SIEGE" && participant.side_key === "B" ? battle.defender_settlement_id : null);
+        sourceSettlementId = sourceSettlement ? (await validateSourceSettlement(client, battle, participant, sourceSettlement, clean)).id : null;
         if (!sourceSettlementId) await validateParticipantAvailability(client, battle, participant, clean, null);
+        if (emptyRoster) {
+          if (!sourceSettlementId) {
+            throw new GameError("Yalnızca özel birliklerden oluşan kadro için birliklerin bulunduğu yerleşke seçilmelidir.");
+          }
+          const specialUnits = await participantSpecialUnitAvailability(client, participant, sourceSettlementId);
+          if (!specialUnits.some((unit) => unit.available > 0)) {
+            throw new GameError("Temel kadro boş bırakıldı ancak seçilen kaynakta kullanılabilir özel birlik bulunmuyor.");
+          }
+        }
       } else await validateNavalParticipantAvailability(client,participant,clean);
       await client.query(
         "UPDATE battle_side_participants SET composition=$1::jsonb,source_settlement_id=$2 WHERE battle_id=$3 AND country_id=$4",
@@ -2322,6 +2344,9 @@ export const battleService = {
       if (!view.sides.A.initial_total) throw new GameError(battle.terrain==="NAVAL"
         ?"Saldıran tarafa en az bir gemi girilmelidir."
         :"Saldıran tarafa en az bir ordu veya birlik girilmelidir.");
+      if (battle.terrain === "SIEGE" && !view.sides.B.initial_total && view.sides.B.participants.some((participant) => participant.source_settlement_id)) {
+        throw new GameError("Savunma kadrosunda özel birlik seçimi henüz tamamlanmadı. Önce kadro mesajındaki menüden en az bir özel birlik ekleyin.");
+      }
       if (battle.terrain !== "SIEGE" && !view.sides.B.initial_total)
         throw new GameError("İki taraf için de gizli ordu veya filo bileşimi girilmelidir.");
       if(battle.terrain==="NAVAL"){
