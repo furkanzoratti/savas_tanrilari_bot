@@ -44,7 +44,7 @@ import {
 export class GameError extends Error {}
 
 interface GuildRow { discord_id: string; current_turn: number; turn_phase: string; acquisition_interval: number; army_composition_activation_turn: number | null; culture_military_penalty_enabled: boolean }
-interface CountryRow { id: string; guild_id: string; name: string; treasury: number; mobilization: Mobilization; mobilization_started_turn: number | null; manpower_over_limit_since_turn: number | null; manpower_penalty_active: boolean; discord_role_id: string | null; status: "ACTIVE" | "YOK_EDİLDİ"; destroyed_turn: number | null; destroyed_reason: string | null; active_formable_key: FormableCountryKey | null; primary_culture_group: CultureGroup }
+interface CountryRow { id: string; guild_id: string; name: string; treasury: number; mobilization: Mobilization; mobilization_started_turn: number | null; manpower_over_limit_since_turn: number | null; manpower_penalty_active: boolean; discord_role_id: string | null; status: "ACTIVE" | "YOK_EDİLDİ"; destroyed_turn: number | null; destroyed_reason: string | null; active_formable_key: FormableCountryKey | null; primary_culture_group: CultureGroup; war_exhaustion: number }
 interface SettlementRow {
   id: string; country_id: string; name: string; population: number; slave_population: number;
   base_income: number; tax_income: number; land_trade_income: number; sea_trade_income: number;
@@ -259,6 +259,7 @@ export interface CountryDocument {
     isBesieged?: boolean;
     incomePenalty?: SettlementIncomePenaltyRow | null;
     rebelFaction: null | { faction_type: string; personnel: number; military_power: number; composition: Record<string,number>; restoration_country_name: string | null };
+    rebellionRisk: number;
     unrestRisk: number;
     starvationBonus: number;
     religionModifiers: ReligionModifiers;
@@ -285,7 +286,7 @@ export interface CountryDocument {
 }
 
 export interface CountryDetailView {
-  country:{id:string;name:string;primaryCultureGroup:CultureGroup};
+  country:{id:string;name:string;primaryCultureGroup:CultureGroup;mobilization:Mobilization;warExhaustion:number};
   totalTreasury:number;
   totalPopulation:number;
   settlementCount:number;
@@ -297,6 +298,11 @@ export interface CountryDetailView {
   religions:Array<{key:ReligionKey;label:string;population:number;percent:number;primaryPopulation:number;primaryPercent:number}>;
   sects:Array<{key:string;label:string;parentReligionKey:ReligionKey;population:number;percent:number}>;
   cultures:Array<{key:CultureGroup;population:number;percent:number}>;
+  dynasty:null|{name:string;monarch:string|null;heir:string|null;livingMembers:number;sickMembers:number};
+  diplomacy:{
+    allies:string[];pacts:Array<{name:string;purpose:string}>;wars:Array<{opponent:string;warGoal:string}>;
+    overlord:string|null;vassals:string[];portAccessFrom:string[];portAccessGrantedTo:string[];
+  };
 }
 
 export interface TurnAdvanceResult {
@@ -909,8 +915,46 @@ export const gameService = {
         };
       });
       const percent=(population:number)=>totalPopulation>0?population/totalPopulation*100:0;
+      const dynasty=(await client.query<{
+        name:string;monarch:string|null;heir:string|null;living_members:number;sick_members:number;
+      }>(`SELECT dynasty.name,
+                 (SELECT member.name FROM dynasty_members member WHERE member.dynasty_id=dynasty.id AND member.status='ALIVE' AND member.is_monarch LIMIT 1) AS monarch,
+                 (SELECT member.name FROM dynasty_members member WHERE member.dynasty_id=dynasty.id AND member.status='ALIVE' AND member.is_heir LIMIT 1) AS heir,
+                 (SELECT COUNT(*)::integer FROM dynasty_members member WHERE member.dynasty_id=dynasty.id AND member.status='ALIVE') AS living_members,
+                 (SELECT COUNT(*)::integer FROM dynasty_members member WHERE member.dynasty_id=dynasty.id AND member.status='ALIVE' AND member.health='SICK') AS sick_members
+            FROM dynasties dynasty WHERE dynasty.country_id=$1`,[countryId])).rows[0]??null;
+      const allies=(await client.query<{name:string}>(
+        `SELECT partner.name FROM country_alliances alliance
+           JOIN countries partner ON partner.id=CASE WHEN alliance.proposer_country_id=$1 THEN alliance.receiver_country_id ELSE alliance.proposer_country_id END
+          WHERE alliance.status='ACTIVE' AND (alliance.proposer_country_id=$1 OR alliance.receiver_country_id=$1) ORDER BY partner.name`,[countryId]
+      )).rows.map((row)=>row.name);
+      const pacts=(await client.query<{name:string;purpose:string}>(
+        `SELECT pact.name,pact.purpose FROM pact_memberships membership JOIN diplomatic_pacts pact ON pact.id=membership.pact_id
+          WHERE membership.country_id=$1 ORDER BY pact.name`,[countryId]
+      )).rows;
+      const wars=(await client.query<{opponent:string;war_goal:string}>(
+        `SELECT DISTINCT opponent.name AS opponent,war.war_goal
+           FROM state_war_participants own JOIN state_wars war ON war.id=own.war_id AND war.status='ACTIVE'
+           JOIN state_war_participants opposing ON opposing.war_id=own.war_id AND opposing.side<>own.side
+           JOIN countries opponent ON opponent.id=opposing.country_id
+          WHERE own.country_id=$1 ORDER BY opponent.name`,[countryId]
+      )).rows.map((row)=>({opponent:row.opponent,warGoal:row.war_goal}));
+      const vassalage=(await client.query<{overlord:string|null;vassals:string[]|null}>(
+        `SELECT
+           (SELECT overlord.name FROM country_vassalages relation JOIN countries overlord ON overlord.id=relation.overlord_country_id
+             WHERE relation.vassal_country_id=$1 AND relation.status='ACTIVE' LIMIT 1) AS overlord,
+           ARRAY(SELECT vassal.name FROM country_vassalages relation JOIN countries vassal ON vassal.id=relation.vassal_country_id
+             WHERE relation.overlord_country_id=$1 AND relation.status='ACTIVE' ORDER BY vassal.name) AS vassals`,[countryId]
+      )).rows[0]??{overlord:null,vassals:[]};
+      const portAccess=(await client.query<{direction:"FROM"|"TO";name:string}>(
+        `SELECT 'FROM'::text AS direction,grantor.name FROM country_port_access access JOIN countries grantor ON grantor.id=access.grantor_country_id
+          WHERE access.requester_country_id=$1 AND access.status='ACTIVE'
+         UNION ALL
+         SELECT 'TO'::text AS direction,requester.name FROM country_port_access access JOIN countries requester ON requester.id=access.requester_country_id
+          WHERE access.grantor_country_id=$1 AND access.status='ACTIVE' ORDER BY name`,[countryId]
+      )).rows;
       return {
-        country:{id:country.id,name:country.name,primaryCultureGroup:country.primary_culture_group},
+        country:{id:country.id,name:country.name,primaryCultureGroup:country.primary_culture_group,mobilization:country.mobilization,warExhaustion:Number(country.war_exhaustion??0)},
         totalTreasury:settlements.reduce((sum,settlement)=>sum+Number(settlement.local_treasury),0),
         totalPopulation,settlementCount:settlements.length,settlements:detailedSettlements,
         religions:[...religionPopulations.entries()].map(([key,population])=>{
@@ -923,7 +967,13 @@ export const gameService = {
           parentReligionKey,population,percent:percent(population)
         })).filter((entry)=>entry.population>0).sort((left,right)=>right.percent-left.percent||left.label.localeCompare(right.label,"tr")),
         cultures:[...culturePopulations.entries()].map(([key,population])=>({key,population,percent:percent(population)}))
-          .filter((entry)=>entry.population>0).sort((left,right)=>right.percent-left.percent||left.key.localeCompare(right.key))
+          .filter((entry)=>entry.population>0).sort((left,right)=>right.percent-left.percent||left.key.localeCompare(right.key)),
+        dynasty:dynasty?{name:dynasty.name,monarch:dynasty.monarch,heir:dynasty.heir,livingMembers:Number(dynasty.living_members),sickMembers:Number(dynasty.sick_members)}:null,
+        diplomacy:{
+          allies,pacts,wars,overlord:vassalage.overlord,vassals:vassalage.vassals??[],
+          portAccessFrom:portAccess.filter((row)=>row.direction==="FROM").map((row)=>row.name),
+          portAccessGrantedTo:portAccess.filter((row)=>row.direction==="TO").map((row)=>row.name)
+        }
       };
     } finally { client.release(); }
   },
@@ -1726,6 +1776,11 @@ export const gameService = {
                  restoration.name AS restoration_country_name
             FROM rebel_factions faction LEFT JOIN countries restoration ON restoration.id=faction.restoration_country_id
            WHERE faction.settlement_id=ANY($1::uuid[]) AND faction.status IN ('ORGANIZING','ACTIVE','OCCUPYING')`,[settlementIds])).rows:[];
+      const stabilityRows=settlementIds.length?(await client.query<{settlement_id:string;unrest_risk:number}>(
+        `SELECT DISTINCT ON (settlement_id) settlement_id,unrest_risk
+           FROM settlement_stability_turns WHERE settlement_id=ANY($1::uuid[])
+          ORDER BY settlement_id,game_turn DESC`,[settlementIds]
+      )).rows:[];
       const buildings = settlementIds.length ? (await client.query<BuildingRow>("SELECT * FROM buildings WHERE settlement_id = ANY($1::uuid[]) AND building_type<>'lupanar' ORDER BY building_type", [settlementIds])).rows : [];
       const policies = settlementIds.length ? (await client.query<SettlementPolicyRow>("SELECT * FROM settlement_policies WHERE settlement_id=ANY($1::uuid[]) ORDER BY slot", [settlementIds])).rows : [];
       const incomePenalties = settlementIds.length ? (await client.query<SettlementIncomePenaltyRow>(
@@ -2035,6 +2090,7 @@ export const gameService = {
           isBesieged: besiegedSettlementIds.has(settlement.id),
           incomePenalty,
           rebelFaction:rebelFactions.find((faction)=>faction.settlement_id===settlement.id)??null,
+          rebellionRisk:Number(stabilityRows.find((row)=>row.settlement_id===settlement.id)?.unrest_risk??0),
           unrestRisk: settlementUnrestChance(activeBuildings, effectiveResources, activePolicies, country.active_formable_key, religion.unrestReduction),
           starvationBonus: settlementStarvationBonus(activeBuildings, activePolicies, country.active_formable_key, religion.starvationBonus),
           religionModifiers: religion,

@@ -404,9 +404,12 @@ export const commandBuilders = [
     .setName("belge").setDescription("Ülkenin güncel belgesini gösterir")
     .addStringOption(countryOption),
   new SlashCommandBuilder()
-    .setName("devlet").setDescription("Devletin hazine, yerleşke, din ve kültür dağılımını gösterir")
-    .addSubcommand((sub)=>sub.setName("detay").setDescription("Devletin nüfus ağırlıklı din, mezhep ve kültür özetini gösterir")
+    .setName("devlet").setDescription("Devletin yönetim, hanedan, ekonomi, askerî ve diplomatik özetini gösterir")
+    .addSubcommand((sub)=>sub.setName("detay").setDescription("Devletin yönetim, hanedan, toplum ve diplomasi bilgilerini gösterir")
       .addStringOption(countryOption)),
+  new SlashCommandBuilder()
+    .setName("yerleskelerim").setDescription("Yerleşkelerin hazine, gelir, askerî kapasite, kültür, din, refah ve isyan durumunu gösterir")
+    .addStringOption(countryOption),
   new SlashCommandBuilder()
     .setName("devlet-bilgisi").setDescription("Bir devletin herkese açık, askerî ve ekonomik bilgi içermeyen profilini gösterir")
     .addStringOption((option) => option.setName("ulke").setDescription("Görüntülenecek devletin adı").setRequired(true)),

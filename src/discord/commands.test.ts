@@ -68,12 +68,19 @@ describe("yönetim komutları", () => {
     expect(command?.description).toContain("eksik devlet rollerini");
   });
 
-  it("devlet detayında hazine, yerleşke, din ve kültür özetini açar",()=>{
+  it("devlet detayında yönetim, hanedan, toplum ve diplomasi özetini açar",()=>{
     const command=commandBuilders.find((item)=>item.name==="devlet");
     const detail=command?.options?.find((option)=>option.name==="detay");
-    expect(command?.description).toContain("hazine");
-    expect(detail?.description).toContain("din, mezhep ve kültür");
+    expect(command?.description).toContain("hanedan");
+    expect(detail?.description).toContain("diplomasi");
     expect(detail?.options?.find((option)=>option.name==="ulke")).toMatchObject({required:false});
+  });
+
+  it("yerleşke ekonomi ve istikrar görünümünü ayrı komutla açar",()=>{
+    const command=commandBuilders.find((item)=>item.name==="yerleskelerim");
+    expect(command?.description).toContain("refah");
+    expect(command?.description).toContain("isyan");
+    expect(command?.options?.find((option)=>option.name==="ulke")).toMatchObject({required:false});
   });
 
   it("Olay Yöneticisi rolünü üyeye verip kaldıran ayrı komutu kaydeder", () => {

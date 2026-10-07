@@ -22,7 +22,7 @@ import { SPECIAL_UNITS, isSpecialUnitType, type SpecialUnitType } from "../domai
 import { FORMABLE_COUNTRIES, FORMABLE_TIER_LABELS, formableModifiers, formableTier, type FormableTier } from "../domain/formable-countries.js";
 import { ESPIONAGE_TARGETS } from "../domain/espionage.js";
 import { RESOURCES, shipCostMultiplier, type ResourceType } from "../domain/resources.js";
-import { buildingPurchaseTerms, unitPurchaseCost, gameService, GameError, type CountryDetailView } from "../services/game-service.js";
+import { buildingPurchaseTerms, unitPurchaseCost, gameService, GameError, type CountryDetailView, type CountryDocument } from "../services/game-service.js";
 import { battleService } from "../services/battle-service.js";
 import { armyService, type MobileSiegeAssetType } from "../services/army-service.js";
 import { armyMusterService } from "../services/army-muster-service.js";
@@ -47,7 +47,8 @@ import { tradeService } from "../services/trade-service.js";
 import { treasuryLedgerService, type TreasuryMovement } from "../services/treasury-ledger-service.js";
 import { assertCountryAccess, isGameMaster, requireGameMaster, resolveCountry } from "./auth.js";
 import { buildingChoices, shipChoices, unitChoices } from "./commands.js";
-import { batchDocumentEmbeds, embedTextLength, renderDocument } from "./document.js";
+import { batchDocumentEmbeds, renderDocument } from "./document.js";
+import { renderSettlementsOverview } from "./settlements-overview.js";
 import { playerMentionPayload } from "./player-mentions.js";
 import { publishGreatPowerRanking } from "./great-power-ui.js";
 import {
@@ -56,6 +57,8 @@ import {
   STATE_DETAIL_BANNER_NAME,
   STATE_DETAIL_BANNER_PATH,
   STATE_DETAIL_BANNER_URL,
+  SETTLEMENTS_OVERVIEW_BANNER_NAME,
+  SETTLEMENTS_OVERVIEW_BANNER_PATH,
   TEMPLE_BANNER_PATH,
   TEMPLE_BANNER_NAME,
   TURN_BANNER_PATH,
@@ -239,67 +242,43 @@ async function findSettlement(countryId: string, name: string) {
 }
 
 const detailPercent=(value:number)=>new Intl.NumberFormat("tr-TR",{maximumFractionDigits:2}).format(value);
+const detailPhaseLabels:Record<string,string>={OPEN:"Hareketler Açık",CLOSED:"Hareketler Kapalı",RESOLVING:"Olaylar Çözülüyor"};
 
-function detailChunks(blocks:string[],limit=980):string[] {
-  const chunks:string[]=[];
-  let current="";
-  for (const block of blocks) {
-    if (current && current.length+block.length+2>limit) {
-      chunks.push(current);
-      current=block;
-    } else current=current?`${current}\n\n${block}`:block;
-  }
-  if (current) chunks.push(current);
-  return chunks;
-}
-
-function renderCountryDetail(detail:CountryDetailView):EmbedBuilder[] {
-  const settlementBlocks=detail.settlements.map((settlement)=>{
-    const beliefs=settlement.religionDistribution.flatMap((share)=>[
-      ...(share.primaryPercent>0?[`${share.religionLabel} **%${detailPercent(share.primaryPercent)}**`]:[]),
-      ...(share.secondaryPercent>0?[`${share.secondaryLabel} **%${detailPercent(share.secondaryPercent)}**`]:[])
-    ]);
-    return [
-      `🏛️ **${settlement.name}** • ${gold(settlement.localTreasury)}`,
-      `↳ Kültür: **${CULTURE_GROUPS[settlement.cultureGroup]?.label??settlement.cultureGroup}** • Özgür nüfus: **${number(settlement.population)}**`,
-      `↳ Ordu: **${number(settlement.militaryUsed)} / ${number(settlement.militaryLimit)}** mevcut/limit`,
-      `↳ Din: ${beliefs.join(" • ")||"Kayıt yok"}`
-    ].join("\n");
-  });
-  const settlementChunks=detailChunks(settlementBlocks.length?settlementBlocks:["Bu devlete bağlı yerleşke bulunmuyor."]);
-  const embeds=settlementChunks.map((chunk,index)=>{
-    const embed=new EmbedBuilder()
-      .setColor(0xc59b45)
-      .setTitle(`🏛️ ${detail.country.name} • Devlet Detayı${settlementChunks.length>1?` • ${index+1}/${settlementChunks.length}`:""}`)
-      .setDescription(index===0?[
-        `💰 **Devlet Toplam Hazinesi:** ${gold(detail.totalTreasury)}`,
-        `🏘️ **Toplam Yerleşke:** ${number(detail.settlementCount)}`,
-        `👥 **Toplam Özgür Nüfus:** ${number(detail.totalPopulation)}`,
-        `🏺 **Ana Kültür:** ${CULTURE_GROUPS[detail.country.primaryCultureGroup]?.label??detail.country.primaryCultureGroup}`
-      ].join("\n"):null)
-      .addFields({name:`Yerleşkeler${settlementChunks.length>1?` • ${index+1}`:""}`,value:chunk});
-    if (index===0) embed.setImage(STATE_DETAIL_BANNER_URL);
-    return embed;
-  });
-  const summaryFields:Array<{name:string;lines:string[]}>= [
-    {name:"⛩️ Devlet İçindeki Dinler",lines:detail.religions.map((entry)=>`• **${entry.label}: %${detailPercent(entry.percent)}** • Ana inanç %${detailPercent(entry.primaryPercent)} • ${number(Math.round(entry.population))} nüfus`)},
-    {name:"📿 Devlet İçindeki Mezhepler",lines:detail.sects.map((entry)=>`• **${entry.label}: %${detailPercent(entry.percent)}** • ${number(Math.round(entry.population))} nüfus`)},
-    {name:"🏺 Kültür Dağılımı",lines:detail.cultures.map((entry)=>`• **${CULTURE_GROUPS[entry.key]?.label??entry.key}: %${detailPercent(entry.percent)}** • ${number(Math.round(entry.population))} nüfus`)}
-  ];
-  let summaryEmbed=embeds[embeds.length-1]!;
-  for (const field of summaryFields) {
-    const chunks=detailChunks(field.lines.length?field.lines:["Kayıt bulunmuyor."]);
-    chunks.forEach((value,index)=>{
-      const name=index===0?field.name:`${field.name} • Devam`;
-      if (embedTextLength(summaryEmbed)+name.length+value.length>5_500) {
-        summaryEmbed=new EmbedBuilder().setColor(0xc59b45).setTitle(`🏛️ ${detail.country.name} • Devlet Dağılımları`);
-        embeds.push(summaryEmbed);
-      }
-      summaryEmbed.addFields({name,value});
-    });
-  }
-  summaryEmbed.setFooter({text:"Din yüzdesi bağlı mezhebi de kapsar; ana inanç ayrıca gösterilir. Bütün oranlar toplam özgür nüfus üzerinden hesaplanır."});
-  return embeds;
+function renderCountryDetail(detail:CountryDetailView,document:CountryDocument):EmbedBuilder[] {
+  const safeField=(value:string)=>value.length<=1024?value:`${value.slice(0,1021)}…`;
+  const list=(values:string[],empty:string)=>safeField(values.length?values.map((value)=>`• ${value}`).join("\n"):empty);
+  const dynasty=detail.dynasty
+    ?[`**${detail.dynasty.name}**`,`Hükümdar: **${detail.dynasty.monarch??"Belirlenmedi"}**`,`Veliaht: **${detail.dynasty.heir??"Belirlenmedi"}**`,`Yaşayan üye: **${detail.dynasty.livingMembers}**${detail.dynasty.sickMembers?` • Hasta: **${detail.dynasty.sickMembers}**`:""}`].join("\n")
+    :"Bu devlet için hanedan kaydı bulunmuyor.";
+  const main=new EmbedBuilder()
+    .setColor(0xc59b45)
+    .setTitle(`👑 ${detail.country.name} • Devlet Detayı`)
+    .setDescription([
+      `**Tur ${document.guild.current_turn}** • ${detailPhaseLabels[document.guild.turn_phase]??document.guild.turn_phase}`,
+      `🏘️ **${number(detail.settlementCount)} yerleşke** • 👥 **${number(detail.totalPopulation)} özgür nüfus**`,
+      `🏺 Ana kültür: **${CULTURE_GROUPS[detail.country.primaryCultureGroup]?.label??detail.country.primaryCultureGroup}**`
+    ].join("\n"))
+    .setImage(STATE_DETAIL_BANNER_URL)
+    .addFields(
+      {name:"👑 Yönetim",value:document.playerIds.length?document.playerIds.map((id)=>`<@${id}>`).join(" • "):"Oyuncu atanmamış.",inline:true},
+      {name:"🏰 Hanedan",value:dynasty,inline:true},
+      {name:"🏦 Devlet Ekonomisi",value:[`Hazine: **${gold(detail.totalTreasury)}**`,`Dönem geliri: **${gold(document.totalPayableIncome)}**`,`Toplam bakım: **−${gold(document.totalUpkeep)}**`,`Net: **${document.netIncome>=0?"+":""}${gold(document.netIncome)}**`].join("\n"),inline:true},
+      {name:"⚔️ Askerî Durum",value:[`Seferberlik: **${MOBILIZATION_RULES[detail.country.mobilization].label}**`,`Mevcut personel: **${number(document.militaryUsed)}**`,`Toplam sınır: **${number(document.militaryLimit)}**`,`Savaş yorgunluğu: **${detail.country.warExhaustion}/100**${document.manpowerPenaltyActive?"\n⚠️ Askerî sınır cezası aktif":""}`].join("\n"),inline:true},
+      {name:"⛩️ İnanç Yapısı",value:list(detail.religions.map((entry)=>`**${entry.label} %${detailPercent(entry.percent)}**${entry.primaryPercent?` • Ana inanç %${detailPercent(entry.primaryPercent)}`:""}`),"Din kaydı bulunmuyor."),inline:true},
+      {name:"🏺 Kültür Yapısı",value:list(detail.cultures.map((entry)=>`**${CULTURE_GROUPS[entry.key]?.label??entry.key} %${detailPercent(entry.percent)}**`),"Kültür kaydı bulunmuyor."),inline:true}
+    )
+    .setFooter({text:"Yerleşke bazlı ekonomi ve istikrar ayrıntıları için /yerleskelerim komutunu kullanın."});
+  const diplomacy=new EmbedBuilder()
+    .setColor(0x8f6b35)
+    .setTitle(`🤝 ${detail.country.name} • Diplomasi ve Egemenlik`)
+    .addFields(
+      {name:"🛡️ Müttefikler",value:list(detail.diplomacy.allies.map((name)=>`**${name}**`),"Aktif müttefik bulunmuyor."),inline:true},
+      {name:"🏛️ Paktlar",value:list(detail.diplomacy.pacts.map((pact)=>`**${pact.name}** — ${pact.purpose}`),"Pakt üyeliği bulunmuyor."),inline:true},
+      {name:"⚖️ Vassallık",value:safeField([detail.diplomacy.overlord?`Hâkim devlet: **${detail.diplomacy.overlord}**`:"Bağımsız devlet",detail.diplomacy.vassals.length?`Vassallar: ${detail.diplomacy.vassals.map((name)=>`**${name}**`).join(", ")}`:"Vassal bulunmuyor."].join("\n")),inline:true},
+      {name:"⚓ Dost Liman Erişimi",value:safeField([`Erişim alınan: ${detail.diplomacy.portAccessFrom.length?detail.diplomacy.portAccessFrom.map((name)=>`**${name}**`).join(", "):"Yok"}`,`Erişim verilen: ${detail.diplomacy.portAccessGrantedTo.length?detail.diplomacy.portAccessGrantedTo.map((name)=>`**${name}**`).join(", "):"Yok"}`].join("\n"))},
+      {name:"⚔️ Aktif Savaşlar",value:list(detail.diplomacy.wars.map((war)=>`**${war.opponent}** — ${war.warGoal}`),"Aktif resmî savaş bulunmuyor.")}
+    );
+  return [main,diplomacy];
 }
 
 async function handleMercenaryCommand(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -1467,12 +1446,20 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
     await interaction.deferReply({flags:MessageFlags.Ephemeral});
     const country=await resolveCountry(interaction,interaction.options.getString("ulke"));
-    const embeds=renderCountryDetail(await gameService.countryDetail(country.id));
+    const [detail,document]=await Promise.all([gameService.countryDetail(country.id),gameService.document(country.id,{includeArmies:false})]);
+    const embeds=renderCountryDetail(detail,document);
     await interaction.editReply({
       embeds:[embeds[0]!],
       files:[new AttachmentBuilder(STATE_DETAIL_BANNER_PATH,{name:STATE_DETAIL_BANNER_NAME})]
     });
     for (const embed of embeds.slice(1)) await interaction.followUp({embeds:[embed],flags:MessageFlags.Ephemeral});
+  } else if(interaction.commandName==="yerleskelerim"){
+    if(!interaction.guildId)throw new GameError("Sunucu bulunamadı.");
+    await interaction.deferReply({flags:MessageFlags.Ephemeral});
+    const country=await resolveCountry(interaction,interaction.options.getString("ulke"));
+    const embeds=renderSettlementsOverview(await gameService.document(country.id,{includeArmies:false}));
+    await interaction.editReply({embeds:[embeds[0]!],files:[new AttachmentBuilder(SETTLEMENTS_OVERVIEW_BANNER_PATH,{name:SETTLEMENTS_OVERVIEW_BANNER_NAME})]});
+    for(const embed of embeds.slice(1))await interaction.followUp({embeds:[embed],flags:MessageFlags.Ephemeral});
   } else if (interaction.commandName === "belge") {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
