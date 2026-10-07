@@ -317,7 +317,7 @@ export const adminRebellionService={
         await client.query(
           `UPDATE rebel_factions SET faction_type=$1,display_name=$2,status=COALESCE($3,status),
              personnel=$4,military_power=$5,composition=$6::jsonb,
-             restoration_country_id=CASE WHEN $1='SEPARATIST' THEN $8 ELSE NULL END,
+             restoration_country_id=CASE WHEN $1='SEPARATIST' THEN $8::uuid ELSE NULL::uuid END,
              target_religion_key=CASE WHEN $1='RELIGIOUS' THEN $9 ELSE NULL END,
              target_culture_group=CASE WHEN $1='SEPARATIST' THEN $10 ELSE NULL END,
              leader_name=COALESCE($11,leader_name),leader_skill_bonus=COALESCE($12,leader_skill_bonus),
