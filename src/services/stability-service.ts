@@ -2,7 +2,7 @@ import { randomInt } from "node:crypto";
 import type { DbClient } from "../db/pool.js";
 import {
   REBEL_FACTION_LABELS, assessRebellionPressure, nextRebellionProgress, prosperityTier,
-  rebelComposition, rebelFactionName, rebelMilitaryPower, rebelPersonnel,
+  rebelComposition, rebelFactionName, rebelMilitaryPower, rebelPersonnel, rebelSiegeTrain,
   type RebelFactionType
 } from "../domain/stability.js";
 import {RELIGIONS,type ReligionKey} from "../domain/religions.js";
@@ -193,6 +193,8 @@ export async function processStabilityTurn(client: DbClient, guildId: string, ne
       });
       rebelCount=settlement.rebellion_personnel_override??rebelPersonnel({type:factionType,population:Number(settlement.population),slavePopulation:Number(settlement.slave_population),warExhaustion:Number(settlement.war_exhaustion)});
       const composition=rebelComposition(factionType,rebelCount);
+      const siegeAssets=rebelSiegeTrain({type:factionType,personnel:rebelCount,composition,
+        engineeringLevel:buildings.get("engineering")??0});
       rebelPower=rebelMilitaryPower(composition);
       const leader=rebelLeaderProfile({
         cultureGroup:factionType==="SEPARATIST"?settlement.culture_group:settlement.primary_culture_group,
@@ -201,13 +203,13 @@ export async function processStabilityTurn(client: DbClient, guildId: string, ne
       await client.query(
         `INSERT INTO rebel_factions(guild_id,settlement_id,against_country_id,faction_type,display_name,restoration_country_id,
            target_religion_key,target_culture_group,status,started_turn,outbreak_turn,personnel,military_power,composition,cause_snapshot,
-           army_name,leader_name,leader_skill_bonus)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,'ACTIVE',$9,$9,$10,$11,$12::jsonb,$13::jsonb,$14,$15,$16)`,
+           army_name,leader_name,leader_skill_bonus,siege_assets)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,'ACTIVE',$9,$9,$10,$11,$12::jsonb,$13::jsonb,$14,$15,$16,$17::jsonb)`,
         [guildId,settlement.id,settlement.country_id,factionType,factionName,restoration?.id??null,
           factionType==="RELIGIOUS"?settlement.religion_key:null,factionType==="SEPARATIST"?settlement.culture_group:null,
           newTurn,rebelCount,rebelPower,JSON.stringify(composition),
           JSON.stringify({risk,roll,factors,warExhaustion:settlement.war_exhaustion,prosperity:settlement.prosperity}),
-          `${factionName} Ordusu`,leader.name,leader.skillBonus]
+          `${factionName} Ordusu`,leader.name,leader.skillBonus,JSON.stringify(siegeAssets)]
       );
       prosperityAfter=0;
       await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'REBELLION_OUTBREAK','settlement',$3,$4::jsonb)",

@@ -1,5 +1,5 @@
 import { describe,expect,it } from "vitest";
-import { assessRebellionPressure,chooseRebelFaction,nextRebellionProgress,projectRebellionTurn,prosperityTier,rebelComposition,rebelFactionName,rebelMilitaryPower,rebelPersonnel } from "./stability.js";
+import { assessRebellionPressure,chooseRebelFaction,nextRebellionProgress,projectRebellionTurn,prosperityTier,rebelComposition,rebelFactionName,rebelMilitaryPower,rebelPersonnel,rebelSiegeTrain } from "./stability.js";
 
 describe("stability domain",()=>{
   it("applies prosperity tiers at their boundaries",()=>{
@@ -31,6 +31,18 @@ describe("stability domain",()=>{
     expect(Object.values(composition).reduce((sum,value)=>sum+value,0)).toBe(personnel);
     expect((composition.heavy_infantry??0)+(composition.heavy_cavalry??0)).toBeGreaterThan(personnel*0.30);
     expect(rebelMilitaryPower(composition)).toBeGreaterThan(personnel*1.5);
+  });
+
+  it("builds a persistent siege train from personnel and engineering",()=>{
+    const composition=rebelComposition("SEPARATIST",12_000);
+    expect(rebelSiegeTrain({type:"SEPARATIST",personnel:12_000,composition,engineeringLevel:2})).toEqual({
+      ladder_group:3,ram:1,mantlet:3,ballista:2,catapult:1
+    });
+  });
+
+  it("does not grant heavy siege engines to a small popular revolt",()=>{
+    const composition=rebelComposition("POPULAR",2_000);
+    expect(rebelSiegeTrain({type:"POPULAR",personnel:2_000,composition,engineeringLevel:0})).toEqual({ladder_group:1});
   });
 
   it("uses the same pressure assessment for panel forecasts and turn resolution",()=>{

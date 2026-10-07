@@ -75,6 +75,7 @@ import { rebellionAdminOverridesMigration } from "./rebellion-admin-overrides-mi
 import { legacyRebelForcesBackfillMigration } from "./legacy-rebel-forces-backfill-migration.js";
 import { warExhaustionActivationBaselineMigration } from "./war-exhaustion-activation-baseline-migration.js";
 import { rebelBattleIntegrationMigration } from "./rebel-battle-integration-migration.js";
+import { rebelSiegeTrainMigration } from "./rebel-siege-train-migration.js";
 
 export const migrations = [
   {
@@ -2367,5 +2368,6 @@ export const migrations = [
   rebellionAdminOverridesMigration,
   legacyRebelForcesBackfillMigration,
   warExhaustionActivationBaselineMigration,
-  rebelBattleIntegrationMigration
+  rebelBattleIntegrationMigration,
+  rebelSiegeTrainMigration
 ] as const;

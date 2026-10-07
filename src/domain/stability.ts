@@ -2,6 +2,9 @@ import { UNIT_POWER } from "./great-power.js";
 
 export type RebelFactionType = "POPULAR" | "SEPARATIST" | "RELIGIOUS" | "SLAVE";
 
+export type RebelSiegeAssetType = "ladder_group" | "ram" | "mantlet" | "ballista" | "catapult" | "siege_tower";
+export type RebelSiegeTrain = Partial<Record<RebelSiegeAssetType, number>>;
+
 export const REBEL_FACTION_LABELS: Record<RebelFactionType, string> = {
   POPULAR: "Halk Ayaklanması",
   SEPARATIST: "Bağımsızlık Yanlıları",
@@ -164,6 +167,29 @@ export function rebelComposition(type: RebelFactionType, personnel: number): Rec
   }
   const primary = Object.keys(weights)[0]!;
   result[primary] = (result[primary] ?? 0) + total - allocated;
+  return result;
+}
+
+export function rebelSiegeTrain(input: {
+  type: RebelFactionType;
+  personnel: number;
+  composition: Readonly<Record<string, number>>;
+  engineeringLevel: number;
+}): RebelSiegeTrain {
+  const infantry = ["light_infantry", "spear", "heavy_infantry", "militia"]
+    .reduce((sum, unit) => sum + Math.max(0, Math.floor(Number(input.composition[unit] ?? 0))), 0);
+  const personnel = Math.max(0, Math.floor(input.personnel));
+  const engineering = Math.max(0, Math.min(3, Math.floor(input.engineeringLevel)));
+  const result: RebelSiegeTrain = {};
+  const ladders = Math.min(8, Math.ceil(infantry / 2_500));
+  const mantlets = Math.min(5, Math.floor(personnel / 4_000));
+  const ballistae = (engineering >= 1 ? 1 : 0) + (input.type === "SEPARATIST" ? 1 : 0);
+  if (ladders > 0) result.ladder_group = ladders;
+  if (personnel >= 4_000) result.ram = 1;
+  if (mantlets > 0) result.mantlet = mantlets;
+  if (ballistae > 0) result.ballista = ballistae;
+  if (engineering >= 2) result.catapult = 1;
+  if (engineering >= 3) result.siege_tower = 1;
   return result;
 }
 

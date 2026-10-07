@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { BATTLE_UNIT_STATS, type BattleUnitType } from "../domain/battle.js";
+import { SIEGE_ASSETS } from "../domain/catalog.js";
 import { RELIGIONS, type ReligionKey } from "../domain/religions.js";
 import {
   REBEL_FACTION_LABELS,
@@ -10,6 +11,8 @@ import {
   rebelFactionName,
   rebelMilitaryPower,
   rebelPersonnel,
+  rebelSiegeTrain,
+  type RebelSiegeTrain,
   type RebelFactionType
 } from "../domain/stability.js";
 import { adminConfig } from "./config.js";
@@ -18,6 +21,14 @@ import { rebelLeaderProfile } from "../domain/rebel-leaders.js";
 
 const factionTypes = ["POPULAR", "SEPARATIST", "RELIGIOUS", "SLAVE"] as const;
 const liveStatuses = ["ORGANIZING", "ACTIVE", "OCCUPYING"] as const;
+const siegeAssetsSchema=z.object({
+  ladder_group:z.coerce.number().int().min(0).max(25),
+  ram:z.coerce.number().int().min(0).max(1),
+  mantlet:z.coerce.number().int().min(0).max(25),
+  ballista:z.coerce.number().int().min(0).max(25),
+  catapult:z.coerce.number().int().min(0).max(25),
+  siege_tower:z.coerce.number().int().min(0).max(25)
+});
 
 const updateSchema = z.object({
   prosperity: z.coerce.number().int().min(0).max(100),
@@ -31,7 +42,8 @@ const updateSchema = z.object({
   liveFactionPersonnel: z.coerce.number().int().min(1_000).max(250_000).nullable().optional(),
   liveFactionStatus: z.enum(liveStatuses).nullable().optional(),
   liveLeaderName: z.string().trim().min(2).max(100).nullable().optional(),
-  liveLeaderSkill: z.coerce.number().int().min(1).max(3).nullable().optional()
+  liveLeaderSkill: z.coerce.number().int().min(1).max(3).nullable().optional(),
+  liveSiegeAssets:siegeAssetsSchema.optional()
 });
 
 const actionSchema = z.object({
@@ -82,6 +94,7 @@ interface RebellionRow {
   live_faction_army_name: string | null;
   live_faction_leader_name: string | null;
   live_faction_leader_skill: number | null;
+  live_faction_siege_assets: RebelSiegeTrain | null;
 }
 
 interface StabilityHistoryRow {
@@ -132,7 +145,8 @@ async function loadRows(client: Queryable, settlementId?: string): Promise<Rebel
             faction.personnel AS live_faction_personnel,faction.military_power AS live_faction_power,
             faction.composition AS live_faction_composition,faction.started_turn AS live_faction_started_turn,
             faction.army_name AS live_faction_army_name,faction.leader_name AS live_faction_leader_name,
-            faction.leader_skill_bonus AS live_faction_leader_skill
+            faction.leader_skill_bonus AS live_faction_leader_skill,
+            faction.siege_assets AS live_faction_siege_assets
        FROM settlements settlement
        JOIN countries country ON country.id=settlement.country_id
        JOIN guilds guild ON guild.discord_id=country.guild_id
@@ -194,6 +208,8 @@ function view(row: RebellionRow, history: StabilityHistoryRow[] = []) {
   }) : 0;
   const predictedPersonnel = factionType ? Number(row.rebellion_personnel_override??generatedPersonnel) : 0;
   const predictedComposition = factionType ? rebelComposition(factionType,predictedPersonnel) : {};
+  const predictedSiegeAssets=factionType?rebelSiegeTrain({type:factionType,personnel:predictedPersonnel,
+    composition:predictedComposition,engineeringLevel:Number(buildings.engineering??0)}):{};
   const predictedPower = rebelMilitaryPower(predictedComposition);
   const outbreakChance = row.rebellion_active || row.live_faction_id ? 0
     : projection.onFailure >= 100 ? 100
@@ -202,6 +218,7 @@ function view(row: RebellionRow, history: StabilityHistoryRow[] = []) {
     id:row.id,name:row.name,countryId:row.country_id,countryName:row.country_name,currentTurn:Number(row.current_turn),
     systemEnabled:row.stability_system_enabled,population:Number(row.population),slavePopulation:Number(row.slave_population),
     prosperity:Number(row.prosperity),prosperityTier:prosperityTier(Number(row.prosperity)).label,
+    engineeringLevel:Number(buildings.engineering??0),
     rebellionProgress:Number(row.rebellion_progress),factionType,
     factionLabel:factionType?REBEL_FACTION_LABELS[factionType]:null,unrestActive:row.unrest_active,
     rebellionActive:row.rebellion_active,recentUprisingUntilTurn:row.recent_uprising_until_turn,
@@ -215,19 +232,22 @@ function view(row: RebellionRow, history: StabilityHistoryRow[] = []) {
       prosperityOnFailure:projectedProsperity(row,projection.onFailure)},
     predictedFaction:{type:factionType,label:factionType?REBEL_FACTION_LABELS[factionType]:null,name:predictedName,
       restorationCountryId:row.restoration_country_id,restorationCountryName:row.restoration_country_name,
-      personnel:predictedPersonnel,militaryPower:predictedPower,composition:predictedComposition,
+      personnel:predictedPersonnel,militaryPower:predictedPower,composition:predictedComposition,siegeAssets:predictedSiegeAssets,
       nameOverridden:Boolean(row.rebellion_name_override),personnelOverridden:row.rebellion_personnel_override!==null},
     liveFaction:row.live_faction_id?{id:row.live_faction_id,type:row.live_faction_type,
       label:row.live_faction_type?REBEL_FACTION_LABELS[row.live_faction_type]:null,name:row.live_faction_name,
       status:row.live_faction_status,personnel:Number(row.live_faction_personnel??0),militaryPower:Number(row.live_faction_power??0),
       composition:row.live_faction_composition??{},startedTurn:row.live_faction_started_turn,
-      armyName:row.live_faction_army_name,leaderName:row.live_faction_leader_name,
+      armyName:row.live_faction_army_name,leaderName:row.live_faction_leader_name,siegeAssets:row.live_faction_siege_assets??{},
+      recommendedSiegeAssets:rebelSiegeTrain({type:row.live_faction_type??"POPULAR",personnel:Number(row.live_faction_personnel??0),
+        composition:row.live_faction_composition??{},engineeringLevel:Number(buildings.engineering??0)}),
       leaderSkill:Number(row.live_faction_leader_skill??1)}:null,
     history:history.map((item)=>({...item,game_turn:Number(item.game_turn),prosperity_before:Number(item.prosperity_before),
       prosperity_after:Number(item.prosperity_after),unrest_risk:Number(item.unrest_risk),
       rebellion_before:Number(item.rebellion_before),rebellion_after:Number(item.rebellion_after),
       rebellion_roll:item.rebellion_roll===null?null:Number(item.rebellion_roll)})),
-    unitLabels:Object.fromEntries(Object.keys(predictedComposition).map((unit)=>[unit,BATTLE_UNIT_STATS[unit as BattleUnitType]?.label??unit]))
+    unitLabels:Object.fromEntries(Object.keys(predictedComposition).map((unit)=>[unit,BATTLE_UNIT_STATS[unit as BattleUnitType]?.label??unit])),
+    siegeAssetLabels:Object.fromEntries(Object.entries(SIEGE_ASSETS).map(([key,asset])=>[key,asset.name]))
   };
 }
 
@@ -288,6 +308,8 @@ export const adminRebellionService={
         const factionType=input.factionType??before.live_faction_type??"POPULAR";
         const personnel=input.liveFactionPersonnel??Number(before.live_faction_personnel??0);
         const composition=rebelComposition(factionType,personnel);
+        const previousSiegeAssets=before.live_faction_siege_assets??{};
+        const siegeAssets=input.liveSiegeAssets??previousSiegeAssets;
         const factionName=input.liveFactionName??(factionType!==before.live_faction_type?rebelFactionName({
           type:factionType,settlementName:before.name,restorationCountryName:before.restoration_country_name,
           religionLabel:factionType==="RELIGIOUS"?(RELIGIONS[before.religion_key]?.label??before.religion_key):null
@@ -299,12 +321,23 @@ export const adminRebellionService={
              target_religion_key=CASE WHEN $1='RELIGIOUS' THEN $9 ELSE NULL END,
              target_culture_group=CASE WHEN $1='SEPARATIST' THEN $10 ELSE NULL END,
              leader_name=COALESCE($11,leader_name),leader_skill_bonus=COALESCE($12,leader_skill_bonus),
-             army_name=$2||' Ordusu',updated_at=NOW() WHERE id=$7`,
+             army_name=$2||' Ordusu',siege_assets=$13::jsonb,updated_at=NOW() WHERE id=$7`,
           [factionType,factionName,input.liveFactionStatus,personnel,rebelMilitaryPower(composition),
             JSON.stringify(composition),before.live_faction_id,before.restoration_country_id,before.religion_key,before.culture_group,
-            input.liveLeaderName,input.liveLeaderSkill]
+            input.liveLeaderName,input.liveLeaderSkill,JSON.stringify(siegeAssets)]
         );
-      }else if(input.liveFactionName!==undefined||input.liveFactionPersonnel!==undefined||input.liveFactionStatus!==undefined||input.liveLeaderName!==undefined||input.liveLeaderSkill!==undefined){
+        const targetFor=(asset:string)=>asset==="ram"?"GATE":["ladder_group","mantlet","siege_tower"].includes(asset)?"ASSAULT":"WALL";
+        const siegeTargets=Object.fromEntries(Object.entries(siegeAssets).filter(([,quantity])=>Number(quantity)>0)
+          .map(([asset])=>[asset,targetFor(asset)]));
+        await client.query(
+          `UPDATE battle_sides side SET
+             support_assets=(COALESCE(side.support_assets,'{}'::jsonb)-ARRAY(SELECT jsonb_object_keys($1::jsonb)))||$2::jsonb,
+             support_targets=(COALESCE(side.support_targets,'{}'::jsonb)-ARRAY(SELECT jsonb_object_keys($1::jsonb)))||$3::jsonb
+           FROM battles battle WHERE battle.id=side.battle_id AND side.rebel_faction_id=$4 AND side.side_key='A'
+             AND battle.terrain='SIEGE' AND battle.status NOT IN ('FINISHED','CANCELLED')`,
+          [JSON.stringify(previousSiegeAssets),JSON.stringify(siegeAssets),JSON.stringify(siegeTargets),before.live_faction_id]
+        );
+      }else if(input.liveFactionName!==undefined||input.liveFactionPersonnel!==undefined||input.liveFactionStatus!==undefined||input.liveLeaderName!==undefined||input.liveLeaderSkill!==undefined||input.liveSiegeAssets!==undefined){
         throw new Error("Düzenlenecek etkin bir isyancı grup bulunmuyor.");
       }
       await audit(client,actorId,"admin.panel.rebellion.update",settlementId,{before:{prosperity:before.prosperity,
@@ -343,18 +376,20 @@ export const adminRebellionService={
         const personnel=Number(preview.predictedFaction.personnel)||rebelPersonnel({type:factionType,population:Number(row.population),
           slavePopulation:Number(row.slave_population),warExhaustion:Number(row.war_exhaustion)});
         const composition=rebelComposition(factionType,personnel);
+        const siegeAssets=rebelSiegeTrain({type:factionType,personnel,composition,
+          engineeringLevel:Number((row.buildings??{}).engineering??0)});
         const power=rebelMilitaryPower(composition);
         const leader=rebelLeaderProfile({cultureGroup:factionType==="SEPARATIST"?row.culture_group:row.primary_culture_group,
           factionType,settlementName:row.name,seed:`${adminConfig.guildId}:${settlementId}:${currentTurn}`});
         await client.query(
           `INSERT INTO rebel_factions(guild_id,settlement_id,against_country_id,faction_type,display_name,restoration_country_id,
              target_religion_key,target_culture_group,status,started_turn,outbreak_turn,personnel,military_power,composition,cause_snapshot,
-             army_name,leader_name,leader_skill_bonus)
-           VALUES($1,$2,$3,$4,$5,$6,$7,$8,'ACTIVE',$9,$9,$10,$11,$12::jsonb,$13::jsonb,$14,$15,$16)`,
+             army_name,leader_name,leader_skill_bonus,siege_assets)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,'ACTIVE',$9,$9,$10,$11,$12::jsonb,$13::jsonb,$14,$15,$16,$17::jsonb)`,
           [adminConfig.guildId,settlementId,row.country_id,factionType,name,row.restoration_country_id,
             factionType==="RELIGIOUS"?row.religion_key:null,factionType==="SEPARATIST"?row.culture_group:null,currentTurn,
             personnel,power,JSON.stringify(composition),JSON.stringify({source:"admin-panel",factors:preview.factors,risk:preview.risk}),
-            `${name} Ordusu`,leader.name,leader.skillBonus]
+            `${name} Ordusu`,leader.name,leader.skillBonus,JSON.stringify(siegeAssets)]
         );
         await client.query("UPDATE settlements SET prosperity=0,rebellion_progress=100,rebellion_faction_type=$1,rebellion_active=TRUE,unrest_active=TRUE,rebellion_name_override=NULL,rebellion_personnel_override=NULL WHERE id=$2",[factionType,settlementId]);
       }

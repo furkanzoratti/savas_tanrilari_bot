@@ -157,6 +157,7 @@ interface ResolvedBattleTarget {
   leaderSkillBonus: number;
   rebelSettlementId: string | null;
   rebelSettlementName: string | null;
+  siegeAssets: SiegeComposition;
 }
 
 export function rebelSiegeSettlement(input:{
@@ -585,13 +586,13 @@ async function resolveBattleTarget(client: DbClient, guildId: string, rawValue: 
           AND (${countryToken?"id::text=$2":"LOWER(name)=LOWER($2)"}) LIMIT 1`,[guildId,countryToken??value]
     )).rows[0];
     if(country)return {id:country.id,name:country.name,kind:"COUNTRY",rebelFactionId:null,composition:{},armyName:null,leaderName:null,
-      leaderSkillBonus:0,rebelSettlementId:null,rebelSettlementName:null};
+      leaderSkillBonus:0,rebelSettlementId:null,rebelSettlementName:null,siegeAssets:{}};
   }
   const faction=(await client.query<{
     id:string;display_name:string;composition:BattleComposition;army_name:string;leader_name:string;
-    leader_skill_bonus:number;culture_group:string;settlement_id:string;settlement_name:string;
+    leader_skill_bonus:number;culture_group:string;settlement_id:string;settlement_name:string;siege_assets:SiegeComposition;
   }>(
-    `SELECT faction.id,faction.display_name,faction.composition,faction.army_name,faction.leader_name,
+    `SELECT faction.id,faction.display_name,faction.composition,faction.army_name,faction.leader_name,faction.siege_assets,
             faction.leader_skill_bonus,settlement.culture_group,settlement.id AS settlement_id,
             settlement.name AS settlement_name
        FROM rebel_factions faction JOIN settlements settlement ON settlement.id=faction.settlement_id
@@ -616,7 +617,7 @@ async function resolveBattleTarget(client: DbClient, guildId: string, rawValue: 
   return {id:proxy.id,name:faction.display_name,kind:"REBEL",rebelFactionId:faction.id,
     composition:faction.composition??{},armyName:faction.army_name,leaderName:faction.leader_name,
     leaderSkillBonus:Number(faction.leader_skill_bonus),rebelSettlementId:faction.settlement_id,
-    rebelSettlementName:faction.settlement_name};
+    rebelSettlementName:faction.settlement_name,siegeAssets:faction.siege_assets??{}};
 }
 
 async function syncRebelBattleSide(client:DbClient,battleId:string,side:BattleSideKey):Promise<void>{
@@ -677,6 +678,18 @@ function retreatLoss(view: BattleView, side: BattleSideKey): number {
   if (view.battle.terrain === "AMBUSH" || view.battle.terrain === "MOUNTAIN_PASS") rate += 0.05;
   if (view.battle.terrain === "SIEGE" && side === "B") rate += 0.05;
   return Math.min(loser.current_total, Math.round(loser.current_total * Math.min(0.25, rate)));
+}
+
+export function rebelSiegeTargets(assets: SiegeComposition): SiegeTargets {
+  const targets: SiegeTargets = {};
+  for (const [rawAsset,rawQuantity] of Object.entries(assets)) {
+    if (Number(rawQuantity??0)<=0) continue;
+    const asset=rawAsset as SiegeAssetType;
+    targets[asset]=asset==="ram"?"GATE"
+      :["ladder_group","mantlet","siege_tower"].includes(asset)?"ASSAULT"
+        :asset==="wall_ballista"?"ARMY":"WALL";
+  }
+  return targets;
 }
 
 function defaultArmySiegeTarget(asset: SiegeAssetType): SiegeTarget {
@@ -1453,12 +1466,25 @@ export const battleService = {
       const compositionA=a.kind==="REBEL"?a.composition:{};
       const compositionB=b.kind==="REBEL"?b.composition:{};
       const totalA=compositionTotal(compositionA),totalB=compositionTotal(compositionB);
+      const supportA:SiegeComposition=input.terrain==="SIEGE"&&a.kind==="REBEL"?a.siegeAssets:{};
+      let supportB:SiegeComposition={};
+      if(input.terrain==="SIEGE"&&b.kind==="REBEL"&&defenderSettlementId){
+        const wallBallistae=Number((await client.query<{quantity:number}>(
+          `SELECT COALESCE(SUM(quantity),0)::integer AS quantity FROM siege_assets
+            WHERE settlement_id=$1 AND asset_type='wall_ballista'`,[defenderSettlementId]
+        )).rows[0]?.quantity??0);
+        if(wallBallistae>0)supportB={wall_ballista:wallBallistae};
+      }
+      const targetsA=rebelSiegeTargets(supportA),targetsB=rebelSiegeTargets(supportB);
       await client.query(
-        `INSERT INTO battle_sides(battle_id,side_key,country_id,controller,composition,initial_composition,initial_total,current_total,seal,rebel_faction_id)
-         VALUES($1,'A',$2,$3,$4::jsonb,$4::jsonb,$5,$5,$6,$7),
-               ($1,'B',$8,$9,$10::jsonb,$10::jsonb,$11,$11,$12,$13)`,
-        [id,a.id,a.kind==="REBEL"?"GM":input.controllerA,JSON.stringify(compositionA),totalA,sealFor(compositionA),a.rebelFactionId,
-          b.id,b.kind==="REBEL"?"GM":input.controllerB,JSON.stringify(compositionB),totalB,sealFor(compositionB),b.rebelFactionId]
+        `INSERT INTO battle_sides(battle_id,side_key,country_id,controller,composition,initial_composition,initial_total,current_total,
+           seal,rebel_faction_id,support_assets,support_targets)
+         VALUES($1,'A',$2,$3,$4::jsonb,$4::jsonb,$5,$5,$6,$7,$8::jsonb,$9::jsonb),
+               ($1,'B',$10,$11,$12::jsonb,$12::jsonb,$13,$13,$14,$15,$16::jsonb,$17::jsonb)`,
+        [id,a.id,a.kind==="REBEL"?"GM":input.controllerA,JSON.stringify(compositionA),totalA,
+          sealFor({...compositionA,...supportA}),a.rebelFactionId,JSON.stringify(supportA),JSON.stringify(targetsA),
+          b.id,b.kind==="REBEL"?"GM":input.controllerB,JSON.stringify(compositionB),totalB,
+          sealFor({...compositionB,...supportB}),b.rebelFactionId,JSON.stringify(supportB),JSON.stringify(targetsB)]
       );
       await client.query(
         `INSERT INTO battle_side_participants(battle_id,side_key,country_id,is_primary,composition,initial_composition)
