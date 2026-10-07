@@ -662,6 +662,48 @@ async function syncRebelBattleSide(client:DbClient,battleId:string,side:BattleSi
   );
 }
 
+async function applyRebelOccupationOutcome(
+  client:DbClient,battleId:string,winner:BattleSideKey|null,guildId:string,actorId:string
+):Promise<boolean>{
+  if(!winner)return false;
+  const outcome=(await client.query<{
+    terrain:BattleTerrain;defender_settlement_id:string|null;rebel_faction_id:string;
+    faction_settlement_id:string;faction_status:string;current_turn:number;
+  }>(
+    `SELECT battle.terrain,battle.defender_settlement_id,side_record.rebel_faction_id,
+            faction.settlement_id AS faction_settlement_id,faction.status AS faction_status,
+            guild.current_turn
+       FROM battles battle
+       JOIN battle_sides side_record ON side_record.battle_id=battle.id AND side_record.side_key=$2
+       JOIN rebel_factions faction ON faction.id=side_record.rebel_faction_id
+       JOIN guilds guild ON guild.discord_id=battle.guild_id
+      WHERE battle.id=$1 FOR UPDATE OF faction`,[battleId,winner]
+  )).rows[0];
+  if(!outcome||outcome.terrain!=="SIEGE"||!outcome.defender_settlement_id)return false;
+  if(outcome.faction_settlement_id!==outcome.defender_settlement_id)return false;
+  await client.query(
+    `UPDATE rebel_factions SET status='OCCUPYING',occupied_turn=COALESCE(occupied_turn,$1),
+       cause_snapshot=COALESCE(cause_snapshot,'{}'::jsonb)||jsonb_build_object(
+         'occupationBattleId',$2::text,'occupiedSettlementId',$3::text
+       ),updated_at=NOW() WHERE id=$4`,
+    [outcome.current_turn,battleId,outcome.defender_settlement_id,outcome.rebel_faction_id]
+  );
+  await client.query(
+    `UPDATE settlements SET rebellion_active=TRUE,unrest_active=TRUE,prosperity=0
+      WHERE id=$1`,[outcome.defender_settlement_id]
+  );
+  if(outcome.faction_status!=="OCCUPYING"){
+    await client.query(
+      `INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details)
+       VALUES($1,$2,'REBEL_SETTLEMENT_OCCUPIED','settlement',$3,$4::jsonb)`,
+      [guildId,actorId,outcome.defender_settlement_id,JSON.stringify({
+        battleId,rebelFactionId:outcome.rebel_faction_id,winner,turn:outcome.current_turn
+      })]
+    );
+  }
+  return true;
+}
+
 function validateSiegeTarget(side: BattleSideKey, asset: SiegeAssetType, target: SiegeTarget): void {
   if (side === "B" && asset !== "wall_ballista") throw new GameError("Savunan taraf yalnızca Hafif Sur Balistası ekleyebilir.");
   if (side === "A" && asset === "wall_ballista") throw new GameError("Hafif Sur Balistası yalnızca savunan tarafa eklenebilir.");
@@ -2376,6 +2418,9 @@ export const battleService = {
         const reason="Savunulan yerleşkede garnizon, ordu veya otomatik milis bulunmadığı için şehir çatışmasız ele geçirildi.";
         await client.query(`UPDATE battles SET status='FINISHED',winner_side='A',finish_reason=$1,losses_applied_at=NOW(),updated_at=NOW()
           WHERE id=$2`,[reason,battle.id]);
+        if(view.sides.A.rebel_faction_id){
+          await applyRebelOccupationOutcome(client,battle.id,"A",input.guildId,input.actorId);
+        }
         await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'battle.siege.unopposed','battle',$3,$4::jsonb)",[
           input.guildId,input.actorId,battle.id,JSON.stringify({defenderSettlementId:battle.defender_settlement_id,winnerSide:"A"})
         ]);
@@ -2976,6 +3021,9 @@ export const battleService = {
         wall_current_hp=COALESCE($6,wall_current_hp),gate_current_hp=COALESCE($7,gate_current_hp),updated_at=NOW() WHERE id=$8`,
       [ended ? "FINISHED" : "WAITING_FIRST_ROLL", ended ? 0 : 1, nextFirst, winner, reason, wallAfter, gateAfter, active.id]);
       if (ended) {
+        if(winner&&view.sides[winner].rebel_faction_id){
+          await applyRebelOccupationOutcome(client,active.id,winner,input.guildId,input.actorId);
+        }
         await settleLinkedEncounter(client,active.id,false);
         const currentTurn = Number((await client.query<{ current_turn: number }>("SELECT current_turn FROM guilds WHERE discord_id=$1", [input.guildId])).rows[0]?.current_turn ?? 0);
         await recordCommanderVictory(client,active.id,winner,currentTurn);
@@ -3034,6 +3082,9 @@ export const battleService = {
       const winner: BattleSideKey = side === "A" ? "B" : "A";
       const finishReason = `${view.sides[side].country_name} geri çekildi.${appliedLoss ? ` Takip sırasında ${appliedLoss} kayıp verdi.` : " İlk turda temas kesildiği için ek kayıp yaşanmadı."}`;
       await client.query("UPDATE battles SET status='FINISHED',winner_side=$1,finish_reason=$2,updated_at=NOW() WHERE id=$3", [winner, finishReason, active.id]);
+      if(view.sides[winner].rebel_faction_id){
+        await applyRebelOccupationOutcome(client,active.id,winner,input.guildId,input.actorId);
+      }
       await settleLinkedEncounter(client,active.id,false);
       const currentTurn = Number((await client.query<{ current_turn: number }>("SELECT current_turn FROM guilds WHERE discord_id=$1", [input.guildId])).rows[0]?.current_turn ?? 0);
       await recordCommanderVictory(client,active.id,winner,currentTurn);
@@ -3046,7 +3097,14 @@ export const battleService = {
     return withTransaction(async (client) => {
       const active = await activeInChannel(client, input.guildId, input.channelId);
       if (!active) throw new GameError("Bu kanalda etkin savaş yok.");
+      const winnerIsRebel=input.winner?Boolean((await client.query(
+        "SELECT 1 FROM battle_sides WHERE battle_id=$1 AND side_key=$2 AND rebel_faction_id IS NOT NULL",
+        [active.id,input.winner]
+      )).rowCount):false;
       await client.query("UPDATE battles SET status='FINISHED',winner_side=$1,finish_reason=$2,updated_at=NOW() WHERE id=$3", [input.winner, input.reason, active.id]);
+      if(winnerIsRebel){
+        await applyRebelOccupationOutcome(client,active.id,input.winner,input.guildId,input.actorId);
+      }
       await settleLinkedEncounter(client,active.id,false);
       const currentTurn = Number((await client.query<{ current_turn: number }>("SELECT current_turn FROM guilds WHERE discord_id=$1", [input.guildId])).rows[0]?.current_turn ?? 0);
       await recordCommanderVictory(client,active.id,input.winner,currentTurn);

@@ -76,6 +76,7 @@ import { legacyRebelForcesBackfillMigration } from "./legacy-rebel-forces-backfi
 import { warExhaustionActivationBaselineMigration } from "./war-exhaustion-activation-baseline-migration.js";
 import { rebelBattleIntegrationMigration } from "./rebel-battle-integration-migration.js";
 import { rebelSiegeTrainMigration } from "./rebel-siege-train-migration.js";
+import { rebelOccupationOutcomeMigration } from "./rebel-occupation-outcome-migration.js";
 
 export const migrations = [
   {
@@ -2369,5 +2370,6 @@ export const migrations = [
   legacyRebelForcesBackfillMigration,
   warExhaustionActivationBaselineMigration,
   rebelBattleIntegrationMigration,
-  rebelSiegeTrainMigration
+  rebelSiegeTrainMigration,
+  rebelOccupationOutcomeMigration
 ] as const;
