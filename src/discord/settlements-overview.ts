@@ -5,7 +5,7 @@ import { prosperityTier } from "../domain/stability.js";
 import type { CountryDocument } from "../services/game-service.js";
 import { SETTLEMENTS_OVERVIEW_BANNER_URL } from "./assets.js";
 
-const PAGE_SIZE=8;
+const PAGE_SIZE=6;
 
 function dominantBelief(settlement:CountryDocument["settlements"][number]):string{
   const shares=settlement.religionDistribution??[];
@@ -32,10 +32,10 @@ export function renderSettlementsOverview(document:CountryDocument):EmbedBuilder
       .setColor(0xb58b32)
       .setTitle(`🏛️ ${document.country.name} • Yerleşkelerim${pages>1?` • ${page+1}/${pages}`:""}`)
       .setDescription(page===0?[
-        `**${document.settlements.length} yerleşke** • Ana kültür: **${cultureLabel}**`,
-        `🏦 Toplam yerel hazine: **${gold(document.country.treasury)}**`,
-        `💰 Dönem geliri: **${gold(document.totalPayableIncome)}** • Bakım: **−${gold(document.totalUpkeep)}** • Net: **${document.netIncome>=0?"+":""}${gold(document.netIncome)}**`,
-        `⚔️ Devlet askerî kapasitesi: **${number(document.militaryUsed)} / ${number(document.militaryLimit)}**`
+        `🏘️ **Yerleşke Sayısı:** ${document.settlements.length} • 🏺 **Ana Kültür:** ${cultureLabel}`,
+        `🏦 **Toplam Yerel Hazine:** ${gold(document.country.treasury)}`,
+        `💰 **Dönem Geliri:** ${gold(document.totalPayableIncome)} • **Toplam Bakım:** −${gold(document.totalUpkeep)} • **Net:** ${document.netIncome>=0?"+":""}${gold(document.netIncome)}`,
+        `⚔️ **Devlet Askerî Kapasitesi:** ${number(document.militaryUsed)} / ${number(document.militaryLimit)}`
       ].join("\n"):`Yerleşke görünümü devam ediyor • Sayfa **${page+1}/${pages}**`)
       .setFooter({text:"Gelirler mevcut refah, kültür, din, seferberlik ve diğer etkin koşullar uygulanmış dönem değerleridir."});
     if(page===0)embed.setImage(SETTLEMENTS_OVERVIEW_BANNER_URL);
@@ -51,10 +51,12 @@ export function renderSettlementsOverview(document:CountryDocument):EmbedBuilder
       embed.addFields({
         name:`🏛️ ${settlement.name} • ${settlementStatus(settlement)}`,
         value:[
-          `🏦 Hazine: **${gold(settlement.local_treasury)}** • Gelir: **${gold(settlement.payableIncome)}** • Net: **${net>=0?"+":""}${gold(net)}**`,
-          `⚔️ Yerel askerî kapasite: **${number(settlement.militaryUsed)} / ${number(settlement.militaryLimit)}** • Devlet: **${number(document.militaryUsed)} / ${number(document.militaryLimit)}**`,
-          `🏺 Kültür: **${culture}** ${cultureCompatible?"✅":"⚠️ Yabancı"} • ⛩️ Din: **${dominantBelief(settlement)}**`,
-          `🌿 Refah: **${settlement.prosperity}/100 • ${prosperity.label}** • 🔥 İsyan: **${settlement.rebellion_progress}/100** • Tur riski: **%${number(settlement.rebellionRisk)}**`
+          `🏦 **Hazine:** ${gold(settlement.local_treasury)} • **Dönem Geliri:** ${gold(settlement.payableIncome)} • **Net:** ${net>=0?"+":""}${gold(net)}`,
+          `⚔️ **Yerel Askerî Kapasite:** ${number(settlement.militaryUsed)} / ${number(settlement.militaryLimit)}`,
+          `🏺 **Kültür:** ${culture} • ${cultureCompatible?"✅ Uyumlu":"⚠️ Yabancı"}`,
+          `⛩️ **Din ve Mezhep:** ${dominantBelief(settlement)}`,
+          `🌿 **Refah:** ${settlement.prosperity}/100 • ${prosperity.label}`,
+          `🔥 **İsyan Durumu:** ${settlement.rebellion_progress}/100 • **Tur Riski:** %${number(settlement.rebellionRisk)}`
         ].join("\n")
       });
     }

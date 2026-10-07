@@ -248,34 +248,35 @@ function renderCountryDetail(detail:CountryDetailView,document:CountryDocument):
   const safeField=(value:string)=>value.length<=1024?value:`${value.slice(0,1021)}…`;
   const list=(values:string[],empty:string)=>safeField(values.length?values.map((value)=>`• ${value}`).join("\n"):empty);
   const dynasty=detail.dynasty
-    ?[`**${detail.dynasty.name}**`,`Hükümdar: **${detail.dynasty.monarch??"Belirlenmedi"}**`,`Veliaht: **${detail.dynasty.heir??"Belirlenmedi"}**`,`Yaşayan üye: **${detail.dynasty.livingMembers}**${detail.dynasty.sickMembers?` • Hasta: **${detail.dynasty.sickMembers}**`:""}`].join("\n")
+    ?[`**${detail.dynasty.name}**`,`**Hükümdar:** ${detail.dynasty.monarch??"Belirlenmedi"}`,`**Veliaht:** ${detail.dynasty.heir??"Belirlenmedi"}`,`**Yaşayan Üye:** ${detail.dynasty.livingMembers}${detail.dynasty.sickMembers?` • **Hasta:** ${detail.dynasty.sickMembers}`:""}`].join("\n")
     :"Bu devlet için hanedan kaydı bulunmuyor.";
   const main=new EmbedBuilder()
     .setColor(0xc59b45)
     .setTitle(`👑 ${detail.country.name} • Devlet Detayı`)
     .setDescription([
-      `**Tur ${document.guild.current_turn}** • ${detailPhaseLabels[document.guild.turn_phase]??document.guild.turn_phase}`,
-      `🏘️ **${number(detail.settlementCount)} yerleşke** • 👥 **${number(detail.totalPopulation)} özgür nüfus**`,
-      `🏺 Ana kültür: **${CULTURE_GROUPS[detail.country.primaryCultureGroup]?.label??detail.country.primaryCultureGroup}**`
+      `🗓️ **Tur ${document.guild.current_turn}** • ${detailPhaseLabels[document.guild.turn_phase]??document.guild.turn_phase}`,
+      `Devletin yönetim, ekonomi, toplum ve askerî durum özeti.`
     ].join("\n"))
     .setImage(STATE_DETAIL_BANNER_URL)
     .addFields(
-      {name:"👑 Yönetim",value:document.playerIds.length?document.playerIds.map((id)=>`<@${id}>`).join(" • "):"Oyuncu atanmamış.",inline:true},
-      {name:"🏰 Hanedan",value:dynasty,inline:true},
-      {name:"🏦 Devlet Ekonomisi",value:[`Hazine: **${gold(detail.totalTreasury)}**`,`Dönem geliri: **${gold(document.totalPayableIncome)}**`,`Toplam bakım: **−${gold(document.totalUpkeep)}**`,`Net: **${document.netIncome>=0?"+":""}${gold(document.netIncome)}**`].join("\n"),inline:true},
-      {name:"⚔️ Askerî Durum",value:[`Seferberlik: **${MOBILIZATION_RULES[detail.country.mobilization].label}**`,`Mevcut personel: **${number(document.militaryUsed)}**`,`Toplam sınır: **${number(document.militaryLimit)}**`,`Savaş yorgunluğu: **${detail.country.warExhaustion}/100**${document.manpowerPenaltyActive?"\n⚠️ Askerî sınır cezası aktif":""}`].join("\n"),inline:true},
-      {name:"⛩️ İnanç Yapısı",value:list(detail.religions.map((entry)=>`**${entry.label} %${detailPercent(entry.percent)}**${entry.primaryPercent?` • Ana inanç %${detailPercent(entry.primaryPercent)}`:""}`),"Din kaydı bulunmuyor."),inline:true},
-      {name:"🏺 Kültür Yapısı",value:list(detail.cultures.map((entry)=>`**${CULTURE_GROUPS[entry.key]?.label??entry.key} %${detailPercent(entry.percent)}**`),"Kültür kaydı bulunmuyor."),inline:true}
+      {name:"🏛️ Devlet Yapısı",value:[`**Yerleşke Sayısı:** ${number(detail.settlementCount)}`,`**Özgür Nüfus:** ${number(detail.totalPopulation)}`,`**Ana Kültür:** ${CULTURE_GROUPS[detail.country.primaryCultureGroup]?.label??detail.country.primaryCultureGroup}`].join("\n"),inline:true},
+      {name:"👑 Ülke Yönetimi",value:document.playerIds.length?document.playerIds.map((id)=>`<@${id}>`).join(" • "):"Oyuncu atanmamış.",inline:true},
+      {name:"🏰 Yönetici Hanedan",value:dynasty},
+      {name:"🏦 Devlet Ekonomisi",value:[`**Hazine:** ${gold(detail.totalTreasury)}`,`**Dönem Geliri:** ${gold(document.totalPayableIncome)}`,`**Toplam Bakım:** −${gold(document.totalUpkeep)}`,`**Net Gelir:** ${document.netIncome>=0?"+":""}${gold(document.netIncome)}`].join("\n"),inline:true},
+      {name:"⚔️ Askerî Durum",value:[`**Seferberlik:** ${MOBILIZATION_RULES[detail.country.mobilization].label}`,`**Askerî Kapasite:** ${number(document.militaryUsed)} / ${number(document.militaryLimit)}`,`**Savaş Yorgunluğu:** ${detail.country.warExhaustion}/100${document.manpowerPenaltyActive?"\n⚠️ **Askerî Sınır Cezası Aktif**":""}`].join("\n"),inline:true},
+      {name:"⛩️ İnanç Dağılımı",value:list(detail.religions.map((entry)=>`**${entry.label}:** %${detailPercent(entry.percent)}${entry.primaryPercent?` • Ana İnanç %${detailPercent(entry.primaryPercent)}`:""}`),"Din kaydı bulunmuyor.")},
+      {name:"🏺 Kültür Dağılımı",value:list(detail.cultures.map((entry)=>`**${CULTURE_GROUPS[entry.key]?.label??entry.key}:** %${detailPercent(entry.percent)}`),"Kültür kaydı bulunmuyor.")}
     )
     .setFooter({text:"Yerleşke bazlı ekonomi ve istikrar ayrıntıları için /yerleskelerim komutunu kullanın."});
   const diplomacy=new EmbedBuilder()
     .setColor(0x8f6b35)
     .setTitle(`🤝 ${detail.country.name} • Diplomasi ve Egemenlik`)
+    .setDescription("Devletin yürürlükteki diplomatik bağları ve savaş durumu.")
     .addFields(
       {name:"🛡️ Müttefikler",value:list(detail.diplomacy.allies.map((name)=>`**${name}**`),"Aktif müttefik bulunmuyor."),inline:true},
       {name:"🏛️ Paktlar",value:list(detail.diplomacy.pacts.map((pact)=>`**${pact.name}** — ${pact.purpose}`),"Pakt üyeliği bulunmuyor."),inline:true},
-      {name:"⚖️ Vassallık",value:safeField([detail.diplomacy.overlord?`Hâkim devlet: **${detail.diplomacy.overlord}**`:"Bağımsız devlet",detail.diplomacy.vassals.length?`Vassallar: ${detail.diplomacy.vassals.map((name)=>`**${name}**`).join(", ")}`:"Vassal bulunmuyor."].join("\n")),inline:true},
-      {name:"⚓ Dost Liman Erişimi",value:safeField([`Erişim alınan: ${detail.diplomacy.portAccessFrom.length?detail.diplomacy.portAccessFrom.map((name)=>`**${name}**`).join(", "):"Yok"}`,`Erişim verilen: ${detail.diplomacy.portAccessGrantedTo.length?detail.diplomacy.portAccessGrantedTo.map((name)=>`**${name}**`).join(", "):"Yok"}`].join("\n"))},
+      {name:"⚖️ Vassallık Durumu",value:safeField([detail.diplomacy.overlord?`**Hâkim Devlet:** ${detail.diplomacy.overlord}`:"**Bağımsız Devlet**",detail.diplomacy.vassals.length?`**Vassallar:** ${detail.diplomacy.vassals.join(", ")}`:"Vassal bulunmuyor."].join("\n")),inline:true},
+      {name:"⚓ Dost Liman Erişimi",value:safeField([`**Erişim Alınan:** ${detail.diplomacy.portAccessFrom.length?detail.diplomacy.portAccessFrom.join(", "):"Yok"}`,`**Erişim Verilen:** ${detail.diplomacy.portAccessGrantedTo.length?detail.diplomacy.portAccessGrantedTo.join(", "):"Yok"}`].join("\n"))},
       {name:"⚔️ Aktif Savaşlar",value:list(detail.diplomacy.wars.map((war)=>`**${war.opponent}** — ${war.warGoal}`),"Aktif resmî savaş bulunmuyor.")}
     );
   return [main,diplomacy];

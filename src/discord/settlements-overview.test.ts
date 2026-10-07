@@ -34,22 +34,26 @@ function documentWithSettlements(count:number):CountryDocument {
 }
 
 describe("renderSettlementsOverview",()=>{
-  it("yerleşkeleri sekizerli sayfalayıp görseli yalnız ilk sayfaya bağlar",()=>{
+  it("yerleşkeleri altışarlı sayfalayıp görseli yalnız ilk sayfaya bağlar",()=>{
     const embeds=renderSettlementsOverview(documentWithSettlements(9));
     expect(embeds).toHaveLength(2);
     expect(embeds[0]!.toJSON().image?.url).toBe(SETTLEMENTS_OVERVIEW_BANNER_URL);
-    expect(embeds[0]!.toJSON().fields).toHaveLength(8);
+    expect(embeds[0]!.toJSON().fields).toHaveLength(6);
     expect(embeds[1]!.toJSON().image).toBeUndefined();
-    expect(embeds[1]!.toJSON().fields).toHaveLength(1);
+    expect(embeds[1]!.toJSON().fields).toHaveLength(3);
   });
 
   it("ekonomi, askerî kapasite, kültür, din, refah ve isyan bilgisini gösterir",()=>{
     const field=renderSettlementsOverview(documentWithSettlements(1))[0]!.toJSON().fields?.[0];
     expect(field?.value).toContain("Hazine");
-    expect(field?.value).toContain("Yerel askerî kapasite");
+    expect(field?.value).toContain("Yerel Askerî Kapasite");
+    expect(field?.value).not.toContain("Devlet:");
     expect(field?.value).toContain("Yabancı");
     expect(field?.value).toContain("Helen Panteonu");
     expect(field?.value).toContain("Refah");
-    expect(field?.value).toContain("Tur riski");
+    expect(field?.value).toContain("Tur Riski");
+    const lines=field?.value.split("\n")??[];
+    expect(lines.find((line)=>line.includes("Kültür"))).not.toContain("Din");
+    expect(lines.find((line)=>line.includes("Din ve Mezhep"))).not.toContain("Kültür");
   });
 });
