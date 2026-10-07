@@ -36,7 +36,7 @@ describe("stability domain",()=>{
   it("builds a persistent siege train from personnel and engineering",()=>{
     const composition=rebelComposition("SEPARATIST",12_000);
     expect(rebelSiegeTrain({type:"SEPARATIST",personnel:12_000,composition,engineeringLevel:2})).toEqual({
-      ladder_group:3,ram:1,mantlet:3,ballista:2,catapult:1
+      ladder_group:4,ram:1,mantlet:3,ballista:2,catapult:1
     });
   });
 

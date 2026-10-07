@@ -181,7 +181,7 @@ export function rebelSiegeTrain(input: {
   const personnel = Math.max(0, Math.floor(input.personnel));
   const engineering = Math.max(0, Math.min(3, Math.floor(input.engineeringLevel)));
   const result: RebelSiegeTrain = {};
-  const ladders = Math.min(8, Math.ceil(infantry / 2_500));
+  const ladders = Math.min(8, Math.ceil(infantry / 2_000));
   const mantlets = Math.min(5, Math.floor(personnel / 4_000));
   const ballistae = (engineering >= 1 ? 1 : 0) + (input.type === "SEPARATIST" ? 1 : 0);
   if (ladders > 0) result.ladder_group = ladders;

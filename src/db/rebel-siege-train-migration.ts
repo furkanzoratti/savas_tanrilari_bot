@@ -19,7 +19,7 @@ export const rebelSiegeTrainMigration={
        GROUP BY faction.id,faction.faction_type,faction.personnel,faction.composition
     ), calculated AS (
       SELECT id,jsonb_strip_nulls(jsonb_build_object(
-        'ladder_group',NULLIF(LEAST(8,CEIL(infantry/2500.0)::integer),0),
+        'ladder_group',NULLIF(LEAST(8,CEIL(infantry/2000.0)::integer),0),
         'ram',CASE WHEN personnel>=4000 THEN 1 END,
         'mantlet',NULLIF(LEAST(5,FLOOR(personnel/4000.0)::integer),0),
         'ballista',NULLIF((CASE WHEN engineering_level>=1 THEN 1 ELSE 0 END)

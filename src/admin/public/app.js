@@ -518,7 +518,7 @@ async function openRebellionEditor(settlementId) {
     const infantry=["light_infantry","spear","heavy_infantry","militia"].reduce((sum,unit)=>sum+Number(composition[unit]||0),0);
     const engineering=Math.max(0,Math.min(3,Number(item.engineeringLevel||0)));
     const calculated={
-      ladder_group:Math.min(8,Math.ceil(infantry/2500)),
+      ladder_group:Math.min(8,Math.ceil(infantry/2000)),
       ram:personnel>=4000?1:0,
       mantlet:Math.min(5,Math.floor(personnel/4000)),
       ballista:(engineering>=1?1:0)+(type==="SEPARATIST"?1:0),
