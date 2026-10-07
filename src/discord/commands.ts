@@ -1042,11 +1042,16 @@ export const commandBuilders = [
       .addStringOption((o) => o.setName("yerleske").setDescription("Nüfusun silineceği yerleşke").setRequired(true))
       .addStringOption((o) => o.setName("nufus-turu").setDescription("Silinecek nüfus türü").setRequired(true).addChoices({ name: "Özgür Nüfus", value: "FREE" }, { name: "Köle Nüfusu", value: "SLAVE" }))
       .addIntegerOption((o) => o.setName("miktar").setDescription("Silinecek nüfus miktarı").setMinValue(1).setRequired(true)))
-    .addSubcommand((sub) => sub.setName("yerleske-devret").setDescription("Bir yerleşkeyi fethedilmiş olarak başka devlete aktarır")
+    .addSubcommand((sub) => sub.setName("yerleske-devret").setDescription("Bir yerleşkeyi fetih, barış veya dostça devir olarak aktarır")
       .addStringOption((o) => o.setName("kaynak-ulke").setDescription("Yerleşkenin mevcut sahibi").setRequired(true))
       .addStringOption((o) => o.setName("yerleske").setDescription("Aktarılacak yerleşke").setRequired(true))
       .addStringOption((o) => o.setName("hedef-ulke").setDescription("Yerleşkenin yeni sahibi").setRequired(true))
-      .addIntegerOption((o) => o.setName("fetih-turu").setDescription("Gecikmeli kayıt için gerçek fetih turu; boşsa mevcut tur").setMinValue(0)))
+      .addStringOption((o) => o.setName("devir-turu").setDescription("Devrin refah, asimilasyon ve isyan etkisini belirler").setRequired(true).addChoices(
+        { name: "⚔️ Fetih", value: "CONQUEST" },
+        { name: "📜 Barış Antlaşması", value: "PEACE_TRANSFER" },
+        { name: "🤝 Dostça Devir", value: "VOLUNTARY_TRANSFER" }
+      ))
+      .addIntegerOption((o) => o.setName("islem-turu").setDescription("Gecikmeli kayıt için gerçek devir turu; boşsa mevcut tur").setMinValue(0)))
     .addSubcommand((sub) => sub.setName("oyuncu-ata").setDescription("Oyuncuyu ülkeye atar")
       .addStringOption((o) => o.setName("ulke").setDescription("Ülke adı").setRequired(true))
       .addUserOption((o) => o.setName("oyuncu").setDescription("Oyuncu").setRequired(true)))

@@ -46,10 +46,12 @@ describe("yönetim komutları", () => {
     expect(vassalage?.options?.find((option) => option.name === "ilhak-et")?.options?.find((option) => option.name === "onay")).toMatchObject({ required: true });
   });
 
-  it("hazine taşımayı kullanım sayısı yerine tur kotasıyla tanımlar ve gecikmeli fetih turunu destekler", () => {
+  it("hazine taşımayı tur kotasıyla tanımlar ve yerleşke devrini türüne göre kaydeder", () => {
     expect(commandBuilders.find((command) => command.name === "hazine-tasi")?.description).toContain("Tur kotanız dolana kadar");
     const transfer = commandBuilders.find((command) => command.name === "yonetim")?.options?.find((option) => option.name === "yerleske-devret");
-    expect(transfer?.options?.find((option) => option.name === "fetih-turu")).toBeDefined();
+    expect(transfer?.options?.find((option) => option.name === "devir-turu")?.choices?.map((choice) => choice.value))
+      .toEqual(["CONQUEST", "PEACE_TRANSFER", "VOLUNTARY_TRANSFER"]);
+    expect(transfer?.options?.find((option) => option.name === "islem-turu")).toBeDefined();
   });
 
   it("gözcü, atölye, saha aleti ve asimilasyon komutlarını kaydeder", () => {

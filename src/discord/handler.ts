@@ -13,6 +13,7 @@ import { CULTURE_GROUPS, type CultureGroup } from "../domain/cultures.js";
 import { RELIGIONS, isReligionKey } from "../domain/religions.js";
 import { garrisonComposition } from "../domain/garrison.js";
 import { currentLocalDate } from "../domain/great-power.js";
+import type { SettlementTransferType } from "../domain/settlement-transfer.js";
 import { isAcquisitionTurn } from "../domain/mobilization.js";
 import type { Mobilization, UnitStatus } from "../domain/types.js";
 import { TRADE_ROUTE_LABELS, type TradeRoute } from "../domain/trade.js";
@@ -897,7 +898,8 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
     const result = await gameService.transferSettlement({
       guildId: interaction.guildId, actorId: interaction.user.id,
       sourceCountryId: source.id, targetCountryId: target.id, settlementId: settlement.id,
-      conqueredTurn: interaction.options.getInteger("fetih-turu")
+      transferType: interaction.options.getString("devir-turu", true) as SettlementTransferType,
+      transferTurn: interaction.options.getInteger("islem-turu")
     });
     if(interaction.guild){
       for(const detail of result.lastStandDetails){
@@ -912,7 +914,10 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
       if(detail.kind==="FAILED")return `\n🏴 **${detail.countryName} yok edildi.** ${detail.reason}`;
       return "";
     }).join("");
-    await interaction.editReply(`🏳️ **${result.settlementName}**, **${result.sourceName}** devletinden **${result.targetName}** devletine aktarıldı ve **Tur ${result.conqueredTurn} fethi** olarak işaretlendi.\n⛓️ Köleleştirilen eski garnizon: **${number(result.enslavedGarrison)}**\n🛡️ Ordularda korunan asker: **${number(result.preservedArmyPersonnel)}**\n🚶 Şehir nüfusundan ayrılan saha askeri: **${number(result.evacuatedArmyPopulation)}**\n🧹 Silinen eski askerî varlıklar: **${number(result.removedArmyPersonnel)} asker** • **${number(result.removedShips)} gemi** • **${number(result.removedSiegeAssets)} kuşatma aleti** • **${result.destroyedMercenaryContracts} paralı asker sözleşmesi**\n🛡️ Yeni garnizon emri: **${number(result.newGarrisonPersonnel)} asker** • **${number(result.newGarrisonCost)} Altın**${result.newGarrisonCompletionTurn ? ` • Tur **${result.newGarrisonCompletionTurn}**` : ""}\n⚔️ İptal edilen aktif asker alımı: **${result.cancelledRecruitmentOrders}**\n🤝 Feshedilen/bekleyen ticaret: **${result.endedTrades}**${lastStandText}`);
+    const transferEffectText=result.transferType==="CONQUEST"
+      ? `⛓️ Köleleştirilen eski garnizon: **${number(result.enslavedGarrison)}**\n📉 Refah **0** olur; yerleşke asimilasyon tamamlanana kadar fethedilmiş sayılır ve isyan baskısı kazanır.\n🛡️ Yeni garnizon emri: **${number(result.newGarrisonPersonnel)} asker** • **${number(result.newGarrisonCost)} Altın**${result.newGarrisonCompletionTurn ? ` • Tur **${result.newGarrisonCompletionTurn}**` : ""}`
+      : `🌿 Mevcut refah korunur; fetih/asimilasyon cezası ve zorunlu garnizon emri uygulanmaz.\n${result.transferType==="PEACE_TRANSFER"?"📜 Eski sahip, olası ayrılıkçı isyanda geri getirilecek devlet olarak tarihsel kayıtta kalır.":"🤝 Eski sahip adına ayrılıkçı geri dönüş iddiası oluşturulmaz."}`;
+    await interaction.editReply(`🏳️ **${result.settlementName}**, **${result.sourceName}** devletinden **${result.targetName}** devletine **${result.transferLabel}** yoluyla aktarıldı • Tur **${result.transferTurn}**.\n${transferEffectText}\n🛡️ Ordularda korunan asker: **${number(result.preservedArmyPersonnel)}**\n🚶 Şehir nüfusundan ayrılan saha askeri: **${number(result.evacuatedArmyPopulation)}**\n🧹 Temizlenen eski askerî varlıklar: **${number(result.removedArmyPersonnel)} asker** • **${number(result.removedShips)} gemi** • **${number(result.removedSiegeAssets)} kuşatma aleti** • **${result.destroyedMercenaryContracts} paralı asker sözleşmesi**\n⚔️ İptal edilen aktif asker alımı: **${result.cancelledRecruitmentOrders}**\n🤝 Feshedilen/bekleyen ticaret: **${result.endedTrades}**${lastStandText}`);
   } else if (sub === "oyuncu-ata") {
     const country = await gameService.countryByName(interaction.guildId, interaction.options.getString("ulke", true));
     if (!country) throw new GameError("Ülke bulunamadı.");
