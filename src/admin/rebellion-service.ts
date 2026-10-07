@@ -14,6 +14,7 @@ import {
 } from "../domain/stability.js";
 import { adminConfig } from "./config.js";
 import { adminPool, type AdminDbClient, withAdminTransaction } from "./db.js";
+import { rebelLeaderProfile } from "../domain/rebel-leaders.js";
 
 const factionTypes = ["POPULAR", "SEPARATIST", "RELIGIOUS", "SLAVE"] as const;
 const liveStatuses = ["ORGANIZING", "ACTIVE", "OCCUPYING"] as const;
@@ -28,7 +29,9 @@ const updateSchema = z.object({
   plannedFactionPersonnel: z.coerce.number().int().min(1_000).max(250_000).nullable(),
   liveFactionName: z.string().trim().min(2).max(100).nullable().optional(),
   liveFactionPersonnel: z.coerce.number().int().min(1_000).max(250_000).nullable().optional(),
-  liveFactionStatus: z.enum(liveStatuses).nullable().optional()
+  liveFactionStatus: z.enum(liveStatuses).nullable().optional(),
+  liveLeaderName: z.string().trim().min(2).max(100).nullable().optional(),
+  liveLeaderSkill: z.coerce.number().int().min(1).max(3).nullable().optional()
 });
 
 const actionSchema = z.object({
@@ -76,6 +79,9 @@ interface RebellionRow {
   live_faction_power: number | null;
   live_faction_composition: Record<string, number> | null;
   live_faction_started_turn: number | null;
+  live_faction_army_name: string | null;
+  live_faction_leader_name: string | null;
+  live_faction_leader_skill: number | null;
 }
 
 interface StabilityHistoryRow {
@@ -124,7 +130,9 @@ async function loadRows(client: Queryable, settlementId?: string): Promise<Rebel
             faction.id AS live_faction_id,faction.faction_type AS live_faction_type,
             faction.display_name AS live_faction_name,faction.status AS live_faction_status,
             faction.personnel AS live_faction_personnel,faction.military_power AS live_faction_power,
-            faction.composition AS live_faction_composition,faction.started_turn AS live_faction_started_turn
+            faction.composition AS live_faction_composition,faction.started_turn AS live_faction_started_turn,
+            faction.army_name AS live_faction_army_name,faction.leader_name AS live_faction_leader_name,
+            faction.leader_skill_bonus AS live_faction_leader_skill
        FROM settlements settlement
        JOIN countries country ON country.id=settlement.country_id
        JOIN guilds guild ON guild.discord_id=country.guild_id
@@ -212,7 +220,9 @@ function view(row: RebellionRow, history: StabilityHistoryRow[] = []) {
     liveFaction:row.live_faction_id?{id:row.live_faction_id,type:row.live_faction_type,
       label:row.live_faction_type?REBEL_FACTION_LABELS[row.live_faction_type]:null,name:row.live_faction_name,
       status:row.live_faction_status,personnel:Number(row.live_faction_personnel??0),militaryPower:Number(row.live_faction_power??0),
-      composition:row.live_faction_composition??{},startedTurn:row.live_faction_started_turn}:null,
+      composition:row.live_faction_composition??{},startedTurn:row.live_faction_started_turn,
+      armyName:row.live_faction_army_name,leaderName:row.live_faction_leader_name,
+      leaderSkill:Number(row.live_faction_leader_skill??1)}:null,
     history:history.map((item)=>({...item,game_turn:Number(item.game_turn),prosperity_before:Number(item.prosperity_before),
       prosperity_after:Number(item.prosperity_after),unrest_risk:Number(item.unrest_risk),
       rebellion_before:Number(item.rebellion_before),rebellion_after:Number(item.rebellion_after),
@@ -288,11 +298,13 @@ export const adminRebellionService={
              restoration_country_id=CASE WHEN $1='SEPARATIST' THEN $8 ELSE NULL END,
              target_religion_key=CASE WHEN $1='RELIGIOUS' THEN $9 ELSE NULL END,
              target_culture_group=CASE WHEN $1='SEPARATIST' THEN $10 ELSE NULL END,
-             updated_at=NOW() WHERE id=$7`,
+             leader_name=COALESCE($11,leader_name),leader_skill_bonus=COALESCE($12,leader_skill_bonus),
+             army_name=$2||' Ordusu',updated_at=NOW() WHERE id=$7`,
           [factionType,factionName,input.liveFactionStatus,personnel,rebelMilitaryPower(composition),
-            JSON.stringify(composition),before.live_faction_id,before.restoration_country_id,before.religion_key,before.culture_group]
+            JSON.stringify(composition),before.live_faction_id,before.restoration_country_id,before.religion_key,before.culture_group,
+            input.liveLeaderName,input.liveLeaderSkill]
         );
-      }else if(input.liveFactionName!==undefined||input.liveFactionPersonnel!==undefined||input.liveFactionStatus!==undefined){
+      }else if(input.liveFactionName!==undefined||input.liveFactionPersonnel!==undefined||input.liveFactionStatus!==undefined||input.liveLeaderName!==undefined||input.liveLeaderSkill!==undefined){
         throw new Error("Düzenlenecek etkin bir isyancı grup bulunmuyor.");
       }
       await audit(client,actorId,"admin.panel.rebellion.update",settlementId,{before:{prosperity:before.prosperity,
@@ -332,13 +344,17 @@ export const adminRebellionService={
           slavePopulation:Number(row.slave_population),warExhaustion:Number(row.war_exhaustion)});
         const composition=rebelComposition(factionType,personnel);
         const power=rebelMilitaryPower(composition);
+        const leader=rebelLeaderProfile({cultureGroup:factionType==="SEPARATIST"?row.culture_group:row.primary_culture_group,
+          factionType,settlementName:row.name,seed:`${adminConfig.guildId}:${settlementId}:${currentTurn}`});
         await client.query(
           `INSERT INTO rebel_factions(guild_id,settlement_id,against_country_id,faction_type,display_name,restoration_country_id,
-             target_religion_key,target_culture_group,status,started_turn,outbreak_turn,personnel,military_power,composition,cause_snapshot)
-           VALUES($1,$2,$3,$4,$5,$6,$7,$8,'ACTIVE',$9,$9,$10,$11,$12::jsonb,$13::jsonb)`,
+             target_religion_key,target_culture_group,status,started_turn,outbreak_turn,personnel,military_power,composition,cause_snapshot,
+             army_name,leader_name,leader_skill_bonus)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,'ACTIVE',$9,$9,$10,$11,$12::jsonb,$13::jsonb,$14,$15,$16)`,
           [adminConfig.guildId,settlementId,row.country_id,factionType,name,row.restoration_country_id,
             factionType==="RELIGIOUS"?row.religion_key:null,factionType==="SEPARATIST"?row.culture_group:null,currentTurn,
-            personnel,power,JSON.stringify(composition),JSON.stringify({source:"admin-panel",factors:preview.factors,risk:preview.risk})]
+            personnel,power,JSON.stringify(composition),JSON.stringify({source:"admin-panel",factors:preview.factors,risk:preview.risk}),
+            `${name} Ordusu`,leader.name,leader.skillBonus]
         );
         await client.query("UPDATE settlements SET prosperity=0,rebellion_progress=100,rebellion_faction_type=$1,rebellion_active=TRUE,unrest_active=TRUE,rebellion_name_override=NULL,rebellion_personnel_override=NULL WHERE id=$2",[factionType,settlementId]);
       }

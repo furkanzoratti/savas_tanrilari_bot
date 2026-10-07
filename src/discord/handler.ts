@@ -263,7 +263,7 @@ function renderCountryDetail(detail:CountryDetailView,document:CountryDocument):
       {name:"👑 Ülke Yönetimi",value:document.playerIds.length?document.playerIds.map((id)=>`<@${id}>`).join(" • "):"Oyuncu atanmamış.",inline:true},
       {name:"🏰 Yönetici Hanedan",value:dynasty},
       {name:"🏦 Devlet Ekonomisi",value:[`**Hazine:** ${gold(detail.totalTreasury)}`,`**Dönem Geliri:** ${gold(document.totalPayableIncome)}`,`**Toplam Bakım:** −${gold(document.totalUpkeep)}`,`**Net Gelir:** ${document.netIncome>=0?"+":""}${gold(document.netIncome)}`].join("\n"),inline:true},
-      {name:"⚔️ Askerî Durum",value:[`**Seferberlik:** ${MOBILIZATION_RULES[detail.country.mobilization].label}`,`**Askerî Kapasite:** ${number(document.militaryUsed)} / ${number(document.militaryLimit)}`,`**Savaş Yorgunluğu:** ${detail.country.warExhaustion}/100${document.manpowerPenaltyActive?"\n⚠️ **Askerî Sınır Cezası Aktif**":""}`].join("\n"),inline:true},
+      {name:"⚔️ Askerî Durum",value:[`**Seferberlik:** ${MOBILIZATION_RULES[detail.country.mobilization].label}`,`**Askerî Kapasite:** ${number(document.militaryUsed)} / ${number(document.militaryLimit)}`,`**Savaş Yorgunluğu:** ${detail.country.warExhaustion}/100`,`**İsyan Riski Etkisi:** +${Math.min(15,Math.floor(detail.country.warExhaustion/10))} puan`,`_Savaş süresi, yeni kayıplar, yağmalar ve toprak kayıpları artırır • Barışta her tur −10_${document.manpowerPenaltyActive?"\n⚠️ **Askerî Sınır Cezası Aktif**":""}`].join("\n"),inline:true},
       {name:"⛩️ İnanç Dağılımı",value:list(detail.religions.map((entry)=>`**${entry.label}:** %${detailPercent(entry.percent)}${entry.primaryPercent?` • Ana İnanç %${detailPercent(entry.primaryPercent)}`:""}`),"Din kaydı bulunmuyor.")},
       {name:"🏺 Kültür Dağılımı",value:list(detail.cultures.map((entry)=>`**${CULTURE_GROUPS[entry.key]?.label??entry.key}:** %${detailPercent(entry.percent)}`),"Kültür kaydı bulunmuyor.")}
     )
@@ -1849,6 +1849,14 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
   if (await handleEspionageAutocomplete(interaction)) return;
   if (await handleCityAutocomplete(interaction)) return;
   const focused = interaction.options.getFocused(true);
+  if(interaction.commandName==="savas"&&interaction.options.getSubcommand(false)==="baslat"&&["taraf-a","taraf-b"].includes(focused.name)){
+    if(!interaction.guildId||!isGameMaster(interaction)){await interaction.respond([]);return;}
+    const query=String(focused.value).toLocaleLowerCase("tr-TR").trim();
+    const targets=await battleService.listStartTargets(interaction.guildId);
+    await interaction.respond(targets.filter((target)=>!query||target.label.toLocaleLowerCase("tr-TR").includes(query))
+      .slice(0,25).map((target)=>({name:target.label.slice(0,100),value:target.value})));
+    return;
+  }
   if (interaction.commandName==="hristiyan-sinir"&&focused.name==="yerleske") {
     if(!interaction.guildId||!isGameMaster(interaction)){await interaction.respond([]);return;}
     const rows=await gameService.searchActiveSettlements(interaction.guildId,String(focused.value));

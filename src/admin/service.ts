@@ -357,12 +357,14 @@ async function auditEntityNames(ids: string[]): Promise<Map<string, string>> {
          JOIN countries country ON country.id=dynasty.country_id
         WHERE dynasty.guild_id=$1 AND member.id=ANY($2::uuid[])
        UNION ALL
-       SELECT battle.id,'Savaş: '||COALESCE(country_a.name,'A Tarafı')||' — '||COALESCE(country_b.name,'B Tarafı'),8
+       SELECT battle.id,'Savaş: '||COALESCE(rebel_a.display_name,country_a.name,'A Tarafı')||' — '||COALESCE(rebel_b.display_name,country_b.name,'B Tarafı'),8
          FROM battles battle
          LEFT JOIN battle_sides side_a ON side_a.battle_id=battle.id AND side_a.side_key='A'
          LEFT JOIN countries country_a ON country_a.id=side_a.country_id
+         LEFT JOIN rebel_factions rebel_a ON rebel_a.id=side_a.rebel_faction_id
          LEFT JOIN battle_sides side_b ON side_b.battle_id=battle.id AND side_b.side_key='B'
          LEFT JOIN countries country_b ON country_b.id=side_b.country_id
+         LEFT JOIN rebel_factions rebel_b ON rebel_b.id=side_b.rebel_faction_id
         WHERE battle.guild_id=$1 AND battle.id=ANY($2::uuid[])
      ) entry ORDER BY entry.id,entry.priority`,
     [adminConfig.guildId, ids]
@@ -587,7 +589,7 @@ export const adminPanelService = {
               (SELECT COUNT(*)::integer FROM settlements WHERE country_id=country.id) AS settlement_count,
               (SELECT COUNT(*)::integer FROM armies WHERE country_id=country.id) AS army_count,
               (SELECT COUNT(*)::integer FROM fleets WHERE country_id=country.id) AS fleet_count
-         FROM countries country WHERE country.guild_id=$1
+         FROM countries country WHERE country.guild_id=$1 AND country.is_system_faction=FALSE
         ORDER BY CASE WHEN country.status='ACTIVE' THEN 0 ELSE 1 END,country.name`,
       [adminConfig.guildId]
     )).rows;
@@ -819,9 +821,9 @@ export const adminPanelService = {
               battle.narrative,battle.winner_side,battle.finish_reason,battle.created_at,battle.updated_at,
               battle.wall_current_hp,battle.wall_max_hp,battle.gate_current_hp,battle.gate_max_hp,
               settlement.name AS defender_settlement_name,
-              country_a.name AS country_a_name,side_a.current_total AS current_a,
+              COALESCE(rebel_a.display_name,country_a.name) AS country_a_name,side_a.current_total AS current_a,
               side_a.initial_total AS initial_a,side_a.total_losses AS losses_a,side_a.pressure AS pressure_a,
-              country_b.name AS country_b_name,side_b.current_total AS current_b,
+              COALESCE(rebel_b.display_name,country_b.name) AS country_b_name,side_b.current_total AS current_b,
               side_b.initial_total AS initial_b,side_b.total_losses AS losses_b,side_b.pressure AS pressure_b,
               COALESCE((
                 SELECT jsonb_agg(jsonb_build_object(
@@ -843,8 +845,10 @@ export const adminPanelService = {
          FROM battles battle
          LEFT JOIN battle_sides side_a ON side_a.battle_id=battle.id AND side_a.side_key='A'
          LEFT JOIN countries country_a ON country_a.id=side_a.country_id
+         LEFT JOIN rebel_factions rebel_a ON rebel_a.id=side_a.rebel_faction_id
          LEFT JOIN battle_sides side_b ON side_b.battle_id=battle.id AND side_b.side_key='B'
          LEFT JOIN countries country_b ON country_b.id=side_b.country_id
+         LEFT JOIN rebel_factions rebel_b ON rebel_b.id=side_b.rebel_faction_id
          LEFT JOIN settlements settlement ON settlement.id=battle.defender_settlement_id
         WHERE battle.guild_id=$1
         ORDER BY CASE WHEN battle.status IN ('FINISHED','CANCELLED') THEN 1 ELSE 0 END,
@@ -862,23 +866,27 @@ export const adminPanelService = {
       current_round_started:boolean;
     }>(
       `SELECT battle.id,battle.terrain,battle.status,battle.round_number,
-              country_a.name AS country_a_name,country_b.name AS country_b_name,
+              COALESCE(rebel_a.display_name,country_a.name) AS country_a_name,
+              COALESCE(rebel_b.display_name,country_b.name) AS country_b_name,
               EXISTS(SELECT 1 FROM battle_rolls roll
                        WHERE roll.battle_id=battle.id AND roll.round_number=battle.round_number) AS current_round_started
          FROM battles battle
          LEFT JOIN battle_sides side_a ON side_a.battle_id=battle.id AND side_a.side_key='A'
          LEFT JOIN countries country_a ON country_a.id=side_a.country_id
+         LEFT JOIN rebel_factions rebel_a ON rebel_a.id=side_a.rebel_faction_id
          LEFT JOIN battle_sides side_b ON side_b.battle_id=battle.id AND side_b.side_key='B'
          LEFT JOIN countries country_b ON country_b.id=side_b.country_id
+         LEFT JOIN rebel_factions rebel_b ON rebel_b.id=side_b.rebel_faction_id
         WHERE battle.id=$1 AND battle.guild_id=$2`,
       [battleId,adminConfig.guildId]
     )).rows[0];
     if (!battle) throw new Error("Savaş bulunamadı.");
     const rows = (await adminPool.query<{
       side_key:"A"|"B";country_id:string;country_name:string;source_settlement_name:string|null;
-      composition:unknown;initial_composition:unknown;uses_armies:boolean;uses_fleets:boolean;
+      composition:unknown;initial_composition:unknown;uses_armies:boolean;uses_fleets:boolean;rebel_faction_id:string|null;
     }>(
-      `SELECT participant.side_key,participant.country_id,country.name AS country_name,
+      `SELECT participant.side_key,participant.country_id,COALESCE(rebel.display_name,country.name) AS country_name,
+              side_record.rebel_faction_id,
               source.name AS source_settlement_name,participant.composition,participant.initial_composition,
               EXISTS(SELECT 1 FROM battle_army_assignments assignment
                       WHERE assignment.battle_id=participant.battle_id AND assignment.country_id=participant.country_id) AS uses_armies,
@@ -886,9 +894,11 @@ export const adminPanelService = {
                       WHERE assignment.battle_id=participant.battle_id AND assignment.country_id=participant.country_id) AS uses_fleets
          FROM battle_side_participants participant
          JOIN countries country ON country.id=participant.country_id
+         JOIN battle_sides side_record ON side_record.battle_id=participant.battle_id AND side_record.side_key=participant.side_key
+         LEFT JOIN rebel_factions rebel ON rebel.id=side_record.rebel_faction_id AND participant.country_id=side_record.country_id
          LEFT JOIN settlements source ON source.id=participant.source_settlement_id
         WHERE participant.battle_id=$1
-        ORDER BY participant.side_key,participant.is_primary DESC,country.name`,
+        ORDER BY participant.side_key,participant.is_primary DESC,COALESCE(rebel.display_name,country.name)`,
       [battle.id]
     )).rows;
     const editable = !["FINISHED","CANCELLED"].includes(battle.status)
@@ -911,7 +921,7 @@ export const adminPanelService = {
         sideKey:row.side_key,countryId:row.country_id,countryName:row.country_name,
         sourceSettlementName:row.source_settlement_name,
         total:compositionTotal(current),initialTotal:compositionTotal(initial) || compositionTotal(current),
-        editable,
+        editable:editable&&!row.rebel_faction_id,
         units:unitTypes.map((unitType) => ({
           unitType,
           label:unitType in BATTLE_UNIT_STATS
@@ -1142,27 +1152,31 @@ export const adminPanelService = {
       adminPool.query(
         `SELECT battle.id,battle.terrain,battle.status,battle.round_number,battle.siege_phase,battle.updated_at,
                 settlement.name AS settlement_name,
-                side_a.country_id AS country_a_id,country_a.name AS country_a_name,
-                side_b.country_id AS country_b_id,country_b.name AS country_b_name
+                side_a.country_id AS country_a_id,COALESCE(rebel_a.display_name,country_a.name) AS country_a_name,
+                side_b.country_id AS country_b_id,COALESCE(rebel_b.display_name,country_b.name) AS country_b_name
            FROM battles battle
            LEFT JOIN settlements settlement ON settlement.id=battle.defender_settlement_id
            JOIN battle_sides side_a ON side_a.battle_id=battle.id AND side_a.side_key='A'
            JOIN countries country_a ON country_a.id=side_a.country_id
+           LEFT JOIN rebel_factions rebel_a ON rebel_a.id=side_a.rebel_faction_id
            JOIN battle_sides side_b ON side_b.battle_id=battle.id AND side_b.side_key='B'
            JOIN countries country_b ON country_b.id=side_b.country_id
+           LEFT JOIN rebel_factions rebel_b ON rebel_b.id=side_b.rebel_faction_id
           WHERE battle.guild_id=$1 AND battle.terrain<>'NAVAL'
             AND battle.status NOT IN ('FINISHED','CANCELLED')
           ORDER BY battle.updated_at DESC`, [adminConfig.guildId]
       ),
       adminPool.query(
         `SELECT participant.battle_id,participant.side_key,participant.country_id,participant.is_primary,
-                country.name AS country_name
+                COALESCE(rebel.display_name,country.name) AS country_name
            FROM battle_side_participants participant
            JOIN battles battle ON battle.id=participant.battle_id
            JOIN countries country ON country.id=participant.country_id
+           JOIN battle_sides side_record ON side_record.battle_id=participant.battle_id AND side_record.side_key=participant.side_key
+           LEFT JOIN rebel_factions rebel ON rebel.id=side_record.rebel_faction_id AND participant.country_id=side_record.country_id
           WHERE battle.guild_id=$1 AND battle.terrain<>'NAVAL'
             AND battle.status NOT IN ('FINISHED','CANCELLED')
-          ORDER BY participant.battle_id,participant.side_key,participant.is_primary DESC,country.name`, [adminConfig.guildId]
+          ORDER BY participant.battle_id,participant.side_key,participant.is_primary DESC,COALESCE(rebel.display_name,country.name)`, [adminConfig.guildId]
       ),
       adminPool.query(
         `SELECT assignment.battle_id,assignment.side_key,army.id AS army_id,army.name AS army_name,

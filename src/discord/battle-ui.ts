@@ -54,7 +54,10 @@ export function battleEmbed(view: BattleView, roundResult?: BattleRoundResult): 
       ? siegeOrderState(side.pressure, side.current_total)
       : orderState(side.pressure, side.initial_total, side.current_total);
     const control = side.controller === "GM" ? "Oyun Yöneticisi (NPC)" : "Ülke Oyuncuları";
-    if (view.battle.terrain === "SIEGE" && key === "B") return `**Toplam Asker:** Gizli\n**Otomatik Garnizon:** Dahil\n**Toplam Kayıp:** ${number(side.total_losses)}\n**Baskı:** ${number(side.pressure)} puan\n**Düzen:** ${orderLabels[order]}\n**Zar Yetkisi:** ${control}`;
+    const rebelHeader=side.rebel_faction_id
+      ? `**İsyancı Ordu:** ${side.rebel_army_name}\n**İsyan Lideri:** ${side.rebel_leader_name} (+${number(side.rebel_leader_skill_bonus??1)})\n`
+      : "";
+    if (view.battle.terrain === "SIEGE" && key === "B") return `${rebelHeader}**Toplam Asker:** Gizli\n${side.rebel_faction_id?"**Savunma Kaynağı:** Yalnızca isyancı ordu":"**Otomatik Garnizon:** Dahil"}\n**Toplam Kayıp:** ${number(side.total_losses)}\n**Baskı:** ${number(side.pressure)} puan\n**Düzen:** ${orderLabels[order]}\n**Zar Yetkisi:** ${control}`;
     if(view.battle.terrain==="NAVAL"){
       const condition=navalFleetCondition({
         initialHullHp:side.initial_hull_hp??0,operationalHullHp:side.operational_hull_hp??0,
@@ -65,9 +68,9 @@ export function battleEmbed(view: BattleView, roundResult?: BattleRoundResult): 
       const orderStateLabel=side.naval_order_locked
         ? bothLocked&&side.naval_order?NAVAL_BATTLE_ORDERS[side.naval_order].label:"Kilitli • Gizli"
         : side.naval_order?"Seçildi • Kilit bekliyor":"Henüz seçilmedi";
-      return `**Başlangıç:** ${number(side.initial_total)} gemi\n**Savaşabilir:** ${number(side.active_ship_total??0)}\n**İş göremez:** ${number(side.disabled_ship_total??0)}\n**Batık:** ${number(side.sunk_ship_total??0)}\n**Savaşabilir HP:** ${number(side.operational_hull_hp??0)} / ${number(side.initial_hull_hp??0)}\n**Filo Durumu:** ${navalConditionLabels[condition]}\n**Manevra Puanı:** ${number(side.naval_maneuver_points??0)}/5\n**Filo Emri:** ${orderStateLabel}\n**Zar Yetkisi:** ${control}`;
+      return `${rebelHeader}**Başlangıç:** ${number(side.initial_total)} gemi\n**Savaşabilir:** ${number(side.active_ship_total??0)}\n**İş göremez:** ${number(side.disabled_ship_total??0)}\n**Batık:** ${number(side.sunk_ship_total??0)}\n**Savaşabilir HP:** ${number(side.operational_hull_hp??0)} / ${number(side.initial_hull_hp??0)}\n**Filo Durumu:** ${navalConditionLabels[condition]}\n**Manevra Puanı:** ${number(side.naval_maneuver_points??0)}/5\n**Filo Emri:** ${orderStateLabel}\n**Zar Yetkisi:** ${control}`;
     }
-    return `**Başlangıç:** ${number(side.initial_total)}\n**Mevcut:** ${number(side.current_total)}\n**Toplam Kayıp:** ${number(side.total_losses)}\n**Baskı:** ${number(side.pressure)} puan\n**Düzen:** ${orderLabels[order]}\n**Zar Yetkisi:** ${control}`;
+    return `${rebelHeader}**Başlangıç:** ${number(side.initial_total)}\n**Mevcut:** ${number(side.current_total)}\n**Toplam Kayıp:** ${number(side.total_losses)}\n**Baskı:** ${number(side.pressure)} puan\n**Düzen:** ${orderLabels[order]}\n**Zar Yetkisi:** ${control}`;
   };
   const siegeProfile = view.battle.terrain === "SIEGE"
     ? siegeFrontageProfile(view.battle.wall_current_hp ?? 0, view.battle.gate_current_hp ?? 0)
@@ -491,7 +494,13 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
       encounterId: interaction.options.getString("karsilasma-id") });
     const rosterCommand = view.battle.terrain === "NAVAL" ? "/savas filo-ayarla" : "/savas kadro-ayarla";
     const supportNote = view.battle.terrain === "SIEGE" ? " Kuşatma aletlerini `/savas kusatma-aleti-ayarla` ile girin." : "";
-    await interaction.editReply({ content: `✅ **${view.sides.A.country_name} — ${view.sides.B.country_name}** savaş taslağı oluşturuldu. ${interaction.options.getString("karsilasma-id") ? "Karşılaşmadaki iki ordu otomatik eklendi; kadroları kontrol edin." : `Gizli kadroları \`${rosterCommand}\` ile girin.`}${supportNote}\nİlk zar sırası: **${view.sides[view.battle.first_side].country_name}**. Taslağı hazır olunca \`/savas yayinla\` ile yayımlayın.` });
+    const rebelSides=(["A","B"] as BattleSideKey[]).filter((side)=>view.sides[side].rebel_faction_id);
+    const rosterNote=interaction.options.getString("karsilasma-id")
+      ? "Karşılaşmadaki iki ordu otomatik eklendi; kadroları kontrol edin."
+      : rebelSides.length
+        ? `İsyancı ordu ve lider otomatik eklendi; gerçek ülke tarafının gizli kadrosunu \`${rosterCommand}\` ile girin.`
+        : `Gizli kadroları \`${rosterCommand}\` ile girin.`;
+    await interaction.editReply({ content: `✅ **${view.sides.A.country_name} — ${view.sides.B.country_name}** savaş taslağı oluşturuldu. ${rosterNote}${supportNote}\nİlk zar sırası: **${view.sides[view.battle.first_side].country_name}**. Taslağı hazır olunca \`/savas yayinla\` ile yayımlayın.` });
   } else if (sub === "taraf-ulke") {
     requireGameMaster(interaction);
     const side = interaction.options.getString("taraf", true) as BattleSideKey;

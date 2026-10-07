@@ -72,6 +72,9 @@ import { countryLastStandMigration } from "./country-last-stand-migration.js";
 import { stabilityRebellionMigration } from "./stability-rebellion-migration.js";
 import { namedRebelFactionsMigration } from "./named-rebel-factions-migration.js";
 import { rebellionAdminOverridesMigration } from "./rebellion-admin-overrides-migration.js";
+import { legacyRebelForcesBackfillMigration } from "./legacy-rebel-forces-backfill-migration.js";
+import { warExhaustionActivationBaselineMigration } from "./war-exhaustion-activation-baseline-migration.js";
+import { rebelBattleIntegrationMigration } from "./rebel-battle-integration-migration.js";
 
 export const migrations = [
   {
@@ -2361,5 +2364,8 @@ export const migrations = [
   countryLastStandMigration,
   stabilityRebellionMigration,
   namedRebelFactionsMigration,
-  rebellionAdminOverridesMigration
+  rebellionAdminOverridesMigration,
+  legacyRebelForcesBackfillMigration,
+  warExhaustionActivationBaselineMigration,
+  rebelBattleIntegrationMigration
 ] as const;

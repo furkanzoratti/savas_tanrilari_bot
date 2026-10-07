@@ -759,7 +759,7 @@ export const gameService = {
 
   async listDestroyedCountries(guildId: string): Promise<CountryRow[]> {
     const result = await pool.query<CountryRow>(
-      "SELECT * FROM countries WHERE guild_id=$1 AND status='YOK_EDİLDİ' ORDER BY destroyed_turn DESC NULLS LAST,name",
+      "SELECT * FROM countries WHERE guild_id=$1 AND status='YOK_EDİLDİ' AND is_system_faction=FALSE ORDER BY destroyed_turn DESC NULLS LAST,name",
       [guildId]
     );
     return result.rows;
@@ -770,7 +770,7 @@ export const gameService = {
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`turn:${input.guildId}`]);
       const guild = await getGuild(client, input.guildId);
       const country = (await client.query<CountryRow>(
-        "SELECT * FROM countries WHERE guild_id=$1 AND status='YOK_EDİLDİ' AND (id::text=$2 OR lower(name)=lower($2)) FOR UPDATE",
+        "SELECT * FROM countries WHERE guild_id=$1 AND status='YOK_EDİLDİ' AND is_system_faction=FALSE AND (id::text=$2 OR lower(name)=lower($2)) FOR UPDATE",
         [input.guildId, input.countryName.trim()]
       )).rows[0];
       if (!country) throw new GameError("YOK EDİLDİ durumunda belirtilen ülke bulunamadı.");

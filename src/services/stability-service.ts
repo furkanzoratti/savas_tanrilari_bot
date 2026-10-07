@@ -6,6 +6,7 @@ import {
   type RebelFactionType
 } from "../domain/stability.js";
 import {RELIGIONS,type ReligionKey} from "../domain/religions.js";
+import { rebelLeaderProfile } from "../domain/rebel-leaders.js";
 
 interface CountryStabilityRow {
   id: string; name: string; primary_culture_group: string; war_exhaustion: number;
@@ -193,18 +194,24 @@ export async function processStabilityTurn(client: DbClient, guildId: string, ne
       rebelCount=settlement.rebellion_personnel_override??rebelPersonnel({type:factionType,population:Number(settlement.population),slavePopulation:Number(settlement.slave_population),warExhaustion:Number(settlement.war_exhaustion)});
       const composition=rebelComposition(factionType,rebelCount);
       rebelPower=rebelMilitaryPower(composition);
+      const leader=rebelLeaderProfile({
+        cultureGroup:factionType==="SEPARATIST"?settlement.culture_group:settlement.primary_culture_group,
+        factionType,settlementName:settlement.name,seed:`${guildId}:${settlement.id}:${newTurn}`
+      });
       await client.query(
         `INSERT INTO rebel_factions(guild_id,settlement_id,against_country_id,faction_type,display_name,restoration_country_id,
-           target_religion_key,target_culture_group,status,started_turn,outbreak_turn,personnel,military_power,composition,cause_snapshot)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,'ACTIVE',$9,$9,$10,$11,$12::jsonb,$13::jsonb)`,
+           target_religion_key,target_culture_group,status,started_turn,outbreak_turn,personnel,military_power,composition,cause_snapshot,
+           army_name,leader_name,leader_skill_bonus)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,'ACTIVE',$9,$9,$10,$11,$12::jsonb,$13::jsonb,$14,$15,$16)`,
         [guildId,settlement.id,settlement.country_id,factionType,factionName,restoration?.id??null,
           factionType==="RELIGIOUS"?settlement.religion_key:null,factionType==="SEPARATIST"?settlement.culture_group:null,
           newTurn,rebelCount,rebelPower,JSON.stringify(composition),
-          JSON.stringify({risk,roll,factors,warExhaustion:settlement.war_exhaustion,prosperity:settlement.prosperity})]
+          JSON.stringify({risk,roll,factors,warExhaustion:settlement.war_exhaustion,prosperity:settlement.prosperity}),
+          `${factionName} Ordusu`,leader.name,leader.skillBonus]
       );
       prosperityAfter=0;
       await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'REBELLION_OUTBREAK','settlement',$3,$4::jsonb)",
-        [guildId,actorId,settlement.id,JSON.stringify({factionType,factionName,factionLabel:REBEL_FACTION_LABELS[factionType],personnel:rebelCount,militaryPower:rebelPower,composition,restorationCountryId:restoration?.id??null})]);
+        [guildId,actorId,settlement.id,JSON.stringify({factionType,factionName,factionLabel:REBEL_FACTION_LABELS[factionType],personnel:rebelCount,militaryPower:rebelPower,composition,leader,restorationCountryId:restoration?.id??null})]);
     }
     await client.query(
       `INSERT INTO settlement_stability_turns(settlement_id,game_turn,prosperity_before,prosperity_after,unrest_risk,
