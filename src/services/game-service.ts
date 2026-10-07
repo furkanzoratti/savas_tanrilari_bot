@@ -31,6 +31,8 @@ import { fallbackReligionDistribution, loadReligionDistributions, loadSettlement
 import { applyCultureIncomeEffect, cultureMilitaryPopulation } from "../domain/culture-effects.js";
 import { syncCountryPrimaryCulture, syncGuildPrimaryCultures } from "./culture-service.js";
 import { processLastStandsForTurn, recordSettlementClaim, recoverLastStand, startLastStand, type LastStandEvent } from "./country-last-stand-service.js";
+import { processStabilityTurn, type StabilityTurnResult } from "./stability-service.js";
+import { prosperityTier } from "../domain/stability.js";
 import {
   CHRISTIAN_BORDER_TARGET_PERCENT,
   christianCatholicPercent,
@@ -54,6 +56,7 @@ interface SettlementRow {
   drought_active: boolean; famine_active: boolean; bountiful_harvest_active: boolean; trade_boom_active: boolean;
   migration_wave_active: boolean; master_craftsmen_active: boolean; local_volunteers_active: boolean;
   tax_rate_percent: number;
+  prosperity: number; rebellion_progress: number; rebellion_faction_type: string | null; recent_uprising_until_turn: number | null;
   religion_key: ReligionKey; religion_adherence_percent: number; minority_religion_key: string;
 }
 interface BuildingRow { settlement_id: string; building_type: string; level: number; target_level: number | null; status: "ACTIVE" | "BUILDING" | "SABOTAGED"; started_turn: number | null; completion_turn: number | null; sabotaged_until_turn: number | null; sabotage_repair_cost:number }
@@ -255,6 +258,7 @@ export interface CountryDocument {
     constructionLimit: number;
     isBesieged?: boolean;
     incomePenalty?: SettlementIncomePenaltyRow | null;
+    rebelFaction: null | { faction_type: string; personnel: number; military_power: number; composition: Record<string,number>; restoration_country_name: string | null };
     unrestRisk: number;
     starvationBonus: number;
     religionModifiers: ReligionModifiers;
@@ -324,6 +328,7 @@ export interface TurnAdvanceResult {
   assimilatedSettlementDetails: Array<{ countryName: string; settlementName: string; diplomatName: string | null }>;
   christianSpreadDetails: ChristianPassiveSpreadDetail[];
   lastStandDetails: LastStandEvent[];
+  stability: StabilityTurnResult;
 }
 
 async function ensureGuild(client: DbClient, guildId: string): Promise<GuildRow> {
@@ -1648,9 +1653,15 @@ export const gameService = {
         await client.query("UPDATE mercenary_contract_assets SET current_quantity=0 WHERE contract_id=ANY($1::uuid[])", [contractIds]);
         await client.query("UPDATE mercenary_contracts SET status='DESTROYED',updated_at=NOW() WHERE id=ANY($1::uuid[])", [contractIds]);
       }
+      await client.query("UPDATE rebel_factions SET status='SUPPRESSED',updated_at=NOW() WHERE settlement_id=$1 AND status IN ('ORGANIZING','ACTIVE','OCCUPYING')", [settlement.id]);
       await client.query(
-        "UPDATE settlements SET country_id=$1,is_conquered=TRUE,conquered_turn=$2,garrison_level=0,population=GREATEST(0,population-$3-$4),slave_population=slave_population+$5 WHERE id=$6",
+        "UPDATE settlements SET country_id=$1,is_conquered=TRUE,conquered_turn=$2,garrison_level=0,population=GREATEST(0,population-$3-$4),slave_population=slave_population+$5,prosperity=0,rebellion_progress=0,rebellion_faction_type=NULL,rebellion_active=FALSE WHERE id=$6",
         [target.id, conqueredTurn, enslavedExistingGarrison, evacuatedArmyPopulation, enslavedGarrison, settlement.id]
+      );
+      await client.query(
+        `INSERT INTO settlement_ownership_history(guild_id,settlement_id,previous_country_id,new_country_id,acquired_turn,change_type,details)
+         VALUES($1,$2,$3,$4,$5,'CONQUEST',$6::jsonb) ON CONFLICT DO NOTHING`,
+        [input.guildId,settlement.id,source.id,target.id,conqueredTurn,JSON.stringify({actorId:input.actorId})]
       );
       const newGarrison = await scheduleMandatoryGarrisonReplenishment(client, { settlementId: settlement.id, currentTurn: guild.current_turn, reason: "CONQUEST" });
       await syncCountryTreasury(client, source.id);
@@ -1709,6 +1720,12 @@ export const gameService = {
           WHERE defender_settlement_id=ANY($1::uuid[]) AND terrain='SIEGE' AND status NOT IN ('DRAFT','FINISHED','CANCELLED')`,
         [settlementIds]
       )).rows.map((row) => row.settlement_id) : []);
+      const rebelFactions=settlementIds.length?(await client.query<{
+        settlement_id:string;faction_type:string;personnel:number;military_power:number;composition:Record<string,number>;restoration_country_name:string|null;
+      }>(`SELECT faction.settlement_id,faction.faction_type,faction.personnel,faction.military_power,faction.composition,
+                 restoration.name AS restoration_country_name
+            FROM rebel_factions faction LEFT JOIN countries restoration ON restoration.id=faction.restoration_country_id
+           WHERE faction.settlement_id=ANY($1::uuid[]) AND faction.status IN ('ORGANIZING','ACTIVE','OCCUPYING')`,[settlementIds])).rows:[];
       const buildings = settlementIds.length ? (await client.query<BuildingRow>("SELECT * FROM buildings WHERE settlement_id = ANY($1::uuid[]) AND building_type<>'lupanar' ORDER BY building_type", [settlementIds])).rows : [];
       const policies = settlementIds.length ? (await client.query<SettlementPolicyRow>("SELECT * FROM settlement_policies WHERE settlement_id=ANY($1::uuid[]) ORDER BY slot", [settlementIds])).rows : [];
       const incomePenalties = settlementIds.length ? (await client.query<SettlementIncomePenaltyRow>(
@@ -1939,14 +1956,16 @@ export const gameService = {
           religion
         });
         const incomePenalty = incomePenalties.find((penalty) => penalty.settlement_id === settlement.id) ?? null;
-        const mobilizedIncome = scaleIncome(economy.payable, marshalPartial ? 1 : MOBILIZATION_RULES[country.mobilization].incomeMultiplier);
+        const prosperity=prosperityTier(Number(settlement.prosperity));
+        const prosperityAdjustedIncome=scaleIncome(economy.payable,settlement.rebellion_active?0:prosperity.incomeMultiplier);
+        const mobilizedIncome = scaleIncome(prosperityAdjustedIncome, marshalPartial ? 1 : MOBILIZATION_RULES[country.mobilization].incomeMultiplier);
         const incomeAfterGeneralPenalty = applyIncomePenalty(mobilizedIncome, Number(incomePenalty?.penalty_percent ?? 0));
         const incomeBreakdown = applyCultureIncomeEffect(
           incomeAfterGeneralPenalty,
           settlement.culture_group,
           country.primary_culture_group
         );
-        const populationGain = applyFormablePopulationModifiers(calculatePopulationGain({
+        const normalPopulationGain = applyFormablePopulationModifiers(calculatePopulationGain({
           population: settlement.population,
           buildings: activeBuildings,
           ruinStage: settlement.ruin_stage,
@@ -1955,6 +1974,7 @@ export const gameService = {
           marshalPartial,
           religionPopulationGrowthPercent: religion.populationGrowthPercent
         }), settlement.ruin_stage, country.active_formable_key);
+        const populationGain=settlement.rebellion_active?0:Math.floor(normalPopulationGain*prosperity.populationMultiplier);
         const settlementUnits = units.filter((unit) => unit.settlement_id === settlement.id);
         const displacedUnits = displacedSupport.get(settlement.id) ?? [];
         const displacedArmyPersonnel = supportedPersonnel(displacedUnits);
@@ -2014,6 +2034,7 @@ export const gameService = {
           constructionLimit: activePolicies.includes("MASTER_ARCHITECTURE") ? 3 : 2,
           isBesieged: besiegedSettlementIds.has(settlement.id),
           incomePenalty,
+          rebelFaction:rebelFactions.find((faction)=>faction.settlement_id===settlement.id)??null,
           unrestRisk: settlementUnrestChance(activeBuildings, effectiveResources, activePolicies, country.active_formable_key, religion.unrestReduction),
           starvationBonus: settlementStarvationBonus(activeBuildings, activePolicies, country.active_formable_key, religion.starvationBonus),
           religionModifiers: religion,
@@ -2943,6 +2964,7 @@ export const gameService = {
       }
       const lastStandDetails=lastStandProcess.events;
       const christianSpreadDetails=await processChristianPassiveSpread(client,guildId,newTurn,actorId);
+      const stability=await processStabilityTurn(client,guildId,newTurn,actorId);
 
       const mercenaryArrivalDetails: Array<{ countryName: string; settlementName: string; companyName: string; upkeep: number }> = [];
       const mercenaryUpkeepDetails: Array<{ countryName: string; companyName: string; amount: number }> = [];
@@ -3172,12 +3194,15 @@ export const gameService = {
               formableKey: country.active_formable_key,
               religion
             });
-            const popGain = applyFormablePopulationModifiers(calculatePopulationGain({ population: settlement.population, buildings: active, ruinStage: settlement.ruin_stage, mobilization: country.mobilization, resources: effectiveResources, marshalPartial, religionPopulationGrowthPercent: religion.populationGrowthPercent }), settlement.ruin_stage, country.active_formable_key);
+            const prosperity=prosperityTier(Number(settlement.prosperity));
+            const normalPopulationGain=applyFormablePopulationModifiers(calculatePopulationGain({ population: settlement.population, buildings: active, ruinStage: settlement.ruin_stage, mobilization: country.mobilization, resources: effectiveResources, marshalPartial, religionPopulationGrowthPercent: religion.populationGrowthPercent }), settlement.ruin_stage, country.active_formable_key);
+            const popGain=settlement.rebellion_active?0:Math.floor(normalPopulationGain*prosperity.populationMultiplier);
             const incomePenalty = (await client.query<SettlementIncomePenaltyRow>(
               "SELECT settlement_id,penalty_percent,remaining_acquisition_turns,reason,created_turn FROM settlement_income_penalties WHERE settlement_id=$1 FOR UPDATE",
               [settlement.id]
             )).rows[0];
-            const mobilizedIncome = scaleIncome(economy.payable, marshalPartial ? 1 : MOBILIZATION_RULES[country.mobilization].incomeMultiplier);
+            const prosperityAdjustedIncome=scaleIncome(economy.payable,settlement.rebellion_active?0:prosperity.incomeMultiplier);
+            const mobilizedIncome = scaleIncome(prosperityAdjustedIncome, marshalPartial ? 1 : MOBILIZATION_RULES[country.mobilization].incomeMultiplier);
             const incomeAfterGeneralPenalty = applyIncomePenalty(mobilizedIncome, Number(incomePenalty?.penalty_percent ?? 0));
             const activeBlockade = (await client.query<{ sea_trade_loss_percent: number }>(
               "SELECT sea_trade_loss_percent FROM naval_blockades WHERE target_settlement_id=$1 AND status='ACTIVE' LIMIT 1",
@@ -3250,6 +3275,7 @@ export const gameService = {
               country.mobilization !== "PEACE" ? MOBILIZATION_RULES[country.mobilization].label+" −"+mobilizationDeduction.toLocaleString("tr-TR") : null,
               incomePenalty ? "Gelir cezası %"+incomePenalty.penalty_percent : null,
               cultureIncomeDeduction ? "Yabancı kültür geliri ×0,80 −"+cultureIncomeDeduction.toLocaleString("tr-TR") : null,
+              settlement.rebellion_active ? "Açık isyan: gelir ve nüfus artışı durdu" : `Refah ${settlement.prosperity}/100 • ${prosperity.label} ×${prosperity.incomeMultiplier.toFixed(2)}`,
               activeBlockade ? "Deniz ablukası %"+blockadePercent+" −"+blockadeDeduction.toLocaleString("tr-TR") : null,
               raidIncomeDeduction ? "Deniz yağması gelir kaybı −"+raidIncomeDeduction.toLocaleString("tr-TR") : null,
               ...activePolicies.map((policy)=>CITY_POLICIES[policy].label),
@@ -3265,7 +3291,8 @@ export const gameService = {
                   landTradeIncome:cultureAdjustedIncome.landTrade,seaTradeIncome:cultureAdjustedIncome.seaTrade,
                   buildingUpkeep:economy.buildingUpkeep,unitUpkeep,displacedArmyUpkeep,shipUpkeep,
                   penaltyDeduction,mobilizationDeduction,blockadeDeduction,blockadePercent,
-                  cultureIncomeDeduction,raidIncomeDeduction,raidIncomeDeductionPending:Math.max(0,pendingRaidDeduction-raidIncomeDeduction),populationGain:popGain,effects
+                  cultureIncomeDeduction,raidIncomeDeduction,raidIncomeDeductionPending:Math.max(0,pendingRaidDeduction-raidIncomeDeduction),
+                  prosperity:settlement.prosperity,prosperityIncomeMultiplier:prosperity.incomeMultiplier,populationGain:popGain,effects
                 })]
             );
             if (incomePenalty) {
@@ -3333,7 +3360,7 @@ export const gameService = {
         mercenaryArrivals: mercenaryArrivalDetails.length, mercenaryUpkeep: mercenaryUpkeepDetails,
         mercenaryUnpaid: mercenaryUnpaidDetails, mercenaryEnded: mercenaryEndedDetails,
         assimilatedSettlements: assimilatedSettlementDetails,
-        christianPassiveSpread: christianSpreadDetails,lastStandDetails
+        christianPassiveSpread: christianSpreadDetails,lastStandDetails,stability
       });
       return {
         turn: newTurn, acquisition, movement,
@@ -3360,7 +3387,7 @@ export const gameService = {
         mercenaryUnpaidDetails,
         mercenaryEndedDetails,
         assimilatedSettlementDetails,
-        christianSpreadDetails,lastStandDetails
+        christianSpreadDetails,lastStandDetails,stability
       };
     });
   },

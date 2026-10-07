@@ -69,6 +69,7 @@ import { christianityMigration } from "./christianity-migration.js";
 import { christianBorderSpreadMigration } from "./christian-border-spread-migration.js";
 import { portAccessMigration } from "./port-access-migration.js";
 import { countryLastStandMigration } from "./country-last-stand-migration.js";
+import { stabilityRebellionMigration } from "./stability-rebellion-migration.js";
 
 export const migrations = [
   {
@@ -2355,5 +2356,6 @@ export const migrations = [
   christianityMigration,
   christianBorderSpreadMigration,
   portAccessMigration,
-  countryLastStandMigration
+  countryLastStandMigration,
+  stabilityRebellionMigration
 ] as const;

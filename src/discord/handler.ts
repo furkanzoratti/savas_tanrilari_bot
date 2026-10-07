@@ -515,7 +515,8 @@ async function handleTurn(interaction: ChatInputCommandInteraction): Promise<voi
       mercenaryEndedDetails: result.mercenaryEndedDetails,
       assimilatedSettlementDetails: result.assimilatedSettlementDetails,
       christianSpreadDetails:result.christianSpreadDetails,
-      lastStandDetails:result.lastStandDetails
+      lastStandDetails:result.lastStandDetails,
+      stability:result.stability
     });
   } else {
     const phase = sub === "ac" ? "OPEN" : sub === "durdur" ? "RESOLVING" : "CLOSED";
@@ -1049,7 +1050,8 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
       mercenaryEndedDetails: result.mercenaryEndedDetails,
       assimilatedSettlementDetails: result.assimilatedSettlementDetails,
       christianSpreadDetails:result.christianSpreadDetails,
-      lastStandDetails:result.lastStandDetails
+      lastStandDetails:result.lastStandDetails,
+      stability:result.stability
     })], files: [new AttachmentBuilder(TURN_BANNER_PATH, { name: TURN_BANNER_NAME })] });
     if (characterAutomation.warnings.length) {
       await interaction.followUp({content:"⚠️ **Karakter otomasyonu:** "+characterAutomation.warnings.join("\n⚠️ "),ephemeral:true});

@@ -127,6 +127,10 @@ async function writeAudit(client: DbClient, guildId: string, actorId: string, ac
   );
 }
 
+function rejectLegacyRebellionDraw(type: SettlementEventType): void {
+  if(type==="REBELLION")throw new GameError("İsyan artık rastgele yerleşke olayı değildir. Refah ve isyan gerilimi her tur otomatik işlenir.");
+}
+
 async function riskReport(client: DbClient, guildId: string, type: SettlementEventType, scopeCountryId: string | null): Promise<SettlementEventRiskReport> {
   const guild = (await client.query<{ current_turn: number }>("SELECT current_turn FROM guilds WHERE discord_id=$1", [guildId])).rows[0];
   if (!guild) throw new GameError("Sunucu oyun ayarları bulunamadı.");
@@ -312,10 +316,12 @@ export const eventService = {
   },
 
   async risks(input: { guildId: string; eventType: SettlementEventType; countryId?: string | null }): Promise<SettlementEventRiskReport> {
+    rejectLegacyRebellionDraw(input.eventType);
     return withTransaction((client) => riskReport(client, input.guildId, input.eventType, input.countryId ?? null));
   },
 
   async select(input: { guildId: string; actorId: string; eventType: SettlementEventType; countryId?: string | null }): Promise<SettlementEventDraw> {
+    rejectLegacyRebellionDraw(input.eventType);
     return withTransaction(async (client) => {
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`event:${input.guildId}:${input.eventType}`]);
       const report = await riskReport(client, input.guildId, input.eventType, input.countryId ?? null);
@@ -365,6 +371,7 @@ export const eventService = {
       if (draw && draw.status !== "PENDING") throw new GameError("Bu olay seçimi daha önce kullanıldı veya yerine yeni bir seçim yapıldı.");
       const type = input.eventType ?? draw?.event_type;
       if (!type || (draw && type !== draw.event_type)) throw new GameError("Olay türü seçilen kayıtla uyuşmuyor.");
+      rejectLegacyRebellionDraw(type);
       const countryId = input.countryId ?? draw?.selected_country_id;
       const settlementId = input.settlementId ?? draw?.selected_settlement_id;
       if (!countryId || !settlementId) throw new GameError("Seçilen ülke veya yerleşke artık bulunmuyor.");
@@ -417,6 +424,16 @@ export const eventService = {
       await client.query(`UPDATE settlements SET ${definition.stateColumn}=FALSE WHERE id=$1`, [settlement.id]);
       const guild = (await client.query<{ current_turn: number }>("SELECT current_turn FROM guilds WHERE discord_id=$1", [input.guildId])).rows[0];
       if (!guild) throw new GameError("Sunucu oyun ayarları bulunamadı.");
+      if(input.eventType==="REBELLION"){
+        await client.query(
+          "UPDATE rebel_factions SET status='SUPPRESSED',updated_at=NOW() WHERE settlement_id=$1 AND status IN ('ORGANIZING','ACTIVE','OCCUPYING')",
+          [settlement.id]
+        );
+        await client.query(
+          "UPDATE settlements SET rebellion_progress=0,rebellion_faction_type=NULL,recent_uprising_until_turn=$1 WHERE id=$2",
+          [guild.current_turn+3,settlement.id]
+        );
+      }
       await writeAudit(client, input.guildId, input.actorId, "SETTLEMENT_EVENT_RESOLVE", settlement.id,
         { eventType: input.eventType, turn: guild.current_turn });
       return { type: input.eventType, settlementId: settlement.id, settlementName: settlement.name,

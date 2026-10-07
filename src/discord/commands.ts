@@ -10,7 +10,11 @@ import { ADMIRAL_DOCTRINES, ADMIRAL_SPECIALIZATIONS, CHARACTER_SPECIALIZATIONS, 
 
 const countryOption = (option: any) => option.setName("ulke").setDescription("Yalnızca DM: işlem yapılacak ülke").setRequired(false);
 const CHARACTER_ROLE_CHOICES = Object.entries(CHARACTER_ROLES).map(([value, role]) => ({ name: role.label, value }));
-const SETTLEMENT_EVENT_CHOICES = Object.entries(SETTLEMENT_EVENT_TYPES).map(([value, event]) => ({ name: event.label, value }));
+const SETTLEMENT_EVENT_CHOICES = Object.entries(SETTLEMENT_EVENT_TYPES)
+  .filter(([value])=>value!=="REBELLION")
+  .map(([value, event]) => ({ name: event.label, value }));
+const SETTLEMENT_EVENT_RESOLUTION_CHOICES = Object.entries(SETTLEMENT_EVENT_TYPES)
+  .map(([value,event])=>({name:event.label,value}));
 
 export const commandBuilders = [
   new SlashCommandBuilder()
@@ -718,7 +722,7 @@ export const commandBuilders = [
       .addStringOption((o) => o.setName("ulke").setDescription("İsteğe bağlı: elle olay uygulanacak ülke"))
       .addStringOption((o) => o.setName("yerleske").setDescription("İsteğe bağlı: elle olay uygulanacak yerleşke")))
     .addSubcommand((sub) => sub.setName("sonlandir").setDescription("Yerleşkede aktif olan bir olayı sonlandırır")
-      .addStringOption((o) => o.setName("tur").setDescription("Sonlandırılacak olay türü").setRequired(true).addChoices(...SETTLEMENT_EVENT_CHOICES))
+      .addStringOption((o) => o.setName("tur").setDescription("Sonlandırılacak olay türü").setRequired(true).addChoices(...SETTLEMENT_EVENT_RESOLUTION_CHOICES))
       .addStringOption((o) => o.setName("ulke").setDescription("Yerleşkenin bağlı olduğu ülke").setRequired(true))
       .addStringOption((o) => o.setName("yerleske").setDescription("Olayın sonlanacağı yerleşke").setRequired(true)))
     .addSubcommand((sub) => sub.setName("aktif").setDescription("Aktif yerleşke olaylarını gösterir ve seçimle sonlandırır"))

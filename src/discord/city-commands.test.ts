@@ -41,11 +41,13 @@ describe("şehir geliştirme ve Akademi komutları", () => {
     const select = events?.options?.find((option) => option.name === "sec");
     expect(select?.options?.find((option) => option.name === "tur")).toMatchObject({ required: true });
     expect(select?.options?.find((option) => option.name === "ulke")).not.toMatchObject({ required: true });
-    expect(select?.options?.find((option) => option.name === "tur")?.choices?.length).toBe(11);
+    // İsyan artık rastgele çekilen bir olay değil; kalıcı refah/isyan motoru tarafından üretilir.
+    expect(select?.options?.find((option) => option.name === "tur")?.choices?.length).toBe(10);
     const apply = events?.options?.find((option) => option.name === "uygula");
     expect(apply?.options?.find((option) => option.name === "ulke")).not.toMatchObject({ required: true });
     expect(apply?.options?.find((option) => option.name === "yerleske")).not.toMatchObject({ required: true });
     const resolve = events?.options?.find((option) => option.name === "sonlandir");
+    expect(resolve?.options?.find((option) => option.name === "tur")?.choices?.length).toBe(11);
     expect(resolve?.options?.find((option) => option.name === "ulke")).toMatchObject({ required: true });
     expect(resolve?.options?.find((option) => option.name === "yerleske")).toMatchObject({ required: true });
   });

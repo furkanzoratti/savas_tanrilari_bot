@@ -41,6 +41,11 @@ export interface TurnAnnouncementInput {
     countryName:string;deadlineTurn:number;remainingTurns:number;armyPersonnel:number;
     settlementName:string|null;reason:string|null;
   }>;
+  stability?:{
+    enabled:boolean;
+    warExhaustion:Array<{countryName:string;before:number;after:number;activeWars:number;newBattleLosses:number;raidsSuffered:number;settlementsLost:number}>;
+    settlements:Array<{countryName:string;settlementName:string;prosperityBefore:number;prosperityAfter:number;rebellionBefore:number;rebellionAfter:number;unrestRisk:number;roll:number|null;factionType:string|null;outbreak:boolean;rebelPersonnel:number;rebelMilitaryPower:number}>;
+  };
 }
 
 function fieldValue(lines: string[]): string {
@@ -127,6 +132,26 @@ export function turnAnnouncement(input: TurnAnnouncementInput): EmbedBuilder {
       if(item.kind==="FAILED")return `• 🏴 **${item.countryName}** — ${item.reason??"Son Direniş başarısız oldu."}`;
       return `• ⚔️ **${item.countryName}** — Son Direniş başladı; son gün Tur ${item.deadlineTurn}.`;
     }))
+  });
+  if(input.stability?.warExhaustion.length)embed.addFields({
+    name:"⚔️ Savaş Yorgunluğu",
+    value:fieldValue(input.stability.warExhaustion.map((item)=>
+      `• **${item.countryName}** — ${item.before} → **${item.after}**${item.activeWars?` • ${item.activeWars} savaş`:" • Barışta toparlanma"}${item.newBattleLosses?` • ${item.newBattleLosses.toLocaleString("tr-TR")} yeni kayıp`:""}${item.raidsSuffered?` • ${item.raidsSuffered} yağma`:""}${item.settlementsLost?` • ${item.settlementsLost} toprak kaybı`:""}`
+    ))
+  });
+  const outbreaks=input.stability?.settlements.filter((item)=>item.outbreak)??[];
+  if(outbreaks.length)embed.addFields({
+    name:"🔥 İsyanlar",
+    value:fieldValue(outbreaks.map((item)=>
+      `• **${item.countryName} / ${item.settlementName}** — ${item.factionType??"İsyancı"} • ${item.rebelPersonnel.toLocaleString("tr-TR")} eğitimli asker • Güç ${item.rebelMilitaryPower.toLocaleString("tr-TR")}`
+    ))
+  });
+  const escalations=input.stability?.settlements.filter((item)=>!item.outbreak&&item.rebellionAfter!==item.rebellionBefore)??[];
+  if(escalations.length)embed.addFields({
+    name:"🌿 Refah ve İsyan Gerilimi",
+    value:fieldValue(escalations.slice(0,20).map((item)=>
+      `• **${item.countryName} / ${item.settlementName}** — Refah ${item.prosperityBefore}→${item.prosperityAfter} • İsyan ${item.rebellionBefore}→**${item.rebellionAfter}**${item.roll!==null?` • Risk %${item.unrestRisk}, Zar ${item.roll}`:""}`
+    ))
   });
   if (input.unrestDetails?.length) embed.addFields({
     name: "⚠️ Huzursuzluk Olayları",

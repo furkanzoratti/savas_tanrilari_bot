@@ -475,7 +475,19 @@ export const diplomacyService = {
       await client.query("UPDATE academy_training_sessions SET country_id=$2 WHERE country_id=$1", [vassal.id, overlord.id]);
       await client.query("UPDATE armies SET country_id=$2,updated_at=NOW() WHERE country_id=$1", [vassal.id, overlord.id]);
       await client.query("UPDATE fleets SET country_id=$2,updated_at=NOW() WHERE country_id=$1", [vassal.id, overlord.id]);
-      await client.query("UPDATE settlements SET country_id=$2,is_conquered=FALSE,conquered_turn=NULL WHERE country_id=$1", [vassal.id, overlord.id]);
+      const integratedSettlements=(await client.query<{id:string}>("SELECT id FROM settlements WHERE country_id=$1 FOR UPDATE",[vassal.id])).rows;
+      if(integratedSettlements.length)await client.query(
+        "UPDATE rebel_factions SET status='SUPPRESSED',updated_at=NOW() WHERE settlement_id=ANY($1::uuid[]) AND status IN ('ORGANIZING','ACTIVE','OCCUPYING')",
+        [integratedSettlements.map((settlement)=>settlement.id)]
+      );
+      await client.query("UPDATE settlements SET country_id=$2,is_conquered=FALSE,conquered_turn=NULL,rebellion_progress=0,rebellion_faction_type=NULL,rebellion_active=FALSE WHERE country_id=$1", [vassal.id, overlord.id]);
+      for(const settlement of integratedSettlements){
+        await client.query(
+          `INSERT INTO settlement_ownership_history(guild_id,settlement_id,previous_country_id,new_country_id,acquired_turn,change_type,details)
+           VALUES($1,$2,$3,$4,$5,'VASSAL_INTEGRATION',$6::jsonb) ON CONFLICT DO NOTHING`,
+          [input.guildId,settlement.id,vassal.id,overlord.id,guild.current_turn,JSON.stringify({vassalageId:relation.id,actorId:input.actorId})]
+        );
+      }
       await syncCountryPrimaryCulture(client, overlord.id);
       for (const table of ["recruitment_orders", "naval_orders", "siege_orders", "garrison_replenishment_orders", "siege_assets", "mercenary_contracts", "pantheon_loans", "purchase_agent_discounts"] as const) {
         await client.query(`UPDATE ${table} SET country_id=$2 WHERE country_id=$1`, [vassal.id, overlord.id]);

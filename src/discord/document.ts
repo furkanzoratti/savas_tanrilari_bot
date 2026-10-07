@@ -224,6 +224,10 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
     ];
     if (hasActivePort) incomeLines.push(incomeLine("⚓ Deniz Ticareti", settlement.incomeBreakdown.seaTrade));
     const incomes = [...incomeLines, `**Toplam: ${gold(settlement.payableIncome)}**`].join("\n");
+    const rebellionLabel=settlement.rebellion_faction_type==="SEPARATIST"?"Bağımsızlık Yanlıları"
+      :settlement.rebellion_faction_type==="RELIGIOUS"?"Dinî İsyancılar"
+      :settlement.rebellion_faction_type==="SLAVE"?"Köle İsyanı"
+      :settlement.rebellion_faction_type==="POPULAR"?"Halk Ayaklanması":"Henüz belirlenmedi";
 
     const embed = new EmbedBuilder()
       .setColor(settlement.ruin_stage ? 0x9a5a2e : settlement.is_conquered ? 0x8c6d46 : 0x3f7f5f)
@@ -266,6 +270,14 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
         },
         { name: "💰 Gelir Kalemleri", value: spacedSection(incomes), inline: true },
         { name: "🧾 Yerleşke Giderleri", value: spacedSection(`Bina: ${gold(settlement.buildingUpkeep)}\nOrdu: ${gold(settlement.unitUpkeep)}${settlement.displacedArmyUpkeep > 0 ? `\n↳ Kayıp kökenli saha ordusu bakımı: ${gold(settlement.displacedArmyUpkeep)}` : ""}\nDonanma: ${gold(settlement.shipUpkeep)}\n**Toplam: ${gold(settlement.totalSettlementUpkeep)}**`), inline: true },
+        { name: "🌿 Refah ve İstikrar", value: spacedSection([
+          `Refah: **${settlement.prosperity}/100**`,
+          `İsyan Gerilimi: **${settlement.rebellion_progress}/100**`,
+          ...(settlement.rebellion_faction_type?[`Olası Fraksiyon: **${rebellionLabel}**`]:[]),
+          ...(settlement.recent_uprising_until_turn!==null&&settlement.recent_uprising_until_turn>=document.guild.current_turn
+            ?[`🕊️ Yeni ayaklanma koruması: **Tur ${settlement.recent_uprising_until_turn} sonuna kadar**`]:[]),
+          ...(settlement.rebellion_active?["🔥 **Açık isyan: gelir ve nüfus artışı durmuştur.**"]:[])
+        ].join("\n")), inline: true },
         { name: "🌐 Etkin Kaynaklar ve Etkileri", value: spacedSection(resourceDetails || "Etkin hammadde etkisi bulunmuyor.") },
         { name: "🏗️ Binalar ve İnşaatlar", value: spacedSection(buildings) }
       );
@@ -274,6 +286,21 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
       .filter((type) => settlement[SETTLEMENT_EVENT_TYPES[type].stateColumn])
       .map((type) => `${SETTLEMENT_EVENT_TYPES[type].emoji} **${SETTLEMENT_EVENT_TYPES[type].label}**`);
     if (activeEvents.length) embed.addFields({ name: "🚨 Aktif Yerleşke Olayları", value: spacedSection(activeEvents.join("\n")) });
+    if(settlement.rebelFaction){
+      const composition=Object.entries(settlement.rebelFaction.composition)
+        .filter(([,quantity])=>Number(quantity)>0)
+        .map(([unit,quantity])=>`• **${number(Number(quantity))}** ${UNITS[unit as keyof typeof UNITS]?.name??unit}`)
+        .join("\n");
+      embed.addFields({
+        name:"🔥 İsyancı Ordu",
+        value:spacedSection([
+          `Fraksiyon: **${rebellionLabel}**`,
+          `Personel: **${number(settlement.rebelFaction.personnel)}** • Askerî Güç: **${number(settlement.rebelFaction.military_power)}**`,
+          ...(settlement.rebelFaction.restoration_country_name?[`Hedef: **${settlement.rebelFaction.restoration_country_name} devletini geri kurmak**`]:[]),
+          composition
+        ].join("\n"))
+      });
+    }
     if (settlement.incomePenalty) {
       embed.addFields({
         name: "📉 Süreli Gelir Cezası",
