@@ -77,6 +77,7 @@ import { warExhaustionActivationBaselineMigration } from "./war-exhaustion-activ
 import { rebelBattleIntegrationMigration } from "./rebel-battle-integration-migration.js";
 import { rebelSiegeTrainMigration } from "./rebel-siege-train-migration.js";
 import { rebelOccupationOutcomeMigration } from "./rebel-occupation-outcome-migration.js";
+import { dynastyMarriageHouseTransferMigration } from "./dynasty-marriage-house-transfer-migration.js";
 
 export const migrations = [
   {
@@ -2371,5 +2372,6 @@ export const migrations = [
   warExhaustionActivationBaselineMigration,
   rebelBattleIntegrationMigration,
   rebelSiegeTrainMigration,
-  rebelOccupationOutcomeMigration
+  rebelOccupationOutcomeMigration,
+  dynastyMarriageHouseTransferMigration
 ] as const;

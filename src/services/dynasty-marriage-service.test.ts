@@ -51,6 +51,7 @@ function fixture(){
     if(sql.includes("INSERT INTO dynasty_marriage_proposals"))return{rows:[{id:ids.proposal}],rowCount:1};
     if(sql.includes("FROM dynasty_marriage_proposals proposal"))return{rows:[proposal],rowCount:1};
     if(sql.includes("UPDATE dynasty_members SET spouse_id=")){writes.push("spouse");return{rows:[],rowCount:1};}
+    if(sql.includes("birth_dynasty_id=COALESCE")){writes.push("wife-transfer");return{rows:[],rowCount:1};}
     if(sql.includes("INSERT INTO dynasty_events")){writes.push("event");return{rows:[],rowCount:1};}
     if(sql.includes("SET status='CANCELLED'")){writes.push("cancel");return{rows:[],rowCount:1};}
     if(sql.includes("SET status='ACCEPTED'")){writes.push("accept");return{rows:[],rowCount:1};}
@@ -75,6 +76,7 @@ describe("ülkeler arası hanedan evliliği",()=>{
     expect(result.proposal.status).toBe("ACCEPTED");
     expect(result.dynastyIds).toEqual([ids.leftDynasty,ids.rightDynasty]);
     expect(writes.filter((item)=>item==="spouse")).toHaveLength(2);
+    expect(writes.filter((item)=>item==="wife-transfer")).toHaveLength(1);
     expect(writes.filter((item)=>item==="event")).toHaveLength(2);
     expect(writes).toContain("accept");
   });

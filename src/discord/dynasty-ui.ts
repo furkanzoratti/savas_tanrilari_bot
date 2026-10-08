@@ -165,7 +165,10 @@ function generationOf(view:DynastyView,member:DynastyMember,memo=new Map<string,
 
 function marriageOnly(member:DynastyMember):boolean{
   const relation=member.relation.toLocaleLowerCase("tr-TR");
-  return !member.is_monarch&&!member.mother_id&&!member.father_id&&(relation.includes("eşi")||relation.includes("eş")||relation.includes("soylu"));
+  if(!member.is_monarch&&relation.includes("evlilik yoluyla"))return true;
+  return !member.is_monarch&&!member.mother_id&&!member.father_id&&(
+    relation.includes("eşi")||relation.includes("eş")||relation.includes("soylu")
+  );
 }
 
 function dynastyStats(view:DynastyView){
@@ -186,7 +189,10 @@ function spouseText(view:DynastyView,member:DynastyMember):string{
   const spouse=view.members.find((candidate)=>candidate.id===member.spouse_id);
   const deceased=(spouse?.status??member.spouse_status)==="DEAD"?"† ":"";
   const title=member.spouse_title?member.spouse_title+" ":"";
-  const origin=[member.spouse_dynasty_name,member.spouse_country_name].filter(Boolean).join(" • ");
+  const originDynasty=spouse?.birth_dynasty_name??member.spouse_birth_dynasty_name??member.spouse_dynasty_name;
+  const originCountry=spouse?.birth_country_name??member.spouse_birth_country_name??member.spouse_country_name;
+  const foreignOrigin=originCountry!==null&&(originCountry!==view.country_name||originDynasty!==view.name);
+  const origin=foreignOrigin?[originDynasty,originCountry].filter(Boolean).join(" • "):"";
   return deceased+title+member.spouse_name+(member.spouse_age===null?"":" — "+member.spouse_age)+(origin?" ["+origin+"]":"");
 }
 
@@ -205,20 +211,26 @@ function attemptStatus(view:DynastyView,member:DynastyMember):string{
 }
 
 function dynastyTreeLines(view:DynastyView):string[]{
-  const spouseIds=new Set(view.members.filter((member)=>member.spouse_id&&marriageOnly(member)).map((member)=>member.id));
-  const roots=view.members.filter((member)=>!member.mother_id&&!member.father_id&&!spouseIds.has(member.id)).sort(memberOrder);
+  const treeMembers=view.members.filter((member)=>!marriageOnly(member));
+  const treeIds=new Set(treeMembers.map((member)=>member.id));
+  const roots=treeMembers.filter((member)=>
+    ![member.mother_id,member.father_id].some((parentId)=>parentId&&treeIds.has(parentId))
+  ).sort(memberOrder);
   const visited=new Set<string>();
   const lines:string[]=[];
-  const walk=(member:DynastyMember,prefix:string,connector:string,depth:number)=>{
+  const walk=(member:DynastyMember,prefix:string,connector:string,depth:number,isRoot=false)=>{
     if(visited.has(member.id)||depth>6)return;
     visited.add(member.id);
     const badge=member.is_monarch?"👑 ":member.is_heir?"📜 ":"";
-    lines.push(prefix+connector+badge+memberName(member));
-    if(member.spouse_name)lines.push(prefix+(connector?"│  ":"")+"└─ 💍 "+spouseText(view,member));
+    const spouse=member.spouse_id?view.members.find((candidate)=>candidate.id===member.spouse_id):undefined;
+    const marriage=member.spouse_name?" ━━ 💍 "+spouseText(view,member):"";
+    lines.push(prefix+(isRoot?"":connector)+badge+memberName(member)+marriage);
+    if(spouse&&marriageOnly(spouse))visited.add(spouse.id);
     const children=childrenOf(view,member.id).filter((child)=>!visited.has(child.id));
-    children.forEach((child,index)=>walk(child,prefix+(connector?"│  ":""),index===children.length-1?"└─ ":"├─ ",depth+1));
+    const childPrefix=isRoot?prefix:prefix+(connector==="└─ "?"   ":"│  ");
+    children.forEach((child,index)=>walk(child,childPrefix,index===children.length-1?"└─ ":"├─ ",depth+1));
   };
-  roots.forEach((root,index)=>{walk(root,"",index?"├─ ":"",1);if(index<roots.length-1)lines.push("");});
+  roots.forEach((root,index)=>{walk(root,"","",1,true);if(index<roots.length-1)lines.push("");});
   return lines.length?lines:["Kayıtlı hanedan üyesi bulunmuyor."];
 }
 
@@ -229,9 +241,13 @@ function successionMembers(view:DynastyView):DynastyMember[]{
 
 function connectionLines(view:DynastyView):string[]{
   const seen=new Set<string>();const lines:string[]=[];
-  for(const member of view.members.filter((candidate)=>candidate.status==="ALIVE"&&candidate.spouse_id&&candidate.spouse_country_name&&candidate.spouse_country_name!==view.country_name)){
+  for(const member of view.members.filter((candidate)=>candidate.status==="ALIVE"&&candidate.spouse_id)){
+    const spouse=view.members.find((candidate)=>candidate.id===member.spouse_id);
+    const originCountry=spouse?.birth_country_name??member.spouse_birth_country_name??member.spouse_country_name;
+    const originDynasty=spouse?.birth_dynasty_name??member.spouse_birth_dynasty_name??member.spouse_dynasty_name;
+    if(!originCountry||originCountry===view.country_name&&originDynasty===view.name)continue;
     const key=[member.id,member.spouse_id].sort().join(":");if(seen.has(key))continue;seen.add(key);
-    lines.push("🤝 **"+member.spouse_country_name+"** • "+(member.spouse_dynasty_name??"Hanedan kaydı")+"\n↳ "+member.name+" × "+member.spouse_name);
+    lines.push("🤝 **"+originCountry+"** • "+(originDynasty??"Hanedan kaydı")+"\n↳ "+member.name+" × "+member.spouse_name);
   }
   return lines;
 }
