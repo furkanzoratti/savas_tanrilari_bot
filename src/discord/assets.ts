@@ -16,6 +16,25 @@ export const DYNASTY_MARRIAGE_BANNER_NAME = "ancient-dynastic-marriage-banner.pn
 export const PORT_ACCESS_BANNER_NAME = "ancient-port-access-banner.png";
 export const SETTLEMENTS_OVERVIEW_BANNER_NAME = "ancient-settlements-overview-banner.png";
 
+export const DYNASTY_VIEW_BANNER_NAMES = {
+  overview: "dynasty-overview-banner.png",
+  person: "dynasty-person-banner.png",
+  familyTree: "dynasty-family-tree-banner.png",
+  succession: "dynasty-succession-banner.png",
+  marriages: "dynasty-marriages-banner.png",
+  children: "dynasty-children-banner.png",
+  deaths: "dynasty-deaths-banner.png",
+  history: "dynasty-history-banner.png",
+  status: "dynasty-status-banner.png"
+} as const;
+
+export type DynastyViewBannerKey = keyof typeof DYNASTY_VIEW_BANNER_NAMES;
+
+export function dynastyViewAsset(key: DynastyViewBannerKey): { name: string; path: string; url: string } {
+  const name = DYNASTY_VIEW_BANNER_NAMES[key];
+  return { name, path: resolve(process.cwd(), "assets", name), url: `attachment://${name}` };
+}
+
 export const TEMPLE_BANNER_PATH = resolve(process.cwd(), "assets", TEMPLE_BANNER_NAME);
 export const BRAND_BANNER_PATH = resolve(process.cwd(), "assets", BRAND_BANNER_NAME);
 export const TURN_BANNER_PATH = resolve(process.cwd(), "assets", TURN_BANNER_NAME);

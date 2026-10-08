@@ -9,7 +9,7 @@ vi.hoisted(()=>{
 });
 
 import {
-  DYNASTY_BANNER_PATH,DYNASTY_BANNER_URL,
+  DYNASTY_VIEW_BANNER_NAMES,dynastyViewAsset,
   DYNASTY_MARRIAGE_BANNER_PATH,DYNASTY_MARRIAGE_BANNER_URL
 } from "./assets.js";
 import {dynastyEmbed,publishDynastyDeathLogs} from "./dynasty-ui.js";
@@ -20,10 +20,18 @@ describe("hanedan görselleri",()=>{
     const embed=dynastyEmbed({
       id:"dynasty",guild_id:"guild",country_id:"country",country_name:"Britanya",name:"York Hanedanı",
       current_turn:28,last_birth_attempt_turn:null,published_channel_id:null,published_message_id:null,
-      members:[],events:[]
+      members:[],events:[],birth_attempts:[]
     }).toJSON();
-    expect(embed.image?.url).toBe(DYNASTY_BANNER_URL);
-    expect(existsSync(DYNASTY_BANNER_PATH)).toBe(true);
+    expect(embed.image?.url).toBe(dynastyViewAsset("overview").url);
+    expect(existsSync(dynastyViewAsset("overview").path)).toBe(true);
+  });
+
+  it("her hanedan bilgi komutunun ayrı deploy görselini saklar",()=>{
+    for(const key of Object.keys(DYNASTY_VIEW_BANNER_NAMES) as Array<keyof typeof DYNASTY_VIEW_BANNER_NAMES>){
+      const asset=dynastyViewAsset(key);
+      expect(asset.url).toBe("attachment://"+asset.name);
+      expect(existsSync(asset.path),asset.name).toBe(true);
+    }
   });
 
   it("evlilik teklifi görselini deploy paketinde tutar",()=>{

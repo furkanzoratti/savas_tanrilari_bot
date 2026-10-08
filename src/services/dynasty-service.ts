@@ -13,6 +13,7 @@ export interface DynastyMemberView{
   status:DynastyMemberStatus;health:DynastyHealth;sick_until_turn:number|null;
   is_monarch:boolean;is_heir:boolean;succession_rank:number|null;
   spouse_id:string|null;spouse_name:string|null;spouse_title:string|null;spouse_age:number|null;spouse_country_name:string|null;
+  spouse_dynasty_name:string|null;spouse_status:DynastyMemberStatus|null;
   mother_id:string|null;mother_name:string|null;
   father_id:string|null;father_name:string|null;born_turn:number|null;died_turn:number|null;death_reason:string|null;
 }
@@ -22,6 +23,7 @@ export interface DynastyView{
   current_turn:number;last_birth_attempt_turn:number|null;published_channel_id:string|null;published_message_id:string|null;
   members:DynastyMemberView[];
   events:Array<{id:string;game_turn:number;event_type:string;member_id:string|null;details:Record<string,unknown>;created_at:Date|string}>;
+  birth_attempts:Array<{first_member_id:string;second_member_id:string;last_attempt_turn:number}>;
 }
 
 export interface DynastyTurnEvent{
@@ -86,7 +88,8 @@ async function dynastyForCountry(client:DbClient,guildId:string,countryId:string
 async function memberForDynasty(client:DbClient,dynastyId:string,memberId:string,lock=false):Promise<DynastyMemberView>{
   const row=(await client.query<DynastyMemberView>(
     `SELECT member.*,spouse.name AS spouse_name,spouse.title AS spouse_title,spouse.age AS spouse_age,
-            spouse_country.name AS spouse_country_name,mother.name AS mother_name,father.name AS father_name
+            spouse_country.name AS spouse_country_name,spouse_dynasty.name AS spouse_dynasty_name,
+            spouse.status AS spouse_status,mother.name AS mother_name,father.name AS father_name
        FROM dynasty_members member
        LEFT JOIN dynasty_members spouse ON spouse.id=member.spouse_id
        LEFT JOIN dynasties spouse_dynasty ON spouse_dynasty.id=spouse.dynasty_id
@@ -103,7 +106,8 @@ async function memberForDynasty(client:DbClient,dynastyId:string,memberId:string
 async function memberAcrossGuild(client:DbClient,guildId:string,memberId:string,lock=false):Promise<DynastyMarriageMember>{
   const row=(await client.query<DynastyMarriageMember>(
     `SELECT member.*,spouse.name AS spouse_name,spouse.title AS spouse_title,spouse.age AS spouse_age,
-            spouse_country.name AS spouse_country_name,mother.name AS mother_name,father.name AS father_name,
+            spouse_country.name AS spouse_country_name,spouse_dynasty.name AS spouse_dynasty_name,
+            spouse.status AS spouse_status,mother.name AS mother_name,father.name AS father_name,
             dynasty.id AS dynasty_id,dynasty.guild_id,dynasty.country_id,dynasty.name AS dynasty_name,
             country.name AS country_name
        FROM dynasty_members member
@@ -278,7 +282,8 @@ async function loadViewByClause(column:"country_id"|"id",value:string):Promise<D
   if(!dynasty)return null;
   const members=(await pool.query<DynastyMemberView>(
     `SELECT member.*,spouse.name AS spouse_name,spouse.title AS spouse_title,spouse.age AS spouse_age,
-            spouse_country.name AS spouse_country_name,mother.name AS mother_name,father.name AS father_name
+            spouse_country.name AS spouse_country_name,spouse_dynasty.name AS spouse_dynasty_name,
+            spouse.status AS spouse_status,mother.name AS mother_name,father.name AS father_name
        FROM dynasty_members member
        LEFT JOIN dynasty_members spouse ON spouse.id=member.spouse_id
        LEFT JOIN dynasties spouse_dynasty ON spouse_dynasty.id=spouse.dynasty_id
@@ -292,9 +297,14 @@ async function loadViewByClause(column:"country_id"|"id",value:string):Promise<D
   const events=(await pool.query<DynastyView["events"][number]>(
     `SELECT id,game_turn,event_type,member_id,details,created_at FROM dynasty_events
       WHERE dynasty_id=$1 AND event_type<>'DEATH_SAVE_PASSED'
-      ORDER BY game_turn DESC,created_at DESC LIMIT 12`,[dynasty.id]
+      ORDER BY game_turn DESC,created_at DESC LIMIT 50`,[dynasty.id]
   )).rows;
-  return{...dynasty,members,events};
+  const birthAttempts=(await pool.query<DynastyView["birth_attempts"][number]>(
+    `SELECT first_member_id,second_member_id,last_attempt_turn
+       FROM dynasty_couple_birth_attempts WHERE dynasty_id=$1
+      ORDER BY last_attempt_turn DESC,first_member_id,second_member_id`,[dynasty.id]
+  )).rows;
+  return{...dynasty,members,events,birth_attempts:birthAttempts};
 }
 
 export const dynastyService={

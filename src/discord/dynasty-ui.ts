@@ -3,19 +3,23 @@ import {
   ModalBuilder,TextInputBuilder,TextInputStyle,
   type AutocompleteInteraction,type ButtonInteraction,type ChatInputCommandInteraction,type Client,type ModalSubmitInteraction
 } from "discord.js";
-import {DYNASTY_GENDER_LABELS,DYNASTY_HEALTH_LABELS,MINIMUM_MARRIAGE_AGE,type DynastyGender,type DynastyHealth} from "../domain/dynasty.js";
+import {BIRTH_ATTEMPT_COOLDOWN_TURNS,DYNASTY_GENDER_LABELS,DYNASTY_HEALTH_LABELS,MINIMUM_MARRIAGE_AGE,type DynastyGender,type DynastyHealth} from "../domain/dynasty.js";
 import {dynastyService,type DynastyMarriageProposalView,type DynastyTurnResult,type DynastyView} from "../services/dynasty-service.js";
 import {gameService,GameError} from "../services/game-service.js";
 import {logger} from "../logger.js";
 import {isGameMaster,requireGameMaster,resolveCountry} from "./auth.js";
 import {playerMentionPayload} from "./player-mentions.js";
 import {
-  DYNASTY_BANNER_NAME,DYNASTY_BANNER_PATH,DYNASTY_BANNER_URL,
+  dynastyViewAsset,type DynastyViewBannerKey,
   DYNASTY_MARRIAGE_BANNER_NAME,DYNASTY_MARRIAGE_BANNER_PATH,DYNASTY_MARRIAGE_BANNER_URL
 } from "./assets.js";
 
 const number=(value:number)=>value.toLocaleString("tr-TR");
 const age=(value:number|null)=>value===null?"yaş bilinmiyor":number(value)+" yaş";
+const dynastyViewAttachment=(key:DynastyViewBannerKey)=>{
+  const asset=dynastyViewAsset(key);
+  return new AttachmentBuilder(asset.path,{name:asset.name});
+};
 
 export type DynastyDeathLogPublishState="NO_LOGS"|"NO_CHANNEL"|"CHANNEL_UNAVAILABLE"|"PUBLISHED"|"FAILED";
 
@@ -114,19 +118,6 @@ export async function publishDynastyDeathLogs(client:Client,guildId:string):Prom
   return{state:"PUBLISHED",channelId,publishedBatches,publishedEntries};
 }
 
-function memberLine(member:DynastyView["members"][number]):string{
-  const badges=[member.is_monarch?"👑 Hükümdar":null,member.is_heir?"📜 Tahtın varisi":null]
-    .filter(Boolean).join(" • ");
-  const health=member.status==="DEAD"
-    ?"Öldü"+(member.died_turn!==null?" • Tur "+member.died_turn:"")
-    :DYNASTY_HEALTH_LABELS[member.health]+(member.health==="SICK"&&member.sick_until_turn!==null?" • Tur "+member.sick_until_turn+" sonuna kadar gebelik yok":"");
-  const family=[member.spouse_name?"Eşi: "+member.spouse_name+(member.spouse_country_name?" ("+member.spouse_country_name+")":""):null,member.mother_name?"Annesi: "+member.mother_name:null,member.father_name?"Babası: "+member.father_name:null]
-    .filter(Boolean).join(" • ");
-  return "• **"+member.title+" "+member.name+"** — "+age(member.age)+" • "+DYNASTY_GENDER_LABELS[member.gender]+
-    "\n↳ "+member.relation+" • "+health+(badges?" • "+badges:"")+(member.succession_rank!==null?" • Veraset #"+member.succession_rank:"")+
-    (family?"\n↳ "+family:"");
-}
-
 function recentEventLine(event:DynastyView["events"][number]):string|null{
   const details=event.details??{};
   if(event.event_type==="BIRTH")return "👶 Tur "+event.game_turn+": **"+String(details.childName??"Çocuk")+"** dünyaya geldi.";
@@ -139,38 +130,238 @@ function recentEventLine(event:DynastyView["events"][number]):string|null{
   return null;
 }
 
-export function dynastyEmbed(view:DynastyView):EmbedBuilder{
+type DynastyMember=DynastyView["members"][number];
+
+function fit(value:string,maximum=1024):string{
+  if(value.length<=maximum)return value;
+  return value.slice(0,Math.max(0,maximum-18)).trimEnd()+"\n… devamı komutta";
+}
+
+function memberName(member:DynastyMember,includeTitle=true):string{
+  const prefix=member.status==="DEAD"?"† ":"";
+  return prefix+(includeTitle?member.title+" ":"")+member.name+(member.age===null?"":" — "+member.age);
+}
+
+function memberOrder(left:DynastyMember,right:DynastyMember):number{
+  if(left.is_monarch!==right.is_monarch)return left.is_monarch?-1:1;
+  if(left.is_heir!==right.is_heir)return left.is_heir?-1:1;
+  if(left.succession_rank!==right.succession_rank)return (left.succession_rank??9999)-(right.succession_rank??9999);
+  return (right.age??-1)-(left.age??-1)||left.name.localeCompare(right.name,"tr");
+}
+
+function childrenOf(view:DynastyView,parentId:string):DynastyMember[]{
+  return view.members.filter((member)=>member.mother_id===parentId||member.father_id===parentId).sort(memberOrder);
+}
+
+function generationOf(view:DynastyView,member:DynastyMember,memo=new Map<string,number>(),trail=new Set<string>()):number{
+  const known=memo.get(member.id);if(known)return known;
+  if(trail.has(member.id))return 1;
+  const nextTrail=new Set(trail).add(member.id);
+  const parents=[member.mother_id,member.father_id]
+    .map((id)=>view.members.find((candidate)=>candidate.id===id)).filter((parent):parent is DynastyMember=>Boolean(parent));
+  const generation=parents.length?Math.max(...parents.map((parent)=>generationOf(view,parent,memo,nextTrail)))+1:1;
+  memo.set(member.id,generation);return generation;
+}
+
+function marriageOnly(member:DynastyMember):boolean{
+  const relation=member.relation.toLocaleLowerCase("tr-TR");
+  return !member.is_monarch&&!member.mother_id&&!member.father_id&&(relation.includes("eşi")||relation.includes("eş")||relation.includes("soylu"));
+}
+
+function dynastyStats(view:DynastyView){
   const living=view.members.filter((member)=>member.status==="ALIVE");
-  const dead=view.members.filter((member)=>member.status==="DEAD");
-  const monarch=living.find((member)=>member.is_monarch);
-  const heir=living.find((member)=>member.is_heir);
-  const spouse=monarch?.spouse_id?living.find((member)=>member.id===monarch.spouse_id):null;
-  const spouseText=spouse
-    ?spouse.title+" "+spouse.name+" — "+age(spouse.age)
-    :monarch?.spouse_name
-      ?(monarch.spouse_title?monarch.spouse_title+" ":"")+monarch.spouse_name+
-        (monarch.spouse_country_name?" ("+monarch.spouse_country_name+")":"")+" — "+age(monarch.spouse_age)
-      :"Yok";
-  const children=living.filter((member)=>member.mother_id===monarch?.id||member.father_id===monarch?.id);
-  const other=living.filter((member)=>member.id!==monarch?.id&&member.id!==spouse?.id&&!children.some((child)=>child.id===member.id));
+  const localMarriage=living.filter(marriageOnly);
+  const ownIds=new Set(view.members.map((member)=>member.id));
+  const externalSpouses=new Set(living.filter((member)=>member.spouse_id&&!ownIds.has(member.spouse_id)&&member.spouse_status!=="DEAD").map((member)=>member.spouse_id!));
+  const generations=living.filter((member)=>!marriageOnly(member)).map((member)=>generationOf(view,member));
+  return{
+    living,dead:view.members.filter((member)=>member.status==="DEAD"),
+    bloodLiving:Math.max(0,living.length-localMarriage.length),marriageLiving:localMarriage.length+externalSpouses.size,
+    livingGenerations:generations.length?Math.max(...generations):0
+  };
+}
+
+function spouseText(view:DynastyView,member:DynastyMember):string{
+  if(!member.spouse_name)return"Eşi yok";
+  const spouse=view.members.find((candidate)=>candidate.id===member.spouse_id);
+  const deceased=(spouse?.status??member.spouse_status)==="DEAD"?"† ":"";
+  const title=member.spouse_title?member.spouse_title+" ":"";
+  const origin=[member.spouse_dynasty_name,member.spouse_country_name].filter(Boolean).join(" • ");
+  return deceased+title+member.spouse_name+(member.spouse_age===null?"":" — "+member.spouse_age)+(origin?" ["+origin+"]":"");
+}
+
+function coupleAttempt(view:DynastyView,member:DynastyMember):number|null{
+  if(!member.spouse_id)return null;
+  const first=member.id<member.spouse_id?member.id:member.spouse_id;
+  const second=member.id<member.spouse_id?member.spouse_id:member.id;
+  return view.birth_attempts.find((attempt)=>attempt.first_member_id===first&&attempt.second_member_id===second)?.last_attempt_turn??null;
+}
+
+function attemptStatus(view:DynastyView,member:DynastyMember):string{
+  const last=coupleAttempt(view,member);
+  if(last===null)return"Son deneme: Yok • Yeni deneme: ✅ Uygun";
+  const next=last+BIRTH_ATTEMPT_COOLDOWN_TURNS;
+  return "Son deneme: Tur "+last+" • Yeni deneme: "+(view.current_turn>=next?"✅ Uygun":"Tur "+next);
+}
+
+function dynastyTreeLines(view:DynastyView):string[]{
+  const spouseIds=new Set(view.members.filter((member)=>member.spouse_id&&marriageOnly(member)).map((member)=>member.id));
+  const roots=view.members.filter((member)=>!member.mother_id&&!member.father_id&&!spouseIds.has(member.id)).sort(memberOrder);
+  const visited=new Set<string>();
+  const lines:string[]=[];
+  const walk=(member:DynastyMember,prefix:string,connector:string,depth:number)=>{
+    if(visited.has(member.id)||depth>6)return;
+    visited.add(member.id);
+    const badge=member.is_monarch?"👑 ":member.is_heir?"📜 ":"";
+    lines.push(prefix+connector+badge+memberName(member));
+    if(member.spouse_name)lines.push(prefix+(connector?"│  ":"")+"└─ 💍 "+spouseText(view,member));
+    const children=childrenOf(view,member.id).filter((child)=>!visited.has(child.id));
+    children.forEach((child,index)=>walk(child,prefix+(connector?"│  ":""),index===children.length-1?"└─ ":"├─ ",depth+1));
+  };
+  roots.forEach((root,index)=>{walk(root,"",index?"├─ ":"",1);if(index<roots.length-1)lines.push("");});
+  return lines.length?lines:["Kayıtlı hanedan üyesi bulunmuyor."];
+}
+
+function successionMembers(view:DynastyView):DynastyMember[]{
+  return view.members.filter((member)=>member.status==="ALIVE"&&!member.is_monarch&&member.succession_rank!==null)
+    .sort((left,right)=>(left.succession_rank??9999)-(right.succession_rank??9999));
+}
+
+function connectionLines(view:DynastyView):string[]{
+  const seen=new Set<string>();const lines:string[]=[];
+  for(const member of view.members.filter((candidate)=>candidate.status==="ALIVE"&&candidate.spouse_id&&candidate.spouse_country_name&&candidate.spouse_country_name!==view.country_name)){
+    const key=[member.id,member.spouse_id].sort().join(":");if(seen.has(key))continue;seen.add(key);
+    lines.push("🤝 **"+member.spouse_country_name+"** • "+(member.spouse_dynasty_name??"Hanedan kaydı")+"\n↳ "+member.name+" × "+member.spouse_name);
+  }
+  return lines;
+}
+
+export function dynastyEmbed(view:DynastyView):EmbedBuilder{
+  const stats=dynastyStats(view);
+  const monarch=stats.living.find((member)=>member.is_monarch);
+  const heir=stats.living.find((member)=>member.is_heir);
+  const marital=!monarch?.spouse_name?"Bekâr":monarch.spouse_status==="DEAD"?"Dul":"Evli";
   const overview=[
-    "**Hanedan:** "+view.name,
-    "**Hükümdar:** "+(monarch?monarch.title+" "+monarch.name+" — "+age(monarch.age):"⚠️ Veraset krizi"),
-    "**Eşi:** "+spouseText,
-    "**Tahtın Varisi:** "+(heir?heir.title+" "+heir.name+" — "+age(heir.age):"Belirlenmedi"),
-    "**Yaşayan Üye:** "+living.length+" • **Ölen Üye:** "+dead.length,
-    "**Son çocuk denemesi:** "+(view.last_birth_attempt_turn===null?"Henüz yapılmadı":"Tur "+view.last_birth_attempt_turn)+" • Bekleme süresi çifte özeldir"
+    "**👑 Hanedan Başkanı:** "+(monarch?memberName(monarch):"⚠️ Veraset krizi"),
+    "**⚔️ Hükümdar:** "+(monarch?monarch.title+" "+monarch.name:"Belirlenmedi"),
+    "**🕊️ Durum:** "+marital,
+    "**📜 Tahtın Varisi:** "+(heir?memberName(heir):"Belirlenmedi"),
+    "**⚖️ Veraset Sistemi:** Erkek Öncelikli Primogenitür",
+    "",
+    "**👥 Yaşayan Kan Üyesi:** "+stats.bloodLiving+" • **💍 Evlilik Yoluyla Bağlı:** "+stats.marriageLiving,
+    "**⚰️ Ölen Üye:** "+stats.dead.length+" • **🌳 Yaşayan Nesil:** "+stats.livingGenerations
   ].join("\n");
-  const embed=new EmbedBuilder().setColor(0xc59b45).setTitle("👑 "+view.country_name+" • Hanedan Formu").setDescription(overview).setImage(DYNASTY_BANNER_URL);
-  if(children.length)embed.addFields({name:"👶 Hükümdarın Çocukları",value:children.map(memberLine).join("\n\n").slice(0,1024)});
-  if(other.length)embed.addFields({name:"🏛️ Diğer Hanedan Üyeleri",value:other.map(memberLine).join("\n\n").slice(0,1024)});
-  const succession=living.filter((member)=>member.succession_rank!==null&&!member.is_monarch)
-    .sort((left,right)=>Number(left.succession_rank)-Number(right.succession_rank));
-  embed.addFields({name:"📜 Veraset Sırası",value:succession.length?succession.map((member)=>"**"+member.succession_rank+".** "+member.title+" "+member.name).join("\n").slice(0,1024):"Uygun varis bulunmuyor."});
-  if(dead.length)embed.addFields({name:"⚰️ Ölen Hanedan Üyeleri",value:dead.slice(0,12).map((member)=>"• **"+member.name+"** — "+age(member.age)+" • "+(member.death_reason??"Ölüm nedeni kaydedilmedi")).join("\n").slice(0,1024)});
+  const embed=new EmbedBuilder().setColor(0xc59b45).setTitle("👑 "+view.country_name.toLocaleUpperCase("tr-TR")+" • "+view.name.toLocaleUpperCase("tr-TR")).setDescription(overview).setImage(dynastyViewAsset("overview").url);
+  embed.addFields({name:"🌳 SOY AĞACI",value:fit(dynastyTreeLines(view).join("\n"),900)});
+  const succession=successionMembers(view);
+  embed.addFields({name:"📜 VERASET",value:fit((monarch?"👑 Tahtta — "+memberName(monarch)+"\n":"")+(succession.length?succession.slice(0,10).map((member)=>"**#"+member.succession_rank+"** "+memberName(member)).join("\n"):"Uygun varis bulunmuyor."),850)});
+  const connections=connectionLines(view);
+  if(connections.length)embed.addFields({name:"🤝 HANEDAN BAĞLANTILARI",value:fit(connections.join("\n"),750)});
   const recent=view.events.map(recentEventLine).filter((line):line is string=>Boolean(line)).slice(0,8);
-  if(recent.length)embed.addFields({name:"🗞️ Son Hanedan Olayları",value:recent.join("\n").slice(0,1024)});
-  return embed.setFooter({text:"Tur "+view.current_turn+" • Her oyun turunda yaşayan üyeler 1 yaş alır."});
+  if(recent.length)embed.addFields({name:"🗞️ SON OLAYLAR",value:fit(recent.join("\n"),750)});
+  return embed.setFooter({text:"Tur "+view.current_turn+" • Ayrıntı: /hanedan kişi, soyagaci, veraset, evlilikler, cocuklar, olumler, gecmis"});
+}
+
+export function dynastyPersonEmbed(view:DynastyView,memberId:string):EmbedBuilder{
+  const member=view.members.find((candidate)=>candidate.id===memberId);
+  if(!member)throw new GameError("Hanedan üyesi bulunamadı.");
+  const children=childrenOf(view,member.id);
+  const position=member.is_monarch?"Hükümdar":member.is_heir?"Tahtın Varisi":member.succession_rank!==null?"Taht Sırasında":"Hanedan Üyesi";
+  const lines=[
+    "**🎂 Yaş:** "+age(member.age),"**"+(member.gender==="MALE"?"♂️":"♀️")+" Cinsiyet:** "+DYNASTY_GENDER_LABELS[member.gender],
+    "**❤️ Durum:** "+(member.status==="DEAD"?"Öldü":DYNASTY_HEALTH_LABELS[member.health]),"",
+    "**👑 Hanedan:** "+view.name,"**📜 Unvan:** "+member.title,"**👑 Konum:** "+position,
+    "**⚖️ Veraset:** "+(member.is_monarch?"Tahtta":member.succession_rank!==null?"#"+member.succession_rank:"Sırada değil"),"",
+    "**👨 Baba:** "+(member.father_name??"Kayıt yok"),"**👩 Anne:** "+(member.mother_name??"Kayıt yok"),"",
+    "**💍 Eşi:** "+spouseText(view,member),"",
+    "**👶 Çocukları:**\n"+(children.length?children.map((child,index)=>(index===children.length-1?"└─ ":"├─ ")+memberName(child)+" "+(child.gender==="MALE"?"♂":"♀")).join("\n"):"└─ Çocuk yok"),"",
+    "**📍 Bağlı Devlet:** "+view.country_name,"**🩸 Nesil:** "+generationOf(view,member)+". Nesil"
+  ];
+  if(member.spouse_id)lines.push("","**👶 Çocuk Denemesi:** "+attemptStatus(view,member));
+  return new EmbedBuilder().setColor(member.status==="DEAD"?0x4b4d52:0xc59b45)
+    .setTitle("👤 "+memberName(member).toLocaleUpperCase("tr-TR")).setDescription(fit(lines.join("\n"),3900)).setImage(dynastyViewAsset("person").url)
+    .setFooter({text:view.country_name+" • "+view.name+" • Tur "+view.current_turn});
+}
+
+export function dynastyTreeEmbed(view:DynastyView):EmbedBuilder{
+  return new EmbedBuilder().setColor(0x8b6f47).setTitle("🌳 "+view.name.toLocaleUpperCase("tr-TR")+" • SOY AĞACI")
+    .setDescription(fit(dynastyTreeLines(view).join("\n"),3900)).setImage(dynastyViewAsset("familyTree").url)
+    .setFooter({text:"Yaşayan ve ölen üyeler, eşler ve kayıtlı ebeveyn bağları gösterilir."});
+}
+
+export function dynastySuccessionEmbed(view:DynastyView):EmbedBuilder{
+  const monarch=view.members.find((member)=>member.status==="ALIVE"&&member.is_monarch);
+  const lines=successionMembers(view).map((member)=>"**#"+member.succession_rank+" "+memberName(member)+"**\n↳ "+member.relation);
+  return new EmbedBuilder().setColor(0xc59b45).setTitle("📜 "+view.country_name.toLocaleUpperCase("tr-TR")+" • VERASET SIRASI")
+    .setDescription("**👑 HÜKÜMDAR**\n"+(monarch?memberName(monarch):"⚠️ Veraset krizi")+"\n\n**📜 TAHT SIRASI**\n\n"+(lines.length?fit(lines.join("\n\n"),3200):"Uygun varis bulunmuyor.")+"\n\n**⚖️ Veraset Yasası:** Erkek Öncelikli Primogenitür\n**📌 Son Güncelleme:** Tur "+view.current_turn)
+    .setImage(dynastyViewAsset("succession").url);
+}
+
+function marriageEntries(view:DynastyView):Array<{member:DynastyMember;children:DynastyMember[];block:string}>{
+  const seen=new Set<string>();const entries:Array<{member:DynastyMember;children:DynastyMember[];block:string}>=[];
+  for(const member of view.members.filter((candidate)=>candidate.spouse_id&&candidate.spouse_name)){
+    const key=[member.id,member.spouse_id!].sort().join(":");if(seen.has(key))continue;seen.add(key);
+    const children=view.members.filter((child)=>[child.mother_id,child.father_id].includes(member.id)&&[child.mother_id,child.father_id].includes(member.spouse_id));
+    const block="**"+memberName(member)+"**\n×\n**"+spouseText(view,member)+"**\n"+(children.length?children.map((child,index)=>(index===children.length-1?"└─ ":"├─ ")+memberName(child)).join("\n"):"└─ Çocuk yok");
+    entries.push({member,children,block});
+  }
+  return entries;
+}
+
+export function dynastyMarriagesEmbed(view:DynastyView):EmbedBuilder{
+  const blocks=marriageEntries(view).map((entry)=>entry.block);const connections=connectionLines(view);
+  return new EmbedBuilder().setColor(0xb86b77).setTitle("🤝 "+view.name.toLocaleUpperCase("tr-TR")+" • EVLİLİK BAĞLARI")
+    .setDescription(fit(blocks.join("\n\n"),3500)||"Kayıtlı evlilik bulunmuyor.").setImage(dynastyViewAsset("marriages").url)
+    .setFooter({text:"Aktif yabancı hanedan bağı: "+connections.length});
+}
+
+export function dynastyChildrenEmbed(view:DynastyView):EmbedBuilder{
+  const blocks=marriageEntries(view).map((entry)=>entry.block+"\n↳ "+attemptStatus(view,entry.member));
+  const childIds=new Set(view.members.filter((member)=>member.mother_id||member.father_id).map((member)=>member.id));
+  const couplesWithChildren=new Set(view.members.filter((member)=>member.spouse_id&&childrenOf(view,member.id).length).map((member)=>[member.id,member.spouse_id!].sort().join(":")));
+  return new EmbedBuilder().setColor(0x78a7d8).setTitle("👶 "+view.name.toLocaleUpperCase("tr-TR")+" • YENİ NESİL")
+    .setDescription(fit(blocks.join("\n\n"),3500)||"Kayıtlı evli çift bulunmuyor.").setImage(dynastyViewAsset("children").url)
+    .setFooter({text:"Yaşayan yeni nesil: "+[...childIds].filter((id)=>view.members.find((member)=>member.id===id)?.status==="ALIVE").length+" • Çocuk sahibi çift: "+couplesWithChildren.size});
+}
+
+export function dynastyDeathsEmbed(view:DynastyView):EmbedBuilder{
+  const dead=view.members.filter((member)=>member.status==="DEAD");
+  const blocks=dead.map((member)=>{
+    const children=childrenOf(view,member.id);
+    return "**† "+member.title+" "+member.name+"**\n"+age(member.age)+" • "+member.relation+"\n"+
+      "Çocukları: "+(children.length?children.map((child)=>child.name).join(", "):"Yok")+"\n"+
+      "Ölüm: "+(member.death_reason??"Nedeni kaydedilmedi")+(member.died_turn===null?"":" • Tur "+member.died_turn);
+  });
+  return new EmbedBuilder().setColor(0x4b4d52).setTitle("⚰️ "+view.name.toLocaleUpperCase("tr-TR")+" • ÖLENLER")
+    .setDescription(fit(blocks.join("\n\n"),3900)||"Kayıtlı ölüm bulunmuyor.").setImage(dynastyViewAsset("deaths").url);
+}
+
+function historyEventLine(event:DynastyView["events"][number]):string|null{
+  const details=event.details??{};const basic=recentEventLine(event);
+  if(basic)return basic;
+  if(event.event_type==="BIRTH_ATTEMPT_FAILED")return "🕯️ Tur "+event.game_turn+": "+String(details.motherName??"Çift")+" için çocuk denemesi başarısız oldu.";
+  if(event.event_type==="HEIR_DESIGNATED")return "📜 Tur "+event.game_turn+": **"+String(details.name??"Yeni varis")+"** tahtın varisi ilan edildi.";
+  if(event.event_type==="MONARCH_DESIGNATED")return "👑 Tur "+event.game_turn+": **"+String(details.name??"Yeni hükümdar")+"** hükümdar ilan edildi.";
+  if(event.event_type==="MEMBER_ADDED")return "👤 Tur "+event.game_turn+": **"+String(details.name??"Yeni üye")+"** hanedana eklendi.";
+  if(event.event_type==="DYNASTY_CREATED")return "🏛️ Tur "+event.game_turn+": Hanedan kaydı oluşturuldu.";
+  return null;
+}
+
+export function dynastyHistoryEmbed(view:DynastyView):EmbedBuilder{
+  const lines=view.events.map(historyEventLine).filter((line):line is string=>Boolean(line));
+  return new EmbedBuilder().setColor(0x7d6a58).setTitle("🗞️ "+view.name.toLocaleUpperCase("tr-TR")+" • TARİHÇE")
+    .setDescription(fit(lines.join("\n\n"),3900)||"Kayıtlı hanedan olayı bulunmuyor.").setImage(dynastyViewAsset("history").url)
+    .setFooter({text:"En yeni olaylar üstte gösterilir • Tur "+view.current_turn});
+}
+
+export function dynastyStatusEmbed(view:DynastyView):EmbedBuilder{
+  const stats=dynastyStats(view);const monarch=stats.living.find((member)=>member.is_monarch);const heir=stats.living.find((member)=>member.is_heir);
+  return new EmbedBuilder().setColor(0xc59b45).setTitle("👑 "+view.name.toLocaleUpperCase("tr-TR"))
+    .setDescription([
+      "**Hükümdar:**\n"+(monarch?memberName(monarch):"Belirlenmedi"),"**Varis:**\n"+(heir?memberName(heir):"Belirlenmedi"),
+      "**Yaşayan Kan Üyesi:** "+stats.bloodLiving,"**Evlilik Yoluyla Bağlı:** "+stats.marriageLiving,"**Ölen:** "+stats.dead.length,
+      "**Nesil:** "+stats.livingGenerations,"**Taht Sırası:** "+successionMembers(view).length+" kişi","**Yabancı Hanedan Bağı:** "+connectionLines(view).length
+    ].join("\n\n")).setImage(dynastyViewAsset("status").url).setFooter({text:view.country_name+" • Tur "+view.current_turn});
 }
 
 export async function refreshDynastyCard(client:Client,dynastyId:string):Promise<boolean>{
@@ -180,10 +371,11 @@ export async function refreshDynastyCard(client:Client,dynastyId:string):Promise
   if(!channel?.isTextBased()||channel.isDMBased())return false;
   const message=await channel.messages.fetch(view.published_message_id).catch(()=>null);
   if(!message)return false;
-  const hasBanner=message.attachments.some((attachment)=>attachment.name===DYNASTY_BANNER_NAME);
+  const asset=dynastyViewAsset("overview");
+  const hasBanner=message.attachments.some((attachment)=>attachment.name===asset.name);
   await message.edit({
     embeds:[dynastyEmbed(view)],
-    ...(hasBanner?{}:{files:[new AttachmentBuilder(DYNASTY_BANNER_PATH,{name:DYNASTY_BANNER_NAME})]})
+    ...(hasBanner?{}:{files:[new AttachmentBuilder(asset.path,{name:asset.name})]})
   });
   return true;
 }
@@ -206,8 +398,23 @@ export async function handleDynastyCommand(interaction:ChatInputCommandInteracti
     if(sub==="bilgi"){
       await interaction.editReply({
         embeds:[dynastyEmbed(view)],
-        files:[new AttachmentBuilder(DYNASTY_BANNER_PATH,{name:DYNASTY_BANNER_NAME})]
+        files:[dynastyViewAttachment("overview")]
       });
+    }else if(sub==="kisi"){
+      await interaction.editReply({
+        embeds:[dynastyPersonEmbed(view,interaction.options.getString("uye",true))],
+        files:[dynastyViewAttachment("person")]
+      });
+    }else if(sub==="soyagaci"||sub==="veraset"||sub==="evlilikler"||sub==="cocuklar"||sub==="olumler"||sub==="gecmis"||sub==="durum"){
+      const embed=sub==="soyagaci"?dynastyTreeEmbed(view)
+        :sub==="veraset"?dynastySuccessionEmbed(view)
+          :sub==="evlilikler"?dynastyMarriagesEmbed(view)
+            :sub==="cocuklar"?dynastyChildrenEmbed(view)
+              :sub==="olumler"?dynastyDeathsEmbed(view)
+                :sub==="gecmis"?dynastyHistoryEmbed(view)
+                  :dynastyStatusEmbed(view);
+      const bannerKey:DynastyViewBannerKey=sub==="soyagaci"?"familyTree":sub==="veraset"?"succession":sub==="evlilikler"?"marriages":sub==="cocuklar"?"children":sub==="olumler"?"deaths":sub==="gecmis"?"history":"status";
+      await interaction.editReply({embeds:[embed],files:[dynastyViewAttachment(bannerKey)]});
     }else if(sub==="cocuk-dene"){
       const result=await dynastyService.attemptBirth({
         guildId:interaction.guildId,countryId:country.id,actorId:interaction.user.id,
@@ -377,7 +584,7 @@ export async function handleDynastyCommand(interaction:ChatInputCommandInteracti
     if(!channel?.isTextBased()||channel.isDMBased())throw new GameError("Hanedan formu yalnızca bir sunucu metin kanalında yayımlanabilir.");
     const message=await channel.send({
       embeds:[dynastyEmbed(view)],
-      files:[new AttachmentBuilder(DYNASTY_BANNER_PATH,{name:DYNASTY_BANNER_NAME})]
+      files:[dynastyViewAttachment("overview")]
     });
     await dynastyService.setPublishedMessage({dynastyId:view.id,channelId:channel.id,messageId:message.id});
     await interaction.editReply("✅ Hanedan formu bu kanalda yayımlandı. Doğum, ölüm ve yönetici değişikliklerinde otomatik güncellenecek.");
@@ -509,6 +716,11 @@ export async function handleDynastyAutocomplete(interaction:AutocompleteInteract
       const countryName=interaction.options.getString("ikinci-ulke");
       country=countryName?await gameService.countryByName(interaction.guildId,countryName):null;
       marriageSelection=true;
+    }else if(sub==="kisi"&&focused.name==="uye"){
+      const requested=interaction.options.getString("ulke");
+      country=requested&&isGameMaster(interaction)
+        ?await gameService.countryByName(interaction.guildId,requested)
+        :await gameService.countryForUser(interaction.guildId,interaction.user.id);
     }else{
       const countryName=interaction.options.getString("ulke");
       country=countryName?await gameService.countryByName(interaction.guildId,countryName):null;

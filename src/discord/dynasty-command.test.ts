@@ -5,8 +5,10 @@ describe("dynasty Discord commands",()=>{
   it("exposes player information, birth and diplomatic marriage actions",()=>{
     const command=commandBuilders.find((item)=>item.name==="hanedan");
     expect(command?.options?.map((option)=>option.name)).toEqual([
-      "bilgi","cocuk-dene","evlilik-teklif","evlilik-cevapla","evlilik-teklifleri","evlilik-geri-cek"
+      "bilgi","kisi","soyagaci","veraset","evlilikler","cocuklar","olumler","gecmis","durum",
+      "cocuk-dene","evlilik-teklif","evlilik-cevapla","evlilik-teklifleri","evlilik-geri-cek"
     ]);
+    expect(command?.options?.find((option)=>option.name==="kisi")?.options?.map((option)=>option.name)).toEqual(["uye","ulke"]);
     expect(command?.options?.find((option)=>option.name==="cocuk-dene")?.options?.map((option)=>option.name)).toEqual(["ulke","ebeveyn"]);
     expect(command?.options?.find((option)=>option.name==="evlilik-teklif")?.options?.map((option)=>option.name)).toEqual([
       "uye","hedef-ulke","hedef-uye","ulke"
