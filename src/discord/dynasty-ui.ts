@@ -165,10 +165,10 @@ function generationOf(view:DynastyView,member:DynastyMember,memo=new Map<string,
 
 function marriageOnly(member:DynastyMember):boolean{
   const relation=member.relation.toLocaleLowerCase("tr-TR");
-  if(!member.is_monarch&&relation.includes("evlilik yoluyla"))return true;
-  return !member.is_monarch&&!member.mother_id&&!member.father_id&&(
-    relation.includes("eşi")||relation.includes("eş")||relation.includes("soylu")
-  );
+  if(member.is_monarch)return false;
+  return relation.includes("evlilik yoluyla")||relation.endsWith(" eşi")||relation.endsWith(" eş")||
+    relation.includes("soylu")||relation.includes("gelini")||relation.includes("damadı")||
+    relation.includes("yengesi")||relation.includes("eniştesi")||relation.includes("üvey");
 }
 
 function dynastyStats(view:DynastyView){
@@ -286,7 +286,7 @@ export function dynastyPersonEmbed(view:DynastyView,memberId:string):EmbedBuilde
   const lines=[
     "**🎂 Yaş:** "+age(member.age),"**"+(member.gender==="MALE"?"♂️":"♀️")+" Cinsiyet:** "+DYNASTY_GENDER_LABELS[member.gender],
     "**❤️ Durum:** "+(member.status==="DEAD"?"Öldü":DYNASTY_HEALTH_LABELS[member.health]),"",
-    "**👑 Hanedan:** "+view.name,"**📜 Unvan:** "+member.title,"**👑 Konum:** "+position,
+    "**👑 Hanedan:** "+view.name,"**📜 Unvan:** "+member.title,"**🧬 Akrabalık:** "+member.relation,"**👑 Konum:** "+position,
     "**⚖️ Veraset:** "+(member.is_monarch?"Tahtta":member.succession_rank!==null?"#"+member.succession_rank:"Sırada değil"),"",
     "**👨 Baba:** "+(member.father_name??"Kayıt yok"),"**👩 Anne:** "+(member.mother_name??"Kayıt yok"),"",
     "**💍 Eşi:** "+spouseText(view,member),"",

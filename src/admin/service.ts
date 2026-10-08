@@ -14,7 +14,7 @@ import {
   COMMANDER_DOCTRINES
 } from "../domain/characters.js";
 import { CULTURE_GROUPS, type CultureGroup } from "../domain/cultures.js";
-import { MINIMUM_MARRIAGE_AGE } from "../domain/dynasty.js";
+import { MINIMUM_MARRIAGE_AGE,automaticDynastyRelations } from "../domain/dynasty.js";
 import { MERCENARY_COMPANIES, type MercenaryCompanyKey } from "../domain/mercenaries.js";
 import { RESOURCES, type ResourceType } from "../domain/resources.js";
 import { RELIGIONS, isReligionKey, secondaryReligionFor, type ReligionKey } from "../domain/religions.js";
@@ -725,7 +725,7 @@ export const adminPanelService = {
   async dynasty(dynastyId: string) {
     if (!z.string().uuid().safeParse(dynastyId).success) throw new Error("Geçersiz hanedan kimliği.");
     const dynasty = await adminDynastyContext(adminPool, dynastyId);
-    const members = (await adminPool.query(
+    const storedMembers = (await adminPool.query(
       `SELECT member.*,spouse.name AS spouse_name,spouse.status AS spouse_status,
               mother.name AS mother_name,father.name AS father_name
          FROM dynasty_members member
@@ -737,6 +737,7 @@ export const adminPanelService = {
                  member.succession_rank NULLS LAST,member.age DESC,member.created_at`,
       [dynastyId]
     )).rows;
+    const members=automaticDynastyRelations(storedMembers);
     const events = (await adminPool.query(
       `SELECT event.id,event.game_turn,event.event_type,event.details,event.created_at,member.name AS member_name
          FROM dynasty_events event LEFT JOIN dynasty_members member ON member.id=event.member_id

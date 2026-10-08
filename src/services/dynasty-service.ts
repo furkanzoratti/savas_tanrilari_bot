@@ -2,6 +2,7 @@ import {randomInt} from "node:crypto";
 import {pool,withTransaction,type DbClient} from "../db/pool.js";
 import {
   BIRTH_ATTEMPT_COOLDOWN_TURNS,MATERNAL_ILLNESS_COOLDOWN_TURNS,
+  automaticDynastyRelations,
   MINIMUM_MARRIAGE_AGE,
   birthAgeModifier,birthAttemptSucceeded,birthComplication,dynastyDeathFailureMaximum,dynastyDeathSaveFailed,dynastyMemberCanBeBirthParent,
   dynastyMemberCanMarry,newbornGender,orderedDynastyCoupleIds,type DynastyGender,type DynastyHealth,type DynastyMemberStatus
@@ -315,7 +316,7 @@ async function loadViewByClause(column:"country_id"|"id",value:string):Promise<D
       WHERE dynasty.${column}=$1`,[value]
   )).rows[0];
   if(!dynasty)return null;
-  const members=(await pool.query<DynastyMemberView>(
+  const storedMembers=(await pool.query<DynastyMemberView>(
     `SELECT member.*,spouse.name AS spouse_name,spouse.title AS spouse_title,spouse.age AS spouse_age,
             spouse_country.name AS spouse_country_name,spouse_dynasty.name AS spouse_dynasty_name,
             birth_dynasty.name AS birth_dynasty_name,birth_country.name AS birth_country_name,
@@ -336,6 +337,7 @@ async function loadViewByClause(column:"country_id"|"id",value:string):Promise<D
       ORDER BY CASE WHEN member.status='ALIVE' THEN 0 ELSE 1 END,member.is_monarch DESC,member.is_heir DESC,
                member.succession_rank NULLS LAST,member.age DESC,member.created_at`,[dynasty.id]
   )).rows;
+  const members=automaticDynastyRelations(storedMembers);
   const events=(await pool.query<DynastyView["events"][number]>(
     `SELECT id,game_turn,event_type,member_id,details,created_at FROM dynasty_events
       WHERE dynasty_id=$1 AND event_type<>'DEATH_SAVE_PASSED'
