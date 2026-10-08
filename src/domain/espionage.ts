@@ -9,7 +9,7 @@ export const ESPIONAGE_TARGETS = {
   INCOME_SABOTAGE: { label: "Gelir Sabotajı", buildingTypes: [], group: "FINANCIAL_SPY" },
   TREASURY_INFILTRATION: { label: "Hazine Sızdırma", buildingTypes: [], group: "FINANCIAL_SPY" },
   TRADE_COLLAPSE: { label: "Ticaret Ağını Çökertme", buildingTypes: [], group: "FINANCIAL_SPY" },
-  INCITE_PUBLIC: { label: "Halkı Kışkırtma", buildingTypes: [], group: "PROVOCATEUR" },
+  INCITE_PUBLIC: { label: "Halkı Kışkırtma • Huzursuzluk", buildingTypes: [], group: "PROVOCATEUR" },
   PARALYZE_GOVERNMENT: { label: "Yönetimi Felç Etme", buildingTypes: [], group: "PROVOCATEUR" },
   AGGRAVATE_EVENT: { label: "Olayı Körükleme", buildingTypes: [], group: "PROVOCATEUR" },
   SUPPLY_COLLAPSE: { label: "Ordu İkmalini Çökertme", buildingTypes: [], group: "MILITARY_AGENT" },

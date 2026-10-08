@@ -69,7 +69,7 @@ export async function espionageTargetExists(client: DbClient, operation: Espiona
     PRODUCTION_SABOTAGE: "SELECT 1 FROM naval_orders WHERE settlement_id=$1 AND status='BUILDING' UNION ALL SELECT 1 FROM siege_orders WHERE settlement_id=$1 AND status='BUILDING' LIMIT 1",
     TRADE_COLLAPSE: "SELECT 1 FROM trade_agreements WHERE status='ACTIVE' AND (proposer_settlement_id=$1 OR receiver_settlement_id=$1) LIMIT 1",
     PARALYZE_GOVERNMENT: "SELECT 1 FROM settlement_policies WHERE settlement_id=$1 AND status='ACTIVE' LIMIT 1",
-    AGGRAVATE_EVENT: "SELECT 1 FROM settlements WHERE id=$1 AND (black_market_active OR epidemic_active OR unrest_active OR rebellion_active)",
+    AGGRAVATE_EVENT: "SELECT 1 FROM settlements WHERE id=$1 AND (black_market_active OR epidemic_active OR unrest_active)",
     POISON_GARRISON: "SELECT 1 FROM unit_stacks WHERE settlement_id=$1 AND force_type='GARRISON' AND quantity>0 LIMIT 1",
     DESTROY_SIEGE_SUPPLIES: "SELECT 1 FROM battles WHERE defender_settlement_id=$1 AND terrain='SIEGE' AND status NOT IN ('FINISHED','CANCELLED') LIMIT 1",
     SABOTAGE_FLEET: "SELECT 1 FROM naval_units WHERE settlement_id=$1 AND quantity>0 LIMIT 1"
@@ -258,13 +258,10 @@ export async function applyEspionageEffect(
     return "Şehrin bütün ticari ilişkileri 2 tur askıya alındı.";
   }
   if (operation.target_type === "INCITE_PUBLIC") {
-    await client.query(
-      severity === "HEAVY"
-        ? "UPDATE settlements SET rebellion_active=TRUE,unrest_active=TRUE WHERE id=$1"
-        : "UPDATE settlements SET unrest_active=TRUE WHERE id=$1",
-      [operation.target_settlement_id]
-    );
-    return severity === "HEAVY" ? "Yerleşkede doğrudan isyan başladı." : (severity === "MEDIUM" ? "Orta şiddette huzursuzluk başladı." : "Huzursuzluk başladı.");
+    await client.query("UPDATE settlements SET unrest_active=TRUE WHERE id=$1",[operation.target_settlement_id]);
+    return severity === "HEAVY"
+      ? "Yerleşkede yoğun huzursuzluk başladı; casusluk doğrudan isyan başlatmaz."
+      : severity === "MEDIUM" ? "Orta şiddette huzursuzluk başladı." : "Huzursuzluk başladı.";
   }
   if (operation.target_type === "PARALYZE_GOVERNMENT") {
     const duration = severity === "HEAVY" ? 3 : 2;
@@ -277,12 +274,10 @@ export async function applyEspionageEffect(
     return severity === "LIGHT" ? "Bir şehir politikası 2 tur kapandı." : "Şehir politikaları "+duration+" tur kapandı"+(severity==="HEAVY" ? "; Curia etkileri 2 tur devre dışı." : ".");
   }
   if (operation.target_type === "AGGRAVATE_EVENT") {
-    if (severity === "HEAVY") {
-      await client.query("UPDATE settlements SET unrest_active=TRUE,rebellion_active=TRUE WHERE id=$1",[operation.target_settlement_id]);
-      return "Kontrol altındaki olay yeniden etkinleşti ve yayılmaya hazır hâle geldi.";
-    }
-    if (severity === "MEDIUM") await client.query("UPDATE settlements SET rebellion_active=CASE WHEN unrest_active THEN TRUE ELSE rebellion_active END,unrest_active=TRUE WHERE id=$1",[operation.target_settlement_id]);
-    return severity === "MEDIUM" ? "Aktif olay bir şiddet kademesi yükseltildi." : "Aktif olayın etkisi 2 tur uzatıldı.";
+    await client.query("UPDATE settlements SET unrest_active=TRUE WHERE id=$1",[operation.target_settlement_id]);
+    return severity === "HEAVY"
+      ? "Aktif olay ağırlaştırıldı ve yoğun huzursuzluk başladı; casusluk doğrudan isyan başlatmaz."
+      : severity === "MEDIUM" ? "Aktif olay ağırlaştırıldı ve huzursuzluk başladı." : "Aktif olay huzursuzluğu artırdı.";
   }
   if (operation.target_type === "SUPPLY_COLLAPSE" && operation.target_army_id) {
     const multiplier = severity === "LIGHT" ? 0.95 : severity === "MEDIUM" ? 0.90 : 0.85;
