@@ -572,17 +572,27 @@ async function openActiveBattleManager(battle) {
   const participants = data.countries.filter((country) => country.side_key);
   const unassignedCountries = data.countries.filter((country) => !country.side_key);
   const assignedArmies = data.armies.filter((army) => army.assigned_side);
+  const mercenaries = Array.isArray(data.mercenaries) ? data.mercenaries : [];
+  const assignedMercenaries = mercenaries.filter((contract) => contract.assignedSide);
   const participantCards = participants.map((country) => {
     const armies = assignedArmies.filter((army) => army.country_id === country.id);
-    return `<div class="record-card"><strong>${escapeHtml(country.name)}</strong><span>${sideName(country.side_key)}${country.is_primary ? " · Ana devlet" : ""}</span><small>${armies.map((army) => `${escapeHtml(army.name)} (${number(army.total)})`).join(" · ") || "Bağlı kalıcı ordu yok"}</small>${country.is_primary ? "" : `<button type="button" class="button compact danger" data-battle-remove-country="${country.id}" data-side="${country.side_key}">Devleti çıkar</button>`}</div>`;
+    const contracts = assignedMercenaries.filter((contract) => contract.countryId === country.id);
+    const forces=[...armies.map((army)=>`${escapeHtml(army.name)} (${number(army.total)})`),...contracts.map((contract)=>`${escapeHtml(contract.companyName)} (${number(compositionAmount(contract.land))})`)].join(" · ");
+    return `<div class="record-card"><strong>${escapeHtml(country.name)}</strong><span>${sideName(country.side_key)}${country.is_primary ? " · Ana devlet" : ""}</span><small>${forces || "Bağlı ordu veya paralı asker yok"}</small>${country.is_primary ? "" : `<button type="button" class="button compact danger" data-battle-remove-country="${country.id}" data-side="${country.side_key}">Devleti çıkar</button>`}</div>`;
   }).join("");
   const armyCards = assignedArmies.map((army) => `<div class="army-unit-line"><div><strong>${escapeHtml(army.country_name)} · ${escapeHtml(army.name)}</strong><small>${sideName(army.assigned_side)} · ${number(army.total)} asker</small></div><button type="button" class="button compact danger" data-battle-remove-army="${army.id}" data-side="${army.assigned_side}">Çıkar</button></div>`).join("");
+  const mercenaryCards=assignedMercenaries.map((contract)=>{
+    const assets=compositionAmount(contract.assets);
+    return `<div class="army-unit-line"><div><strong>${escapeHtml(contract.countryName)} · ${escapeHtml(contract.companyName)}</strong><small>${sideName(contract.assignedSide)} · ${number(compositionAmount(contract.land))} asker${assets?` · ${number(assets)} kuşatma aleti`:""} · ${escapeHtml(contract.settlementName)}</small></div><button type="button" class="button compact danger" data-battle-remove-mercenary="${contract.id}" data-side="${contract.assignedSide}">Çıkar</button></div>`;
+  }).join("");
   openEditor("Savaş katılımcılarını yönet", `${terrainLabels[data.terrain] || data.terrain} · ${battleStatusLabels[data.status] || data.status}`, `
-    <div class="preview-warning"><strong>Aktif savaşa takviye işlemi</strong><span>Eklenen ordu mevcut ve başlangıç kuvvet havuzuna birlikte yazılır; önceki kayıplar değişmez. Ordu kuşatma aletleriyle birlikte eklenir. Değerlendirme zarı atılmaya başladıysa önce o değerlendirme sonuçlandırılmalıdır.</span></div>
+    <div class="preview-warning"><strong>Aktif savaşa takviye işlemi</strong><span>Eklenen ordu veya paralı asker mevcut ve başlangıç kuvvet havuzuna birlikte yazılır; önceki kayıplar değişmez. Kuşatan tarafa bağlı kuşatma aletleri de eklenir. Değerlendirme zarı atılmaya başladıysa önce o değerlendirme sonuçlandırılmalıdır.</span></div>
     <div class="section-title"><h2>Mevcut devletler</h2><span>${number(participants.length)} devlet</span></div><div class="compact-grid">${participantCards || '<div class="empty">Katılımcı bulunamadı.</div>'}</div>
     <div class="section-title"><h2>Devlet ekle</h2><span>Önce tarafı seç</span></div><div class="form-grid"><label>Taraf<select id="battle-country-side"><option value="A">${sideName("A")}</option><option value="B">${sideName("B")}</option></select></label><label>Devlet<select id="battle-country-id">${unassignedCountries.map((country) => `<option value="${country.id}">${escapeHtml(country.name)}</option>`).join("")}</select></label></div><button type="button" class="button primary" id="battle-add-country" ${unassignedCountries.length ? "" : "disabled"}>Devleti savaşa ekle</button>
     <div class="section-title"><h2>Ordu ekle</h2><span>Yalnız uygun ordular</span></div><div class="form-grid"><label>Taraf<select id="battle-army-side"><option value="A">${sideName("A")}</option><option value="B">${sideName("B")}</option></select></label><label>Devlet<select id="battle-army-country"></select></label><label>Ordu<select id="battle-army-id"></select></label></div><button type="button" class="button primary" id="battle-add-army">Orduyu savaşa sok</button>
     <div class="section-title"><h2>Bağlı ordular</h2><span>${number(assignedArmies.length)} ordu</span></div><div class="army-unit-editor">${armyCards || '<div class="empty">Bağlı kalıcı ordu yok.</div>'}</div>
+    <div class="section-title"><h2>Paralı asker ekle</h2><span>Yalnız etkin sözleşmeler</span></div><div class="form-grid"><label>Taraf<select id="battle-mercenary-side"><option value="A">${sideName("A")}</option><option value="B">${sideName("B")}</option></select></label><label>Devlet<select id="battle-mercenary-country"></select></label><label>Şirket<select id="battle-mercenary-id"></select></label></div><button type="button" class="button primary" id="battle-add-mercenary">Paralı askeri savaşa sok</button>
+    <div class="section-title"><h2>Bağlı paralı askerler</h2><span>${number(assignedMercenaries.length)} şirket</span></div><div class="army-unit-editor">${mercenaryCards || '<div class="empty">Bağlı paralı asker grubu yok.</div>'}</div>
   `, null);
 
   const armySide = document.getElementById("battle-army-side");
@@ -605,6 +615,26 @@ async function openActiveBattleManager(battle) {
   armyCountry.addEventListener("change", refreshArmyChoices);
   refreshArmyCountries();
 
+  const mercenarySide=document.getElementById("battle-mercenary-side");
+  const mercenaryCountry=document.getElementById("battle-mercenary-country");
+  const mercenarySelect=document.getElementById("battle-mercenary-id");
+  const addMercenaryButton=document.getElementById("battle-add-mercenary");
+  const refreshMercenaryCountries=()=>{
+    const countries=participants.filter((country)=>country.side_key===mercenarySide.value);
+    mercenaryCountry.innerHTML=countries.map((country)=>`<option value="${country.id}">${escapeHtml(country.name)}</option>`).join("");
+    refreshMercenaryChoices();
+  };
+  const refreshMercenaryChoices=()=>{
+    const contracts=mercenaries.filter((contract)=>contract.countryId===mercenaryCountry.value&&!contract.assignedSide);
+    mercenarySelect.innerHTML=contracts.map((contract)=>`<option value="${contract.id}" ${contract.blockingReason?"disabled":""}>${escapeHtml(contract.companyName)} · ${number(compositionAmount(contract.land))} asker · ${escapeHtml(contract.settlementName)}${contract.blockingReason?` · ${escapeHtml(contract.blockingReason)}`:""}</option>`).join("");
+    const selectable=contracts.some((contract)=>!contract.blockingReason&&compositionAmount(contract.land)>0);
+    addMercenaryButton.disabled=!selectable;
+    if(selectable)mercenarySelect.value=contracts.find((contract)=>!contract.blockingReason&&compositionAmount(contract.land)>0)?.id||"";
+  };
+  mercenarySide.addEventListener("change",refreshMercenaryCountries);
+  mercenaryCountry.addEventListener("change",refreshMercenaryChoices);
+  refreshMercenaryCountries();
+
   document.getElementById("battle-add-country").addEventListener("click", async (event) => {
     event.currentTarget.disabled = true;
     try {
@@ -623,6 +653,15 @@ async function openActiveBattleManager(battle) {
       closeEditor(); toast("Ordu aktif savaşa takviye olarak eklendi."); await battlesPage();
     } catch (error) { toast(error.message,"error"); event.currentTarget.disabled = false; }
   });
+  addMercenaryButton.addEventListener("click",async(event)=>{
+    event.currentTarget.disabled=true;
+    try{
+      await api(`/api/admin/battles/${battle.id}/mercenaries`,{method:"POST",body:JSON.stringify({
+        contractId:mercenarySelect.value,side:mercenarySide.value,action:"ADD"
+      })});
+      closeEditor();toast("Paralı asker aktif savaşa takviye olarak eklendi.");await battlesPage();
+    }catch(error){toast(error.message,"error");event.currentTarget.disabled=false;}
+  });
   document.querySelectorAll("[data-battle-remove-army]").forEach((button) => button.addEventListener("click", async () => {
     const army = assignedArmies.find((item) => item.id === button.dataset.battleRemoveArmy);
     if (!army || !window.confirm(`${army.name} ordusunu aktif savaştan çıkarmak istediğine emin misin? Savaşa katıldıktan sonra zar atıldıysa işlem engellenecek.`)) return;
@@ -631,6 +670,15 @@ async function openActiveBattleManager(battle) {
       await api(`/api/admin/battles/${battle.id}/armies`, { method:"POST",body:JSON.stringify({ armyId:army.id,side:button.dataset.side,action:"REMOVE" }) });
       closeEditor(); toast("Ordu savaştan çıkarıldı."); await battlesPage();
     } catch (error) { toast(error.message,"error"); button.disabled = false; }
+  }));
+  document.querySelectorAll("[data-battle-remove-mercenary]").forEach((button)=>button.addEventListener("click",async()=>{
+    const contract=assignedMercenaries.find((item)=>item.id===button.dataset.battleRemoveMercenary);
+    if(!contract||!window.confirm(`${contract.companyName} grubunu aktif savaştan çıkarmak istediğine emin misin? Savaşa katıldıktan sonra zar atıldıysa işlem engellenecek.`))return;
+    button.disabled=true;
+    try{
+      await api(`/api/admin/battles/${battle.id}/mercenaries`,{method:"POST",body:JSON.stringify({contractId:contract.id,side:button.dataset.side,action:"REMOVE"})});
+      closeEditor();toast("Paralı asker savaştan çıkarıldı.");await battlesPage();
+    }catch(error){toast(error.message,"error");button.disabled=false;}
   }));
   document.querySelectorAll("[data-battle-remove-country]").forEach((button) => button.addEventListener("click", async () => {
     const country = participants.find((item) => item.id === button.dataset.battleRemoveCountry);

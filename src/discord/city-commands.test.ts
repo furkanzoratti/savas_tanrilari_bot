@@ -59,6 +59,9 @@ describe("şehir geliştirme ve Akademi komutları", () => {
     expect(train?.options?.map((option) => option.name)).toEqual(expect.arrayContaining([
       "yerleske", "elenen-gorev", "secilen-gorev", "ulke"
     ]));
+    const expectedRoles = ["SPY", "MERCHANT", "COMMANDER", "DIPLOMAT"];
+    expect(train?.options?.find((option) => option.name === "elenen-gorev")?.choices?.map((choice) => choice.value)).toEqual(expectedRoles);
+    expect(train?.options?.find((option) => option.name === "secilen-gorev")?.choices?.map((choice) => choice.value)).toEqual(expectedRoles);
   });
 
   it("bina yıkımında yerleşke ve bina seçimlerini otomatik tamamlar", () => {

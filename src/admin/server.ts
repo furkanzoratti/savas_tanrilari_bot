@@ -313,6 +313,14 @@ const server = createServer(async (request, response) => {
       if (!session) return;
       return json(response, 200, await adminPanelService.mutateActiveBattleArmy(session.sub, battleArmyMatch[1]!, await body(request)));
     }
+    const battleMercenaryMatch = request.method === "POST"
+      ? url.pathname.match(/^\/api\/admin\/(?:battles|sieges)\/([0-9a-f-]+)\/mercenaries$/iu)
+      : null;
+    if (battleMercenaryMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.mutateActiveBattleMercenary(session.sub, battleMercenaryMatch[1]!, await body(request)));
+    }
     const battleManualRosterRemoveMatch = request.method === "POST" ? url.pathname.match(/^\/api\/admin\/battles\/([0-9a-f-]+)\/manual-rosters\/remove$/iu) : null;
     if (battleManualRosterRemoveMatch) {
       const session = requireMutation(request, response);

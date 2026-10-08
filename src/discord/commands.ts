@@ -7,9 +7,11 @@ import { NPC_AUTO_PURCHASE_DOCTRINES } from "../domain/npc-auto-purchase.js";
 import { SPECIAL_UNITS } from "../domain/special-units.js";
 import { ESPIONAGE_PREPARATIONS, ESPIONAGE_TARGETS } from "../domain/espionage.js";
 import { ADMIRAL_DOCTRINES, ADMIRAL_SPECIALIZATIONS, CHARACTER_SPECIALIZATIONS, COMMANDER_DOCTRINES } from "../domain/characters.js";
+import { ACADEMY_ROLE_ORDER } from "../domain/academy.js";
 
 const countryOption = (option: any) => option.setName("ulke").setDescription("Yalnızca DM: işlem yapılacak ülke").setRequired(false);
 const CHARACTER_ROLE_CHOICES = Object.entries(CHARACTER_ROLES).map(([value, role]) => ({ name: role.label, value }));
+const ACADEMY_ROLE_CHOICES = ACADEMY_ROLE_ORDER.map((value) => ({ name: CHARACTER_ROLES[value].label, value }));
 const SETTLEMENT_EVENT_CHOICES = Object.entries(SETTLEMENT_EVENT_TYPES)
   .filter(([value])=>value!=="REBELLION")
   .map(([value, event]) => ({ name: event.label, value }));
@@ -687,8 +689,8 @@ export const commandBuilders = [
     .setName("akademi").setDescription("Akademi karakter eğitimini ve görev atamalarını yönetir")
     .addSubcommand((sub) => sub.setName("egit").setDescription("Akademinin bu Alım Turundaki karakter eğitimini başlatır")
       .addStringOption((o) => o.setName("yerleske").setDescription("Karakteri yetiştirecek Akademi").setRequired(true).setAutocomplete(true))
-      .addStringOption((o) => o.setName("elenen-gorev").setDescription("Yalnız Akademi Sv2: zar havuzundan çıkarılacak görev").addChoices(...CHARACTER_ROLE_CHOICES))
-      .addStringOption((o) => o.setName("secilen-gorev").setDescription("Yalnız Akademi Sv3: doğrudan yetiştirilecek görev").addChoices(...CHARACTER_ROLE_CHOICES))
+      .addStringOption((o) => o.setName("elenen-gorev").setDescription("Yalnız Akademi Sv2: zar havuzundan çıkarılacak görev").addChoices(...ACADEMY_ROLE_CHOICES))
+      .addStringOption((o) => o.setName("secilen-gorev").setDescription("Yalnız Akademi Sv3: doğrudan yetiştirilecek görev").addChoices(...ACADEMY_ROLE_CHOICES))
       .addStringOption(countryOption))
     .addSubcommand((sub) => sub.setName("karakterler").setDescription("Ülkenin yetişmiş karakterlerini listeler")
       .addStringOption(countryOption))

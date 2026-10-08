@@ -1,8 +1,8 @@
 import { randomInt } from "node:crypto";
 import type { DbClient } from "../db/pool.js";
 import { pool, withTransaction } from "../db/pool.js";
-import { CHARACTER_ROLES, CITY_POLICIES, type CityPolicyKey } from "../domain/catalog.js";
-import { academyRoleForRoll, academyRollSides } from "../domain/academy.js";
+import { CITY_POLICIES, type CityPolicyKey } from "../domain/catalog.js";
+import { ACADEMY_ROLE_ORDER, academyRoleForRoll, academyRollSides } from "../domain/academy.js";
 import { isAcquisitionTurn } from "../domain/mobilization.js";
 import { assimilationCompletionTurn } from "../domain/assimilation.js";
 import type { CharacterRole } from "../domain/types.js";
@@ -52,9 +52,11 @@ async function syncTreasury(client: DbClient, countryId: string): Promise<void> 
   await client.query("UPDATE countries SET treasury=(SELECT COALESCE(SUM(local_treasury),0)::bigint FROM settlements WHERE country_id=$1) WHERE id=$1", [countryId]);
 }
 
-function ensureRole(value: string | null | undefined): CharacterRole | null {
+function ensureAcademyRole(value: string | null | undefined): CharacterRole | null {
   if (!value) return null;
-  if (!(value in CHARACTER_ROLES)) throw new GameError("Geçersiz karakter görevi seçildi.");
+  if (!ACADEMY_ROLE_ORDER.includes(value as CharacterRole)) {
+    throw new GameError("Akademide yalnızca Casus, Tüccar, Komutan veya Diplomat yetiştirilebilir.");
+  }
   return value as CharacterRole;
 }
 
@@ -148,8 +150,8 @@ export const cityService = {
       if (!isAcquisitionTurn(guild.current_turn, guild.acquisition_interval)) throw new GameError("Akademi eğitimi yalnızca Alım Turunda başlatılabilir.");
       const level = await activeBuildingLevel(client, settlement.id, "academy");
       if (!level) throw new GameError("Bu yerleşkede aktif Akademi bulunmuyor.");
-      const excludedRole = ensureRole(input.excludedRole);
-      const selectedRole = ensureRole(input.selectedRole);
+      const excludedRole = ensureAcademyRole(input.excludedRole);
+      const selectedRole = ensureAcademyRole(input.selectedRole);
       if (level === 2 && !excludedRole) throw new GameError("Akademi Sv2 için elenecek görev türünü seçmelisiniz.");
       if (level === 3 && !selectedRole) throw new GameError("Akademi Sv3 için yetiştirilecek görev türünü seçmelisiniz.");
       if (level !== 2 && excludedRole) throw new GameError("Görev eleme yalnızca Akademi Sv2 eğitiminde kullanılabilir.");

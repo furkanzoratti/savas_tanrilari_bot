@@ -52,6 +52,65 @@ function fieldValue(lines: string[]): string {
   return lines.join("\n").slice(0, 1_024);
 }
 
+type TurnAnnouncementField = { name: string; value: string; inline?: boolean };
+
+const TURN_CARD_MAX_TEXT = 5_800;
+const SECOND_CARD_FIELD_NAMES = new Set([
+  "⚔️ Savaş Yorgunluğu",
+  "🔥 İsyanlar",
+  "🌿 Refah ve İsyan Gerilimi",
+  "⚠️ Huzursuzluk Olayları",
+  "🏰 Kuşatma Erzak Durumu",
+  "🏛️ Panteon Kredisi Ödemeleri",
+  "📉 Uygulanan Gelir Cezaları",
+  "\u{1FA99} Yerleşkeye Ulaşan Paralı Askerler",
+  "\u{1F4B0} Paralı Asker Bakımları",
+  "\u26A0\uFE0F Ödenemeyen Paralı Asker Bakımları",
+  "\u{1F4DC} Sona Eren Paralı Asker Sözleşmeleri"
+]);
+
+export function turnAnnouncementTextLength(embed: EmbedBuilder): number {
+  const data = embed.toJSON();
+  return (data.title?.length ?? 0)
+    + (data.description?.length ?? 0)
+    + (data.footer?.text.length ?? 0)
+    + (data.author?.name.length ?? 0)
+    + (data.fields ?? []).reduce((sum, field) => sum + field.name.length + field.value.length, 0);
+}
+
+function shortenedField(field: TurnAnnouncementField, maximumValueLength: number): TurnAnnouncementField {
+  if (field.value.length <= maximumValueLength) return field;
+  const suffix = "\n… Liste kısaltıldı.";
+  return {
+    ...field,
+    value: field.value.slice(0, Math.max(1, maximumValueLength - suffix.length)) + suffix
+  };
+}
+
+function splitAdvanceFields(
+  fields: TurnAnnouncementField[],
+  firstBase: EmbedBuilder,
+  secondBase: EmbedBuilder
+): [TurnAnnouncementField[], TurnAnnouncementField[]] {
+  const preferred = fields.findIndex((field) => SECOND_CARD_FIELD_NAMES.has(field.name));
+  const preferredSplit = preferred < 0 ? Math.ceil(fields.length / 2) : preferred;
+  for (let maximumValueLength = 1_024; maximumValueLength >= 96; maximumValueLength -= 32) {
+    const fitted = fields.map((field) => shortenedField(field, maximumValueLength));
+    let best: { split: number; score: number } | null = null;
+    for (let split = 0; split <= fitted.length; split += 1) {
+      const firstLength = turnAnnouncementTextLength(firstBase)
+        + fitted.slice(0, split).reduce((sum, field) => sum + field.name.length + field.value.length, 0);
+      const secondLength = turnAnnouncementTextLength(secondBase)
+        + fitted.slice(split).reduce((sum, field) => sum + field.name.length + field.value.length, 0);
+      if (firstLength > TURN_CARD_MAX_TEXT || secondLength > TURN_CARD_MAX_TEXT) continue;
+      const score = Math.abs(firstLength - secondLength) + Math.abs(split - preferredSplit) * 80;
+      if (!best || score < best.score) best = { split, score };
+    }
+    if (best) return [fitted.slice(0, best.split), fitted.slice(best.split)];
+  }
+  return [[], fields.map((field) => shortenedField(field, 96))];
+}
+
 export function turnAnnouncement(input: TurnAnnouncementInput): EmbedBuilder {
   if (input.kind !== "ADVANCE") {
     const details = {
@@ -194,4 +253,35 @@ export function turnAnnouncement(input: TurnAnnouncementInput): EmbedBuilder {
     value: fieldValue(input.mercenaryEndedDetails.map((item) => `- **${item.countryName}** - ${item.companyName} - ${item.reason}`))
   });
   return embed;
+}
+
+export function turnAnnouncementCards(input: TurnAnnouncementInput): EmbedBuilder[] {
+  const announcement = turnAnnouncement(input);
+  if (input.kind !== "ADVANCE") return [announcement];
+
+  const source = announcement.toJSON();
+  const first = new EmbedBuilder()
+    .setColor(source.color ?? 0xb58b32)
+    .setTitle(`⚔️ TUR ${input.turn} BAŞLADI • 1/2`)
+    .setDescription(source.description ?? "Yeni rol turu açılmıştır.")
+    .setImage(TURN_BANNER_URL)
+    .setFooter({ text: source.footer?.text ?? "Antik Medeniyetler Role Play • Resmî Tur Duyurusu" })
+    .setTimestamp();
+  const second = new EmbedBuilder()
+    .setColor(source.color ?? 0xb58b32)
+    .setTitle(`📜 TUR ${input.turn} SONUÇLARI • 2/2`)
+    .setDescription("Tur ilerletilirken işlenen ekonomi, toplum, savaş yorgunluğu ve diğer sistem sonuçları.")
+    .setFooter({ text: source.footer?.text ?? "Antik Medeniyetler Role Play • Resmî Tur Duyurusu" })
+    .setTimestamp();
+
+  const fields = (source.fields ?? []).map((field) => ({
+    name: field.name,
+    value: field.value,
+    ...(field.inline === undefined ? {} : { inline: field.inline })
+  }));
+  const [firstFields, secondFields] = splitAdvanceFields(fields, first, second);
+  if (firstFields.length) first.addFields(firstFields);
+  if (secondFields.length) second.addFields(secondFields);
+  else second.setDescription("Bu tur ek ayrıntılı sistem sonucu oluşmadı.");
+  return [first, second];
 }

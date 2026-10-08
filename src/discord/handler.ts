@@ -65,7 +65,7 @@ import {
   TURN_BANNER_PATH,
   TURN_BANNER_NAME
 } from "./assets.js";
-import { turnAnnouncement } from "./turn-announcements.js";
+import { turnAnnouncement, turnAnnouncementCards } from "./turn-announcements.js";
 import { handleBattleButton, handleBattleCommand, handleBattleModal, handleBattleSelect, refreshActiveBattleCards } from "./battle-ui.js";
 import { handleNavalOperationsAutocomplete,handleNavalOperationsButton,handleNavalOperationsCommand } from "./naval-operations-ui.js";
 import { handleLandRaidsAutocomplete,handleLandRaidsButton,handleLandRaidsCommand } from "./land-raids-ui.js";
@@ -457,7 +457,7 @@ async function handleTurn(interaction: ChatInputCommandInteraction): Promise<voi
   if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
   const sub = interaction.options.getSubcommand();
   await interaction.deferReply();
-  let embed: EmbedBuilder;
+  let embeds: EmbedBuilder[];
   let characterAutomationWarnings:string[] = [];
   let movementSummary: Awaited<ReturnType<typeof gameService.stopTurn>> | null = null;
   if (sub === "atla") {
@@ -473,7 +473,7 @@ async function handleTurn(interaction: ChatInputCommandInteraction): Promise<voi
       }
     }
     await refreshActiveBattleCards(interaction.client, interaction.guildId);
-    embed = turnAnnouncement({
+    embeds = turnAnnouncementCards({
       kind: "ADVANCE", turn: result.turn, acquisition: result.acquisition,
       completedBuildings: result.completedBuildings, recruitmentArrivals: result.recruitmentArrivals,
       completedShips: result.completedShips, completedSiegeAssets: result.completedSiegeAssets, garrisonUpgrades: result.garrisonUpgrades,
@@ -504,9 +504,12 @@ async function handleTurn(interaction: ChatInputCommandInteraction): Promise<voi
     if (sub === "durdur") movementSummary = await gameService.stopTurn(interaction.guildId, interaction.user.id);
     else await gameService.setTurnPhase(interaction.guildId, interaction.user.id, phase);
     const guild = await gameService.guildState(interaction.guildId);
-    embed = turnAnnouncement({ kind: sub === "ac" ? "OPEN" : sub === "durdur" ? "PAUSE" : "CLOSE", turn: guild.current_turn });
+    embeds = [turnAnnouncement({ kind: sub === "ac" ? "OPEN" : sub === "durdur" ? "PAUSE" : "CLOSE", turn: guild.current_turn })];
   }
-  await interaction.editReply({ embeds: [embed], files: [new AttachmentBuilder(TURN_BANNER_PATH, { name: TURN_BANNER_NAME })] });
+  await interaction.editReply({ embeds: [embeds[0]!], files: [new AttachmentBuilder(TURN_BANNER_PATH, { name: TURN_BANNER_NAME })] });
+  for (const extraEmbed of embeds.slice(1)) {
+    await interaction.followUp({ embeds: [extraEmbed] });
+  }
   if (movementSummary?.enabled) {
     await interaction.followUp({
       content: `🗺️ **Hareket çözümlemesi • Tur ${movementSummary.turn}**\n` +
@@ -1012,7 +1015,7 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
       }
     }
     await refreshActiveBattleCards(interaction.client, interaction.guildId);
-    await interaction.editReply({ embeds: [turnAnnouncement({
+    const announcementCards = turnAnnouncementCards({
       kind: "ADVANCE", turn: result.turn, acquisition: result.acquisition,
       completedBuildings: result.completedBuildings, recruitmentArrivals: result.recruitmentArrivals,
       completedShips: result.completedShips, completedSiegeAssets: result.completedSiegeAssets, garrisonUpgrades: result.garrisonUpgrades,
@@ -1037,7 +1040,11 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
       christianSpreadDetails:result.christianSpreadDetails,
       lastStandDetails:result.lastStandDetails,
       stability:result.stability
-    })], files: [new AttachmentBuilder(TURN_BANNER_PATH, { name: TURN_BANNER_NAME })] });
+    });
+    await interaction.editReply({ embeds: [announcementCards[0]!], files: [new AttachmentBuilder(TURN_BANNER_PATH, { name: TURN_BANNER_NAME })] });
+    for (const extraEmbed of announcementCards.slice(1)) {
+      await interaction.followUp({ embeds: [extraEmbed], flags: MessageFlags.Ephemeral });
+    }
     if (characterAutomation.warnings.length) {
       await interaction.followUp({content:"⚠️ **Karakter otomasyonu:** "+characterAutomation.warnings.join("\n⚠️ "),ephemeral:true});
     }
