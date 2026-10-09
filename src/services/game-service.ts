@@ -34,7 +34,7 @@ import { processLastStandsForTurn, recordSettlementClaim, recoverLastStand, star
 import { processStabilityTurn, type StabilityTurnResult } from "./stability-service.js";
 import {
   processRomanRepublicTurn,type RomanElectionOpenedDetail,type RomanFamilyTurnIncomeDetail,
-  type RomanGovernorshipTurnDetail
+  type RomanFamilyLifecycleDetail,type RomanGovernorshipTurnDetail
 } from "./roman-republic-turn-service.js";
 import type {RomanPoliticalTurnResult} from "./roman-politics-service.js";
 import { prosperityTier } from "../domain/stability.js";
@@ -344,7 +344,12 @@ export interface TurnAdvanceResult {
   romanFamilyIncomeDetails: RomanFamilyTurnIncomeDetail[];
   romanGovernorshipDetails: RomanGovernorshipTurnDetail[];
   romanElectionOpenedDetails: RomanElectionOpenedDetail[];
+  romanFamilyLifecycleDetails: RomanFamilyLifecycleDetail[];
   romanPolitics: RomanPoliticalTurnResult;
+  countryEconomyDetails:Array<{
+    countryName:string;buildingIncome:number;taxIncome:number;landTradeIncome:number;seaTradeIncome:number;
+    upkeep:number;net:number;populationGain:number;settlementCount:number;
+  }>;
 }
 
 async function ensureGuild(client: DbClient, guildId: string): Promise<GuildRow> {
@@ -1154,6 +1159,20 @@ export const gameService = {
         [countryId, userId]
       );
       if (!removed.rowCount) throw new GameError("Bu oyuncu seçilen ülkeye atanmış değil.");
+      await client.query(
+        `UPDATE roman_family_players player
+            SET status='LEFT',is_leader=FALSE,updated_at=NOW()
+          FROM roman_republics republic
+         WHERE player.republic_id=republic.id AND republic.country_id=$1
+           AND player.discord_user_id=$2 AND player.status='ACTIVE'`,
+        [countryId,userId]
+      );
+      await client.query(
+        `UPDATE roman_families family SET leader_user_id=NULL,updated_at=NOW()
+          FROM roman_republics republic
+         WHERE family.republic_id=republic.id AND republic.country_id=$1 AND family.leader_user_id=$2`,
+        [countryId,userId]
+      );
       await audit(client, guildId, actorId, "PLAYER_REMOVE", "country", countryId, { userId });
     });
   },
@@ -3204,6 +3223,7 @@ export const gameService = {
       const unrestDetails: Array<{ settlementName: string; chance: number; roll: number }> = [];
       const pantheonLoanDetails: Array<{ settlementName: string; amount: number; remaining: number }> = [];
       const incomePenaltyDetails: Array<{ settlementName: string; percent: number; deductedAmount: number; remainingAcquisitionTurns: number; reason: string }> = [];
+      const countryEconomyDetails:TurnAdvanceResult["countryEconomyDetails"]=[];
       const manpowerCountries = (await client.query<CountryRow>("SELECT * FROM countries WHERE guild_id=$1 AND status='ACTIVE' FOR UPDATE", [guildId])).rows;
       for (const country of manpowerCountries) {
         const manpower = await countryManpower(client, country.id);
@@ -3237,6 +3257,7 @@ export const gameService = {
           const displacedSupport = await loadDisplacedArmySupport(client,country.id);
           let incomeBreakdown: IncomeBreakdown = { building: 0, tax: 0, landTrade: 0, seaTrade: 0 };
           let upkeep = 0;
+          let populationGain=0;
           for (const settlement of settlements) {
             const religion=religionDistributionModifiers(
               religionDistributions.get(settlement.id)??fallbackReligionDistribution(settlement),
@@ -3274,6 +3295,7 @@ export const gameService = {
             const prosperity=prosperityTier(Number(settlement.prosperity));
             const normalPopulationGain=applyFormablePopulationModifiers(calculatePopulationGain({ population: settlement.population, buildings: active, ruinStage: settlement.ruin_stage, mobilization: country.mobilization, resources: effectiveResources, marshalPartial, religionPopulationGrowthPercent: religion.populationGrowthPercent }), settlement.ruin_stage, country.active_formable_key);
             const popGain=settlement.rebellion_active?0:Math.floor(normalPopulationGain*prosperity.populationMultiplier);
+            populationGain+=popGain;
             const incomePenalty = (await client.query<SettlementIncomePenaltyRow>(
               "SELECT settlement_id,penalty_percent,remaining_acquisition_turns,reason,created_turn FROM settlement_income_penalties WHERE settlement_id=$1 FOR UPDATE",
               [settlement.id]
@@ -3410,6 +3432,11 @@ export const gameService = {
           }
           const adjustedIncome = incomeTotal(incomeBreakdown);
           const net = adjustedIncome - upkeep;
+          countryEconomyDetails.push({
+            countryName:country.name,buildingIncome:incomeBreakdown.building,taxIncome:incomeBreakdown.tax,
+            landTradeIncome:incomeBreakdown.landTrade,seaTradeIncome:incomeBreakdown.seaTrade,
+            upkeep,net,populationGain,settlementCount:settlements.length
+          });
           await syncCountryTreasury(client, country.id);
           await client.query(
             "INSERT INTO transactions(country_id,turn,kind,amount,description,details) VALUES($1,$2,'ACQUISITION_TURN',$3,$4,$5::jsonb)",
@@ -3433,6 +3460,7 @@ export const gameService = {
       const romanFamilyIncomeDetails=romanRepublicTurn.familyIncomeDetails;
       const romanGovernorshipDetails=romanRepublicTurn.governorshipDetails;
       const romanElectionOpenedDetails=romanRepublicTurn.electionOpenedDetails;
+      const romanFamilyLifecycleDetails=romanRepublicTurn.familyLifecycleDetails;
       const romanPolitics=romanRepublicTurn.politics;
       await syncGuildPrimaryCultures(client, guildId);
       await client.query("UPDATE guilds SET current_turn=$1,turn_phase='OPEN',updated_at=NOW() WHERE discord_id=$2", [newTurn, guildId]);
@@ -3443,7 +3471,7 @@ export const gameService = {
         mercenaryUnpaid: mercenaryUnpaidDetails, mercenaryEnded: mercenaryEndedDetails,
         assimilatedSettlements: assimilatedSettlementDetails,
         christianPassiveSpread: christianSpreadDetails,lastStandDetails,stability,romanFamilyIncomeDetails,
-        romanGovernorshipDetails,romanElectionOpenedDetails,romanPolitics
+        romanGovernorshipDetails,romanElectionOpenedDetails,romanFamilyLifecycleDetails,romanPolitics,countryEconomyDetails
       });
       return {
         turn: newTurn, acquisition, movement,
@@ -3471,7 +3499,7 @@ export const gameService = {
         mercenaryEndedDetails,
         assimilatedSettlementDetails,
         christianSpreadDetails,lastStandDetails,stability,romanFamilyIncomeDetails,
-        romanGovernorshipDetails,romanElectionOpenedDetails,romanPolitics
+        romanGovernorshipDetails,romanElectionOpenedDetails,romanFamilyLifecycleDetails,romanPolitics,countryEconomyDetails
       };
     });
   },

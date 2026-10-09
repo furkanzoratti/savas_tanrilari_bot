@@ -87,7 +87,10 @@ import { handlePlayerAutoPurchaseButton, handlePlayerAutoPurchaseCommand } from 
 import { handleWarDeclarationButton, handleWarDeclarationCommand, handleWarDeclarationModal } from "./war-declaration-ui.js";
 import { mercenaryCompanyAutocompleteAllowed, mercenarySubcommandRequiresGameMaster } from "./mercenary-access.js";
 import { handleGreatGamesButton, handleGreatGamesCommand, handleGreatGamesModal, handleGreatGamesSelect } from "./great-games-ui-v2.js";
-import { handleRomanRepublicButton,handleRomanRepublicCommand,handleRomanRepublicSelect,refreshRomanPublicPanels } from "./roman-republic-ui.js";
+import {
+  handleRomanRepublicAutocomplete,handleRomanRepublicButton,handleRomanRepublicCommand,handleRomanRepublicModal,
+  handleRomanRepublicSelect,refreshRomanPublicPanels
+} from "./roman-republic-ui.js";
 import { decodeUnitTypeFromCustomId, encodeUnitTypeForCustomId } from "./unit-custom-id.js";
 
 function settlementSelect(customId: string, settlements: Array<{ id: string; name: string; population: number }>, placeholder: string) {
@@ -468,16 +471,11 @@ async function handleTurn(interaction: ChatInputCommandInteraction): Promise<voi
   const sub = interaction.options.getSubcommand();
   await interaction.deferReply();
   let embeds: EmbedBuilder[];
-  let characterAutomationWarnings:string[] = [];
-  let npcDynastySummary:string|null = null;
   let movementSummary: Awaited<ReturnType<typeof gameService.stopTurn>> | null = null;
   if (sub === "atla") {
     const result = await gameService.advanceTurn(interaction.guildId, interaction.user.id);
     movementSummary = result.movement;
     const characterAutomation = await processDueCharacterSystems(interaction.client, interaction.guildId, result.turn, result.acquisition);
-    characterAutomationWarnings = characterAutomation.warnings;
-    if(characterAutomation.dynastyNpcBirths||characterAutomation.dynastyNpcMarriages)npcDynastySummary=
-      `🤖 **NPC hanedan otomasyonu:** ${characterAutomation.dynastyNpcBirths} doğum • ${characterAutomation.dynastyNpcMarriages} evlilik`;
     if(interaction.guild){
       for(const detail of result.lastStandDetails){
         if(detail.kind==="FAILED"&&detail.discordRoleId){
@@ -515,7 +513,11 @@ async function handleTurn(interaction: ChatInputCommandInteraction): Promise<voi
       romanFamilyIncomeDetails:result.romanFamilyIncomeDetails,
       romanGovernorshipDetails:result.romanGovernorshipDetails,
       romanElectionOpenedDetails:result.romanElectionOpenedDetails,
-      romanPolitics:result.romanPolitics
+      romanFamilyLifecycleDetails:result.romanFamilyLifecycleDetails,
+      romanPolitics:result.romanPolitics,
+      countryEconomyDetails:result.countryEconomyDetails,
+      movement:result.movement,
+      characterAutomation
     });
   } else {
     const phase = sub === "ac" ? "OPEN" : sub === "durdur" ? "RESOLVING" : "CLOSED";
@@ -528,7 +530,7 @@ async function handleTurn(interaction: ChatInputCommandInteraction): Promise<voi
   for (const extraEmbed of embeds.slice(1)) {
     await interaction.followUp({ embeds: [extraEmbed] });
   }
-  if (movementSummary?.enabled) {
+  if (sub!=="atla"&&movementSummary?.enabled) {
     await interaction.followUp({
       content: `🗺️ **Hareket çözümlemesi • Tur ${movementSummary.turn}**\n` +
         `Emir: **${movementSummary.processed}** • İlerleyen: **${movementSummary.advanced}** • Varan: **${movementSummary.completed}** • ` +
@@ -542,13 +544,6 @@ async function handleTurn(interaction: ChatInputCommandInteraction): Promise<voi
         `**${movementSummary.disembarkations.blocked}** engelli` +
         (movementSummary.alreadyProcessed ? "\nBu aşama önceden çözülmüştü; tekrar hareket uygulanmadı." : ""),
       flags: MessageFlags.Ephemeral
-    });
-  }
-  if(npcDynastySummary)await interaction.followUp({content:npcDynastySummary,flags:MessageFlags.Ephemeral});
-  if (characterAutomationWarnings.length) {
-    await interaction.followUp({
-      content:"⚠️ **Yalnızca yöneticiye görünen karakter otomasyonu uyarısı:**\n"+characterAutomationWarnings.join("\n⚠️ "),
-      ephemeral:true
     });
   }
 }
@@ -1063,20 +1058,15 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
       romanFamilyIncomeDetails:result.romanFamilyIncomeDetails,
       romanGovernorshipDetails:result.romanGovernorshipDetails,
       romanElectionOpenedDetails:result.romanElectionOpenedDetails,
-      romanPolitics:result.romanPolitics
+      romanFamilyLifecycleDetails:result.romanFamilyLifecycleDetails,
+      romanPolitics:result.romanPolitics,
+      countryEconomyDetails:result.countryEconomyDetails,
+      movement:result.movement,
+      characterAutomation
     });
     await interaction.editReply({ embeds: [announcementCards[0]!], files: [new AttachmentBuilder(TURN_BANNER_PATH, { name: TURN_BANNER_NAME })] });
     for (const extraEmbed of announcementCards.slice(1)) {
       await interaction.followUp({ embeds: [extraEmbed], flags: MessageFlags.Ephemeral });
-    }
-    if(characterAutomation.dynastyNpcBirths||characterAutomation.dynastyNpcMarriages){
-      await interaction.followUp({
-        content:`🤖 **NPC hanedan otomasyonu:** ${characterAutomation.dynastyNpcBirths} doğum • ${characterAutomation.dynastyNpcMarriages} evlilik`,
-        flags:MessageFlags.Ephemeral
-      });
-    }
-    if (characterAutomation.warnings.length) {
-      await interaction.followUp({content:"⚠️ **Karakter otomasyonu:** "+characterAutomation.warnings.join("\n⚠️ "),ephemeral:true});
     }
   } else if (sub === "tur-durumu") {
     const phase = interaction.options.getString("durum", true) as "OPEN" | "CLOSED" | "RESOLVING";
@@ -1866,6 +1856,7 @@ async function handleButton(interaction: ButtonInteraction): Promise<void> {
 }
 
 async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
+  if (await handleRomanRepublicModal(interaction)) return;
   if (await handleDynastyModal(interaction)) return;
   if (await handleBattleModal(interaction)) return;
   if (await handleMovementModal(interaction)) return;
@@ -1890,6 +1881,7 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
 }
 
 async function handleAutocomplete(interaction: AutocompleteInteraction): Promise<void> {
+  if (await handleRomanRepublicAutocomplete(interaction)) return;
   if (await handleDynastyAutocomplete(interaction)) return;
   if (await handleNavalOperationsAutocomplete(interaction)) return;
   if (await handleLandRaidsAutocomplete(interaction)) return;

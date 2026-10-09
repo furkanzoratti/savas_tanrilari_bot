@@ -6,7 +6,8 @@ describe("Roma siyaset Discord komutları",()=>{
     const command=commandBuilders.find((item)=>item.name==="roma");
     const names=(command?.options??[]).map((option)=>option.name);
     expect(names).toEqual(expect.arrayContaining([
-      "senato","teklif-sun","teklif-oyla","makam-adayi","makamlar","iliskiler","aile-eylemi","siyasi-durum"
+      "senato","teklif-sun","teklif-oyla","makam-adayi","makamlar","iliskiler","aile-eylemi","siyasi-durum",
+      "evlilik-teklif","evlilik-cevapla","evlilik-teklifleri","cocuk-dene"
     ]));
     expect(names.length).toBeLessThanOrEqual(25);
   });

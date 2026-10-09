@@ -90,6 +90,9 @@ import { romanScipioInitialConsulMigration } from "./roman-scipio-initial-consul
 import { romanPoliticsChannelMigration } from "./roman-politics-channel-migration.js";
 import { romanDefaultFamiliesBackfillMigration } from "./roman-default-families-backfill-migration.js";
 import { npcDynastyAutomationMigration } from "./npc-dynasty-automation-migration.js";
+import { romanFamilyLifecycleMigration } from "./roman-family-lifecycle-migration.js";
+import { romanFamilyMarriageBirthMigration } from "./roman-family-marriage-birth-migration.js";
+import { romanFamilyMarriageMessageMigration } from "./roman-family-marriage-message-migration.js";
 
 export const migrations = [
   {
@@ -2397,5 +2400,8 @@ export const migrations = [
   romanScipioInitialConsulMigration,
   romanPoliticsChannelMigration,
   romanDefaultFamiliesBackfillMigration,
-  npcDynastyAutomationMigration
+  npcDynastyAutomationMigration,
+  romanFamilyLifecycleMigration,
+  romanFamilyMarriageBirthMigration,
+  romanFamilyMarriageMessageMigration
 ] as const;

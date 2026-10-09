@@ -13,13 +13,41 @@ export interface DefaultRomanFamilyMemberSeed{
   name:string;
   gender:"MALE"|"FEMALE";
   age:number;
-  position:"HEAD"|"SPOUSE"|"CHILD"|"HEAD_SIBLING"|"SPOUSE_SIBLING";
+  position:"HEAD"|"SPOUSE"|"CHILD"|"PARENT"|"HEAD_SIBLING"|"SPOUSE_SIBLING"|"HOUSEHOLD";
   relation:string;
   spouseKey?:string;
   motherKey?:string;
   fatherKey?:string;
   sortOrder:number;
 }
+
+export const ROMAN_PLAYER_FAMILY_MEMBERS:DefaultRomanFamilyMemberSeed[]=[
+  {familyName:"Nero ailesi",key:"head",name:"Tiberius Claudius Nero",gender:"MALE",age:30,position:"HEAD",relation:"Pater Familias",spouseKey:"spouse",sortOrder:1},
+  {familyName:"Nero ailesi",key:"spouse",name:"Valeria Antonia",gender:"FEMALE",age:24,position:"SPOUSE",relation:"Yöneticinin eşi",spouseKey:"head",sortOrder:2},
+  {familyName:"Nero ailesi",key:"child_one",name:"Claudia Major",gender:"FEMALE",age:8,position:"CHILD",relation:"Yöneticinin kızı",motherKey:"spouse",fatherKey:"head",sortOrder:3},
+  {familyName:"Nero ailesi",key:"child_two",name:"Flavius Claudius Minor",gender:"MALE",age:6,position:"CHILD",relation:"Yöneticinin oğlu",motherKey:"spouse",fatherKey:"head",sortOrder:4},
+  {familyName:"Nero ailesi",key:"child_three",name:"Claudia Minor",gender:"FEMALE",age:4,position:"CHILD",relation:"Yöneticinin kızı",motherKey:"spouse",fatherKey:"head",sortOrder:5},
+  {familyName:"Nero ailesi",key:"household_antinous",name:"Antinous",gender:"MALE",age:20,position:"HOUSEHOLD",relation:"Erkek Yunan köle",sortOrder:6},
+  {familyName:"Nero ailesi",key:"head_sister",name:"Claudia Agrippina",gender:"FEMALE",age:20,position:"HEAD_SIBLING",relation:"Yöneticinin kız kardeşi",sortOrder:7},
+  {familyName:"Nero ailesi",key:"head_brother",name:"Flavius Claudius",gender:"MALE",age:16,position:"HEAD_SIBLING",relation:"Yöneticinin erkek kardeşi",sortOrder:8},
+
+  {familyName:"Scipio ailesi",key:"head",name:"Publius Cornelius Scipio",gender:"MALE",age:45,position:"HEAD",relation:"Aile reisi, Konsül",spouseKey:"spouse",motherKey:"head_mother",sortOrder:1},
+  {familyName:"Scipio ailesi",key:"spouse",name:"Junia Secunda",gender:"FEMALE",age:43,position:"SPOUSE",relation:"Yöneticinin eşi, Brutii ailesinden",spouseKey:"head",sortOrder:2},
+  {familyName:"Scipio ailesi",key:"child_one",name:"Quintus Cornelius Scipio",gender:"MALE",age:26,position:"CHILD",relation:"Yöneticinin oğlu",motherKey:"spouse",fatherKey:"head",sortOrder:3},
+  {familyName:"Scipio ailesi",key:"child_two",name:"Aemiliana Scipio",gender:"FEMALE",age:22,position:"CHILD",relation:"Yöneticinin kızı",motherKey:"spouse",fatherKey:"head",sortOrder:4},
+  {familyName:"Scipio ailesi",key:"child_three",name:"Sempronia Scipio",gender:"FEMALE",age:19,position:"CHILD",relation:"Yöneticinin kızı",motherKey:"spouse",fatherKey:"head",sortOrder:5},
+  {familyName:"Scipio ailesi",key:"head_mother",name:"Aemilla Tertia",gender:"FEMALE",age:62,position:"PARENT",relation:"Yöneticinin annesi, Scipio Africanus'un dulu",sortOrder:6},
+  {familyName:"Scipio ailesi",key:"head_sister_one",name:"Cornelia Scipio",gender:"FEMALE",age:47,position:"HEAD_SIBLING",relation:"Yöneticinin ablası, Gallaek kraliyet ailesinin gelini",sortOrder:7},
+  {familyName:"Scipio ailesi",key:"head_brother",name:"Lucius Cornelius Scipio",gender:"MALE",age:41,position:"HEAD_SIBLING",relation:"Yöneticinin erkek kardeşi, Senatör",sortOrder:8},
+  {familyName:"Scipio ailesi",key:"head_sister_two",name:"Küçük Cornelia Scipio",gender:"FEMALE",age:40,position:"HEAD_SIBLING",relation:"Yöneticinin kız kardeşi, Julii ailesinin gelini",sortOrder:9},
+
+  {familyName:"Magnus ailesi",key:"head",name:"Lucius Cornelius Magnus",gender:"MALE",age:47,position:"HEAD",relation:"Pater Familias",spouseKey:"spouse",sortOrder:1},
+  {familyName:"Magnus ailesi",key:"spouse",name:"Aurelia Marcia",gender:"FEMALE",age:40,position:"SPOUSE",relation:"Yöneticinin eşi",spouseKey:"head",sortOrder:2},
+  {familyName:"Magnus ailesi",key:"child_one",name:"Lucia Cornelia Magnus",gender:"FEMALE",age:19,position:"CHILD",relation:"Yöneticinin kızı",motherKey:"spouse",fatherKey:"head",sortOrder:3},
+  {familyName:"Magnus ailesi",key:"child_two",name:"Lecilia Cordelia Magnus",gender:"FEMALE",age:18,position:"CHILD",relation:"Yöneticinin kızı",motherKey:"spouse",fatherKey:"head",sortOrder:4},
+  {familyName:"Magnus ailesi",key:"child_three",name:"Gaius Cornelius Magnus",gender:"MALE",age:16,position:"CHILD",relation:"Yöneticinin oğlu",motherKey:"spouse",fatherKey:"head",sortOrder:5},
+  {familyName:"Magnus ailesi",key:"head_brother",name:"Marcus Cornelius Magnus",gender:"MALE",age:43,position:"HEAD_SIBLING",relation:"Yöneticinin erkek kardeşi",sortOrder:6}
+];
 
 export const DEFAULT_ROMAN_FAMILIES:DefaultRomanFamilySeed[]=[
   {name:"Scipio ailesi",seats:18,influence:0,bloc:"MILITARISTS"},
@@ -92,4 +120,9 @@ export const DEFAULT_ROMAN_NPC_MEMBERS:DefaultRomanFamilyMemberSeed[]=[
   {familyName:"Caecilius ailesi",key:"child_two",name:"Caecilia Metella",gender:"FEMALE",age:19,position:"CHILD",relation:"Yöneticinin kızı",motherKey:"spouse",fatherKey:"head",sortOrder:4},
   {familyName:"Caecilius ailesi",key:"head_sibling",name:"Gaius Caecilius Metellus",gender:"MALE",age:47,position:"HEAD_SIBLING",relation:"Yöneticinin kardeşi",sortOrder:5},
   {familyName:"Caecilius ailesi",key:"spouse_sibling",name:"Lucius Calpurnius Piso",gender:"MALE",age:40,position:"SPOUSE_SIBLING",relation:"Yönetici eşinin kardeşi",sortOrder:6}
+];
+
+export const DEFAULT_ROMAN_FAMILY_MEMBERS:DefaultRomanFamilyMemberSeed[]=[
+  ...ROMAN_PLAYER_FAMILY_MEMBERS,
+  ...DEFAULT_ROMAN_NPC_MEMBERS
 ];

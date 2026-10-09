@@ -49,33 +49,42 @@ export interface TurnAnnouncementInput {
   romanFamilyIncomeDetails?:Array<{familyName:string;businessIncome:number;consulStipend:number;total:number}>;
   romanGovernorshipDetails?:Array<{countryName:string;familyName:string;governorName:string;settlementName:string;treasuryShare:number;influenceGain:number;completed:boolean}>;
   romanElectionOpenedDetails?:Array<{countryName:string;sequence:number;closesTurn:number}>;
+  romanFamilyLifecycleDetails?:Array<{familyName:string;agedMembers:number;birthAttempts:number;births:number;events:string[]}>;
+  countryEconomyDetails?:Array<{
+    countryName:string;buildingIncome:number;taxIncome:number;landTradeIncome:number;seaTradeIncome:number;
+    upkeep:number;net:number;populationGain:number;settlementCount:number;
+  }>;
   romanPolitics?:{
     proposalResults:Array<{countryName:string;title:string;passed:boolean;yesWeight:number;noWeight:number;requiredWeight:number}>;
     officeYields:Array<{familyName:string;characterName:string;officeLabel:string;treasury:number;influence:number;reputation:number;scandal:number;completed:boolean}>;
     lawEffects:Array<{countryName:string;lawTitle:string;summary:string}>;
   };
+  movement?:{
+    enabled:boolean;stage:string;turn:number;processed:number;advanced:number;completed:number;blocked:number;ongoing:number;
+    ownershipUpdates:number;alreadyProcessed:boolean;reconChecks:number;encounters:number;
+    muster:{processed:number;advanced:number;joined:number;blocked:number;waiting:number};
+    disembarkations:{processed:number;completed:number;blocked:number};
+  };
+  characterAutomation?:{
+    espionageResolved:number;espionagePublished:number;characterEvents:number;characterPublished:number;
+    dynastyProcessed:number;dynastyEvents:number;dynastyDeathChecks:number;dynastyDeathLogsPublished:number;
+    dynastyNpcBirths:number;dynastyNpcMarriages:number;warnings:string[];
+  };
 }
 
+let activeFieldCapture:string[]|null=null;
+
 function fieldValue(lines: string[]): string {
-  return lines.join("\n").slice(0, 1_024);
+  const value=lines.join("\n");
+  activeFieldCapture?.push(value);
+  return value.slice(0,1_024);
 }
 
 type TurnAnnouncementField = { name: string; value: string; inline?: boolean };
 
 const TURN_CARD_MAX_TEXT = 5_800;
-const SECOND_CARD_FIELD_NAMES = new Set([
-  "⚔️ Savaş Yorgunluğu",
-  "🔥 İsyanlar",
-  "🌿 Refah ve İsyan Gerilimi",
-  "⚠️ Huzursuzluk Olayları",
-  "🏰 Kuşatma Erzak Durumu",
-  "🏛️ Panteon Kredisi Ödemeleri",
-  "📉 Uygulanan Gelir Cezaları",
-  "\u{1FA99} Yerleşkeye Ulaşan Paralı Askerler",
-  "\u{1F4B0} Paralı Asker Bakımları",
-  "\u26A0\uFE0F Ödenemeyen Paralı Asker Bakımları",
-  "\u{1F4DC} Sona Eren Paralı Asker Sözleşmeleri"
-]);
+const TURN_CARD_MAX_FIELDS=25;
+const fullAdvanceFields=new WeakMap<EmbedBuilder,TurnAnnouncementField[]>();
 
 export function turnAnnouncementTextLength(embed: EmbedBuilder): number {
   const data = embed.toJSON();
@@ -86,37 +95,42 @@ export function turnAnnouncementTextLength(embed: EmbedBuilder): number {
     + (data.fields ?? []).reduce((sum, field) => sum + field.name.length + field.value.length, 0);
 }
 
-function shortenedField(field: TurnAnnouncementField, maximumValueLength: number): TurnAnnouncementField {
-  if (field.value.length <= maximumValueLength) return field;
-  const suffix = "\n… Liste kısaltıldı.";
-  return {
+function splitField(field:TurnAnnouncementField):TurnAnnouncementField[]{
+  const pieces:string[]=[];
+  for(const line of field.value.split("\n")){
+    if(line.length<=1_024){pieces.push(line);continue;}
+    for(let offset=0;offset<line.length;offset+=1_024)pieces.push(line.slice(offset,offset+1_024));
+  }
+  const values:string[]=[];
+  let current="";
+  for(const piece of pieces){
+    const next=current?`${current}\n${piece}`:piece;
+    if(next.length<=1_024){current=next;continue;}
+    if(current)values.push(current);
+    current=piece;
+  }
+  if(current||!values.length)values.push(current||"—");
+  return values.map((value,index)=>({
     ...field,
-    value: field.value.slice(0, Math.max(1, maximumValueLength - suffix.length)) + suffix
-  };
+    name:index===0?field.name:`${field.name} • Devam ${index+1}`.slice(0,256),
+    value
+  }));
 }
 
-function splitAdvanceFields(
-  fields: TurnAnnouncementField[],
-  firstBase: EmbedBuilder,
-  secondBase: EmbedBuilder
-): [TurnAnnouncementField[], TurnAnnouncementField[]] {
-  const preferred = fields.findIndex((field) => SECOND_CARD_FIELD_NAMES.has(field.name));
-  const preferredSplit = preferred < 0 ? Math.ceil(fields.length / 2) : preferred;
-  for (let maximumValueLength = 1_024; maximumValueLength >= 96; maximumValueLength -= 32) {
-    const fitted = fields.map((field) => shortenedField(field, maximumValueLength));
-    let best: { split: number; score: number } | null = null;
-    for (let split = 0; split <= fitted.length; split += 1) {
-      const firstLength = turnAnnouncementTextLength(firstBase)
-        + fitted.slice(0, split).reduce((sum, field) => sum + field.name.length + field.value.length, 0);
-      const secondLength = turnAnnouncementTextLength(secondBase)
-        + fitted.slice(split).reduce((sum, field) => sum + field.name.length + field.value.length, 0);
-      if (firstLength > TURN_CARD_MAX_TEXT || secondLength > TURN_CARD_MAX_TEXT) continue;
-      const score = Math.abs(firstLength - secondLength) + Math.abs(split - preferredSplit) * 80;
-      if (!best || score < best.score) best = { split, score };
+function paginateFields(fields:TurnAnnouncementField[]):TurnAnnouncementField[][]{
+  const chunks=fields.flatMap(splitField);
+  const pages:TurnAnnouncementField[][]=[];
+  let page:TurnAnnouncementField[]=[];
+  let textLength=0;
+  for(const field of chunks){
+    const fieldLength=field.name.length+field.value.length;
+    if(page.length&&(page.length>=TURN_CARD_MAX_FIELDS||textLength+fieldLength>TURN_CARD_MAX_TEXT-500)){
+      pages.push(page);page=[];textLength=0;
     }
-    if (best) return [fitted.slice(0, best.split), fitted.slice(best.split)];
+    page.push(field);textLength+=fieldLength;
   }
-  return [[], fields.map((field) => shortenedField(field, 96))];
+  if(page.length)pages.push(page);
+  return pages.length?pages:[[]];
 }
 
 export function turnAnnouncement(input: TurnAnnouncementInput): EmbedBuilder {
@@ -130,6 +144,7 @@ export function turnAnnouncement(input: TurnAnnouncementInput): EmbedBuilder {
     return new EmbedBuilder().setColor(selected.color).setTitle(selected.title).setDescription(selected.description).setImage(TURN_BANNER_URL).setFooter({ text: "Antik Medeniyetler Role Play • Resmî Tur Duyurusu" }).setTimestamp();
   }
 
+  activeFieldCapture=[];
   const embed = new EmbedBuilder()
     .setColor(0xb58b32)
     .setTitle(`⚔️ TUR ${input.turn} BAŞLADI`)
@@ -165,14 +180,17 @@ export function turnAnnouncement(input: TurnAnnouncementInput): EmbedBuilder {
     name: "🛠️ Tamamlanan Kuşatma Aletleri",
     value: fieldValue(input.completedSiegeDetails.map((item) => `• **${item.settlementName}** — ${item.quantity.toLocaleString("tr-TR")} ${item.assetName}`))
   });
-  if (input.garrisonUpgradeDetails?.length) embed.addFields({
+  if (input.garrisonReplenishmentCompletedDetails?.length||input.garrisonUpgradeDetails?.length) embed.addFields({
     name: "🛡️ Garnizonu Tamamlanan Yerleşkeler",
-    value: fieldValue((input.garrisonReplenishmentCompletedDetails ?? []).map((item) => `• **${item.settlementName}** — ${item.personnel.toLocaleString("tr-TR")} asker`))
+    value: fieldValue(input.garrisonReplenishmentCompletedDetails?.length
+      ?input.garrisonReplenishmentCompletedDetails.map((item) => `• **${item.settlementName}** — ${item.personnel.toLocaleString("tr-TR")} asker`)
+      :(input.garrisonUpgradeDetails??[]).map((settlementName)=>`• **${settlementName}**`))
   });
   if (input.garrisonReplenishmentStartedDetails?.length) embed.addFields({
     name: "🛡️ Başlatılan Zorunlu Garnizon Yenilemeleri",
     value: fieldValue(input.garrisonReplenishmentStartedDetails.map((item) =>
       `• **${item.settlementName}** — ${item.personnel.toLocaleString("tr-TR")} asker • ${item.cost.toLocaleString("tr-TR")} Altın • Tur ${item.completionTurn}`
+      +` • ${item.reason}`
     ))
   });
   if (input.activatedPolicyDetails?.length) embed.addFields({
@@ -185,9 +203,15 @@ export function turnAnnouncement(input: TurnAnnouncementInput): EmbedBuilder {
       `• **${item.countryName} / ${item.settlementName}**${item.diplomatName ? ` — Diplomat: ${item.diplomatName}` : ""}`
     ))
   });
-  if(input.romanFamilyIncomeDetails?.some((item)=>item.total>0))embed.addFields({
+  if(input.countryEconomyDetails?.length)embed.addFields({
+    name:"💰 Ülke Ekonomi Dökümü",
+    value:fieldValue(input.countryEconomyDetails.map((item)=>
+      `• **${item.countryName}** — Bina ${item.buildingIncome.toLocaleString("tr-TR")} • Vergi ${item.taxIncome.toLocaleString("tr-TR")} • Kara ${item.landTradeIncome.toLocaleString("tr-TR")} • Deniz ${item.seaTradeIncome.toLocaleString("tr-TR")} • Bakım −${item.upkeep.toLocaleString("tr-TR")} • **Net ${item.net>=0?"+":""}${item.net.toLocaleString("tr-TR")} Altın** • Nüfus +${item.populationGain.toLocaleString("tr-TR")} • ${item.settlementCount} yerleşke`
+    ))
+  });
+  if(input.romanFamilyIncomeDetails?.length)embed.addFields({
     name:"🏛️ Roma Siyasi Aile Gelirleri",
-    value:fieldValue(input.romanFamilyIncomeDetails.filter((item)=>item.total>0).map((item)=>
+    value:fieldValue(input.romanFamilyIncomeDetails.map((item)=>
       `• **${item.familyName}** — +${item.total.toLocaleString("tr-TR")} Altın`+
       ` • İşletmeler ${item.businessIncome.toLocaleString("tr-TR")}`+
       (item.consulStipend?` • Konsül ödeneği ${item.consulStipend.toLocaleString("tr-TR")}`:"")
@@ -206,6 +230,13 @@ export function turnAnnouncement(input: TurnAnnouncementInput): EmbedBuilder {
     value:fieldValue(input.romanElectionOpenedDetails.map((item)=>
       `• **${item.countryName}** — ${item.sequence}. seçim açıldı • Oyların son turu: **Tur ${item.closesTurn}**`
     ))
+  });
+  if(input.romanFamilyLifecycleDetails?.length)embed.addFields({
+    name:"🌿 Roma Aile Yaşamı",
+    value:fieldValue(input.romanFamilyLifecycleDetails.flatMap((item)=>[
+      `• **${item.familyName}** — ${item.agedMembers} yaşayan üye yaşlandı • ${item.birthAttempts} çocuk denemesi • ${item.births} doğum`,
+      ...item.events.map((event)=>`  ↳ ${event}`)
+    ]))
   });
   if(input.romanPolitics?.proposalResults.length)embed.addFields({
     name:"🏛️ Roma Senatosu Sonuçları",
@@ -253,10 +284,12 @@ export function turnAnnouncement(input: TurnAnnouncementInput): EmbedBuilder {
       `• **${item.factionName??`${item.settlementName} İsyancıları`}** — ${item.countryName} / ${item.settlementName} • ${item.rebelPersonnel.toLocaleString("tr-TR")} eğitimli asker • Güç ${item.rebelMilitaryPower.toLocaleString("tr-TR")}`
     ))
   });
-  const escalations=input.stability?.settlements.filter((item)=>!item.outbreak&&item.rebellionAfter!==item.rebellionBefore)??[];
+  const escalations=input.stability?.settlements.filter((item)=>!item.outbreak&&(
+    item.rebellionAfter!==item.rebellionBefore||item.prosperityAfter!==item.prosperityBefore
+  ))??[];
   if(escalations.length)embed.addFields({
     name:"🌿 Refah ve İsyan Gerilimi",
-    value:fieldValue(escalations.slice(0,20).map((item)=>
+    value:fieldValue(escalations.map((item)=>
       `• **${item.countryName} / ${item.settlementName}** — Refah ${item.prosperityBefore}→${item.prosperityAfter} • İsyan ${item.rebellionBefore}→**${item.rebellionAfter}**${item.roll!==null?` • Risk %${item.unrestRisk}, Zar ${item.roll}`:""}`
     ))
   });
@@ -300,6 +333,32 @@ export function turnAnnouncement(input: TurnAnnouncementInput): EmbedBuilder {
     name: "\u{1F4DC} Sona Eren Paralı Asker Sözleşmeleri",
     value: fieldValue(input.mercenaryEndedDetails.map((item) => `- **${item.countryName}** - ${item.companyName} - ${item.reason}`))
   });
+  if(input.movement)embed.addFields({
+    name:"🗺️ Hareket Çözümlemesi",
+    value:fieldValue(input.movement.enabled?[
+      `• **Tur ${input.movement.turn} / ${input.movement.stage}** — Emir ${input.movement.processed} • İlerleyen ${input.movement.advanced} • Varan ${input.movement.completed} • Devam eden ${input.movement.ongoing} • Engelli ${input.movement.blocked}`,
+      `• Gizli keşif ${input.movement.reconChecks} • Karşılaşma/Hex dosyası ${input.movement.encounters} • Sahiplik güncellemesi ${input.movement.ownershipUpdates}`,
+      `• Ordu toplama: ${input.movement.muster.processed} emir • ${input.movement.muster.advanced} ilerledi • ${input.movement.muster.joined} katıldı • ${input.movement.muster.blocked} engelli • ${input.movement.muster.waiting} bekliyor`,
+      `• Çıkarma: ${input.movement.disembarkations.processed} emir • ${input.movement.disembarkations.completed} tamamlandı • ${input.movement.disembarkations.blocked} engelli`,
+      ...(input.movement.alreadyProcessed?["• Bu hareket aşaması daha önce çözülmüştü; ikinci kez uygulanmadı."]:[])
+    ]:["• Koordinatlı hareket sistemi bu tur etkin değil."])
+  });
+  if(input.characterAutomation)embed.addFields({
+    name:"🧭 Karakter ve Hanedan Otomasyonu",
+    value:fieldValue([
+      `• Casusluk: ${input.characterAutomation.espionageResolved} sonuçlandı • ${input.characterAutomation.espionagePublished} loglandı`,
+      `• Akademi karakterleri: ${input.characterAutomation.characterEvents} olay işlendi • ${input.characterAutomation.characterPublished} loglandı`,
+      `• Hanedanlar: ${input.characterAutomation.dynastyProcessed} hane • ${input.characterAutomation.dynastyEvents} olay • ${input.characterAutomation.dynastyDeathChecks} ölüm zarı • ${input.characterAutomation.dynastyDeathLogsPublished} ölüm kaydı yayımlandı`,
+      `• NPC hanedanları: ${input.characterAutomation.dynastyNpcBirths} doğum • ${input.characterAutomation.dynastyNpcMarriages} evlilik`,
+      ...input.characterAutomation.warnings.map((warning)=>`• ⚠️ ${warning}`)
+    ])
+  });
+  const captured=activeFieldCapture;
+  activeFieldCapture=null;
+  const renderedFields=(embed.toJSON().fields??[]).map((field,index)=>({
+    name:field.name,value:captured?.[index]??field.value,...(field.inline===undefined?{}:{inline:field.inline})
+  }));
+  fullAdvanceFields.set(embed,renderedFields);
   return embed;
 }
 
@@ -308,28 +367,30 @@ export function turnAnnouncementCards(input: TurnAnnouncementInput): EmbedBuilde
   if (input.kind !== "ADVANCE") return [announcement];
 
   const source = announcement.toJSON();
+  const sourceFields=fullAdvanceFields.get(announcement)??(source.fields??[]).map((field)=>({
+    name:field.name,value:field.value,...(field.inline===undefined?{}:{inline:field.inline})
+  }));
+  const detailPages=paginateFields(sourceFields);
+  const total=1+detailPages.length;
   const first = new EmbedBuilder()
     .setColor(source.color ?? 0xb58b32)
-    .setTitle(`⚔️ TUR ${input.turn} BAŞLADI • 1/2`)
+    .setTitle(`⚔️ TUR ${input.turn} BAŞLADI • 1/${total}`)
     .setDescription(source.description ?? "Yeni rol turu açılmıştır.")
     .setImage(TURN_BANNER_URL)
     .setFooter({ text: source.footer?.text ?? "Antik Medeniyetler Role Play • Resmî Tur Duyurusu" })
     .setTimestamp();
-  const second = new EmbedBuilder()
-    .setColor(source.color ?? 0xb58b32)
-    .setTitle(`📜 TUR ${input.turn} SONUÇLARI • 2/2`)
-    .setDescription("Tur ilerletilirken işlenen ekonomi, toplum, savaş yorgunluğu ve diğer sistem sonuçları.")
-    .setFooter({ text: source.footer?.text ?? "Antik Medeniyetler Role Play • Resmî Tur Duyurusu" })
-    .setTimestamp();
-
-  const fields = (source.fields ?? []).map((field) => ({
-    name: field.name,
-    value: field.value,
-    ...(field.inline === undefined ? {} : { inline: field.inline })
-  }));
-  const [firstFields, secondFields] = splitAdvanceFields(fields, first, second);
-  if (firstFields.length) first.addFields(firstFields);
-  if (secondFields.length) second.addFields(secondFields);
-  else second.setDescription("Bu tur ek ayrıntılı sistem sonucu oluşmadı.");
-  return [first, second];
+  const details=detailPages.map((fields,index)=>{
+    const card=new EmbedBuilder()
+      .setColor(source.color??0xb58b32)
+      .setTitle(`📜 TUR ${input.turn} SONUÇLARI • ${index+2}/${total}`)
+      .setDescription(index===0
+        ?"Tur ilerletilirken işlenen bütün ekonomi, toplum, askerî hareket ve otomasyon sonuçları. Hiçbir kayıt kısaltılmaz; devam sayfaları sırayla yayımlanır."
+        :"Tur sonuçlarının devamı.")
+      .setFooter({text:source.footer?.text??"Antik Medeniyetler Role Play • Resmî Tur Duyurusu"})
+      .setTimestamp();
+    if(fields.length)card.addFields(fields);
+    else card.setDescription("Bu tur ek ayrıntılı sistem sonucu oluşmadı.");
+    return card;
+  });
+  return[first,...details];
 }

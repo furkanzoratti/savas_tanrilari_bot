@@ -8,7 +8,7 @@ import {
 import {ensureNpcElectionParticipation,recordRomanElectionSupport} from "./roman-politics-service.js";
 import {renewRomanSenateSeats,type RomanSenateRenewalResult} from "./roman-senate-seat-service.js";
 import { GameError } from "./game-service.js";
-import {DEFAULT_ROMAN_FAMILIES,DEFAULT_ROMAN_NPC_MEMBERS} from "../domain/roman-family-seed.js";
+import {DEFAULT_ROMAN_FAMILIES,DEFAULT_ROMAN_FAMILY_MEMBERS} from "../domain/roman-family-seed.js";
 
 export interface RomanFamilyView {
   id:string;name:string;treasury:number;politicalInfluence:number;senateSeats:number;
@@ -20,7 +20,7 @@ export interface RomanFamilyView {
 
 export interface RomanFamilyMemberView {
   id:string;name:string;gender:"MALE"|"FEMALE";age:number;
-  position:"HEAD"|"SPOUSE"|"CHILD"|"HEAD_SIBLING"|"SPOUSE_SIBLING";
+  position:"HEAD"|"SPOUSE"|"CHILD"|"PARENT"|"HEAD_SIBLING"|"SPOUSE_SIBLING"|"HOUSEHOLD";
   relation:string;spouseName:string|null;motherName:string|null;fatherName:string|null;
 }
 
@@ -223,21 +223,21 @@ async function seedDefaultRomanFamilies(client:DbClient,input:{
     "SELECT id,name FROM roman_families WHERE republic_id=$1 AND status='ACTIVE'",[input.republicId]
   )).rows;
   const familyIds=new Map(familyRows.map((family)=>[family.name,family.id]));
-  for(const member of DEFAULT_ROMAN_NPC_MEMBERS){
+  for(const member of DEFAULT_ROMAN_FAMILY_MEMBERS){
     const familyId=familyIds.get(member.familyName);
     if(!familyId)continue;
     await client.query(
-      `INSERT INTO roman_family_members(family_id,name,gender,age,position,relation,sort_order)
-       VALUES($1,$2,$3,$4,$5,$6,$7)
+      `INSERT INTO roman_family_members(family_id,birth_family_id,name,gender,age,position,relation,sort_order)
+       VALUES($1,$1,$2,$3,$4,$5,$6,$7)
        ON CONFLICT(family_id,lower(name)) DO NOTHING`,
       [familyId,member.name,member.gender,member.age,member.position,member.relation,member.sortOrder]
     );
   }
-  for(const member of DEFAULT_ROMAN_NPC_MEMBERS){
+  for(const member of DEFAULT_ROMAN_FAMILY_MEMBERS){
     if(!member.spouseKey&&!member.motherKey&&!member.fatherKey)continue;
     const familyId=familyIds.get(member.familyName);
     if(!familyId)continue;
-    const familyMembers=DEFAULT_ROMAN_NPC_MEMBERS.filter((candidate)=>candidate.familyName===member.familyName);
+    const familyMembers=DEFAULT_ROMAN_FAMILY_MEMBERS.filter((candidate)=>candidate.familyName===member.familyName);
     const nameFor=(key:string|undefined)=>familyMembers.find((candidate)=>candidate.key===key)?.name??null;
     await client.query(
       `UPDATE roman_family_members member SET
