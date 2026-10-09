@@ -14,7 +14,7 @@ import { gameService,GameError } from "../services/game-service.js";
 import { romanRepublicService,type RomanFamilyView,type RomanRepublicView } from "../services/roman-republic-service.js";
 import {romanFamilyLifeService,type RomanFamilyBirthAttemptResult,type RomanFamilyMarriageProposalView} from "../services/roman-family-life-service.js";
 import {romanPoliticsService,type RomanPoliticsView} from "../services/roman-politics-service.js";
-import { isGameMaster,requireGameMaster,resolveCountry } from "./auth.js";
+import { isGameMaster,requireGameMaster } from "./auth.js";
 import {romanViewAsset,type RomanViewBannerKey} from "./assets.js";
 import {renderRomanSenateChart,romanSenateLegend} from "./roman-senate-chart.js";
 import {playerMentionPayload} from "./player-mentions.js";
@@ -437,22 +437,46 @@ async function requiredView(interaction:{guildId:string|null},countryId:string):
   return view;
 }
 
+async function resolveRomanCommandContext(interaction:ChatInputCommandInteraction):Promise<{
+  country:{id:string;name:string};familyId:string|null;
+}>{
+  const guildId=interaction.guildId!;
+  const access=await romanRepublicService.playerAccess(guildId,interaction.user.id);
+  if(!isGameMaster(interaction)){
+    if(!access)throw new GameError("Bir Roma siyasi ailesine atanmış değilsiniz.");
+    return{country:{id:access.countryId,name:access.countryName},familyId:access.familyId};
+  }
+  const requested=interaction.options.getString("ulke");
+  if(requested){
+    const country=await gameService.countryByName(guildId,requested);
+    if(!country)throw new GameError("Devlet bulunamadı.");
+    return{country,familyId:access?.countryId===country.id?access.familyId:null};
+  }
+  if(access)return{country:{id:access.countryId,name:access.countryName},familyId:access.familyId};
+  const view=await romanRepublicService.view(guildId);
+  if(!view)throw new GameError("Bu sunucuda etkin Roma Cumhuriyeti sistemi bulunamadı.");
+  return{country:{id:view.countryId,name:view.countryName},familyId:null};
+}
+
 export async function handleRomanRepublicAutocomplete(interaction:AutocompleteInteraction):Promise<boolean>{
   if(interaction.commandName!=="roma")return false;
   const action=interaction.options.getSubcommand(false)??"";
   if(!["evlilik-teklif","evlilik-cevapla","cocuk-dene"].includes(action))return false;
   if(!interaction.guildId){await interaction.respond([]);return true;}
+  const access=await romanRepublicService.playerAccess(interaction.guildId,interaction.user.id);
   const requestedCountry=interaction.options.getString("ulke");
   const country=requestedCountry&&isGameMaster(interaction)
     ?await gameService.countryByName(interaction.guildId,requestedCountry)
-    :await gameService.countryForUser(interaction.guildId,interaction.user.id);
+    :null;
   const view=country
     ?await romanRepublicService.view(interaction.guildId,country.id)
-    :isGameMaster(interaction)?await romanRepublicService.view(interaction.guildId):null;
+    :access?await romanRepublicService.view(interaction.guildId,access.countryId)
+      :isGameMaster(interaction)?await romanRepublicService.view(interaction.guildId):null;
   if(!view){await interaction.respond([]);return true;}
   const focused=interaction.options.getFocused(true);
   const query=String(focused.value).toLocaleLowerCase("tr-TR").trim();
-  const ownFamily=view.families.find((family)=>family.playerIds.includes(interaction.user.id));
+  const ownFamily=view.families.find((family)=>family.id===access?.familyId)
+    ??view.families.find((family)=>family.playerIds.includes(interaction.user.id));
   if(focused.name==="uye"||focused.name==="ebeveyn"){
     const families=ownFamily?[ownFamily]:isGameMaster(interaction)?view.families:[];
     const members=families.flatMap((family)=>family.members.map((member)=>({family,member})))
@@ -502,7 +526,8 @@ export async function handleRomanRepublicCommand(interaction:ChatInputCommandInt
   if(!interaction.guildId)return false;
   if(interaction.commandName==="roma"){
     await interaction.deferReply({flags:MessageFlags.Ephemeral});
-    const country=await resolveCountry(interaction,interaction.options.getString("ulke"));
+    const context=await resolveRomanCommandContext(interaction);
+    const country=context.country;
     const action=interaction.options.getSubcommand();
     const view=await requiredView(interaction,country.id);
     if(action==="durum"||action==="aileler"){
@@ -561,8 +586,8 @@ export async function handleRomanRepublicCommand(interaction:ChatInputCommandInt
       return true;
     }
     const ownFamily=isGameMaster(interaction)
-      ?view.families.find((family)=>family.isConsulFamily)
-      :view.families.find((family)=>family.playerIds.includes(interaction.user.id));
+      ?view.families.find((family)=>family.id===context.familyId)??view.families.find((family)=>family.isConsulFamily)
+      :view.families.find((family)=>family.id===context.familyId);
     if(!ownFamily)throw new GameError(isGameMaster(interaction)?"Önce konsül ailesini belirleyin.":"Bir Roma siyasi ailesine atanmış değilsiniz.");
     if(action==="ailem"||action==="isletmelerim"){
       await interaction.editReply({embeds:[familyEmbed(view,ownFamily)],files:romanFiles("family")});
@@ -949,7 +974,8 @@ export async function handleRomanRepublicButton(interaction:ButtonInteraction):P
     const politics=await romanPoliticsService.vote({guildId:interaction.guildId,countryId,actorId:interaction.user.id,
       gameMaster:isGameMaster(interaction),proposal:proposalId,choice,influenceSpend});
     const view=await requiredView(interaction,countryId);
-    const family=view.families.find((item)=>item.playerIds.includes(interaction.user.id))??view.families.find((item)=>item.isConsulFamily);
+    const access=await romanRepublicService.playerAccess(interaction.guildId,interaction.user.id);
+    const family=view.families.find((item)=>item.id===access?.familyId)??view.families.find((item)=>item.isConsulFamily);
     await interaction.editReply({
       content:`✅ **${family?.name??"Roma siyasi ailesi"}** Senato oyunu kullandı${influenceSpend?`; **${influenceSpend} nüfuz** harcandı`:""}.`,
       embeds:[senateEmbed(politics,view.families)],components:[],files:[senateChartFile(view)]
@@ -965,7 +991,8 @@ export async function handleRomanRepublicButton(interaction:ButtonInteraction):P
     guildId:interaction.guildId,countryId,actorId:interaction.user.id,candidate:candidateId,
     influenceSpend,gameMaster:isGameMaster(interaction)
   });
-  const family=updated.families.find((item)=>item.playerIds.includes(interaction.user.id))??updated.families.find((item)=>item.isConsulFamily);
+  const access=await romanRepublicService.playerAccess(interaction.guildId,interaction.user.id);
+  const family=updated.families.find((item)=>item.id===access?.familyId)??updated.families.find((item)=>item.isConsulFamily);
   await interaction.editReply({
     content:`✅ **${family?.name??"Roma siyasi ailesi"}** oyunu kullandı${influenceSpend?`; **${influenceSpend} nüfuz** harcandı`:""}.`,
     embeds:[electionEmbed(updated)],components:[],files:romanFiles("election")

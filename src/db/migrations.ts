@@ -93,6 +93,7 @@ import { npcDynastyAutomationMigration } from "./npc-dynasty-automation-migratio
 import { romanFamilyLifecycleMigration } from "./roman-family-lifecycle-migration.js";
 import { romanFamilyMarriageBirthMigration } from "./roman-family-marriage-birth-migration.js";
 import { romanFamilyMarriageMessageMigration } from "./roman-family-marriage-message-migration.js";
+import { romanFamilyPlayerAccessMigration } from "./roman-family-player-access-migration.js";
 
 export const migrations = [
   {
@@ -2403,5 +2404,6 @@ export const migrations = [
   npcDynastyAutomationMigration,
   romanFamilyLifecycleMigration,
   romanFamilyMarriageBirthMigration,
-  romanFamilyMarriageMessageMigration
+  romanFamilyMarriageMessageMigration,
+  romanFamilyPlayerAccessMigration
 ] as const;

@@ -9,6 +9,7 @@ import {ensureNpcElectionParticipation,recordRomanElectionSupport} from "./roman
 import {renewRomanSenateSeats,type RomanSenateRenewalResult} from "./roman-senate-seat-service.js";
 import { GameError } from "./game-service.js";
 import {DEFAULT_ROMAN_FAMILIES,DEFAULT_ROMAN_FAMILY_MEMBERS} from "../domain/roman-family-seed.js";
+import {romanFamilyAccess,romanFamilyMembership,type RomanFamilyAccess} from "./roman-family-access.js";
 
 export interface RomanFamilyView {
   id:string;name:string;treasury:number;politicalInfluence:number;senateSeats:number;
@@ -84,13 +85,10 @@ async function familyRow(client:DbClient,republicId:string,value:string){
 }
 
 async function leaderFamily(client:DbClient,republicId:string,userId:string,gameMaster=false){
-  const membership=(await client.query<{family_id:string;is_leader:boolean}>(
-    `SELECT family_id,is_leader FROM roman_family_players
-      WHERE republic_id=$1 AND discord_user_id=$2 AND status='ACTIVE'`,[republicId,userId]
-  )).rows[0];
+  const membership=await romanFamilyMembership(client,republicId,userId);
   if(!membership&&!gameMaster)throw new GameError("Bir Roma siyasi ailesine atanmış değilsiniz.");
-  if(membership&&!membership.is_leader&&!gameMaster)throw new GameError("Bu işlemi yalnızca siyasi aile lideri yapabilir.");
-  return membership?.family_id??null;
+  if(membership&&!membership.isLeader&&!gameMaster)throw new GameError("Bu işlemi yalnızca siyasi aile lideri yapabilir.");
+  return membership?.familyId??null;
 }
 
 async function viewWithClient(client:DbClient,guildId:string,countryId?:string):Promise<RomanRepublicView|null>{
@@ -182,7 +180,10 @@ async function viewWithClient(client:DbClient,guildId:string,countryId?:string):
       id:family.id,name:family.name,treasury:Number(family.treasury),politicalInfluence:Number(family.political_influence),
       senateSeats:Number(family.senate_seats),leaderUserId:family.leader_user_id,
       reputation:Number(family.reputation),scandal:Number(family.scandal),politicalBloc:family.political_bloc,
-      playerIds:players.filter((player)=>player.family_id===family.id).map((player)=>player.discord_user_id),
+      playerIds:[...new Set([
+        ...players.filter((player)=>player.family_id===family.id).map((player)=>player.discord_user_id),
+        ...(family.leader_user_id?[family.leader_user_id]:[])
+      ])],
       isConsulFamily:republic.current_consul_family_id===family.id,
       members:members.filter((member)=>member.family_id===family.id).map((member)=>({
         id:member.id,name:member.name,gender:member.gender,age:Number(member.age),position:member.position,
@@ -290,6 +291,10 @@ async function seedDefaultRomanFamilies(client:DbClient,input:{
 }
 
 export const romanRepublicService={
+  async playerAccess(guildId:string,userId:string):Promise<RomanFamilyAccess|null>{
+    return withTransaction((client)=>romanFamilyAccess(client,guildId,userId));
+  },
+
   async view(guildId:string,countryId?:string):Promise<RomanRepublicView|null>{
     const client=await pool.connect();
     try{return await viewWithClient(client,guildId,countryId);}finally{client.release();}
@@ -451,19 +456,16 @@ export const romanRepublicService={
       const definition=ROMAN_BUSINESSES[input.businessType];
       const republic=await republicRow(client,input.guildId,input.countryId);
       if(!republic)throw new GameError("Bu devlet Roma Cumhuriyeti aile sistemini kullanmıyor.");
-      const membership=(await client.query<{family_id:string;is_leader:boolean}>(
-        `SELECT family_id,is_leader FROM roman_family_players
-          WHERE republic_id=$1 AND discord_user_id=$2 AND status='ACTIVE'`,[republic.id,input.actorId]
-      )).rows[0];
+      const membership=await romanFamilyMembership(client,republic.id,input.actorId);
       if(!membership&&!input.gameMaster)throw new GameError("Bir Roma siyasi ailesine atanmış değilsiniz.");
-      const targetFamilyId=membership?.family_id??republic.current_consul_family_id;
+      const targetFamilyId=membership?.familyId??republic.current_consul_family_id;
       if(!targetFamilyId)throw new GameError("Yönetici alımı için önce konsül ailesini belirleyin.");
       const family=(await client.query<{id:string;name:string;treasury:number;political_influence:number;leader_user_id:string|null}>(
         "SELECT id,name,treasury,political_influence,leader_user_id FROM roman_families WHERE id=$1 AND republic_id=$2 AND status='ACTIVE' FOR UPDATE",
         [targetFamilyId,republic.id]
       )).rows[0];
       if(!family)throw new GameError("Siyasi aile bulunamadı.");
-      if(!input.gameMaster&&family.leader_user_id!==input.actorId&&!membership?.is_leader){
+      if(!input.gameMaster&&family.leader_user_id!==input.actorId&&!membership?.isLeader){
         throw new GameError("Aile hazinesinden yalnızca siyasi aile lideri işletme satın alabilir.");
       }
       const count=Number((await client.query<{count:number}>(
@@ -754,12 +756,9 @@ export const romanRepublicService={
     try{
       const republic=await republicRow(client,guildId,countryId);
       if(!republic)throw new GameError("Roma Cumhuriyeti kaydı bulunamadı.");
-      const membership=(await client.query<{family_id:string}>(
-        "SELECT family_id FROM roman_family_players WHERE republic_id=$1 AND discord_user_id=$2 AND status='ACTIVE'",
-        [republic.id,userId]
-      )).rows[0];
+      const membership=await romanFamilyMembership(client,republic.id,userId);
       if(!membership&&!gameMaster)throw new GameError("Bir Roma siyasi ailesine atanmış değilsiniz.");
-      const familyId=membership?.family_id??republic.current_consul_family_id;
+      const familyId=membership?.familyId??republic.current_consul_family_id;
       if(!familyId)throw new GameError("Görüntülenecek siyasi aile bulunamadı.");
       const family=await familyRow(client,republic.id,familyId);
       if(!family)throw new GameError("Siyasi aile bulunamadı.");
@@ -772,14 +771,19 @@ export const romanRepublicService={
   },
 
   async executiveAccess(guildId:string,countryId:string,userId:string):Promise<{restricted:boolean;allowed:boolean;familyName:string|null}>{
-    const row=(await pool.query<{current_consul_family_id:string|null;family_id:string|null;family_name:string|null}>(`
-      SELECT republic.current_consul_family_id,membership.family_id,family.name AS family_name
-        FROM roman_republics republic
-        LEFT JOIN roman_family_players membership ON membership.republic_id=republic.id
-          AND membership.discord_user_id=$3 AND membership.status='ACTIVE'
-        LEFT JOIN roman_families family ON family.id=republic.current_consul_family_id
-       WHERE republic.guild_id=$1 AND republic.country_id=$2 AND republic.status='ACTIVE'`,[guildId,countryId,userId])).rows[0];
-    if(!row)return{restricted:false,allowed:true,familyName:null};
-    return{restricted:true,allowed:Boolean(row.current_consul_family_id&&row.family_id===row.current_consul_family_id),familyName:row.family_name};
+    const client=await pool.connect();
+    try{
+      const row=await republicRow(client,guildId,countryId);
+      if(!row)return{restricted:false,allowed:true,familyName:null};
+      const membership=await romanFamilyMembership(client,row.id,userId);
+      const consul=row.current_consul_family_id
+        ?await familyRow(client,row.id,row.current_consul_family_id)
+        :null;
+      return{
+        restricted:true,
+        allowed:Boolean(row.current_consul_family_id&&membership?.familyId===row.current_consul_family_id),
+        familyName:consul?.name??null
+      };
+    }finally{client.release();}
   }
 };

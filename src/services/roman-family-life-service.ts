@@ -6,6 +6,7 @@ import {
   type BirthComplication,type DynastyGender
 } from "../domain/dynasty.js";
 import {GameError} from "./game-service.js";
+import {romanFamilyMembership} from "./roman-family-access.js";
 
 export type RomanFamilyMarriageStatus="PENDING"|"ACCEPTED"|"REJECTED"|"CANCELLED";
 
@@ -56,13 +57,9 @@ async function requireFamilyLeader(
   client:DbClient,republicId:string,familyId:string,userId:string,gameMaster:boolean
 ):Promise<void>{
   if(gameMaster)return;
-  const membership=(await client.query<{is_leader:boolean}>(
-    `SELECT is_leader FROM roman_family_players
-      WHERE republic_id=$1 AND family_id=$2 AND discord_user_id=$3 AND status='ACTIVE'`,
-    [republicId,familyId,userId]
-  )).rows[0];
-  if(!membership)throw new GameError("Bu Roma siyasi ailesine atanmış değilsiniz.");
-  if(!membership.is_leader)throw new GameError("Bu işlemi yalnızca siyasi aile lideri yapabilir.");
+  const membership=await romanFamilyMembership(client,republicId,userId);
+  if(!membership||membership.familyId!==familyId)throw new GameError("Bu Roma siyasi ailesine atanmış değilsiniz.");
+  if(!membership.isLeader)throw new GameError("Bu işlemi yalnızca siyasi aile lideri yapabilir.");
 }
 
 function requireMarriageEligibility(item:FamilyMemberRow):void{
@@ -105,10 +102,7 @@ export const romanFamilyLifeService={
     const rep=await withTransaction((client)=>republic(client,guildId,countryId));
     let familyId:string|null=null;
     if(!gameMaster){
-      familyId=(await pool.query<{family_id:string}>(
-        `SELECT family_id FROM roman_family_players
-          WHERE republic_id=$1 AND discord_user_id=$2 AND status='ACTIVE'`,[rep.id,userId]
-      )).rows[0]?.family_id??null;
+      familyId=(await withTransaction((client)=>romanFamilyMembership(client,rep.id,userId)))?.familyId??null;
       if(!familyId)throw new GameError("Bir Roma siyasi ailesine atanmış değilsiniz.");
     }
     return (await pool.query<RomanFamilyMarriageProposalView>(`

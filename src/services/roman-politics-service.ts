@@ -5,6 +5,7 @@ import {
   type RomanOfficeKey,type RomanPoliticalBloc,type RomanPoliticalCategory,type RomanProposalType,type RomanRelationAction
 } from "../domain/roman-republic.js";
 import {GameError} from "./game-service.js";
+import {romanFamilyMembership} from "./roman-family-access.js";
 
 type VoteChoice="YES"|"NO"|"ABSTAIN";
 
@@ -51,13 +52,10 @@ async function familyByValue(client:DbClient,republicId:string,value:string){
 }
 
 async function actingFamily(client:DbClient,republicId:string,userId:string,gameMaster:boolean,currentConsulId:string|null){
-  const membership=(await client.query<{family_id:string;is_leader:boolean}>(
-    `SELECT family_id,is_leader FROM roman_family_players
-      WHERE republic_id=$1 AND discord_user_id=$2 AND status='ACTIVE'`,[republicId,userId]
-  )).rows[0];
+  const membership=await romanFamilyMembership(client,republicId,userId);
   if(!membership&&!gameMaster)throw new GameError("Bir Roma siyasi ailesine atanmış değilsiniz.");
-  if(membership&&!membership.is_leader&&!gameMaster)throw new GameError("Bu işlemi yalnızca siyasi aile lideri yapabilir.");
-  const familyId=membership?.family_id??currentConsulId;
+  if(membership&&!membership.isLeader&&!gameMaster)throw new GameError("Bu işlemi yalnızca siyasi aile lideri yapabilir.");
+  const familyId=membership?.familyId??currentConsulId;
   if(!familyId)throw new GameError("İşlemi yapacak siyasi aile bulunamadı.");
   return familyId;
 }
