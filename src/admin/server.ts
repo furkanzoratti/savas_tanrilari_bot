@@ -126,6 +126,10 @@ const server = createServer(async (request, response) => {
       if (!requireSession(request, response)) return;
       return json(response, 200, await adminPanelService.dynasties());
     }
+    if (request.method === "GET" && url.pathname === "/api/roman-politics") {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await adminPanelService.romanPolitics());
+    }
     const dynastyMatch = request.method === "GET" ? url.pathname.match(/^\/api\/dynasties\/([0-9a-f-]+)$/iu) : null;
     if (dynastyMatch) {
       if (!requireSession(request, response)) return;

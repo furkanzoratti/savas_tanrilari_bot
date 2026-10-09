@@ -252,6 +252,38 @@ textarea { resize: vertical; line-height: 1.45; }
 .scenario-grid strong { margin: 6px 0; }
 .rebellion-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .preview-table { margin-top: 14px; }
+.roman-republic-section + .roman-republic-section { margin-top: 34px; padding-top: 28px; border-top: 1px solid var(--line); }
+.roman-senate-card { overflow: hidden; background: radial-gradient(circle at 50% 115%, rgba(197,155,69,.15), var(--surface) 58%); }
+.roman-seat-grid { width: min(720px,100%); display: grid; grid-template-columns: repeat(20,minmax(10px,1fr)); gap: 8px; margin: 18px auto 24px; }
+.roman-seat { width: 100%; aspect-ratio: 1; border: 2px solid rgba(255,255,255,.32); border-radius: 50%; background: var(--roman-family,#52525b); box-shadow: 0 2px 8px rgba(0,0,0,.32); }
+.roman-seat.empty-seat { opacity: .34; background: #52525b; }
+.roman-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 7px 12px; }
+.roman-legend span { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; }
+.roman-legend i,.roman-color-dot { width: 10px; height: 10px; flex: 0 0 auto; border-radius: 50%; background: var(--roman-family,#52525b); box-shadow: 0 0 0 2px rgba(255,255,255,.12); }
+.roman-family-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
+.roman-family-card { display: grid; gap: 12px; border-left: 4px solid var(--roman-family,#52525b); }
+.roman-family-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.roman-family-head > div { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 2px 8px; }
+.roman-family-head strong { font-size: 16px; }
+.roman-family-head small { grid-column: 2; color: var(--muted); }
+.roman-family-stats { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 7px; }
+.roman-family-stats span { padding: 9px; border-radius: 8px; background: var(--bg); }
+.roman-family-stats small,.roman-family-stats strong { display: block; }
+.roman-family-stats small { margin-bottom: 4px; color: var(--muted); font-size: 10px; }
+.roman-family-stats strong { font-size: 12px; }
+.roman-members { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; }
+.roman-members > span { min-width: 0; padding: 8px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.roman-members b,.roman-members small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.roman-members b { font-size: 12px; }
+.roman-members small { margin-top: 3px; color: var(--muted); font-size: 10px; }
+.roman-bottom-grid { align-items: start; }
+.roman-election-row { grid-template-columns: minmax(160px,1fr) auto; }
+.roman-proposal { grid-template-columns: minmax(190px,1fr) auto auto; }
+.scipio { --roman-family:#d4af37; }.magnus { --roman-family:#b91c1c; }.cato { --roman-family:#f3f0df; }.nero { --roman-family:#312e81; }
+.julius { --roman-family:#7c3aed; }.aemilius { --roman-family:#2563eb; }.fabius { --roman-family:#16a34a; }.valerius { --roman-family:#ea580c; }
+.licinius { --roman-family:#06b6d4; }.junius { --roman-family:#db2777; }.servilius { --roman-family:#92400e; }.caecilius { --roman-family:#64748b; }
+.fallback-0 { --roman-family:#eab308; }.fallback-1 { --roman-family:#ef4444; }.fallback-2 { --roman-family:#22c55e; }.fallback-3 { --roman-family:#3b82f6; }
+.fallback-4 { --roman-family:#a855f7; }.fallback-5 { --roman-family:#f97316; }.fallback-6 { --roman-family:#14b8a6; }.fallback-7 { --roman-family:#ec4899; }
 .toast { position: fixed; right: 22px; bottom: 22px; z-index: 30; max-width: 420px; padding: 13px 15px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); box-shadow: 0 16px 50px var(--shadow); }
 .toast.success { border-color: var(--accent); }
 .toast.error { border-color: var(--danger); }
@@ -272,6 +304,7 @@ textarea { resize: vertical; line-height: 1.45; }
   .rebellion-toolbar { grid-template-columns: 1fr 1fr; }
   .rebellion-detail-grid { grid-template-columns: 1fr; }
   .dynasty-grid { grid-template-columns: 1fr; }
+  .roman-family-grid { grid-template-columns: 1fr; }
   .ai-plan-two-columns { grid-template-columns: 1fr; }
 }
 @media (max-width: 620px) {
@@ -289,4 +322,6 @@ textarea { resize: vertical; line-height: 1.45; }
   .rebellion-toolbar,.rebellion-detail-hero { grid-template-columns: 1fr; }
   .rebellion-forecast { grid-template-columns: 1fr 1fr; }
   .rebellion-card-split { grid-template-columns: 1fr; }
+  .roman-family-stats,.roman-members { grid-template-columns: 1fr; }
+  .roman-seat-grid { grid-template-columns: repeat(10,minmax(10px,1fr)); gap: 6px; }
 }

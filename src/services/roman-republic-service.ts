@@ -8,6 +8,7 @@ import {
 import {ensureNpcElectionParticipation,recordRomanElectionSupport} from "./roman-politics-service.js";
 import {renewRomanSenateSeats,type RomanSenateRenewalResult} from "./roman-senate-seat-service.js";
 import { GameError } from "./game-service.js";
+import {DEFAULT_ROMAN_FAMILIES,DEFAULT_ROMAN_NPC_MEMBERS} from "../domain/roman-family-seed.js";
 
 export interface RomanFamilyView {
   id:string;name:string;treasury:number;politicalInfluence:number;senateSeats:number;
@@ -202,6 +203,92 @@ async function viewWithClient(client:DbClient,guildId:string,countryId?:string):
   };
 }
 
+async function seedDefaultRomanFamilies(client:DbClient,input:{
+  republicId:string;guildId:string;actorId:string;turn:number;termLength:number;
+}):Promise<void>{
+  for(const seed of DEFAULT_ROMAN_FAMILIES){
+    await client.query(
+      `INSERT INTO roman_families(republic_id,name,treasury,political_influence,senate_seats,political_bloc)
+       VALUES($1,$2,5000,$3,$4,$5)
+       ON CONFLICT(republic_id,name) DO UPDATE SET
+         senate_seats=EXCLUDED.senate_seats,
+         political_influence=GREATEST(roman_families.political_influence,EXCLUDED.political_influence),
+         political_bloc=EXCLUDED.political_bloc,
+         updated_at=NOW()`,
+      [input.republicId,seed.name,seed.influence,seed.seats,seed.bloc]
+    );
+  }
+
+  const familyRows=(await client.query<{id:string;name:string}>(
+    "SELECT id,name FROM roman_families WHERE republic_id=$1 AND status='ACTIVE'",[input.republicId]
+  )).rows;
+  const familyIds=new Map(familyRows.map((family)=>[family.name,family.id]));
+  for(const member of DEFAULT_ROMAN_NPC_MEMBERS){
+    const familyId=familyIds.get(member.familyName);
+    if(!familyId)continue;
+    await client.query(
+      `INSERT INTO roman_family_members(family_id,name,gender,age,position,relation,sort_order)
+       VALUES($1,$2,$3,$4,$5,$6,$7)
+       ON CONFLICT(family_id,lower(name)) DO NOTHING`,
+      [familyId,member.name,member.gender,member.age,member.position,member.relation,member.sortOrder]
+    );
+  }
+  for(const member of DEFAULT_ROMAN_NPC_MEMBERS){
+    if(!member.spouseKey&&!member.motherKey&&!member.fatherKey)continue;
+    const familyId=familyIds.get(member.familyName);
+    if(!familyId)continue;
+    const familyMembers=DEFAULT_ROMAN_NPC_MEMBERS.filter((candidate)=>candidate.familyName===member.familyName);
+    const nameFor=(key:string|undefined)=>familyMembers.find((candidate)=>candidate.key===key)?.name??null;
+    await client.query(
+      `UPDATE roman_family_members member SET
+         spouse_id=spouse.id,mother_id=mother.id,father_id=father.id,updated_at=NOW()
+       FROM roman_families family
+       LEFT JOIN roman_family_members spouse ON spouse.family_id=family.id AND lower(spouse.name)=lower($3)
+       LEFT JOIN roman_family_members mother ON mother.family_id=family.id AND lower(mother.name)=lower($4)
+       LEFT JOIN roman_family_members father ON father.family_id=family.id AND lower(father.name)=lower($5)
+       WHERE family.id=$1 AND member.family_id=family.id AND lower(member.name)=lower($2)`,
+      [familyId,member.name,nameFor(member.spouseKey)??"",nameFor(member.motherKey)??"",nameFor(member.fatherKey)??""]
+    );
+  }
+
+  await client.query(
+    `INSERT INTO roman_family_relations(republic_id,family_a_id,family_b_id,score,trust,rivalry,last_reason)
+     SELECT $1,left_family.id,right_family.id,
+       CASE
+         WHEN left_family.political_bloc=right_family.political_bloc THEN 15
+         WHEN left_family.political_bloc IN ('OPTIMATES','TRADITIONALISTS') AND right_family.political_bloc='POPULARES' THEN -20
+         WHEN right_family.political_bloc IN ('OPTIMATES','TRADITIONALISTS') AND left_family.political_bloc='POPULARES' THEN -20
+         ELSE 0 END,
+       CASE WHEN left_family.political_bloc=right_family.political_bloc THEN 60 ELSE 50 END,
+       CASE
+         WHEN left_family.political_bloc IN ('OPTIMATES','TRADITIONALISTS') AND right_family.political_bloc='POPULARES' THEN 15
+         WHEN right_family.political_bloc IN ('OPTIMATES','TRADITIONALISTS') AND left_family.political_bloc='POPULARES' THEN 15
+         ELSE 0 END,
+       'Başlangıç siyasi hizip dengesi'
+     FROM roman_families left_family
+     JOIN roman_families right_family ON right_family.republic_id=left_family.republic_id AND left_family.id<right_family.id
+     WHERE left_family.republic_id=$1 AND left_family.status='ACTIVE' AND right_family.status='ACTIVE'
+     ON CONFLICT DO NOTHING`,[input.republicId]
+  );
+
+  const scipioId=familyIds.get("Scipio ailesi");
+  if(scipioId){
+    const updated=await client.query(
+      `UPDATE roman_republics SET current_consul_family_id=$2,term_started_turn=$3,
+         next_election_turn=$3+$4,updated_at=NOW()
+       WHERE id=$1 AND current_consul_family_id IS NULL`,
+      [input.republicId,scipioId,input.turn,input.termLength]
+    );
+    if(updated.rowCount){
+      await client.query(
+        `INSERT INTO roman_republic_events(republic_id,game_turn,event_type,actor_user_id,family_id,details)
+         VALUES($1,$2,'INITIAL_CONSUL_SET',$3,$4,$5::jsonb)`,
+        [input.republicId,input.turn,input.actorId,scipioId,JSON.stringify({familyName:"Scipio ailesi",nextElectionTurn:input.turn+input.termLength,automatic:true})]
+      );
+    }
+  }
+}
+
 export const romanRepublicService={
   async view(guildId:string,countryId?:string):Promise<RomanRepublicView|null>{
     const client=await pool.connect();
@@ -216,13 +303,16 @@ export const romanRepublicService={
       if(!country)throw new GameError("Etkin devlet bulunamadı.");
       const turn=await currentTurn(client,input.guildId);
       const termLength=input.termLength??ROMAN_TERM_LENGTH;
-      const created=await client.query<{id:string}>(
+      const existing=(await client.query<{id:string}>(
+        "SELECT id FROM roman_republics WHERE guild_id=$1 AND country_id=$2 FOR UPDATE",[input.guildId,input.countryId]
+      )).rows[0];
+      const republicId=existing?.id??(await client.query<{id:string}>(
         `INSERT INTO roman_republics(guild_id,country_id,term_length,next_election_turn)
-         VALUES($1,$2,$3,$4) ON CONFLICT(guild_id,country_id) DO NOTHING RETURNING id`,
-        [input.guildId,input.countryId,termLength,turn+termLength]
-      );
-      if(!created.rowCount)throw new GameError("Bu devlet için Roma Cumhuriyeti sistemi zaten kurulmuş.");
-      await audit(client,input.guildId,input.actorId,"ROMAN_REPUBLIC_SETUP","roman_republic",created.rows[0]!.id,{countryId:country.id,termLength});
+         VALUES($1,$2,$3,$4) RETURNING id`,[input.guildId,input.countryId,termLength,turn+termLength]
+      )).rows[0]!.id;
+      await seedDefaultRomanFamilies(client,{republicId,guildId:input.guildId,actorId:input.actorId,turn,termLength});
+      await audit(client,input.guildId,input.actorId,existing?"ROMAN_REPUBLIC_DEFAULTS_REPAIRED":"ROMAN_REPUBLIC_SETUP",
+        "roman_republic",republicId,{countryId:country.id,termLength,familyCount:DEFAULT_ROMAN_FAMILIES.length});
       return (await viewWithClient(client,input.guildId,input.countryId))!;
     });
   },

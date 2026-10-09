@@ -92,6 +92,13 @@ const rebellionFactionLabels = { POPULAR: "Halk Ayaklanması", SEPARATIST: "Bağ
 const rebellionFactionStatusLabels = { ORGANIZING: "Örgütleniyor", ACTIVE: "Ayaklanma", OCCUPYING: "İşgal ediyor", SUPPRESSED: "Bastırıldı", ENFORCED: "Taleplerini kabul ettirdi" };
 const rebelSiegeAssetKeys = ["ladder_group","ram","mantlet","ballista","catapult","siege_tower"];
 const rebellionOutcomeLabels = { OUTBREAK: "İsyan çıktı", IMMUNE: "Koruma altında", ESCALATED: "Gerilim arttı", CALMED: "Gerilim azaldı", UNCHANGED: "Değişmedi" };
+const romanBlocLabels = { CENTRIST: "Merkez", OPTIMATES: "Optimates", POPULARES: "Populares", EQUITES: "Equites", MILITARISTS: "Askerî hizip", TRADITIONALISTS: "Gelenekçiler" };
+const romanFamilyColorKeys = {
+  "scipio ailesi": "scipio", "magnus ailesi": "magnus", "cato ailesi": "cato", "nero ailesi": "nero",
+  "julius ailesi": "julius", "aemilius ailesi": "aemilius", "fabius ailesi": "fabius", "valerius ailesi": "valerius",
+  "licinius ailesi": "licinius", "junius ailesi": "junius", "servilius ailesi": "servilius", "caecilius ailesi": "caecilius"
+};
+const romanFamilyColorKey = (name, index = 0) => romanFamilyColorKeys[String(name || "").toLocaleLowerCase("tr-TR")] || `fallback-${index % 8}`;
 const roleLabel = (row) => row.is_admiral ? "Amiral" : (roleLabels[row.role] || row.role);
 const characterStatusLabel = (value) => characterStatusLabels[value] || value;
 const developmentLabel = (value) => {
@@ -220,6 +227,46 @@ async function dynastiesPage() {
   document.querySelectorAll("[data-open-dynasty]").forEach((button) => button.addEventListener("click", () => {
     dynastyDetailPage(button.dataset.openDynasty).catch(showPageError);
   }));
+}
+
+function romanSenateSeats(families, totalSeats) {
+  const seats = families.flatMap((family, familyIndex) => Array.from(
+    { length: Math.max(0, Number(family.senate_seats || 0)) },
+    () => `<span class="roman-seat ${romanFamilyColorKey(family.name, familyIndex)}" title="${escapeHtml(family.name)}"></span>`
+  ));
+  while (seats.length < Number(totalSeats || 100)) seats.push('<span class="roman-seat empty-seat" title="Boş koltuk"></span>');
+  return seats.slice(0, Number(totalSeats || 100)).join("");
+}
+
+function romanRepublicPanel(republic, currentTurn) {
+  const consul = republic.families.find((family) => family.is_consul);
+  const allocated = republic.families.reduce((sum, family) => sum + Number(family.senate_seats || 0), 0);
+  const election = republic.election;
+  const electionCandidates = election?.candidates || [];
+  const familyCards = republic.families.map((family, index) => {
+    const members = family.members || [];
+    return `<article class="card roman-family-card ${romanFamilyColorKey(family.name, index)}">
+      <div class="roman-family-head"><div><span class="roman-color-dot"></span><strong>${escapeHtml(family.name)}</strong><small>${escapeHtml(romanBlocLabels[family.political_bloc] || family.political_bloc)}</small></div>${family.is_consul ? '<span class="pill">Konsül ailesi</span>' : `<span class="pill neutral">${number(family.senate_seats)} koltuk</span>`}</div>
+      <div class="roman-family-stats"><span><small>Aile hazinesi</small><strong>${money(family.treasury)}</strong></span><span><small>Siyasi nüfuz</small><strong>${number(family.political_influence)}</strong></span><span><small>İtibar / Skandal</small><strong>${number(family.reputation)} / ${number(family.scandal)}</strong></span><span><small>Oyuncu</small><strong>${number(family.player_count)}</strong></span></div>
+      <div class="roman-members">${members.length ? members.map((member) => `<span><b>${escapeHtml(member.name)}</b><small>${number(member.age)} yaş · ${escapeHtml(member.relation)}</small></span>`).join("") : '<span class="muted">Oyuncu ailesi; kadro oyuncular tarafından doldurulacak.</span>'}</div>
+    </article>`;
+  }).join("");
+  const proposalRows = republic.proposals.map((proposal) => `<div class="data-row roman-proposal"><div><strong>${escapeHtml(proposal.title)}</strong><small>${escapeHtml(proposal.proposer_family_name)} · Son Tur ${number(proposal.closes_turn)}</small></div><span class="pill ${proposal.status === "OPEN" ? "" : "neutral"}">${proposal.status === "OPEN" ? "Oylamada" : escapeHtml(proposal.status)}</span><span>Evet ${number(proposal.yes_weight)} / Hayır ${number(proposal.no_weight)}</span></div>`).join("");
+  return `<section class="roman-republic-section">
+    <div class="page-head"><div><h1>🏛️ ${escapeHtml(republic.country_name)} · Roma Siyaseti</h1><p>Canlı konsül, seçim, Senato ve siyasi aile görünümü</p></div><div class="actions"><span class="pill">Tur ${number(currentTurn)}</span><span class="pill neutral">${number(republic.families.length)} aile</span></div></div>
+    <section class="detail-grid"><div class="detail-cell"><span>Mevcut konsül ailesi</span><strong>${escapeHtml(consul?.name || "Belirlenmedi")}</strong></div><div class="detail-cell"><span>Görev dönemi</span><strong>${republic.term_started_turn === null ? "Başlamadı" : `Tur ${number(republic.term_started_turn)}–${number((republic.next_election_turn ?? republic.term_started_turn) - 1)}`}</strong></div><div class="detail-cell"><span>İlk / sonraki seçim</span><strong>${republic.next_election_turn === null ? "Belirlenmedi" : `Tur ${number(republic.next_election_turn)}`}</strong></div><div class="detail-cell"><span>Senato doluluğu</span><strong>${number(allocated)} / ${number(republic.senate_total_seats)}</strong></div></section>
+    <section class="card roman-senate-card"><div class="card-head"><div><h2>100 Koltuklu Senato</h2><p>Her nokta bir koltuktur; aile renkleri Discord Senato formuyla aynıdır.</p></div><span class="pill neutral">${number(allocated)} dolu</span></div><div class="roman-seat-grid">${romanSenateSeats(republic.families, republic.senate_total_seats)}</div><div class="roman-legend">${republic.families.map((family, index) => `<span class="${romanFamilyColorKey(family.name, index)}"><i></i>${escapeHtml(family.name)} · ${number(family.senate_seats)}</span>`).join("")}</div></section>
+    <div class="section-title"><h2>Siyasi aileler</h2><span>Hazine, nüfuz, koltuk, itibar ve aile kadroları</span></div><section class="roman-family-grid">${familyCards || '<div class="card empty">Roma siyasi ailesi bulunmuyor.</div>'}</section>
+    <section class="content-grid roman-bottom-grid"><div class="card"><div class="card-head"><div><h2>Konsül seçimi</h2><p>${election ? `${number(election.sequence)}. seçim · Tur ${number(election.started_turn)}–${number(election.closes_turn)}` : "Henüz seçim kaydı yok"}</p></div>${election ? `<span class="pill ${election.status === "OPEN" ? "" : "neutral"}">${election.status === "OPEN" ? "Açık" : escapeHtml(election.status)}</span>` : ""}</div>${electionCandidates.map((candidate) => `<div class="data-row roman-election-row"><div><strong>${escapeHtml(candidate.candidateName)}</strong><small>${escapeHtml(candidate.familyName)}</small></div><span>${number(Number(candidate.seatWeight) + Number(candidate.influenceSupport))} ağırlık</span></div>`).join("") || '<div class="empty compact-empty">Aday bulunmuyor.</div>'}</div><div class="card"><div class="card-head"><div><h2>Senato teklifleri</h2><p>Açık ve yakın dönem teklifleri</p></div></div>${proposalRows || '<div class="empty compact-empty">Teklif bulunmuyor.</div>'}</div></section>
+  </section>`;
+}
+
+async function romanPoliticsPage() {
+  setActiveRoute("roman-politics"); loading();
+  const data = await api("/api/roman-politics");
+  page.innerHTML = data.republics.length
+    ? data.republics.map((republic) => romanRepublicPanel(republic, data.currentTurn)).join("")
+    : '<div class="page-head"><div><h1>Roma Siyaseti</h1><p>Roma Cumhuriyeti iç yönetimi</p></div></div><div class="card empty">Henüz Roma Cumhuriyeti kaydı bulunmuyor. Discord’da /roma-yonetim kur komutunu kullanın.</div>';
 }
 
 function dynastyMemberConnections(member) {
@@ -958,6 +1005,7 @@ async function navigate(route) {
     if (route === "armies") return forcesPage();
     if (route === "characters") return charactersPage();
     if (route === "dynasties") return dynastiesPage();
+    if (route === "roman-politics") return romanPoliticsPage();
     if (route === "assignments") return assignmentsPage();
     if (route === "ai-governance") return aiGovernancePage();
     if (route === "battles") return battlesPage();

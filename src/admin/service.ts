@@ -856,6 +856,78 @@ export const adminPanelService = {
     )).rows;
   },
 
+  async romanPolitics() {
+    const guild=(await adminPool.query<{current_turn:number}>(
+      "SELECT current_turn FROM guilds WHERE discord_id=$1",[adminConfig.guildId]
+    )).rows[0];
+    if(!guild)throw new Error("Yönetilecek Discord sunucusu veritabanında bulunamadı.");
+    const republics=(await adminPool.query<{
+      id:string;country_id:string;country_name:string;term_length:number;term_started_turn:number|null;
+      next_election_turn:number|null;current_consul_family_id:string|null;senate_total_seats:number;
+      politics_channel_id:string|null;
+    }>(`SELECT republic.id,republic.country_id,country.name AS country_name,republic.term_length,
+               republic.term_started_turn,republic.next_election_turn,republic.current_consul_family_id,
+               republic.senate_total_seats,republic.politics_channel_id
+          FROM roman_republics republic
+          JOIN countries country ON country.id=republic.country_id
+         WHERE republic.guild_id=$1 AND republic.status='ACTIVE'
+         ORDER BY country.name`,[adminConfig.guildId])).rows;
+    const result=[];
+    for(const republic of republics){
+      const families=(await adminPool.query(
+        `SELECT family.id,family.name,family.treasury,family.political_influence,family.senate_seats,
+                family.reputation,family.scandal,family.political_bloc,family.leader_user_id,
+                (family.id=$2) AS is_consul,
+                (SELECT COUNT(*)::integer FROM roman_family_players player
+                  WHERE player.family_id=family.id AND player.status='ACTIVE') AS player_count,
+                COALESCE((SELECT jsonb_agg(jsonb_build_object(
+                  'id',member.id,'name',member.name,'gender',member.gender,'age',member.age,
+                  'position',member.position,'relation',member.relation
+                ) ORDER BY member.sort_order,member.age DESC)
+                  FROM roman_family_members member
+                 WHERE member.family_id=family.id AND member.status='ALIVE'),'[]'::jsonb) AS members
+           FROM roman_families family
+          WHERE family.republic_id=$1 AND family.status='ACTIVE'
+          ORDER BY family.senate_seats DESC,family.political_influence DESC,family.name`,
+        [republic.id,republic.current_consul_family_id]
+      )).rows;
+      const election=(await adminPool.query(
+        `SELECT election.id,election.sequence,election.started_turn,election.closes_turn,election.status,
+                election.winner_family_id,winner.name AS winner_family_name,
+                COALESCE((SELECT jsonb_agg(jsonb_build_object(
+                  'id',candidate_stats.id,'candidateName',candidate_stats.candidate_name,
+                  'familyName',candidate_stats.family_name,'votes',candidate_stats.votes,
+                  'seatWeight',candidate_stats.seat_weight,'influenceSupport',candidate_stats.influence_support
+                ) ORDER BY candidate_stats.created_at)
+                  FROM(
+                    SELECT candidate.id,candidate.candidate_name,family.name AS family_name,candidate.created_at,
+                           COUNT(vote.voter_family_id)::integer AS votes,
+                           COALESCE(SUM(vote.seat_weight),0)::integer AS seat_weight,
+                           COALESCE(SUM(vote.influence_spent),0)::integer AS influence_support
+                      FROM roman_election_candidates candidate
+                      JOIN roman_families family ON family.id=candidate.family_id
+                      LEFT JOIN roman_election_ballots vote ON vote.candidate_id=candidate.id
+                     WHERE candidate.election_id=election.id
+                     GROUP BY candidate.id,candidate.candidate_name,family.name,candidate.created_at
+                  ) candidate_stats),'[]'::jsonb) AS candidates
+           FROM roman_elections election
+           LEFT JOIN roman_families winner ON winner.id=election.winner_family_id
+          WHERE election.republic_id=$1 ORDER BY election.sequence DESC LIMIT 1`,[republic.id]
+      )).rows[0]??null;
+      const proposals=(await adminPool.query(
+        `SELECT proposal.id,proposal.title,proposal.description,proposal.status,proposal.threshold_percent,
+                proposal.closes_turn,proposal.yes_weight,proposal.no_weight,proposal.abstain_families,
+                family.name AS proposer_family_name
+           FROM roman_senate_proposals proposal
+           JOIN roman_families family ON family.id=proposal.proposed_by_family_id
+          WHERE proposal.republic_id=$1
+          ORDER BY CASE WHEN proposal.status='OPEN' THEN 0 ELSE 1 END,proposal.created_at DESC LIMIT 12`,[republic.id]
+      )).rows;
+      result.push({...republic,families,election,proposals});
+    }
+    return{currentTurn:Number(guild.current_turn),republics:result};
+  },
+
   async dynasty(dynastyId: string) {
     if (!z.string().uuid().safeParse(dynastyId).success) throw new Error("Geçersiz hanedan kimliği.");
     const dynasty = await adminDynastyContext(adminPool, dynastyId);

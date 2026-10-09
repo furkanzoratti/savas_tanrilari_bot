@@ -212,6 +212,22 @@ function electionComponents(view:RomanRepublicView):ActionRowBuilder<StringSelec
   )];
 }
 
+function familySelectComponents(view:RomanRepublicView):ActionRowBuilder<StringSelectMenuBuilder>[] {
+  if(!view.families.length)return[];
+  return[new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+    new StringSelectMenuBuilder().setCustomId(`roman-family-pick|${view.countryId}`)
+      .setPlaceholder("Roma siyasi ailesini seç")
+      .addOptions(view.families.slice(0,25).map((family)=>(
+        {
+          label:family.name.slice(0,100),
+          description:`${family.senateSeats} koltuk • ${family.politicalInfluence} nüfuz • ${family.politicalBloc}`.slice(0,100),
+          value:family.id,
+          emoji:family.isConsulFamily?"🏛️":"🏺"
+        }
+      )))
+  )];
+}
+
 function voteSupportComponents(countryId:string,candidateId:string):ActionRowBuilder<ButtonBuilder>{
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
     ...[0,2,5,10].map((amount)=>new ButtonBuilder()
@@ -302,7 +318,7 @@ function publicElectionEmbed(view:RomanRepublicView):EmbedBuilder|null{
 
 function publicPanelComponents(view:RomanRepublicView,politics:RomanPoliticsView):Array<ActionRowBuilder<ButtonBuilder>|ActionRowBuilder<StringSelectMenuBuilder>>{
   const rows:Array<ActionRowBuilder<ButtonBuilder>|ActionRowBuilder<StringSelectMenuBuilder>>=[];
-  rows.push(...electionComponents(view),...senateProposalComponents(politics));
+  rows.push(...familySelectComponents(view),...electionComponents(view),...senateProposalComponents(politics));
   rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(`roman-public-refresh|${view.countryId}`).setLabel("Paneli Yenile")
       .setEmoji("🔄").setStyle(ButtonStyle.Secondary)
@@ -373,7 +389,7 @@ export async function handleRomanRepublicCommand(interaction:ChatInputCommandInt
     const action=interaction.options.getSubcommand();
     const view=await requiredView(interaction,country.id);
     if(action==="durum"||action==="aileler"){
-      await interaction.editReply({embeds:[statusEmbed(view)],files:romanFiles("republic")});
+      await interaction.editReply({embeds:[statusEmbed(view)],components:familySelectComponents(view),files:romanFiles("republic")});
       return true;
     }
     if(action==="aile-bilgi"){
@@ -550,7 +566,7 @@ export async function handleRomanRepublicCommand(interaction:ChatInputCommandInt
       guildId:interaction.guildId,countryId:country.id,actorId:interaction.user.id,
       termLength:interaction.options.getInteger("donem")??6
     });
-    await interaction.editReply({content:`✅ **${country.name}** için Roma Cumhuriyeti çekirdeği kuruldu.`,embeds:[statusEmbed(view)],files:romanFiles("republic")});
+    await interaction.editReply({content:`✅ **${country.name}** için Roma Cumhuriyeti ve **12 siyasi aile** kuruldu.`,embeds:[statusEmbed(view)],components:familySelectComponents(view),files:romanFiles("republic")});
     return true;
   }
   if(action==="aile-ekle"){
@@ -639,15 +655,26 @@ export async function handleRomanRepublicCommand(interaction:ChatInputCommandInt
     return true;
   }
   if(action==="durum"){
-    await interaction.editReply({embeds:[statusEmbed(await requiredView(interaction,country.id))],files:romanFiles("republic")});
+    const view=await requiredView(interaction,country.id);
+    await interaction.editReply({embeds:[statusEmbed(view)],components:familySelectComponents(view),files:romanFiles("republic")});
     return true;
   }
   throw new GameError("Desteklenmeyen Roma yönetim işlemi.");
 }
 
 export async function handleRomanRepublicSelect(interaction:StringSelectMenuInteraction):Promise<boolean>{
-  if(!interaction.customId.startsWith("roman-vote-pick|")&&!interaction.customId.startsWith("roman-senate-pick|"))return false;
+  if(!interaction.customId.startsWith("roman-vote-pick|")&&!interaction.customId.startsWith("roman-senate-pick|")&&!interaction.customId.startsWith("roman-family-pick|"))return false;
   if(!interaction.guildId)throw new GameError("Sunucu bulunamadı.");
+  if(interaction.customId.startsWith("roman-family-pick|")){
+    const countryId=interaction.customId.split("|")[1];
+    const familyId=interaction.values[0];
+    if(!countryId||!familyId)throw new GameError("Roma aile menüsü bilgisi bozuk.");
+    const view=await requiredView(interaction,countryId);
+    const family=view.families.find((item)=>item.id===familyId);
+    if(!family)throw new GameError("Seçilen Roma siyasi ailesi artık bulunmuyor.");
+    await interaction.reply({flags:MessageFlags.Ephemeral,embeds:[familyEmbed(view,family)],files:romanFiles("family")});
+    return true;
+  }
   if(interaction.customId.startsWith("roman-senate-pick|")){
     const countryId=interaction.customId.split("|")[1];
     const proposalId=interaction.values[0];
