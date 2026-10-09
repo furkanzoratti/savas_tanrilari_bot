@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { DbClient } from "../db/pool.js";
 import { pool, withTransaction } from "../db/pool.js";
 import {
-  BASE_SIEGE_STARVATION_TURNS, BATTLE_TERRAINS, BATTLE_UNIT_STATS, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, SIEGE_ASSAULT_FRONTAGE, SIEGE_ATTACKER_DISMOUNT_MAP, activeSiegeAssaultAssets, baseRetreatRate, battleEnds, commanderClashBonus, compositionTotal, egyptianWarChariotPressureBonus, fieldPressureAfterRound, hasAssaultForce, orderState, resolveRound, restoreSiegeAttackerCasualtyTypes, roundDamageFactors, siegeAssaultAccess, siegeAssaultComposition, siegeAssaultGroups, siegeAttackerBreaks, siegeAttackerDismountedComposition, siegeDefenderCaptured, siegeDefenderGroups, siegeDefenderReserveBonus, siegeDefenseModifiers, siegeFrontageProfile, siegeOrderState, siegePressureAfterRound,
+  BASE_SIEGE_STARVATION_TURNS, BATTLE_TERRAINS, BATTLE_UNIT_STATS, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, SIEGE_ASSAULT_FRONTAGE, SIEGE_ATTACKER_DISMOUNT_MAP, activeSiegeAssaultAssets, applyRestrictedBattleLoss, baseRetreatRate, battleEnds, commanderClashBonus, compositionTotal, egyptianWarChariotPressureBonus, fieldPressureAfterRound, hasAssaultForce, orderState, resolveRound, restoreSiegeAttackerCasualtyTypes, roundDamageFactors, siegeAssaultAccess, siegeAssaultComposition, siegeAssaultGroups, siegeAttackerBreaks, siegeAttackerDismountedComposition, siegeAttackerRetreatExposure, siegeDefenderCaptured, siegeDefenderGroups, siegeDefenderReserveBonus, siegeDefenseModifiers, siegeFrontageProfile, siegeOrderState, siegePressureAfterRound,
   rollBattlePool, rollNavalPool, rollSiegeSupport,
   type BattleComposition, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain,
   type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeComposition, type SiegeDismountUnitType, type SiegeTarget, type SiegeTargets
@@ -735,10 +735,23 @@ function applyProportionalLoss(composition: BattleComposition, requestedLoss: nu
 }
 
 
+function retreatExposure(view: BattleView, side: BattleSideKey): BattleComposition {
+  if (view.battle.terrain !== "SIEGE" || side !== "A") return view.sides[side].composition;
+  return siegeAttackerRetreatExposure(
+    view.sides.A.composition,
+    attackerDismountments(view.sides.A),
+    view.sides.A.support_assets,
+    view.battle.wall_current_hp ?? 0,
+    view.battle.gate_current_hp ?? 0,
+    BATTLE_TERRAINS.SIEGE.frontageA
+  );
+}
+
 function retreatLoss(view: BattleView, side: BattleSideKey): number {
   if (view.battle.round_number <= 1) return 0;
   const loser = view.sides[side];
   const winner = view.sides[side === "A" ? "B" : "A"];
+  const exposedTotal = compositionTotal(retreatExposure(view, side));
   let rate = baseRetreatRate(view.battle.round_number);
   if (view.battle.terrain === "NAVAL") {
     rate += winner.current_total ? ((winner.composition.kerkouros ?? 0) / winner.current_total) * 0.15 : 0;
@@ -749,7 +762,7 @@ function retreatLoss(view: BattleView, side: BattleSideKey): number {
   }
   if (view.battle.terrain === "AMBUSH" || view.battle.terrain === "MOUNTAIN_PASS") rate += 0.05;
   if (view.battle.terrain === "SIEGE" && side === "B") rate += 0.05;
-  return Math.min(loser.current_total, Math.round(loser.current_total * Math.min(0.25, rate)));
+  return Math.min(exposedTotal, Math.round(exposedTotal * Math.min(0.25, rate)));
 }
 
 export function rebelSiegeTargets(assets: SiegeComposition): SiegeTargets {
@@ -3074,7 +3087,9 @@ export const battleService = {
         const multiplier = commander.specialization_level >= 3 ? 0.75 : commander.specialization_level >= 2 ? 0.80 : 0.90;
         calculated = Math.floor(calculated*multiplier);
       }
-      const landApplied=applyProportionalLoss(view.sides[side].composition,calculated);
+      const landApplied = view.battle.terrain === "SIEGE" && side === "A"
+        ? applyRestrictedBattleLoss(view.sides.A.composition, retreatExposure(view, "A"), calculated)
+        : applyProportionalLoss(view.sides[side].composition, calculated);
       const remaining=landApplied.remaining;
       const appliedLoss=landApplied.applied;
       const total = compositionTotal(remaining);

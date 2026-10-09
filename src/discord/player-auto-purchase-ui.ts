@@ -9,7 +9,7 @@ import {
   type PlayerAutoPurchaseExecution, type PlayerAutoPurchaseMode, type PlayerAutoPurchasePlan
 } from "../services/player-auto-purchase-service.js";
 import { GameError } from "../services/game-service.js";
-import { isGameMaster, resolveCountry } from "./auth.js";
+import { assertCountryExecutiveAccess,isGameMaster, resolveCountry } from "./auth.js";
 
 function actionLines(plan: PlayerAutoPurchasePlan): string[] {
   const lines: string[] = [];
@@ -86,6 +86,7 @@ export async function handlePlayerAutoPurchaseCommand(interaction: ChatInputComm
   if (!interaction.guildId) throw new GameError("Bu komut yalnızca bir Discord sunucusunda kullanılabilir.");
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
+  await assertCountryExecutiveAccess(interaction,country.id);
   const mode = interaction.options.getString("tur", true) as PlayerAutoPurchaseMode;
   if (!(mode in PLAYER_AUTO_PURCHASE_MODES)) throw new GameError("Geçersiz otomatik alım türü.");
   const preview = await playerAutoPurchaseService.preview({

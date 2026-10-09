@@ -46,7 +46,7 @@ import { warDeclarationService } from "../services/war-declaration-service.js";
 import { DEFAULT_WELCOME_MESSAGE, renderWelcomeMessage, welcomeService } from "../services/welcome-service.js";
 import { tradeService } from "../services/trade-service.js";
 import { treasuryLedgerService, type TreasuryMovement } from "../services/treasury-ledger-service.js";
-import { assertCountryAccess, isGameMaster, requireGameMaster, resolveCountry } from "./auth.js";
+import { assertCountryAccess,assertCountryExecutiveAccess,isGameMaster,requireGameMaster,resolveCountry } from "./auth.js";
 import { buildingChoices, shipChoices, unitChoices } from "./commands.js";
 import { batchDocumentEmbeds, renderDocument } from "./document.js";
 import { renderSettlementsOverview } from "./settlements-overview.js";
@@ -82,10 +82,12 @@ import { handleCharacterAutocomplete, handleCharacterCommand, publishCharacterTu
 import { characterService, processCharacterTurn } from "../services/character-service.js";
 import { handleDynastyAutocomplete,handleDynastyButton,handleDynastyCommand,handleDynastyModal,processDynastyAutomation } from "./dynasty-ui.js";
 import { handleDiplomacyButton, handleDiplomacyCommand } from "./diplomacy-ui.js";
+import { handleSteppeHegemonyButton,handleSteppeHegemonyCommand,handleSteppeHegemonySelect } from "./steppe-hegemony-ui.js";
 import { handlePlayerAutoPurchaseButton, handlePlayerAutoPurchaseCommand } from "./player-auto-purchase-ui.js";
 import { handleWarDeclarationButton, handleWarDeclarationCommand, handleWarDeclarationModal } from "./war-declaration-ui.js";
 import { mercenaryCompanyAutocompleteAllowed, mercenarySubcommandRequiresGameMaster } from "./mercenary-access.js";
 import { handleGreatGamesButton, handleGreatGamesCommand, handleGreatGamesModal, handleGreatGamesSelect } from "./great-games-ui-v2.js";
+import { handleRomanRepublicButton,handleRomanRepublicCommand,handleRomanRepublicSelect,refreshRomanPublicPanels } from "./roman-republic-ui.js";
 import { decodeUnitTypeFromCustomId, encodeUnitTypeForCustomId } from "./unit-custom-id.js";
 
 function settlementSelect(customId: string, settlements: Array<{ id: string; name: string; population: number }>, placeholder: string) {
@@ -228,6 +230,7 @@ async function sendDocument(interaction: ChatInputCommandInteraction, countryId:
 async function startPurchase(interaction: ChatInputCommandInteraction, kind: "build" | "unit" | "ship"): Promise<void> {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
+  await assertCountryExecutiveAccess(interaction,country.id);
   const settlements = await gameService.listSettlements(country.id);
   const prefix = kind === "build" ? "bs" : kind === "unit" ? "us" : "ss";
   const label = kind === "build" ? "Bina kurulacak yerleşkeyi seç" : kind === "unit" ? "Asker eğitilecek yerleşkeyi seç" : "Geminin üretileceği yerleşkeyi seç";
@@ -473,6 +476,7 @@ async function handleTurn(interaction: ChatInputCommandInteraction): Promise<voi
       }
     }
     await refreshActiveBattleCards(interaction.client, interaction.guildId);
+    await refreshRomanPublicPanels(interaction.client,interaction.guildId);
     embeds = turnAnnouncementCards({
       kind: "ADVANCE", turn: result.turn, acquisition: result.acquisition,
       completedBuildings: result.completedBuildings, recruitmentArrivals: result.recruitmentArrivals,
@@ -497,7 +501,11 @@ async function handleTurn(interaction: ChatInputCommandInteraction): Promise<voi
       assimilatedSettlementDetails: result.assimilatedSettlementDetails,
       christianSpreadDetails:result.christianSpreadDetails,
       lastStandDetails:result.lastStandDetails,
-      stability:result.stability
+      stability:result.stability,
+      romanFamilyIncomeDetails:result.romanFamilyIncomeDetails,
+      romanGovernorshipDetails:result.romanGovernorshipDetails,
+      romanElectionOpenedDetails:result.romanElectionOpenedDetails,
+      romanPolitics:result.romanPolitics
     });
   } else {
     const phase = sub === "ac" ? "OPEN" : sub === "durdur" ? "RESOLVING" : "CLOSED";
@@ -1015,6 +1023,7 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
       }
     }
     await refreshActiveBattleCards(interaction.client, interaction.guildId);
+    await refreshRomanPublicPanels(interaction.client,interaction.guildId);
     const announcementCards = turnAnnouncementCards({
       kind: "ADVANCE", turn: result.turn, acquisition: result.acquisition,
       completedBuildings: result.completedBuildings, recruitmentArrivals: result.recruitmentArrivals,
@@ -1039,7 +1048,11 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
       assimilatedSettlementDetails: result.assimilatedSettlementDetails,
       christianSpreadDetails:result.christianSpreadDetails,
       lastStandDetails:result.lastStandDetails,
-      stability:result.stability
+      stability:result.stability,
+      romanFamilyIncomeDetails:result.romanFamilyIncomeDetails,
+      romanGovernorshipDetails:result.romanGovernorshipDetails,
+      romanElectionOpenedDetails:result.romanElectionOpenedDetails,
+      romanPolitics:result.romanPolitics
     });
     await interaction.editReply({ embeds: [announcementCards[0]!], files: [new AttachmentBuilder(TURN_BANNER_PATH, { name: TURN_BANNER_NAME })] });
     for (const extraEmbed of announcementCards.slice(1)) {
@@ -1326,6 +1339,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     return;
   }
   if (await handleGreatGamesCommand(interaction)) return;
+  if (await handleRomanRepublicCommand(interaction)) return;
   if (await handleDynastyCommand(interaction)) return;
   if (await handleNavalOperationsCommand(interaction)) return;
   if (await handleLandRaidsCommand(interaction)) return;
@@ -1352,6 +1366,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
   if (await handleCharacterCommand(interaction)) return;
   if (await handleEspionageCommand(interaction)) return;
   if (await handleWarDeclarationCommand(interaction)) return;
+  if (await handleSteppeHegemonyCommand(interaction)) return;
   if (await handleDiplomacyCommand(interaction)) return;
   if (await handleCityCommand(interaction)) return;
   if (interaction.commandName === "hazine-hareketleri") {
@@ -1691,6 +1706,8 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
 }
 
 async function handleSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+  if (await handleRomanRepublicSelect(interaction)) return;
+  if (await handleSteppeHegemonySelect(interaction)) return;
   if (await handleBattleSelect(interaction)) return;
   if (await handleMovementSelect(interaction)) return;
   if (await handleGreatGamesSelect(interaction)) return;
@@ -1787,6 +1804,8 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
 }
 
 async function handleButton(interaction: ButtonInteraction): Promise<void> {
+  if (await handleRomanRepublicButton(interaction)) return;
+  if (await handleSteppeHegemonyButton(interaction)) return;
   if (await handleDynastyButton(interaction)) return;
   if (await handlePlayerAutoPurchaseButton(interaction)) return;
   if (await handleMovementButton(interaction)) return;

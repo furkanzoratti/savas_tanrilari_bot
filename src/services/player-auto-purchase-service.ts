@@ -245,6 +245,18 @@ export const playerAutoPurchaseService = {
         [row.country_id, input.actorId]
       );
       if (!access.rowCount) throw new GameError("Artık bu ülke üzerinde işlem yapma yetkin bulunmuyor.");
+      const romanAccess=(await pool.query<{current_consul_family_id:string|null;family_id:string|null;family_name:string|null}>(`
+        SELECT republic.current_consul_family_id,membership.family_id,consul.name AS family_name
+          FROM roman_republics republic
+          LEFT JOIN roman_family_players membership ON membership.republic_id=republic.id
+            AND membership.discord_user_id=$3 AND membership.status='ACTIVE'
+          LEFT JOIN roman_families consul ON consul.id=republic.current_consul_family_id
+         WHERE republic.guild_id=$1 AND republic.country_id=$2 AND republic.status='ACTIVE'`,
+        [input.guildId,row.country_id,input.actorId]
+      )).rows[0];
+      if(romanAccess&&(!romanAccess.current_consul_family_id||romanAccess.family_id!==romanAccess.current_consul_family_id)){
+        throw new GameError(`Roma Cumhuriyeti'nde otomatik alımı yalnızca mevcut konsül ailesi onaylayabilir${romanAccess.family_name?`: ${romanAccess.family_name}`:""}.`);
+      }
     }
     if (row.status !== "PENDING") throw new GameError("Bu otomatik alım önizlemesi daha önce sonuçlandırıldı.");
     if (new Date(row.expires_at).getTime() <= Date.now()) {

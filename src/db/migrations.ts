@@ -78,6 +78,16 @@ import { rebelBattleIntegrationMigration } from "./rebel-battle-integration-migr
 import { rebelSiegeTrainMigration } from "./rebel-siege-train-migration.js";
 import { rebelOccupationOutcomeMigration } from "./rebel-occupation-outcome-migration.js";
 import { dynastyMarriageHouseTransferMigration } from "./dynasty-marriage-house-transfer-migration.js";
+import { steppeHegemonyMigration } from "./steppe-hegemony-migration.js";
+import { academyRoleConstraintRepairMigration } from "./academy-role-constraint-repair-migration.js";
+import { romanRepublicMigration } from "./roman-republic-migration.js";
+import { romanRepublicElectionsMigration } from "./roman-republic-elections-migration.js";
+import { romanRepublicFamilyRostersMigration } from "./roman-republic-family-rosters-migration.js";
+import { romanRepublicSenateSeatsMigration } from "./roman-republic-senate-seats-migration.js";
+import { romanRepublicPoliticsMigration } from "./roman-republic-politics-migration.js";
+import { romanSenateRenewalMigration } from "./roman-senate-renewal-migration.js";
+import { romanScipioInitialConsulMigration } from "./roman-scipio-initial-consul-migration.js";
+import { romanPoliticsChannelMigration } from "./roman-politics-channel-migration.js";
 
 export const migrations = [
   {
@@ -2373,5 +2383,15 @@ export const migrations = [
   rebelBattleIntegrationMigration,
   rebelSiegeTrainMigration,
   rebelOccupationOutcomeMigration,
-  dynastyMarriageHouseTransferMigration
+  dynastyMarriageHouseTransferMigration,
+  steppeHegemonyMigration,
+  academyRoleConstraintRepairMigration,
+  romanRepublicMigration,
+  romanRepublicElectionsMigration,
+  romanRepublicFamilyRostersMigration,
+  romanRepublicSenateSeatsMigration,
+  romanRepublicPoliticsMigration,
+  romanSenateRenewalMigration,
+  romanScipioInitialConsulMigration,
+  romanPoliticsChannelMigration
 ] as const;

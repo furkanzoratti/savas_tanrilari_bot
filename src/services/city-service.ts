@@ -159,7 +159,7 @@ export const cityService = {
       const existing = (await client.query<AcademyTrainingSession>("SELECT * FROM academy_training_sessions WHERE settlement_id=$1 AND acquisition_turn=$2 FOR UPDATE", [settlement.id, guild.current_turn])).rows[0];
       if (existing) {
         if (existing.status === "COMPLETED") throw new GameError("Bu Akademi mevcut Alım Turunda eğitim hakkını kullandı.");
-        return existing;
+        if (existing.status !== "CANCELLED") return existing;
       }
       const capacity = (await client.query<{ academies:number; characters:number; pending:number }>(
         `SELECT
@@ -179,12 +179,25 @@ export const cityService = {
       }
       const resources = (await settlementResourceAccess(client, input.countryId)).get(settlement.id) ?? [];
       const skillBonus = (level === 1 ? 0 : level === 2 ? 1 : 2) + (resources.includes("SILK") ? 1 : 0);
-      const result = await client.query<AcademyTrainingSession>(
-        `INSERT INTO academy_training_sessions(country_id,settlement_id,academy_level,acquisition_turn,roll_sides,excluded_role,selected_role,skill_bonus,initiated_by)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-        [input.countryId, settlement.id, level, guild.current_turn, academyRollSides(level), excludedRole, selectedRole, skillBonus, input.actorId]
+      const values = [input.countryId, settlement.id, level, guild.current_turn, academyRollSides(level), excludedRole, selectedRole, skillBonus, input.actorId];
+      const result = existing
+        ? await client.query<AcademyTrainingSession>(
+          `UPDATE academy_training_sessions
+              SET country_id=$1,academy_level=$3,roll_sides=$5,roll_value=NULL,
+                  excluded_role=$6,selected_role=$7,result_role=NULL,skill_bonus=$8,
+                  status='PENDING_ROLL',initiated_by=$9,character_id=NULL,created_at=NOW()
+            WHERE id=$10 RETURNING *`, [...values, existing.id]
+        )
+        : await client.query<AcademyTrainingSession>(
+          `INSERT INTO academy_training_sessions(country_id,settlement_id,academy_level,acquisition_turn,roll_sides,excluded_role,selected_role,skill_bonus,initiated_by)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`, values
+        );
+      await audit(
+        client, input.guildId, input.actorId,
+        existing ? "ACADEMY_TRAINING_RESTART" : "ACADEMY_TRAINING_BEGIN",
+        "settlement", settlement.id,
+        { level, excludedRole, selectedRole, restartedSessionId: existing?.id ?? null }
       );
-      await audit(client, input.guildId, input.actorId, "ACADEMY_TRAINING_BEGIN", "settlement", settlement.id, { level, excludedRole, selectedRole });
       return result.rows[0]!;
     });
   },

@@ -32,6 +32,11 @@ import { applyCultureIncomeEffect, cultureMilitaryPopulation } from "../domain/c
 import { syncCountryPrimaryCulture, syncGuildPrimaryCultures } from "./culture-service.js";
 import { processLastStandsForTurn, recordSettlementClaim, recoverLastStand, startLastStand, type LastStandEvent } from "./country-last-stand-service.js";
 import { processStabilityTurn, type StabilityTurnResult } from "./stability-service.js";
+import {
+  processRomanRepublicTurn,type RomanElectionOpenedDetail,type RomanFamilyTurnIncomeDetail,
+  type RomanGovernorshipTurnDetail
+} from "./roman-republic-turn-service.js";
+import type {RomanPoliticalTurnResult} from "./roman-politics-service.js";
 import { prosperityTier } from "../domain/stability.js";
 import { settlementTransferPolicy, type SettlementTransferType } from "../domain/settlement-transfer.js";
 import {
@@ -336,6 +341,10 @@ export interface TurnAdvanceResult {
   christianSpreadDetails: ChristianPassiveSpreadDetail[];
   lastStandDetails: LastStandEvent[];
   stability: StabilityTurnResult;
+  romanFamilyIncomeDetails: RomanFamilyTurnIncomeDetail[];
+  romanGovernorshipDetails: RomanGovernorshipTurnDetail[];
+  romanElectionOpenedDetails: RomanElectionOpenedDetail[];
+  romanPolitics: RomanPoliticalTurnResult;
 }
 
 async function ensureGuild(client: DbClient, guildId: string): Promise<GuildRow> {
@@ -3420,6 +3429,11 @@ export const gameService = {
       const startedGarrisons = await scheduleAllMissingGarrisons(client, guildId, newTurn);
       const garrisonReplenishmentStartedDetails = startedGarrisons.map((order) => ({ settlementName: order.settlementName, personnel: order.personnel, cost: order.cost, completionTurn: order.completionTurn, reason: order.reason }));
       await snapshotTreasuryTransferTurn(client, guildId, newTurn);
+      const romanRepublicTurn=await processRomanRepublicTurn(client,guildId,newTurn,acquisition);
+      const romanFamilyIncomeDetails=romanRepublicTurn.familyIncomeDetails;
+      const romanGovernorshipDetails=romanRepublicTurn.governorshipDetails;
+      const romanElectionOpenedDetails=romanRepublicTurn.electionOpenedDetails;
+      const romanPolitics=romanRepublicTurn.politics;
       await syncGuildPrimaryCultures(client, guildId);
       await client.query("UPDATE guilds SET current_turn=$1,turn_phase='OPEN',updated_at=NOW() WHERE discord_id=$2", [newTurn, guildId]);
       const movement = await resolveMovementStage(client, guildId, actorId, newTurn, "ADVANCE");
@@ -3428,7 +3442,8 @@ export const gameService = {
         mercenaryArrivals: mercenaryArrivalDetails.length, mercenaryUpkeep: mercenaryUpkeepDetails,
         mercenaryUnpaid: mercenaryUnpaidDetails, mercenaryEnded: mercenaryEndedDetails,
         assimilatedSettlements: assimilatedSettlementDetails,
-        christianPassiveSpread: christianSpreadDetails,lastStandDetails,stability
+        christianPassiveSpread: christianSpreadDetails,lastStandDetails,stability,romanFamilyIncomeDetails,
+        romanGovernorshipDetails,romanElectionOpenedDetails,romanPolitics
       });
       return {
         turn: newTurn, acquisition, movement,
@@ -3455,7 +3470,8 @@ export const gameService = {
         mercenaryUnpaidDetails,
         mercenaryEndedDetails,
         assimilatedSettlementDetails,
-        christianSpreadDetails,lastStandDetails,stability
+        christianSpreadDetails,lastStandDetails,stability,romanFamilyIncomeDetails,
+        romanGovernorshipDetails,romanElectionOpenedDetails,romanPolitics
       };
     });
   },

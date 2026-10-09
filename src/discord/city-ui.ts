@@ -8,7 +8,7 @@ import { gold } from "../domain/format.js";
 import { cityService } from "../services/city-service.js";
 import { characterService } from "../services/character-service.js";
 import { gameService, GameError, type AcademyTrainingSession } from "../services/game-service.js";
-import { assertCountryAccess, isGameMaster, requireEventManager, requireGameMaster, resolveCountry } from "./auth.js";
+import { assertCountryAccess,assertCountryExecutiveAccess,isGameMaster,requireEventManager,requireGameMaster,resolveCountry } from "./auth.js";
 import { charactersEmbed, queueCharacterLog } from "./character-ui.js";
 import { handleSettlementEventButton, handleSettlementEventCommand } from "./event-ui.js";
 
@@ -123,6 +123,10 @@ export async function handleCityCommand(interaction: ChatInputCommandInteraction
     ? await gameService.countryByName(interaction.guildId, requestedCountry)
     : await resolveCountry(interaction, requestedCountry);
   if (!country) throw new GameError("Belirtilen ülke bulunamadı.");
+
+  const readOnly=(interaction.commandName==="politika"&&sub==="liste")||
+    (interaction.commandName==="akademi"&&sub==="karakterler");
+  if(interaction.commandName!=="olay"&&!readOnly)await assertCountryExecutiveAccess(interaction,country.id);
 
   if (interaction.commandName === "olay") {
     const settlement = await findSettlement(country.id, interaction.options.getString("yerleske", true));

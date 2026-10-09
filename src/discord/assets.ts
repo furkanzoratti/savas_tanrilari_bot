@@ -16,6 +16,20 @@ export const DYNASTY_MARRIAGE_BANNER_NAME = "ancient-dynastic-marriage-banner.pn
 export const PORT_ACCESS_BANNER_NAME = "ancient-port-access-banner.png";
 export const SETTLEMENTS_OVERVIEW_BANNER_NAME = "ancient-settlements-overview-banner.png";
 
+export const ROMAN_VIEW_BANNER_NAMES={
+  republic:"roman-republic-banner.png",
+  family:"roman-family-banner.png",
+  election:"roman-election-banner.png",
+  business:"roman-business-banner.png",
+  governorship:"roman-governorship-banner.png",
+  offices:"roman-offices-banner.png"
+} as const;
+export type RomanViewBannerKey=keyof typeof ROMAN_VIEW_BANNER_NAMES;
+export function romanViewAsset(key:RomanViewBannerKey):{name:string;path:string;url:string}{
+  const name=ROMAN_VIEW_BANNER_NAMES[key];
+  return{name,path:resolve(process.cwd(),"assets","roman",name),url:`attachment://${name}`};
+}
+
 export const DYNASTY_VIEW_BANNER_NAMES = {
   overview: "dynasty-overview-banner.png",
   person: "dynasty-person-banner.png",

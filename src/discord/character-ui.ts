@@ -10,7 +10,7 @@ import { characterService, type CharacterView } from "../services/character-serv
 import { cityService } from "../services/city-service.js";
 import { gameService, GameError } from "../services/game-service.js";
 import { logger } from "../logger.js";
-import { requireGameMaster, resolveCountry } from "./auth.js";
+import { assertCountryExecutiveAccess,requireGameMaster, resolveCountry } from "./auth.js";
 import { RELIGIONS, type ReligionKey } from "../domain/religions.js";
 
 const assignmentLabels: Record<string,string> = {
@@ -376,6 +376,7 @@ export async function handleCharacterCommand(interaction: ChatInputCommandIntera
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const country = await resolveCountry(interaction);
   const sub = interaction.options.getSubcommand();
+  await assertCountryExecutiveAccess(interaction,country.id);
   if(interaction.commandName==="misyoner"){
     if(sub==="al"){
       const result=await characterService.purchaseMissionary({

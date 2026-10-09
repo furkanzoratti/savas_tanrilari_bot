@@ -21,6 +21,8 @@ const ACTION_LABELS: Record<string, string> = {
   "admin.panel.battle.participant.remove": "Aktif savaştan devlet çıkarıldı",
   "admin.panel.battle.army.add": "Aktif savaşa ordu eklendi",
   "admin.panel.battle.army.remove": "Aktif savaştan ordu çıkarıldı",
+  "admin.panel.battle.fleet.add": "Aktif deniz savaşına filo eklendi",
+  "admin.panel.battle.fleet.remove": "Aktif deniz savaşından filo çıkarıldı",
   "admin.panel.battle.mercenary.add": "Aktif savaşa paralı asker eklendi",
   "admin.panel.battle.mercenary.remove": "Aktif savaştan paralı asker çıkarıldı",
   "admin.panel.battle.roster.unit.remove": "Savaş kadrosundan birlik çıkarıldı",

@@ -3,7 +3,7 @@ import type { NavalUnitType } from "../domain/battle.js";
 import { fleetService } from "../services/fleet-service.js";
 import { navalRepairService } from "../services/naval-repair-service.js";
 import { GameError } from "../services/game-service.js";
-import { resolveCountry } from "./auth.js";
+import { assertCountryExecutiveAccess,resolveCountry } from "./auth.js";
 import { queueCharacterLog } from "./character-ui.js";
 import { renderFleetEmbed } from "./fleet-embed.js";
 import { renderRepairFleetEmbed } from "./repair-fleet-embed.js";
@@ -20,6 +20,7 @@ export async function handleFleetCommand(interaction: ChatInputCommandInteractio
   const sub = interaction.options.getSubcommand();
   await interaction.deferReply({ ephemeral:true });
   const country = await resolveCountry(interaction);
+  if(!["bilgi","tamir-bilgi"].includes(sub))await assertCountryExecutiveAccess(interaction,country.id);
   if (sub === "olustur") {
     const fleet = await fleetService.create({
       guildId:interaction.guildId,countryId:country.id,actorId:interaction.user.id,

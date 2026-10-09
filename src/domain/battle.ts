@@ -536,6 +536,60 @@ export function siegeAssaultComposition(
   return siegeAssaultGroups(composition, support, wallHp, gateHp, frontage).combined;
 }
 
+/**
+ * Kuşatma saldırganının gerçekten sur hücumuna soktuğu özgün birlikleri döndürür.
+ * Yaya indirilmeyen süvariler, filler ve cephe kapasitesinin dışında kalan rezervler
+ * geri çekilme takip kaybına dâhil edilmez.
+ */
+export function siegeAttackerRetreatExposure(
+  composition: BattleComposition,
+  dismounted: BattleComposition,
+  support: SiegeComposition,
+  wallHp: number,
+  gateHp: number,
+  frontage = SIEGE_TOTAL_ASSAULT_FRONTAGE
+): BattleComposition {
+  const effective = siegeAttackerDismountedComposition(composition, dismounted);
+  const engaged = siegeAssaultGroups(effective, support, wallHp, gateHp, frontage).combined;
+  return restoreSiegeAttackerCasualtyTypes(composition, engaged, dismounted);
+}
+
+export function applyRestrictedBattleLoss(
+  composition: BattleComposition,
+  exposed: BattleComposition,
+  requestedLoss: number
+): { remaining: BattleComposition; applied: number } {
+  const result: BattleComposition = { ...composition };
+  const entries = Object.entries(exposed)
+    .map(([key, quantity]) => [key as BattleForceType, Math.min(
+      Math.max(0, Math.floor(quantity ?? 0)),
+      Math.max(0, Math.floor(composition[key as BattleForceType] ?? 0))
+    )] as const)
+    .filter(([, quantity]) => quantity > 0);
+  const total = entries.reduce((sum, [, quantity]) => sum + quantity, 0);
+  const target = Math.min(Math.max(0, Math.floor(requestedLoss)), total);
+  if (!target) return { remaining: result, applied: 0 };
+
+  let applied = 0;
+  for (const [key, quantity] of entries) {
+    const loss = Math.min(quantity, Math.floor(target * quantity / total));
+    result[key] = Math.max(0, (result[key] ?? 0) - loss);
+    applied += loss;
+  }
+
+  let rest = target - applied;
+  for (const [key, quantity] of entries) {
+    if (rest <= 0) break;
+    const alreadyLost = (composition[key] ?? 0) - (result[key] ?? 0);
+    const available = Math.max(0, quantity - alreadyLost);
+    const extra = Math.min(rest, available);
+    result[key] = Math.max(0, (result[key] ?? 0) - extra);
+    applied += extra;
+    rest -= extra;
+  }
+  return { remaining: result, applied };
+}
+
 export function siegeDefenderGroups(
   composition: BattleComposition,
   wallHp: number,

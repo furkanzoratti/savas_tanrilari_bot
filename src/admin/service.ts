@@ -4,9 +4,11 @@ import {
   BATTLE_UNIT_STATS,
   NAVAL_UNIT_STATS,
   type BattleUnitType,
+  type NavalUnitType,
   type SiegeAssetType,
   type SiegeTarget
 } from "../domain/battle.js";
+import { NAVAL_HULL_STATS } from "../domain/naval-hulls.js";
 import {
   ADMIRAL_DOCTRINES,
   ADMIRAL_SPECIALIZATIONS,
@@ -140,6 +142,12 @@ const battleParticipantMutationSchema = z.object({
 
 const battleArmyMutationSchema = z.object({
   armyId: z.string().uuid(),
+  side: z.enum(["A", "B"]),
+  action: z.enum(["ADD", "REMOVE"])
+});
+
+const battleFleetMutationSchema = z.object({
+  fleetId: z.string().uuid(),
   side: z.enum(["A", "B"]),
   action: z.enum(["ADD", "REMOVE"])
 });
@@ -476,6 +484,132 @@ function battleSeal(composition: unknown, support: unknown): string {
   return createHash("sha256")
     .update(JSON.stringify(Object.keys(combined).sort().map((key) => [key, combined[key] ?? 0])))
     .digest("hex").slice(0, 12).toUpperCase();
+}
+
+type AdminFleetReadiness = {
+  settlementName:string;
+  shipType:NavalUnitType;
+  quantity:number;
+  stockTotal:number;
+  otherAllocated:number;
+  disabled:number;
+  readyAvailable:number;
+};
+
+async function adminFleetReadiness(client: Pick<AdminDbClient,"query">, fleetId: string): Promise<AdminFleetReadiness[]> {
+  const rows = (await client.query<{
+    settlement_name:string;ship_type:NavalUnitType;quantity:number;
+    stock_total:number;other_allocated:number;disabled:number;
+  }>(
+    `SELECT settlement.name AS settlement_name,ships.ship_type,ships.quantity,
+            COALESCE((SELECT SUM(stock.quantity) FROM naval_units stock
+              WHERE stock.settlement_id=ships.settlement_id AND stock.ship_type=ships.ship_type),0)::integer AS stock_total,
+            COALESCE((SELECT SUM(other.quantity) FROM fleet_ships other
+              WHERE other.settlement_id=ships.settlement_id AND other.ship_type=ships.ship_type
+                AND other.fleet_id<>ships.fleet_id),0)::integer AS other_allocated,
+            COALESCE((SELECT COUNT(*) FROM naval_ship_damage damage
+              WHERE damage.fleet_id=ships.fleet_id AND damage.settlement_id=ships.settlement_id
+                AND damage.ship_type=ships.ship_type AND damage.status='DISABLED'),0)::integer AS disabled
+       FROM fleet_ships ships
+       JOIN settlements settlement ON settlement.id=ships.settlement_id
+      WHERE ships.fleet_id=$1
+      ORDER BY settlement.name,ships.ship_type`, [fleetId]
+  )).rows;
+  return rows.map((row) => {
+    const quantity=Number(row.quantity);
+    const stockTotal=Number(row.stock_total);
+    const otherAllocated=Number(row.other_allocated);
+    const disabled=Number(row.disabled);
+    return {
+      settlementName:row.settlement_name,shipType:row.ship_type,quantity,stockTotal,otherAllocated,disabled,
+      readyAvailable:Math.max(0,stockTotal-otherAllocated-disabled)
+    };
+  });
+}
+
+function fleetReadinessError(rows: AdminFleetReadiness[]): string | null {
+  const unavailable=rows.find((row)=>row.quantity>row.readyAvailable);
+  if(!unavailable)return null;
+  const label=NAVAL_UNIT_STATS[unavailable.shipType]?.label??unavailable.shipType;
+  if(unavailable.disabled>0)return `${unavailable.settlementName} limanına bağlı ${label} gemilerinin ${unavailable.disabled} tanesi iş göremez.`;
+  if(unavailable.otherAllocated>0)return `${unavailable.settlementName} limanındaki ${label} gemilerinin ${unavailable.otherAllocated} tanesi başka filolara ayrılmış.`;
+  return `${unavailable.settlementName} limanındaki ${label} stoku filo kaydıyla uyuşmuyor.`;
+}
+
+async function battleHasShipHulls(client: Pick<AdminDbClient,"query">, battleId:string):Promise<boolean>{
+  return Boolean((await client.query("SELECT 1 FROM battle_ship_hulls WHERE battle_id=$1 LIMIT 1",[battleId])).rowCount);
+}
+
+async function appendFleetShipHulls(
+  client:AdminDbClient,battleId:string,side:"A"|"B",countryId:string,fleetId:string
+):Promise<void>{
+  const allocations=(await client.query<{settlement_id:string;ship_type:NavalUnitType;quantity:number}>(
+    `SELECT settlement_id,ship_type,quantity FROM fleet_ships
+      WHERE fleet_id=$1 ORDER BY settlement_id,ship_type FOR UPDATE`,[fleetId]
+  )).rows;
+  for(const allocation of allocations){
+    const quantity=Number(allocation.quantity);
+    const damaged=(await client.query<{id:string;current_hp:number;status:"DAMAGED"|"DISABLED"}>(
+      `SELECT id,current_hp,status FROM naval_ship_damage
+        WHERE fleet_id=$1 AND settlement_id=$2 AND ship_type=$3 AND status IN ('DAMAGED','DISABLED')
+        ORDER BY current_hp,id FOR UPDATE`,[fleetId,allocation.settlement_id,allocation.ship_type]
+    )).rows.slice(0,quantity);
+    for(const ship of damaged){
+      const stats=NAVAL_HULL_STATS[allocation.ship_type];
+      await client.query(
+        `INSERT INTO battle_ship_hulls(
+           battle_id,side_key,country_id,fleet_id,settlement_id,ship_type,max_hp,current_hp,disabled_round,damage_record_id
+         ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [battleId,side,countryId,fleetId,allocation.settlement_id,allocation.ship_type,stats.maxHp,
+          Number(ship.current_hp),ship.status==="DISABLED"?0:null,ship.id]
+      );
+    }
+    for(let index=damaged.length;index<quantity;index+=1){
+      const stats=NAVAL_HULL_STATS[allocation.ship_type];
+      await client.query(
+        `INSERT INTO battle_ship_hulls(
+           battle_id,side_key,country_id,fleet_id,settlement_id,ship_type,max_hp,current_hp
+         ) VALUES($1,$2,$3,$4,$5,$6,$7,$7)`,
+        [battleId,side,countryId,fleetId,allocation.settlement_id,allocation.ship_type,stats.maxHp]
+      );
+    }
+  }
+}
+
+async function appendMercenaryShipHulls(
+  client:AdminDbClient,battleId:string,side:"A"|"B",countryId:string,ships:unknown
+):Promise<void>{
+  for(const [shipType,quantity] of Object.entries(numericComposition(ships))){
+    const stats=NAVAL_HULL_STATS[shipType as NavalUnitType];
+    if(!stats)continue;
+    for(let index=0;index<quantity;index+=1){
+      await client.query(
+        `INSERT INTO battle_ship_hulls(
+           battle_id,side_key,country_id,fleet_id,settlement_id,ship_type,max_hp,current_hp
+         ) VALUES($1,$2,$3,NULL,NULL,$4,$5,$5)`,
+        [battleId,side,countryId,shipType,stats.maxHp]
+      );
+    }
+  }
+}
+
+async function removeMercenaryShipHulls(
+  client:AdminDbClient,battleId:string,side:"A"|"B",countryId:string,ships:unknown,createdAt:Date
+):Promise<void>{
+  for(const [shipType,quantity] of Object.entries(numericComposition(ships))){
+    const removed=await client.query(
+      `DELETE FROM battle_ship_hulls WHERE id IN (
+         SELECT id FROM battle_ship_hulls
+          WHERE battle_id=$1 AND side_key=$2 AND country_id=$3 AND fleet_id IS NULL
+            AND ship_type=$4 AND created_at>=$5 AND current_hp=max_hp
+            AND disabled_round IS NULL AND sunk_round IS NULL AND damage_record_id IS NULL
+          ORDER BY created_at DESC,id DESC LIMIT $6
+       )`,[battleId,side,countryId,shipType,createdAt,quantity]
+    );
+    if(Number(removed.rowCount??0)!==quantity){
+      throw new Error("Paralı gemilerin savaş sağlamlık kayıtları değiştiği için grup güvenle çıkarılamaz.");
+    }
+  }
 }
 
 function defaultSiegeTarget(asset: SiegeAssetType): SiegeTarget {
@@ -1155,7 +1289,7 @@ export const adminPanelService = {
   },
 
   async activeBattles() {
-    const [battleRows, participantRows, armyRows] = await Promise.all([
+    const [battleRows, participantRows, armyRows, fleetRows] = await Promise.all([
       adminPool.query(
         `SELECT battle.id,battle.terrain,battle.status,battle.round_number,battle.siege_phase,battle.updated_at,
                 settlement.name AS settlement_name,
@@ -1169,8 +1303,7 @@ export const adminPanelService = {
            JOIN battle_sides side_b ON side_b.battle_id=battle.id AND side_b.side_key='B'
            JOIN countries country_b ON country_b.id=side_b.country_id
            LEFT JOIN rebel_factions rebel_b ON rebel_b.id=side_b.rebel_faction_id
-          WHERE battle.guild_id=$1 AND battle.terrain<>'NAVAL'
-            AND battle.status NOT IN ('FINISHED','CANCELLED')
+          WHERE battle.guild_id=$1 AND battle.status NOT IN ('FINISHED','CANCELLED')
           ORDER BY battle.updated_at DESC`, [adminConfig.guildId]
       ),
       adminPool.query(
@@ -1181,8 +1314,7 @@ export const adminPanelService = {
            JOIN countries country ON country.id=participant.country_id
            JOIN battle_sides side_record ON side_record.battle_id=participant.battle_id AND side_record.side_key=participant.side_key
            LEFT JOIN rebel_factions rebel ON rebel.id=side_record.rebel_faction_id AND participant.country_id=side_record.country_id
-          WHERE battle.guild_id=$1 AND battle.terrain<>'NAVAL'
-            AND battle.status NOT IN ('FINISHED','CANCELLED')
+          WHERE battle.guild_id=$1 AND battle.status NOT IN ('FINISHED','CANCELLED')
           ORDER BY participant.battle_id,participant.side_key,participant.is_primary DESC,COALESCE(rebel.display_name,country.name)`, [adminConfig.guildId]
       ),
       adminPool.query(
@@ -1198,6 +1330,20 @@ export const adminPanelService = {
           WHERE battle.guild_id=$1 AND battle.terrain<>'NAVAL'
             AND battle.status NOT IN ('FINISHED','CANCELLED')
           ORDER BY battle.updated_at DESC,assignment.side_key,country.name,army.name,origin.name,unit.unit_type`, [adminConfig.guildId]
+      ),
+      adminPool.query(
+        `SELECT assignment.battle_id,assignment.side_key,fleet.id AS fleet_id,fleet.name AS fleet_name,
+                country.id AS country_id,country.name AS country_name,
+                ships.settlement_id,origin.name AS origin_name,ships.ship_type,ships.quantity
+           FROM battle_fleet_assignments assignment
+           JOIN battles battle ON battle.id=assignment.battle_id
+           JOIN fleets fleet ON fleet.id=assignment.fleet_id
+           JOIN countries country ON country.id=fleet.country_id
+           LEFT JOIN fleet_ships ships ON ships.fleet_id=fleet.id
+           LEFT JOIN settlements origin ON origin.id=ships.settlement_id
+          WHERE battle.guild_id=$1 AND battle.terrain='NAVAL'
+            AND battle.status NOT IN ('FINISHED','CANCELLED')
+          ORDER BY battle.updated_at DESC,assignment.side_key,country.name,fleet.name,origin.name,ships.ship_type`, [adminConfig.guildId]
       )
     ]);
     const participantsByBattle = new Map<string, unknown[]>();
@@ -1224,13 +1370,32 @@ export const adminPanelService = {
       }
       armiesByBattle.set(battleId,armies);
     }
+    const fleetsByBattle = new Map<string, Map<string, { id:string;name:unknown;countryId:unknown;countryName:unknown;sideKey:unknown;total:number;ships:unknown[] }>>();
+    for (const row of fleetRows.rows as Array<Record<string, unknown>>) {
+      const battleId=String(row.battle_id);
+      const fleets=fleetsByBattle.get(battleId)??new Map();
+      const fleetId=String(row.fleet_id);
+      let fleet=fleets.get(fleetId);
+      if(!fleet){
+        fleet={id:fleetId,name:row.fleet_name,countryId:row.country_id,countryName:row.country_name,sideKey:row.side_key,total:0,ships:[]};
+        fleets.set(fleetId,fleet);
+      }
+      if(row.ship_type){
+        const quantity=Number(row.quantity??0);
+        fleet.total+=quantity;
+        fleet.ships.push({settlementId:row.settlement_id,originName:row.origin_name,shipType:row.ship_type,quantity});
+      }
+      fleetsByBattle.set(battleId,fleets);
+    }
     return (battleRows.rows as Array<Record<string, unknown>>).map((battle) => {
       const battleId = String(battle.id);
       return {
         id:battleId,terrain:battle.terrain,status:battle.status,roundNumber:battle.round_number,siegePhase:battle.siege_phase,
         settlementName:battle.settlement_name,countryAId:battle.country_a_id,countryAName:battle.country_a_name,
         countryBId:battle.country_b_id,countryBName:battle.country_b_name,
-        participants:participantsByBattle.get(battleId) ?? [],armies:[...(armiesByBattle.get(battleId)?.values() ?? [])]
+        participants:participantsByBattle.get(battleId) ?? [],
+        armies:[...(armiesByBattle.get(battleId)?.values() ?? [])],
+        fleets:[...(fleetsByBattle.get(battleId)?.values() ?? [])]
       };
     });
   },
@@ -1238,11 +1403,11 @@ export const adminPanelService = {
   async activeBattleRosterOptions(battleId: string) {
     if (!z.string().uuid().safeParse(battleId).success) throw new Error("Geçersiz savaş kimliği.");
     const battle = (await adminPool.query(
-      `SELECT id,terrain,status FROM battles WHERE id=$1 AND guild_id=$2 AND terrain<>'NAVAL'
+      `SELECT id,terrain,status FROM battles WHERE id=$1 AND guild_id=$2
         AND status NOT IN ('FINISHED','CANCELLED')`, [battleId,adminConfig.guildId]
     )).rows[0];
-    if (!battle) throw new Error("Düzenlenebilir aktif kara savaşı bulunamadı.");
-    const [countries,armies,mercenaries] = await Promise.all([
+    if (!battle) throw new Error("Düzenlenebilir aktif savaş bulunamadı.");
+    const [countries,armies,fleets,mercenaries] = await Promise.all([
       adminPool.query(
         `SELECT country.id,country.name,participant.side_key,COALESCE(participant.is_primary,FALSE) AS is_primary
            FROM countries country
@@ -1276,9 +1441,38 @@ export const adminPanelService = {
            JOIN countries country ON country.id=army.country_id
            LEFT JOIN army_units unit ON unit.army_id=army.id
            LEFT JOIN battle_army_assignments own ON own.army_id=army.id AND own.battle_id=$1
-          WHERE army.guild_id=$2 AND country.status='ACTIVE'
+          WHERE army.guild_id=$2 AND country.status='ACTIVE' AND $3::text<>'NAVAL'
           GROUP BY army.id,army.name,army.country_id,country.name,own.side_key
-          ORDER BY country.name,army.name`, [battleId,adminConfig.guildId]
+          ORDER BY country.name,army.name`, [battleId,adminConfig.guildId,battle.terrain]
+      ),
+      adminPool.query(
+        `SELECT fleet.id,fleet.name,fleet.country_id,country.name AS country_name,
+                COALESCE((SELECT SUM(ships.quantity) FROM fleet_ships ships WHERE ships.fleet_id=fleet.id),0)::integer AS total,
+                COALESCE((SELECT jsonb_object_agg(summary.ship_type,summary.quantity) FROM (
+                  SELECT ships.ship_type,SUM(ships.quantity)::integer AS quantity
+                    FROM fleet_ships ships WHERE ships.fleet_id=fleet.id GROUP BY ships.ship_type
+                ) summary),'{}'::jsonb) AS ships,
+                own.side_key AS assigned_side,
+                CASE
+                  WHEN EXISTS(SELECT 1 FROM naval_blockades blockade WHERE blockade.fleet_id=fleet.id AND blockade.status='ACTIVE')
+                    THEN 'Etkin ablukaya bağlı'
+                  WHEN EXISTS(SELECT 1 FROM naval_raids raid WHERE raid.fleet_id=fleet.id AND raid.status='WAITING_ROLL')
+                    THEN 'Deniz yağması sonucu bekliyor'
+                  WHEN EXISTS(
+                    SELECT 1 FROM battle_fleet_assignments other_assignment
+                    JOIN battles other_battle ON other_battle.id=other_assignment.battle_id
+                    WHERE other_assignment.fleet_id=fleet.id AND other_assignment.battle_id<>$1
+                      AND other_battle.status NOT IN ('FINISHED','CANCELLED')
+                  ) THEN 'Başka bir etkin savaşa bağlı'
+                  WHEN NOT EXISTS(SELECT 1 FROM fleet_ships ships WHERE ships.fleet_id=fleet.id AND ships.quantity>0)
+                    THEN 'Savaşa katılabilecek gemi yok'
+                  ELSE NULL
+                END AS blocking_reason
+           FROM fleets fleet
+           JOIN countries country ON country.id=fleet.country_id
+           LEFT JOIN battle_fleet_assignments own ON own.fleet_id=fleet.id AND own.battle_id=$1
+          WHERE fleet.guild_id=$2 AND country.status='ACTIVE' AND $3::text='NAVAL'
+          ORDER BY country.name,fleet.name`, [battleId,adminConfig.guildId,battle.terrain]
       ),
       adminPool.query(
         `SELECT contract.id,contract.company_key,contract.country_id,country.name AS country_name,
@@ -1286,6 +1480,9 @@ export const adminPanelService = {
                 COALESCE((SELECT jsonb_object_agg(unit.unit_type,unit.current_quantity)
                   FROM mercenary_contract_units unit
                  WHERE unit.contract_id=contract.id AND unit.current_quantity>0),'{}'::jsonb) AS land,
+                COALESCE((SELECT jsonb_object_agg(ship.ship_type,ship.current_quantity)
+                  FROM mercenary_contract_ships ship
+                 WHERE ship.contract_id=contract.id AND ship.current_quantity>0),'{}'::jsonb) AS ships,
                 COALESCE((SELECT jsonb_object_agg(asset.asset_type,asset.current_quantity)
                   FROM mercenary_contract_assets asset
                  WHERE asset.contract_id=contract.id AND asset.current_quantity>0),'{}'::jsonb) AS assets,
@@ -1300,7 +1497,11 @@ export const adminPanelService = {
                     WHERE other_assignment.contract_id=contract.id AND other_assignment.battle_id<>$1
                       AND other_battle.status NOT IN ('FINISHED','CANCELLED')
                   ) THEN 'Başka bir etkin savaşa bağlı'
-                  WHEN NOT EXISTS(
+                  WHEN $3::text='NAVAL' AND NOT EXISTS(
+                    SELECT 1 FROM mercenary_contract_ships ship
+                     WHERE ship.contract_id=contract.id AND ship.current_quantity>0
+                  ) THEN 'Savaşa katılabilecek gemi yok'
+                  WHEN $3::text<>'NAVAL' AND NOT EXISTS(
                     SELECT 1 FROM mercenary_contract_units unit
                      WHERE unit.contract_id=contract.id AND unit.current_quantity>0
                   ) THEN 'Savaşa katılabilecek kara birliği yok'
@@ -1312,17 +1513,22 @@ export const adminPanelService = {
            LEFT JOIN battle_mercenary_assignments own ON own.contract_id=contract.id AND own.battle_id=$1
           WHERE contract.guild_id=$2 AND country.status='ACTIVE'
             AND contract.status IN ('PENDING','ACTIVE','UNPAID')
-          ORDER BY country.name,contract.company_key`, [battleId,adminConfig.guildId]
+          ORDER BY country.name,contract.company_key`, [battleId,adminConfig.guildId,battle.terrain]
       )
     ]);
+    for(const fleet of fleets.rows as Array<Record<string,unknown>>){
+      if(fleet.assigned_side||fleet.blocking_reason)continue;
+      fleet.blocking_reason=fleetReadinessError(await adminFleetReadiness(adminPool,String(fleet.id)));
+    }
     return {
       battleId,terrain:battle.terrain,status:battle.status,countries:countries.rows,armies:armies.rows,
+      fleets:fleets.rows,
       mercenaries:mercenaries.rows.map((row) => {
         const companyKey=String(row.company_key);
         return {
           id:row.id,companyKey,companyName:MERCENARY_COMPANIES[companyKey as MercenaryCompanyKey]?.name ?? companyKey,
           countryId:row.country_id,countryName:row.country_name,settlementName:row.settlement_name,
-          status:row.status,assignedSide:row.assigned_side,land:row.land,assets:row.assets,blockingReason:row.blocking_reason
+          status:row.status,assignedSide:row.assigned_side,land:row.land,ships:row.ships,assets:row.assets,blockingReason:row.blocking_reason
         };
       })
     };
@@ -1333,10 +1539,10 @@ export const adminPanelService = {
     const input = battleParticipantMutationSchema.parse(rawInput);
     return withAdminTransaction(async (client) => {
       const battle = (await client.query<{ id:string;status:string }>(
-        `SELECT id,status FROM battles WHERE id=$1 AND guild_id=$2 AND terrain<>'NAVAL'
+        `SELECT id,status FROM battles WHERE id=$1 AND guild_id=$2
           AND status NOT IN ('FINISHED','CANCELLED') FOR UPDATE`, [battleId,adminConfig.guildId]
       )).rows[0];
-      if (!battle) throw new Error("Düzenlenebilir aktif kara savaşı bulunamadı.");
+      if (!battle) throw new Error("Düzenlenebilir aktif savaş bulunamadı.");
       const country = (await client.query<{ id:string;name:string }>(
         "SELECT id,name FROM countries WHERE id=$1 AND guild_id=$2 AND status='ACTIVE' FOR UPDATE",
         [input.countryId,adminConfig.guildId]
@@ -1364,7 +1570,7 @@ export const adminPanelService = {
         if (!existing || existing.side_key !== input.side) throw new Error("Bu devlet seçilen savaş tarafında bulunmuyor.");
         if (existing.is_primary) throw new Error("Savaşın ana taraf devletleri çıkarılamaz.");
         if (compositionTotal(existing.composition) || compositionTotal(existing.initial_composition)) {
-          throw new Error("Devletin savaş mevcudu boş değil. Önce bağlı orduları çıkarın.");
+          throw new Error("Devletin savaş mevcudu boş değil. Önce bağlı ordu, filo veya paralı kuvvetleri çıkarın.");
         }
         if ((await client.query("SELECT 1 FROM battle_army_assignments WHERE battle_id=$1 AND country_id=$2 LIMIT 1",[battle.id,country.id])).rowCount) {
           throw new Error("Devleti çıkarmadan önce bağlı orduları çıkarın.");
@@ -1545,15 +1751,141 @@ export const adminPanelService = {
     });
   },
 
+  async mutateActiveBattleFleet(actorId: string, battleId: string, rawInput: unknown) {
+    if (!z.string().uuid().safeParse(battleId).success) throw new Error("Geçersiz savaş kimliği.");
+    const input=battleFleetMutationSchema.parse(rawInput);
+    return withAdminTransaction(async(client)=>{
+      const battle=(await client.query<{id:string;status:string;terrain:string}>(
+        `SELECT id,status,terrain FROM battles WHERE id=$1 AND guild_id=$2 AND terrain='NAVAL'
+          AND status NOT IN ('FINISHED','CANCELLED') FOR UPDATE`,[battleId,adminConfig.guildId]
+      )).rows[0];
+      if(!battle)throw new Error("Düzenlenebilir aktif deniz savaşı bulunamadı.");
+      const fleet=(await client.query<{id:string;name:string;country_id:string;country_name:string}>(
+        `SELECT fleet.id,fleet.name,fleet.country_id,country.name AS country_name
+           FROM fleets fleet JOIN countries country ON country.id=fleet.country_id
+          WHERE fleet.id=$1 AND fleet.guild_id=$2 AND country.status='ACTIVE' FOR UPDATE OF fleet`,
+        [input.fleetId,adminConfig.guildId]
+      )).rows[0];
+      if(!fleet)throw new Error("Aktif filo bulunamadı.");
+      const participant=(await client.query<{side_key:"A"|"B";composition:unknown;initial_composition:unknown}>(
+        `SELECT side_key,composition,initial_composition FROM battle_side_participants
+          WHERE battle_id=$1 AND country_id=$2 FOR UPDATE`,[battle.id,fleet.country_id]
+      )).rows[0];
+      if(!participant||participant.side_key!==input.side)throw new Error("Filonun devleti önce seçilen savaş tarafına eklenmelidir.");
+      const side=(await client.query<{composition:unknown;initial_composition:unknown;support_assets:unknown}>(
+        `SELECT composition,initial_composition,support_assets FROM battle_sides
+          WHERE battle_id=$1 AND side_key=$2 FOR UPDATE`,[battle.id,input.side]
+      )).rows[0];
+      if(!side)throw new Error("Savaş tarafı bulunamadı.");
+      const assignment=(await client.query<{initial_composition:unknown;created_at:Date}>(
+        `SELECT initial_composition,created_at FROM battle_fleet_assignments
+          WHERE battle_id=$1 AND fleet_id=$2 FOR UPDATE`,[battle.id,fleet.id]
+      )).rows[0];
+
+      if(input.action==="REMOVE"){
+        if(!assignment)throw new Error("Bu filo savaşa bağlı değil.");
+        const laterCombat=await client.query(
+          `SELECT 1 FROM battle_rounds WHERE battle_id=$1 AND created_at>=$2
+           UNION ALL
+           SELECT 1 FROM battle_rolls WHERE battle_id=$1 AND created_at>=$2 LIMIT 1`,[battle.id,assignment.created_at]
+        );
+        if(battle.status!=="DRAFT"&&laterCombat.rowCount){
+          throw new Error("Filo savaşa katıldıktan sonra savaş zarı veya değerlendirme işlendiği için güvenle çıkarılamaz.");
+        }
+        const nextParticipant=subtractBattleComposition(participant.composition,assignment.initial_composition);
+        const nextParticipantInitial=subtractBattleComposition(participant.initial_composition,assignment.initial_composition);
+        const nextSide=subtractBattleComposition(side.composition,assignment.initial_composition);
+        const nextSideInitial=subtractBattleComposition(side.initial_composition,assignment.initial_composition);
+        await client.query("DELETE FROM battle_ship_hulls WHERE battle_id=$1 AND fleet_id=$2",[battle.id,fleet.id]);
+        await client.query("DELETE FROM battle_fleet_assignments WHERE battle_id=$1 AND fleet_id=$2",[battle.id,fleet.id]);
+        await client.query(
+          `UPDATE battle_side_participants SET composition=$1::jsonb,initial_composition=$2::jsonb
+            WHERE battle_id=$3 AND country_id=$4`,
+          [JSON.stringify(nextParticipant),JSON.stringify(nextParticipantInitial),battle.id,fleet.country_id]
+        );
+        await client.query(
+          `UPDATE battle_sides SET composition=$1::jsonb,initial_composition=$2::jsonb,
+                  initial_total=$3,current_total=$4,total_losses=$5,seal=$6
+            WHERE battle_id=$7 AND side_key=$8`,
+          [JSON.stringify(nextSide),JSON.stringify(nextSideInitial),compositionTotal(nextSideInitial),compositionTotal(nextSide),
+            Math.max(0,compositionTotal(nextSideInitial)-compositionTotal(nextSide)),battleSeal(nextSide,side.support_assets),battle.id,input.side]
+        );
+        await client.query("UPDATE battles SET updated_at=NOW() WHERE id=$1",[battle.id]);
+        await writeAdminAudit(client,actorId,"admin.panel.battle.fleet.remove","battle",battle.id,{
+          fleetId:fleet.id,fleetName:fleet.name,countryId:fleet.country_id,countryName:fleet.country_name,
+          side:input.side,status:battle.status,total:compositionTotal(assignment.initial_composition)
+        });
+        return {battleId:battle.id,fleetId:fleet.id,fleetName:fleet.name,countryName:fleet.country_name,
+          side:input.side,action:input.action,total:compositionTotal(assignment.initial_composition)};
+      }
+
+      if(assignment)throw new Error("Bu filo savaşa zaten bağlı.");
+      if((await client.query(
+        `SELECT 1 FROM battle_rolls roll JOIN battles current_battle ON current_battle.id=roll.battle_id
+          WHERE roll.battle_id=$1 AND roll.round_number=current_battle.round_number LIMIT 1`,[battle.id]
+      )).rowCount)throw new Error("Başlamış bir değerlendirmeye takviye eklenemez. Mevcut değerlendirmeyi sonuçlandırdıktan sonra tekrar deneyin.");
+      if((await client.query("SELECT 1 FROM naval_blockades WHERE fleet_id=$1 AND status='ACTIVE' LIMIT 1",[fleet.id])).rowCount)
+        throw new Error("Etkin abluka filosu savaşa eklenmeden önce abluka kaldırılmalıdır.");
+      if((await client.query("SELECT 1 FROM naval_raids WHERE fleet_id=$1 AND status='WAITING_ROLL' LIMIT 1",[fleet.id])).rowCount)
+        throw new Error("Bu filonun deniz yağması zarı sonuçlanmadan filo savaşa eklenemez.");
+      if((await client.query(
+        `SELECT 1 FROM battle_fleet_assignments other JOIN battles active ON active.id=other.battle_id
+          WHERE other.fleet_id=$1 AND other.battle_id<>$2 AND active.status NOT IN ('FINISHED','CANCELLED') LIMIT 1`,
+        [fleet.id,battle.id]
+      )).rowCount)throw new Error("Bu filo başka bir etkin savaşa bağlı.");
+      if(!(await client.query("SELECT 1 FROM battle_fleet_assignments WHERE battle_id=$1 AND country_id=$2 LIMIT 1",[battle.id,fleet.country_id])).rowCount
+        &&(compositionTotal(participant.composition)||compositionTotal(participant.initial_composition))){
+        throw new Error("Bu devletin manuel deniz savaşı kadrosu bulunuyor. Kalıcı filo eklemeden önce manuel kadro temizlenmelidir.");
+      }
+      const readiness=await adminFleetReadiness(client,fleet.id);
+      const readinessError=fleetReadinessError(readiness);
+      if(readinessError)throw new Error(`${readinessError} Önce filo ve liman kayıtlarını düzeltin.`);
+      const composition=Object.fromEntries((await client.query<{ship_type:string;quantity:number}>(
+        `SELECT ship_type,COALESCE(SUM(quantity),0)::integer AS quantity FROM fleet_ships
+          WHERE fleet_id=$1 GROUP BY ship_type HAVING SUM(quantity)>0 ORDER BY ship_type`,[fleet.id]
+      )).rows.map((row)=>[row.ship_type,Number(row.quantity)]));
+      const total=compositionTotal(composition);
+      if(!total)throw new Error("Bu filoda savaşa eklenebilecek gemi bulunmuyor.");
+      const hadHulls=await battleHasShipHulls(client,battle.id);
+      const nextParticipant=addBattleComposition(participant.composition,composition);
+      const nextParticipantInitial=addBattleComposition(participant.initial_composition,composition);
+      const nextSide=addBattleComposition(side.composition,composition);
+      const nextSideInitial=addBattleComposition(side.initial_composition,composition);
+      await client.query(
+        `INSERT INTO battle_fleet_assignments(battle_id,side_key,fleet_id,country_id,initial_composition)
+         VALUES($1,$2,$3,$4,$5::jsonb)`,[battle.id,input.side,fleet.id,fleet.country_id,JSON.stringify(composition)]
+      );
+      await client.query(
+        `UPDATE battle_side_participants SET composition=$1::jsonb,initial_composition=$2::jsonb
+          WHERE battle_id=$3 AND country_id=$4`,
+        [JSON.stringify(nextParticipant),JSON.stringify(nextParticipantInitial),battle.id,fleet.country_id]
+      );
+      await client.query(
+        `UPDATE battle_sides SET composition=$1::jsonb,initial_composition=$2::jsonb,
+                initial_total=initial_total+$3,current_total=current_total+$3,seal=$4
+          WHERE battle_id=$5 AND side_key=$6`,
+        [JSON.stringify(nextSide),JSON.stringify(nextSideInitial),total,battleSeal(nextSide,side.support_assets),battle.id,input.side]
+      );
+      if(hadHulls)await appendFleetShipHulls(client,battle.id,input.side,fleet.country_id,fleet.id);
+      await client.query("UPDATE battles SET updated_at=NOW() WHERE id=$1",[battle.id]);
+      await writeAdminAudit(client,actorId,"admin.panel.battle.fleet.add","battle",battle.id,{
+        fleetId:fleet.id,fleetName:fleet.name,countryId:fleet.country_id,countryName:fleet.country_name,
+        side:input.side,total,status:battle.status
+      });
+      return {battleId:battle.id,fleetId:fleet.id,fleetName:fleet.name,countryName:fleet.country_name,
+        side:input.side,action:input.action,total};
+    });
+  },
+
   async mutateActiveBattleMercenary(actorId: string, battleId: string, rawInput: unknown) {
     if (!z.string().uuid().safeParse(battleId).success) throw new Error("Geçersiz savaş kimliği.");
     const input = battleMercenaryMutationSchema.parse(rawInput);
     return withAdminTransaction(async (client) => {
       const battle = (await client.query<{ id:string;status:string;terrain:string }>(
-        `SELECT id,status,terrain FROM battles WHERE id=$1 AND guild_id=$2 AND terrain<>'NAVAL'
+        `SELECT id,status,terrain FROM battles WHERE id=$1 AND guild_id=$2
           AND status NOT IN ('FINISHED','CANCELLED') FOR UPDATE`, [battleId,adminConfig.guildId]
       )).rows[0];
-      if (!battle) throw new Error("Düzenlenebilir aktif kara savaşı bulunamadı.");
+      if (!battle) throw new Error("Düzenlenebilir aktif savaş bulunamadı.");
       const contract = (await client.query<{
         id:string;company_key:MercenaryCompanyKey;country_id:string;country_name:string;status:string;
       }>(
@@ -1581,9 +1913,9 @@ export const adminPanelService = {
       )).rows[0];
       if (!side) throw new Error("Savaş tarafı bulunamadı.");
       const assignment=(await client.query<{
-        initial_land:unknown;initial_assets:unknown;created_at:Date;
+        initial_land:unknown;initial_ships:unknown;initial_assets:unknown;created_at:Date;
       }>(
-        `SELECT initial_land,initial_assets,created_at FROM battle_mercenary_assignments
+        `SELECT initial_land,initial_ships,initial_assets,created_at FROM battle_mercenary_assignments
           WHERE battle_id=$1 AND contract_id=$2 FOR UPDATE`,[battle.id,contract.id]
       )).rows[0];
 
@@ -1597,11 +1929,15 @@ export const adminPanelService = {
         if(battle.status!=="DRAFT"&&laterCombat.rowCount){
           throw new Error("Paralı asker savaşa katıldıktan sonra zar veya değerlendirme işlendiği için güvenle çıkarılamaz.");
         }
-        const nextSide=subtractBattleComposition(side.composition,assignment.initial_land);
-        const nextSideInitial=subtractBattleComposition(side.initial_composition,assignment.initial_land);
+        const used=battle.terrain==="NAVAL"?assignment.initial_ships:assignment.initial_land;
+        const nextSide=subtractBattleComposition(side.composition,used);
+        const nextSideInitial=subtractBattleComposition(side.initial_composition,used);
         const nextSupport=subtractBattleComposition(side.support_assets,assignment.initial_assets);
         const nextTargets={...(side.support_targets??{})};
         for(const key of Object.keys(numericComposition(assignment.initial_assets)))if(!nextSupport[key])delete nextTargets[key];
+        if(battle.terrain==="NAVAL"&&compositionTotal(assignment.initial_ships)>0&&await battleHasShipHulls(client,battle.id)){
+          await removeMercenaryShipHulls(client,battle.id,input.side,contract.country_id,assignment.initial_ships,assignment.created_at);
+        }
         await client.query("DELETE FROM battle_mercenary_assignments WHERE battle_id=$1 AND contract_id=$2",[battle.id,contract.id]);
         await client.query(
           `UPDATE battle_sides SET composition=$1::jsonb,initial_composition=$2::jsonb,
@@ -1615,9 +1951,9 @@ export const adminPanelService = {
         await client.query("UPDATE battles SET updated_at=NOW() WHERE id=$1",[battle.id]);
         await writeAdminAudit(client,actorId,"admin.panel.battle.mercenary.remove","battle",battle.id,{
           contractId:contract.id,companyKey:contract.company_key,companyName,countryId:contract.country_id,
-          countryName:contract.country_name,side:input.side,status:battle.status,total:compositionTotal(assignment.initial_land)
+          countryName:contract.country_name,side:input.side,status:battle.status,total:compositionTotal(used)
         });
-        return {battleId:battle.id,contractId:contract.id,companyName,countryName:contract.country_name,side:input.side,action:input.action,total:compositionTotal(assignment.initial_land)};
+        return {battleId:battle.id,contractId:contract.id,companyName,countryName:contract.country_name,side:input.side,action:input.action,total:compositionTotal(used)};
       }
 
       if(assignment)throw new Error("Bu paralı asker grubu savaşa zaten bağlı.");
@@ -1635,8 +1971,15 @@ export const adminPanelService = {
         `SELECT unit_type,current_quantity FROM mercenary_contract_units
           WHERE contract_id=$1 AND current_quantity>0 ORDER BY unit_type`,[contract.id]
       )).rows.map((row)=>[row.unit_type,Number(row.current_quantity)]));
-      const total=compositionTotal(land);
-      if(!total)throw new Error("Bu paralı asker grubunda savaşa katılabilecek kara birliği yok.");
+      const ships=Object.fromEntries((await client.query<{ship_type:string;current_quantity:number}>(
+        `SELECT ship_type,current_quantity FROM mercenary_contract_ships
+          WHERE contract_id=$1 AND current_quantity>0 ORDER BY ship_type`,[contract.id]
+      )).rows.map((row)=>[row.ship_type,Number(row.current_quantity)]));
+      const used=battle.terrain==="NAVAL"?ships:land;
+      const total=compositionTotal(used);
+      if(!total)throw new Error(battle.terrain==="NAVAL"
+        ?"Bu paralı asker grubunda savaşa katılabilecek gemi yok."
+        :"Bu paralı asker grubunda savaşa katılabilecek kara birliği yok.");
       const allAssets=Object.fromEntries((await client.query<{asset_type:SiegeAssetType;current_quantity:number}>(
         `SELECT asset_type,current_quantity FROM mercenary_contract_assets
           WHERE contract_id=$1 AND current_quantity>0 ORDER BY asset_type`,[contract.id]
@@ -1646,12 +1989,14 @@ export const adminPanelService = {
       if((nextSupport.ram??0)>1)throw new Error("Kuşatmada toplam Koçbaşı sayısı 1'i aşamaz.");
       const nextTargets={...(side.support_targets??{})};
       for(const key of Object.keys(assets))nextTargets[key]??=defaultSiegeTarget(key as SiegeAssetType);
-      const nextSide=addBattleComposition(side.composition,land);
-      const nextSideInitial=addBattleComposition(side.initial_composition,land);
+      const nextSide=addBattleComposition(side.composition,used);
+      const nextSideInitial=addBattleComposition(side.initial_composition,used);
+      const hadHulls=battle.terrain==="NAVAL"&&await battleHasShipHulls(client,battle.id);
       await client.query(
         `INSERT INTO battle_mercenary_assignments(battle_id,side_key,contract_id,initial_land,initial_ships,initial_assets)
-         VALUES($1,$2,$3,$4::jsonb,'{}'::jsonb,$5::jsonb)`,
-        [battle.id,input.side,contract.id,JSON.stringify(land),JSON.stringify(assets)]
+         VALUES($1,$2,$3,$4::jsonb,$5::jsonb,$6::jsonb)`,
+        [battle.id,input.side,contract.id,JSON.stringify(battle.terrain==="NAVAL"?{}:land),
+          JSON.stringify(battle.terrain==="NAVAL"?ships:{}),JSON.stringify(assets)]
       );
       await client.query(
         `UPDATE battle_sides SET composition=$1::jsonb,initial_composition=$2::jsonb,
@@ -1662,6 +2007,7 @@ export const adminPanelService = {
           compositionTotal(nextSideInitial),compositionTotal(nextSide),
           Math.max(0,compositionTotal(nextSideInitial)-compositionTotal(nextSide)),battleSeal(nextSide,nextSupport),battle.id,input.side]
       );
+      if(hadHulls)await appendMercenaryShipHulls(client,battle.id,input.side,contract.country_id,ships);
       await client.query("UPDATE battles SET updated_at=NOW() WHERE id=$1",[battle.id]);
       await writeAdminAudit(client,actorId,"admin.panel.battle.mercenary.add","battle",battle.id,{
         contractId:contract.id,companyKey:contract.company_key,companyName,countryId:contract.country_id,

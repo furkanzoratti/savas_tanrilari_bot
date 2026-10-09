@@ -35,6 +35,17 @@ export async function assertCountryAccess(interaction: GuildInteraction, country
   if (isGameMaster(interaction)) return;
   const ownCountry = await gameService.countryForUser(interaction.guildId, interaction.user.id);
   if (!ownCountry || ownCountry.id !== countryId) throw new GameError("Bu ülke üzerinde işlem yapma yetkin yok.");
+  // Dinamik yükleme, salt yetki yardımcılarını kullanan komut kayıt/test yollarının
+  // veritabanı havuzunu gereksiz yere başlatmasını önler.
+  const {romanRepublicService}=await import("../services/roman-republic-service.js");
+  const executive=await romanRepublicService.executiveAccess(interaction.guildId,countryId,interaction.user.id);
+  if(executive.restricted&&!executive.allowed){
+    throw new GameError(`Roma Cumhuriyeti'nde devlet icra yetkisi yalnızca mevcut konsül ailesindedir${executive.familyName?`: ${executive.familyName}`:""}. Diğer aileler aile, seçim ve senato işlemlerini kullanabilir.`);
+  }
+}
+
+export async function assertCountryExecutiveAccess(interaction:GuildInteraction,countryId:string):Promise<void>{
+  await assertCountryAccess(interaction,countryId);
 }
 
 export function requireGameMaster(interaction: ChatInputCommandInteraction): void {

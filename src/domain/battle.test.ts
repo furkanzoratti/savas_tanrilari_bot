@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BASE_SIEGE_STARVATION_TURNS, MAX_BOMBARDMENTS_PER_GAME_TURN, activeSiegeAssaultAssets, advantageTier, remainingBombardments, baseRetreatRate, battleEnds, commanderClashBonus, compositionTotal, engagedComposition, fieldPressureAfterRound, orderState, resolveRound, restoreSiegeAttackerCasualtyTypes, rollBattlePool, rollNavalPool, rollSiegeSupport, siegeAssaultAccess, siegeAssaultComposition, siegeAttackerBreaks, siegeAttackerDismountedComposition, siegeDefenderCaptured, siegeDefenderComposition, siegeDefenderGroups, siegeDefenderReserveBonus, siegeDefenseModifiers, siegeFrontageProfile, siegeOrderState, siegePressureAfterRound } from "./battle.js";
+import { BASE_SIEGE_STARVATION_TURNS, MAX_BOMBARDMENTS_PER_GAME_TURN, activeSiegeAssaultAssets, advantageTier, applyRestrictedBattleLoss, remainingBombardments, baseRetreatRate, battleEnds, commanderClashBonus, compositionTotal, engagedComposition, fieldPressureAfterRound, orderState, resolveRound, restoreSiegeAttackerCasualtyTypes, rollBattlePool, rollNavalPool, rollSiegeSupport, siegeAssaultAccess, siegeAssaultComposition, siegeAttackerBreaks, siegeAttackerDismountedComposition, siegeAttackerRetreatExposure, siegeDefenderCaptured, siegeDefenderComposition, siegeDefenderGroups, siegeDefenderReserveBonus, siegeDefenseModifiers, siegeFrontageProfile, siegeOrderState, siegePressureAfterRound } from "./battle.js";
 
 describe("savaş motoru", () => {
   it("kuşatma açlığının temel süresini altı oyun turu kabul eder", () => {
@@ -316,6 +316,39 @@ describe("savaş motoru", () => {
     expect(baseRetreatRate(1)).toBe(0);
     expect(baseRetreatRate(2)).toBe(0.05);
     expect(baseRetreatRate(5)).toBeGreaterThan(baseRetreatRate(2));
+  });
+
+  it("kuşatma geri çekilmesinde yalnız sahaya sokulan birliklerden kayıp verir", () => {
+    const army = {
+      heavy_infantry: 1_000,
+      archer: 500,
+      heavy_cavalry: 1_000,
+      carthaginian_war_elephant: 500
+    } as const;
+    const exposed = siegeAttackerRetreatExposure(
+      army,
+      { heavy_cavalry: 400 },
+      {},
+      0,
+      0
+    );
+    expect(exposed.carthaginian_war_elephant ?? 0).toBe(0);
+    expect(exposed.heavy_cavalry).toBe(400);
+
+    const result = applyRestrictedBattleLoss(army, exposed, 1_500);
+    expect(result.applied).toBe(1_500);
+    expect(result.remaining.carthaginian_war_elephant).toBe(500);
+    expect(result.remaining.heavy_cavalry).toBeGreaterThanOrEqual(600);
+  });
+
+  it("kuşatma alanına indirilmeyen süvari ve filler geri çekilme kaybından tamamen korunur", () => {
+    const army = { heavy_infantry: 1_000, heavy_cavalry: 1_000, carthaginian_war_elephant: 500 } as const;
+    const exposed = siegeAttackerRetreatExposure(army, {}, { ladder_group: 1 }, 30_000, 1_000);
+    const result = applyRestrictedBattleLoss(army, exposed, 800);
+
+    expect(result.remaining.heavy_infantry).toBe(200);
+    expect(result.remaining.heavy_cavalry).toBe(1_000);
+    expect(result.remaining.carthaginian_war_elephant).toBe(500);
   });
   it("oyun turu başına dört bombardıman hakkını sınırlar", () => {
     expect(MAX_BOMBARDMENTS_PER_GAME_TURN).toBe(4);

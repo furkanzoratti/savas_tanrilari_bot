@@ -6,7 +6,7 @@ import { number } from "../domain/format.js";
 import { armyService } from "../services/army-service.js";
 import { armyMusterService } from "../services/army-muster-service.js";
 import { GameError } from "../services/game-service.js";
-import { resolveCountry } from "./auth.js";
+import { assertCountryExecutiveAccess,resolveCountry } from "./auth.js";
 import { renderArmyEmbed } from "./army-embed.js";
 import { queueCharacterLog } from "./character-ui.js";
 import { batchDocumentEmbeds } from "./document.js";
@@ -25,6 +25,8 @@ export async function handleArmyCommand(interaction: ChatInputCommandInteraction
   const sub = interaction.options.getSubcommand();
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const country = await resolveCountry(interaction);
+
+  if(!["bilgi","toplama-emirleri"].includes(sub))await assertCountryExecutiveAccess(interaction,country.id);
 
   if (sub === "olustur") {
     const army = await armyService.create({

@@ -46,6 +46,14 @@ export interface TurnAnnouncementInput {
     warExhaustion:Array<{countryName:string;before:number;after:number;activeWars:number;newBattleLosses:number;raidsSuffered:number;settlementsLost:number}>;
     settlements:Array<{countryName:string;settlementName:string;prosperityBefore:number;prosperityAfter:number;rebellionBefore:number;rebellionAfter:number;unrestRisk:number;roll:number|null;factionType:string|null;factionName:string|null;outbreak:boolean;rebelPersonnel:number;rebelMilitaryPower:number}>;
   };
+  romanFamilyIncomeDetails?:Array<{familyName:string;businessIncome:number;consulStipend:number;total:number}>;
+  romanGovernorshipDetails?:Array<{countryName:string;familyName:string;governorName:string;settlementName:string;treasuryShare:number;influenceGain:number;completed:boolean}>;
+  romanElectionOpenedDetails?:Array<{countryName:string;sequence:number;closesTurn:number}>;
+  romanPolitics?:{
+    proposalResults:Array<{countryName:string;title:string;passed:boolean;yesWeight:number;noWeight:number;requiredWeight:number}>;
+    officeYields:Array<{familyName:string;characterName:string;officeLabel:string;treasury:number;influence:number;reputation:number;scandal:number;completed:boolean}>;
+    lawEffects:Array<{countryName:string;lawTitle:string;summary:string}>;
+  };
 }
 
 function fieldValue(lines: string[]): string {
@@ -176,6 +184,46 @@ export function turnAnnouncement(input: TurnAnnouncementInput): EmbedBuilder {
     value: fieldValue(input.assimilatedSettlementDetails.map((item) =>
       `• **${item.countryName} / ${item.settlementName}**${item.diplomatName ? ` — Diplomat: ${item.diplomatName}` : ""}`
     ))
+  });
+  if(input.romanFamilyIncomeDetails?.some((item)=>item.total>0))embed.addFields({
+    name:"🏛️ Roma Siyasi Aile Gelirleri",
+    value:fieldValue(input.romanFamilyIncomeDetails.filter((item)=>item.total>0).map((item)=>
+      `• **${item.familyName}** — +${item.total.toLocaleString("tr-TR")} Altın`+
+      ` • İşletmeler ${item.businessIncome.toLocaleString("tr-TR")}`+
+      (item.consulStipend?` • Konsül ödeneği ${item.consulStipend.toLocaleString("tr-TR")}`:"")
+    ))
+  });
+  if(input.romanGovernorshipDetails?.length)embed.addFields({
+    name:"🏺 Roma Valilik Getirileri",
+    value:fieldValue(input.romanGovernorshipDetails.map((item)=>
+      `• **${item.familyName} / ${item.settlementName}** — ${item.governorName} • +${item.influenceGain} nüfuz`+
+      (item.treasuryShare?` • +${item.treasuryShare.toLocaleString("tr-TR")} Altın`:` • Bu tur hazine payı yok`)+
+      (item.completed?" • Görev süresi tamamlandı":"")
+    ))
+  });
+  if(input.romanElectionOpenedDetails?.length)embed.addFields({
+    name:"🗳️ Roma Konsül Seçimleri",
+    value:fieldValue(input.romanElectionOpenedDetails.map((item)=>
+      `• **${item.countryName}** — ${item.sequence}. seçim açıldı • Oyların son turu: **Tur ${item.closesTurn}**`
+    ))
+  });
+  if(input.romanPolitics?.proposalResults.length)embed.addFields({
+    name:"🏛️ Roma Senatosu Sonuçları",
+    value:fieldValue(input.romanPolitics.proposalResults.map((item)=>
+      `• ${item.passed?"✅":"❌"} **${item.title}** — Evet ${item.yesWeight} • Hayır ${item.noWeight} • Gereken ${item.requiredWeight}`
+    ))
+  });
+  if(input.romanPolitics?.officeYields.length)embed.addFields({
+    name:"🏺 Roma Makamları",
+    value:fieldValue(input.romanPolitics.officeYields.map((item)=>
+      `• **${item.characterName} / ${item.officeLabel}** — ${item.familyName} • +${item.influence} nüfuz`+
+      (item.treasury?` • +${item.treasury.toLocaleString("tr-TR")} Altın`:"")+
+      (item.reputation?` • +${item.reputation} itibar`:"")+(item.scandal?` • ${item.scandal} skandal`:"")+(item.completed?" • Görev tamamlandı":"")
+    ))
+  });
+  if(input.romanPolitics?.lawEffects.length)embed.addFields({
+    name:"📜 Yürürlükteki Roma Yasaları",
+    value:fieldValue(input.romanPolitics.lawEffects.map((item)=>`• **${item.lawTitle}** — ${item.summary}`))
   });
   if (input.christianSpreadDetails?.length) embed.addFields({
     name:"✝️ Hristiyan Sınır Yayılımı",

@@ -7,6 +7,7 @@ describe("GM panel audit presenter", () => {
     expect(auditActionLabel("battle.army.add")).toBe("Savaşa ordu eklendi");
     expect(auditActionLabel("admin.panel.battle.participant.add")).toBe("Aktif savaşa devlet eklendi");
     expect(auditActionLabel("admin.panel.battle.army.add")).toBe("Aktif savaşa ordu eklendi");
+    expect(auditActionLabel("admin.panel.battle.fleet.add")).toBe("Aktif deniz savaşına filo eklendi");
     expect(auditActionLabel("admin.panel.battle.mercenary.add")).toBe("Aktif savaşa paralı asker eklendi");
     expect(auditActionLabel("admin.panel.battle.roster.unit.remove")).toBe("Savaş kadrosundan birlik çıkarıldı");
     expect(auditActionLabel("admin.panel.battle.roster.clear")).toBe("Manuel savaş kadrosu temizlendi");

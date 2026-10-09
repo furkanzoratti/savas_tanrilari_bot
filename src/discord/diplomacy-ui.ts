@@ -411,7 +411,7 @@ export async function handleDiplomacyCommand(interaction: ChatInputCommandIntera
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     await diplomacyService.setChannel({ guildId: interaction.guildId, actorId: interaction.user.id, channelId: action === "set" ? channel!.id : null });
     await interaction.editReply(action === "set"
-      ? `✅ İttifak, pakt ve liman erişimi teklifleri artık ${channel} kanalında yürütülecek. Davetler, katılımlar ve bilgi kartları herkese açık yayımlanır.`
+      ? `✅ İttifak, pakt, liman erişimi ve bozkır haracı teklifleri artık ${channel} kanalında yürütülecek. Davetler, katılımlar ve bilgi kartları herkese açık yayımlanır.`
       : "✅ Diplomasi kanalı kapatıldı. Yeniden kanal seçilinceye kadar diplomasi teklifleri durduruldu.");
     return true;
   }
