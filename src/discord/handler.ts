@@ -107,6 +107,8 @@ interface CharacterAutomationResult {
   dynastyEvents: number;
   dynastyDeathChecks: number;
   dynastyDeathLogsPublished: number;
+  dynastyNpcBirths: number;
+  dynastyNpcMarriages: number;
   warnings: string[];
 }
 
@@ -178,6 +180,8 @@ export async function processDueCharacterSystems(
   let dynastyEvents=0;
   let dynastyDeathChecks=0;
   let dynastyDeathLogsPublished=0;
+  let dynastyNpcBirths=0;
+  let dynastyNpcMarriages=0;
   let dynastyWarnings:string[]=[];
   try{
     const dynasty=await processDynastyAutomation(client,guildId,turn);
@@ -185,6 +189,8 @@ export async function processDueCharacterSystems(
     dynastyEvents=dynasty.events.length;
     dynastyDeathChecks=dynasty.deathChecks;
     dynastyDeathLogsPublished=dynasty.deathLogsPublished;
+    dynastyNpcBirths=dynasty.npcBirths;
+    dynastyNpcMarriages=dynasty.npcMarriages;
     dynastyWarnings=dynasty.failures.map((failure)=>"Hanedan: "+failure);
     if(dynasty.deathLogWarning)dynastyWarnings.push(dynasty.deathLogWarning);
   }catch(error){
@@ -196,7 +202,7 @@ export async function processDueCharacterSystems(
     espionagePublished: espionage.published,
     characterEvents: academy.events,
     characterPublished: academy.published,
-    dynastyProcessed,dynastyEvents,dynastyDeathChecks,dynastyDeathLogsPublished,
+    dynastyProcessed,dynastyEvents,dynastyDeathChecks,dynastyDeathLogsPublished,dynastyNpcBirths,dynastyNpcMarriages,
     warnings: [espionage.warning,academy.warning,...dynastyWarnings].filter((warning): warning is string => Boolean(warning))
   };
 }
@@ -215,6 +221,7 @@ async function handleCharacterTurnRecovery(interaction: ChatInputCommandInteract
     `🕵️ Sonuçlandırılan vadesi gelmiş casus görevi: **${result.espionageResolved}** • Loglanan: **${result.espionagePublished}**`,
     `🎓 İşlenen Tüccar/Diplomat etkinliği: **${result.characterEvents}** • Loglanan/kuyruktan yayımlanan: **${result.characterPublished}**`,
     `👑 İşlenen hanedan: **${result.dynastyProcessed}** • Hanedan olayı: **${result.dynastyEvents}**`,
+    `🤖 NPC hanedan doğumu: **${result.dynastyNpcBirths}** • Otomatik NPC evliliği: **${result.dynastyNpcMarriages}**`,
     `⚰️ Atılan ölüm zarı: **${result.dynastyDeathChecks}** • Loglanan/kuyruktan yayımlanan: **${result.dynastyDeathLogsPublished}**`,
     result.warnings.length ? `\n⚠️ ${result.warnings.join("\n⚠️ ")}` : "\nBütün işlemler tamamlandı. Komut tekrar kullanılırsa tamamlanmış görevler ikinci kez uygulanmaz."
   ].join("\n"));
@@ -462,12 +469,15 @@ async function handleTurn(interaction: ChatInputCommandInteraction): Promise<voi
   await interaction.deferReply();
   let embeds: EmbedBuilder[];
   let characterAutomationWarnings:string[] = [];
+  let npcDynastySummary:string|null = null;
   let movementSummary: Awaited<ReturnType<typeof gameService.stopTurn>> | null = null;
   if (sub === "atla") {
     const result = await gameService.advanceTurn(interaction.guildId, interaction.user.id);
     movementSummary = result.movement;
     const characterAutomation = await processDueCharacterSystems(interaction.client, interaction.guildId, result.turn, result.acquisition);
     characterAutomationWarnings = characterAutomation.warnings;
+    if(characterAutomation.dynastyNpcBirths||characterAutomation.dynastyNpcMarriages)npcDynastySummary=
+      `🤖 **NPC hanedan otomasyonu:** ${characterAutomation.dynastyNpcBirths} doğum • ${characterAutomation.dynastyNpcMarriages} evlilik`;
     if(interaction.guild){
       for(const detail of result.lastStandDetails){
         if(detail.kind==="FAILED"&&detail.discordRoleId){
@@ -534,6 +544,7 @@ async function handleTurn(interaction: ChatInputCommandInteraction): Promise<voi
       flags: MessageFlags.Ephemeral
     });
   }
+  if(npcDynastySummary)await interaction.followUp({content:npcDynastySummary,flags:MessageFlags.Ephemeral});
   if (characterAutomationWarnings.length) {
     await interaction.followUp({
       content:"⚠️ **Yalnızca yöneticiye görünen karakter otomasyonu uyarısı:**\n"+characterAutomationWarnings.join("\n⚠️ "),
@@ -1057,6 +1068,12 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
     await interaction.editReply({ embeds: [announcementCards[0]!], files: [new AttachmentBuilder(TURN_BANNER_PATH, { name: TURN_BANNER_NAME })] });
     for (const extraEmbed of announcementCards.slice(1)) {
       await interaction.followUp({ embeds: [extraEmbed], flags: MessageFlags.Ephemeral });
+    }
+    if(characterAutomation.dynastyNpcBirths||characterAutomation.dynastyNpcMarriages){
+      await interaction.followUp({
+        content:`🤖 **NPC hanedan otomasyonu:** ${characterAutomation.dynastyNpcBirths} doğum • ${characterAutomation.dynastyNpcMarriages} evlilik`,
+        flags:MessageFlags.Ephemeral
+      });
     }
     if (characterAutomation.warnings.length) {
       await interaction.followUp({content:"⚠️ **Karakter otomasyonu:** "+characterAutomation.warnings.join("\n⚠️ "),ephemeral:true});

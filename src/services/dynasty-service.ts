@@ -1,5 +1,7 @@
 import {randomInt} from "node:crypto";
 import {pool,withTransaction,type DbClient} from "../db/pool.js";
+import type {CultureGroup} from "../domain/cultures.js";
+import {availableCulturalDynastyName} from "../domain/dynasty-names.js";
 import {
   BIRTH_ATTEMPT_COOLDOWN_TURNS,MATERNAL_ILLNESS_COOLDOWN_TURNS,
   automaticDynastyRelations,
@@ -35,6 +37,7 @@ export interface DynastyTurnEvent{
 
 export interface DynastyTurnResult{
   processed:number;events:DynastyTurnEvent[];deathChecks:number;failures:string[];
+  npcBirths:number;npcMarriages:number;
 }
 
 export interface DynastyDeathLogBatch{
@@ -305,6 +308,316 @@ async function killMember(
   const ageText=member.age===null?"yaşı bilinmiyorken":member.age+" yaşında";
   eventTexts.push("⚰️ **"+countryName+"** • **"+member.name+"**, "+ageText+" hayatını kaybetti. Sebep: **"+reason+"**.");
   if(member.is_monarch||member.is_heir)await reconcileSuccession(client,dynastyId,turn,countryName,eventTexts);
+}
+
+interface NpcDynastyCountry{
+  country_id:string;country_name:string;dynasty_id:string;culture_group:CultureGroup;
+}
+
+interface NpcDynastyLocation{
+  country_id:string;q:number;r:number;region_key:string|null;
+}
+
+interface NpcMarriageCandidate{
+  id:string;dynasty_id:string;country_id:string;country_name:string;dynasty_name:string;
+  name:string;gender:DynastyGender;age:number;is_monarch:boolean;
+  birth_dynasty_id:string|null;mother_id:string|null;father_id:string|null;
+}
+
+interface NpcDynastyAutomationResult{
+  births:number;marriages:number;events:DynastyTurnEvent[];
+}
+
+const NPC_MARRIAGE_MAX_HEX_DISTANCE=6;
+
+function axialDistance(left:NpcDynastyLocation,right:NpcDynastyLocation):number{
+  const dq=left.q-right.q;
+  const dr=left.r-right.r;
+  return Math.max(Math.abs(dq),Math.abs(dr),Math.abs(dq+dr));
+}
+
+function nearbyNpcCountries(left:NpcDynastyLocation[],right:NpcDynastyLocation[]):{nearby:boolean;distance:number}{
+  if(!left.length||!right.length)return{nearby:false,distance:Number.POSITIVE_INFINITY};
+  let distance=Number.POSITIVE_INFINITY;
+  for(const first of left)for(const second of right)distance=Math.min(distance,axialDistance(first,second));
+  const sharedRegion=left.some((first)=>first.region_key&&right.some((second)=>second.region_key===first.region_key));
+  return{nearby:sharedRegion||distance<=NPC_MARRIAGE_MAX_HEX_DISTANCE,distance};
+}
+
+async function nextNpcChildName(
+  client:DbClient,dynastyId:string,culture:CultureGroup,gender:DynastyGender
+):Promise<string>{
+  const names=(await client.query<{name:string}>("SELECT name FROM dynasty_members WHERE dynasty_id=$1",[dynastyId])).rows.map((row)=>row.name);
+  return availableCulturalDynastyName(culture,gender,names,(maximum)=>randomInt(0,maximum));
+}
+
+async function insertNpcChild(input:{
+  client:DbClient;country:NpcDynastyCountry;turn:number;mother:DynastyMemberView;father:DynastyMemberView;
+  gender:DynastyGender;attemptRoll:number;modifier:number;genderRoll:number;
+  complicationRoll:number;complication:"DEATH"|"ILLNESS"|"HEALTHY";childRelation:string;
+}):Promise<{childId:string;childName:string;eventTexts:string[]}>{
+  const {client,country,turn,mother,father}=input;
+  const childName=await nextNpcChildName(client,country.dynasty_id,country.culture_group,input.gender);
+  const rank=Number((await client.query<{rank:number}>(
+    "SELECT COALESCE(MAX(succession_rank),0)::integer+1 AS rank FROM dynasty_members WHERE dynasty_id=$1",
+    [country.dynasty_id]
+  )).rows[0]?.rank??1);
+  const child=(await client.query<{id:string}>(
+    `INSERT INTO dynasty_members(
+       dynasty_id,name,gender,age,title,relation,succession_rank,mother_id,father_id,born_turn,birth_dynasty_id
+     ) VALUES($1,$2,$3,0,$4,$5,$6,$7,$8,$9,$1) RETURNING id`,
+    [country.dynasty_id,childName,input.gender,input.gender==="MALE"?"Prens":"Prenses",input.childRelation,
+      rank,mother.id,father.id,turn]
+  )).rows[0]!;
+  await client.query(
+    `INSERT INTO dynasty_birth_sessions(
+       dynasty_id,initiated_by,parent_member_id,mother_id,father_id,game_turn,
+       attempt_roll,age_modifier,gender_roll,gender,complication_roll,complication,child_relation,status,child_id,completed_at
+     ) VALUES($1,'system:npc-dynasty',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'COMPLETED',$13,NOW())`,
+    [country.dynasty_id,father.id,mother.id,father.id,turn,input.attemptRoll,input.modifier,input.genderRoll,
+      input.gender,input.complicationRoll,input.complication,input.childRelation,child.id]
+  );
+  await addEvent(client,country.dynasty_id,turn,"BIRTH",child.id,{
+    childName,gender:input.gender,motherName:mother.name,fatherName:father.name,parentMemberId:father.id,
+    attemptRoll:input.attemptRoll,modifier:input.modifier,genderRoll:input.genderRoll,
+    complicationRoll:input.complicationRoll,complication:input.complication,automaticNpc:true
+  });
+  const eventTexts=["👶 **"+country.country_name+"** • **"+mother.name+"** ile **"+father.name+"** çiftinin "+
+    (input.gender==="MALE"?"oğlu":"kızı")+" **"+childName+"** dünyaya geldi."];
+  if(input.complication==="ILLNESS"){
+    await client.query(
+      "UPDATE dynasty_members SET health='SICK',sick_until_turn=$1,updated_at=NOW() WHERE id=$2",
+      [turn+MATERNAL_ILLNESS_COOLDOWN_TURNS,mother.id]
+    );
+    await addEvent(client,country.dynasty_id,turn,"MATERNAL_ILLNESS",mother.id,{
+      name:mother.name,blockedThroughTurn:turn+MATERNAL_ILLNESS_COOLDOWN_TURNS,automaticNpc:true
+    });
+    eventTexts.push("🩺 **"+mother.name+"** doğum komplikasyonu nedeniyle hastalandı.");
+  }else if(input.complication==="DEATH"){
+    await killMember(client,country.dynasty_id,mother,turn,"Doğum komplikasyonu",country.country_name,eventTexts);
+  }
+  await reconcileSuccession(client,country.dynasty_id,turn,country.country_name,eventTexts);
+  return{childId:child.id,childName,eventTexts};
+}
+
+async function completePendingNpcBirths(
+  client:DbClient,country:NpcDynastyCountry,turn:number
+):Promise<{births:number;eventTexts:string[]}>{
+  type Pending={
+    id:string;game_turn:number;mother_id:string;father_id:string;gender:DynastyGender;attempt_roll:number;
+    age_modifier:number;gender_roll:number;complication_roll:number;complication:"DEATH"|"ILLNESS"|"HEALTHY";
+    child_relation:string;
+  };
+  const pending=(await client.query<Pending>(
+    `SELECT * FROM dynasty_birth_sessions WHERE dynasty_id=$1 AND status='PENDING_NAME'
+      ORDER BY created_at LIMIT 1 FOR UPDATE`,[country.dynasty_id]
+  )).rows[0];
+  if(!pending)return{births:0,eventTexts:[]};
+  const mother=await memberForDynasty(client,country.dynasty_id,pending.mother_id,true);
+  const father=await memberForDynasty(client,country.dynasty_id,pending.father_id,true);
+  const childName=await nextNpcChildName(client,country.dynasty_id,country.culture_group,pending.gender);
+  const rank=Number((await client.query<{rank:number}>(
+    "SELECT COALESCE(MAX(succession_rank),0)::integer+1 AS rank FROM dynasty_members WHERE dynasty_id=$1",
+    [country.dynasty_id]
+  )).rows[0]?.rank??1);
+  const child=(await client.query<{id:string}>(
+    `INSERT INTO dynasty_members(
+       dynasty_id,name,gender,age,title,relation,succession_rank,mother_id,father_id,born_turn,birth_dynasty_id
+     ) VALUES($1,$2,$3,0,$4,$5,$6,$7,$8,$9,$1) RETURNING id`,
+    [country.dynasty_id,childName,pending.gender,pending.gender==="MALE"?"Prens":"Prenses",pending.child_relation,
+      rank,mother.id,father.id,pending.game_turn]
+  )).rows[0]!;
+  await client.query(
+    "UPDATE dynasty_birth_sessions SET status='COMPLETED',child_id=$1,completed_at=NOW() WHERE id=$2",
+    [child.id,pending.id]
+  );
+  await addEvent(client,country.dynasty_id,pending.game_turn,"BIRTH",child.id,{
+    childName,gender:pending.gender,motherName:mother.name,fatherName:father.name,
+    attemptRoll:pending.attempt_roll,modifier:pending.age_modifier,genderRoll:pending.gender_roll,
+    complicationRoll:pending.complication_roll,complication:pending.complication,automaticNpcName:true
+  });
+  const texts=["👶 **"+country.country_name+"** hanesinde adı bekleyen çocuk kültürel olarak **"+childName+"** adıyla kaydedildi."];
+  await reconcileSuccession(client,country.dynasty_id,turn,country.country_name,texts);
+  return{births:1,eventTexts:texts};
+}
+
+async function processNpcBirthsForCountry(
+  client:DbClient,country:NpcDynastyCountry,turn:number
+):Promise<{births:number;eventTexts:string[]}>{
+  let births=0;
+  const eventTexts:string[]=[];
+  const completed=await completePendingNpcBirths(client,country,turn);
+  births+=completed.births;
+  eventTexts.push(...completed.eventTexts);
+  const monarch=(await client.query<{id:string}>(
+    "SELECT id FROM dynasty_members WHERE dynasty_id=$1 AND status='ALIVE' AND is_monarch=TRUE LIMIT 1",
+    [country.dynasty_id]
+  )).rows[0];
+  if(!monarch)return{births,eventTexts};
+  const couples=(await client.query<{mother:DynastyMemberView;father:DynastyMemberView}>(
+    `SELECT to_jsonb(mother) AS mother,to_jsonb(father) AS father
+       FROM dynasty_members mother
+       JOIN dynasty_members father ON father.id=mother.spouse_id AND father.spouse_id=mother.id
+      WHERE mother.dynasty_id=$1 AND father.dynasty_id=$1
+        AND mother.gender='FEMALE' AND father.gender='MALE'
+        AND mother.status='ALIVE' AND father.status='ALIVE'
+        AND mother.age BETWEEN 18 AND 44
+        AND mother.health='HEALTHY'
+      ORDER BY mother.is_monarch DESC,father.is_monarch DESC,mother.age,mother.id
+      FOR UPDATE OF mother,father`,[country.dynasty_id]
+  )).rows;
+  for(const couple of couples){
+    const mother=couple.mother;
+    const father=couple.father;
+    const [firstMemberId,secondMemberId]=orderedDynastyCoupleIds(mother.id,father.id);
+    const prior=(await client.query<{last_attempt_turn:number}>(
+      `SELECT last_attempt_turn FROM dynasty_couple_birth_attempts
+        WHERE dynasty_id=$1 AND first_member_id=$2 AND second_member_id=$3 FOR UPDATE`,
+      [country.dynasty_id,firstMemberId,secondMemberId]
+    )).rows[0];
+    if(prior?.last_attempt_turn===turn)continue;
+    await client.query(
+      `INSERT INTO dynasty_couple_birth_attempts(dynasty_id,first_member_id,second_member_id,last_attempt_turn)
+       VALUES($1,$2,$3,$4)
+       ON CONFLICT(dynasty_id,first_member_id,second_member_id)
+       DO UPDATE SET last_attempt_turn=EXCLUDED.last_attempt_turn,updated_at=NOW()`,
+      [country.dynasty_id,firstMemberId,secondMemberId,turn]
+    );
+    await client.query("UPDATE dynasties SET last_birth_attempt_turn=$1,updated_at=NOW() WHERE id=$2",[turn,country.dynasty_id]);
+    const modifier=birthAgeModifier(Number(mother.age));
+    if(modifier===null)continue;
+    const attemptRoll=randomInt(1,21);
+    if(!birthAttemptSucceeded(Number(mother.age),attemptRoll)){
+      await addEvent(client,country.dynasty_id,turn,"BIRTH_ATTEMPT_FAILED",mother.id,{
+        motherName:mother.name,fatherName:father.name,parentMemberId:father.id,roll:attemptRoll,modifier,automaticNpc:true
+      });
+      continue;
+    }
+    const genderRoll=randomInt(1,3);
+    const gender=newbornGender(genderRoll);
+    const complicationRoll=randomInt(1,21);
+    const complication=birthComplication(complicationRoll);
+    const directMonarchChild=mother.mother_id===monarch.id||mother.father_id===monarch.id||
+      father.mother_id===monarch.id||father.father_id===monarch.id;
+    const childRelation=mother.id===monarch.id||father.id===monarch.id
+      ?"Hükümdarın çocuğu"
+      :directMonarchChild?"Hükümdarın torunu":"Hanedan üyesinin çocuğu";
+    const created=await insertNpcChild({
+      client,country,turn,mother,father,gender,attemptRoll,modifier,genderRoll,
+      complicationRoll,complication,childRelation
+    });
+    births+=1;
+    eventTexts.push(...created.eventTexts);
+  }
+  return{births,eventTexts};
+}
+
+async function processNpcMarriages(
+  client:DbClient,guildId:string,turn:number,countries:NpcDynastyCountry[]
+):Promise<{marriages:number;events:DynastyTurnEvent[]}>{
+  if(countries.length<2)return{marriages:0,events:[]};
+  const locations=(await client.query<NpcDynastyLocation>(
+    `SELECT settlement.country_id,hex.q,hex.r,hex.region_key
+       FROM settlements settlement
+       JOIN settlement_map_positions position ON position.settlement_id=settlement.id
+       JOIN map_hexes hex ON hex.id=position.hex_id
+      WHERE hex.guild_id=$1 AND settlement.country_id=ANY($2::uuid[])`,
+    [guildId,countries.map((country)=>country.country_id)]
+  )).rows;
+  const locationsByCountry=new Map<string,NpcDynastyLocation[]>();
+  for(const location of locations){
+    const rows=locationsByCountry.get(location.country_id)??[];
+    rows.push(location);locationsByCountry.set(location.country_id,rows);
+  }
+  const candidates=(await client.query<NpcMarriageCandidate>(
+    `SELECT member.id,member.dynasty_id,dynasty.country_id,country.name AS country_name,dynasty.name AS dynasty_name,
+            member.name,member.gender,member.age,member.is_monarch,member.birth_dynasty_id,member.mother_id,member.father_id
+       FROM dynasty_members member
+       JOIN dynasties dynasty ON dynasty.id=member.dynasty_id
+       JOIN countries country ON country.id=dynasty.country_id
+      WHERE dynasty.guild_id=$1 AND country.status='ACTIVE' AND COALESCE(country.is_system_faction,FALSE)=FALSE
+        AND NOT EXISTS(SELECT 1 FROM country_members player WHERE player.country_id=country.id)
+        AND member.status='ALIVE' AND member.spouse_id IS NULL AND member.age>=$2
+      ORDER BY country.name,member.age DESC,member.name`,[guildId,MINIMUM_MARRIAGE_AGE]
+  )).rows.map((row)=>({...row,age:Number(row.age)}));
+  const possible:Array<{man:NpcMarriageCandidate;woman:NpcMarriageCandidate;score:number}>=[];
+  for(const man of candidates.filter((member)=>member.gender==="MALE")){
+    for(const woman of candidates.filter((member)=>member.gender==="FEMALE"&&!member.is_monarch)){
+      if(man.country_id===woman.country_id||Math.abs(man.age-woman.age)>25)continue;
+      if(man.birth_dynasty_id&&woman.birth_dynasty_id&&man.birth_dynasty_id===woman.birth_dynasty_id)continue;
+      if(man.mother_id&&[woman.mother_id,woman.father_id].includes(man.mother_id))continue;
+      if(man.father_id&&[woman.mother_id,woman.father_id].includes(man.father_id))continue;
+      const proximity=nearbyNpcCountries(locationsByCountry.get(man.country_id)??[],locationsByCountry.get(woman.country_id)??[]);
+      if(!proximity.nearby)continue;
+      possible.push({man,woman,score:proximity.distance*100+Math.abs(man.age-woman.age)*3+randomInt(0,31)});
+    }
+  }
+  possible.sort((left,right)=>left.score-right.score);
+  const usedCountries=new Set<string>();
+  const usedMembers=new Set<string>();
+  const events:DynastyTurnEvent[]=[];
+  let marriages=0;
+  for(const match of possible){
+    if(usedCountries.has(match.man.country_id)||usedCountries.has(match.woman.country_id)||
+      usedMembers.has(match.man.id)||usedMembers.has(match.woman.id))continue;
+    await lockMarriageMembers(client,[match.man.id,match.woman.id]);
+    const man=await memberAcrossGuild(client,guildId,match.man.id,true);
+    const woman=await memberAcrossGuild(client,guildId,match.woman.id,true);
+    if(!dynastyMemberCanMarry(man.age,man.status,man.spouse_id)||
+      !dynastyMemberCanMarry(woman.age,woman.status,woman.spouse_id))continue;
+    const proposal=(await client.query<{id:string}>(
+      `INSERT INTO dynasty_marriage_proposals(
+         guild_id,proposer_country_id,target_country_id,proposer_member_id,target_member_id,
+         status,created_turn,resolved_turn,created_by,resolved_by,resolved_at
+       ) VALUES($1,$2,$3,$4,$5,'PENDING',$6,NULL,'system:npc-dynasty',NULL,NULL) RETURNING id`,
+      [guildId,man.country_id,woman.country_id,man.id,woman.id,turn]
+    )).rows[0]!;
+    await establishMarriage(client,man,woman,turn,"system:npc-dynasty","NPC_AUTO_ACCEPTED_PROPOSAL");
+    await client.query(
+      `UPDATE dynasty_marriage_proposals
+          SET status='ACCEPTED',resolved_turn=$1,resolved_by='system:npc-dynasty',resolved_at=NOW()
+        WHERE id=$2`,[turn,proposal.id]
+    );
+    const text="💍 **"+man.country_name+"** hanesinden **"+man.name+"** ile **"+woman.country_name+
+      "** hanesinden **"+woman.name+"**, komşu NPC hanedanları arasında yapılan otomatik teklifle evlendi.";
+    events.push({dynastyId:man.dynasty_id,countryName:man.country_name,text});
+    events.push({dynastyId:woman.dynasty_id,countryName:woman.country_name,text});
+    usedCountries.add(man.country_id);usedCountries.add(woman.country_id);
+    usedMembers.add(man.id);usedMembers.add(woman.id);
+    marriages+=1;
+  }
+  return{marriages,events};
+}
+
+async function processNpcDynastyTurn(client:DbClient,guildId:string,turn:number):Promise<NpcDynastyAutomationResult|null>{
+  const claimed=await client.query(
+    `INSERT INTO dynasty_npc_turn_resolutions(guild_id,game_turn)
+     VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING guild_id`,[guildId,turn]
+  );
+  if(!claimed.rowCount)return null;
+  const countries=(await client.query<NpcDynastyCountry>(
+    `SELECT country.id AS country_id,country.name AS country_name,dynasty.id AS dynasty_id,
+            country.primary_culture_group AS culture_group
+       FROM countries country
+       JOIN dynasties dynasty ON dynasty.country_id=country.id
+      WHERE country.guild_id=$1 AND country.status='ACTIVE' AND COALESCE(country.is_system_faction,FALSE)=FALSE
+        AND NOT EXISTS(SELECT 1 FROM country_members player WHERE player.country_id=country.id)
+      ORDER BY country.name FOR UPDATE OF dynasty`,[guildId]
+  )).rows;
+  const events:DynastyTurnEvent[]=[];
+  let births=0;
+  for(const country of countries){
+    const result=await processNpcBirthsForCountry(client,country,turn);
+    births+=result.births;
+    events.push(...result.eventTexts.map((text)=>({dynastyId:country.dynasty_id,countryName:country.country_name,text})));
+  }
+  const marriageResult=await processNpcMarriages(client,guildId,turn,countries);
+  events.push(...marriageResult.events);
+  await client.query(
+    "UPDATE dynasty_npc_turn_resolutions SET details=$1::jsonb WHERE guild_id=$2 AND game_turn=$3",
+    [JSON.stringify({births,marriages:marriageResult.marriages,events}),guildId,turn]
+  );
+  return{births,marriages:marriageResult.marriages,events};
 }
 
 async function loadViewByClause(column:"country_id"|"id",value:string):Promise<DynastyView|null>{
@@ -904,6 +1217,8 @@ export const dynastyService={
     const failures:string[]=[];
     let processed=0;
     let deathChecks=0;
+    let npcBirths=0;
+    let npcMarriages=0;
     for(const dynasty of dynasties){
       try{
         const resolution=await withTransaction(async(client)=>{
@@ -956,6 +1271,16 @@ export const dynastyService={
         failures.push(dynasty.country_name+": "+(error instanceof Error?error.message:String(error)));
       }
     }
-    return{processed,events,deathChecks,failures};
+    try{
+      const npc=await withTransaction((client)=>processNpcDynastyTurn(client,guildId,turn));
+      if(npc){
+        npcBirths=npc.births;
+        npcMarriages=npc.marriages;
+        events.push(...npc.events);
+      }
+    }catch(error){
+      failures.push("NPC hanedan otomasyonu: "+(error instanceof Error?error.message:String(error)));
+    }
+    return{processed,events,deathChecks,failures,npcBirths,npcMarriages};
   }
 };

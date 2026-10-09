@@ -114,6 +114,6 @@ export function renderRomanSenateChart(families:Pick<RomanFamilyView,"name"|"sen
 export function romanSenateLegend(families:Pick<RomanFamilyView,"name"|"senateSeats">[]):string{
   return families.map((family,index)=>{
     const color=romanFamilyColor(family.name,index);
-    return `• **${family.name}** — ${family.senateSeats} koltuk • ${color.label} \`${color.hex}\``;
+    return `• **${family.name}** — ${family.senateSeats} koltuk • ${color.label}`;
   }).join("\n");
 }

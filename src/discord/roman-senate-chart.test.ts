@@ -17,5 +17,6 @@ describe("Dinamik Roma Senatosu görseli",()=>{
   it("aile renklerini sabit tutar ve açıklamada koltukları listeler",()=>{
     expect(romanFamilyColor("Scipio Ailesi").hex).toBe("#d4af37");
     expect(romanSenateLegend(families as never)).toContain("Magnus Ailesi** — 18 koltuk");
+    expect(romanSenateLegend(families as never)).not.toContain("#d4af37");
   });
 });

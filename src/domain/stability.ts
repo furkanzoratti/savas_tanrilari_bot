@@ -32,6 +32,9 @@ export interface RebellionPressureInput {
   curiaLevel: number;
   innsBathsLevel: number;
   hasPantheon: boolean;
+  hasAmber?: boolean;
+  stabilityRiskReduction?: number;
+  stabilityRiskReductionLabel?: string;
 }
 
 export interface RebellionPressureAssessment {
@@ -75,6 +78,8 @@ export function assessRebellionPressure(input: RebellionPressureInput): Rebellio
   add("Curia", -Math.max(0, input.curiaLevel) * 2);
   add("Hanlar ve Hamamlar", -(input.innsBathsLevel >= 3 ? 10 : input.innsBathsLevel === 2 ? 6 : input.innsBathsLevel === 1 ? 3 : 0));
   add("Panteon", input.hasPantheon ? -10 : 0);
+  add("Kehribar", input.hasAmber ? -10 : 0);
+  add(input.stabilityRiskReductionLabel?.trim()||"Ülke etkisi",-Math.max(0,Math.floor(input.stabilityRiskReduction??0)));
 
   const scores: Record<RebelFactionType, number> = {
     POPULAR: 5 + (input.unrestActive ? 15 : 0) + (input.strictTaxation ? 10 : 0),

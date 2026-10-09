@@ -68,4 +68,17 @@ describe("stability domain",()=>{
     const projection=projectRebellionTurn({before:65,active:false,immune:true,pressure:{eligible:true,risk:75}});
     expect(projection).toEqual({onSuccess:45,onFailure:45,expected:45,successChance:0});
   });
+
+  it("applies amber and country stability reductions to persistent rebellion risk",()=>{
+    const pressure=assessRebellionPressure({
+      prosperity:25,unrestActive:true,conquered:false,foreignCulture:false,activeMissionary:false,
+      strictTaxation:false,epidemicActive:false,famineActive:false,besieged:false,ruinStage:0,
+      slaveCampLevel:0,slaveRatio:0,recentRaid:false,warExhaustion:0,curiaLevel:0,
+      innsBathsLevel:0,hasPantheon:false,hasAmber:true,stabilityRiskReduction:10,
+      stabilityRiskReductionLabel:"Büyük Britanya"
+    });
+    expect(pressure.risk).toBe(5);
+    expect(pressure.factors).toContainEqual({label:"Kehribar",adjustment:-10});
+    expect(pressure.factors).toContainEqual({label:"Büyük Britanya",adjustment:-10});
+  });
 });

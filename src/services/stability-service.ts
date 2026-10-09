@@ -7,6 +7,7 @@ import {
 } from "../domain/stability.js";
 import {RELIGIONS,type ReligionKey} from "../domain/religions.js";
 import { rebelLeaderProfile } from "../domain/rebel-leaders.js";
+import {FORMABLE_COUNTRIES,formableModifiers,type FormableCountryKey} from "../domain/formable-countries.js";
 
 interface CountryStabilityRow {
   id: string; name: string; primary_culture_group: string; war_exhaustion: number;
@@ -21,6 +22,7 @@ interface SettlementStabilityRow {
   recent_uprising_until_turn: number | null; ruin_stage: number; is_conquered: boolean;
   unrest_active: boolean; rebellion_active: boolean; epidemic_active: boolean; famine_active: boolean;
   tax_rate_percent: number; war_exhaustion: number; primary_culture_group: string;
+  active_formable_key:FormableCountryKey|null;resource_type:string;imported_amber:boolean;
   religion_key:ReligionKey;
   live_faction_id: string | null;
 }
@@ -126,7 +128,16 @@ export async function processStabilityTurn(client: DbClient, guildId: string, ne
             s.prosperity,s.rebellion_progress,s.rebellion_faction_type,s.rebellion_name_override,
             s.rebellion_personnel_override,s.recent_uprising_until_turn,
             s.ruin_stage,s.is_conquered,s.unrest_active,s.rebellion_active,s.epidemic_active,s.famine_active,
-            s.tax_rate_percent,c.war_exhaustion,c.primary_culture_group,s.religion_key,
+            s.tax_rate_percent,c.war_exhaustion,c.primary_culture_group,c.active_formable_key,s.resource_type,s.religion_key,
+            EXISTS(
+              SELECT 1 FROM trade_agreements trade
+              JOIN settlements partner ON partner.id=CASE
+                WHEN trade.proposer_settlement_id=s.id THEN trade.receiver_settlement_id
+                ELSE trade.proposer_settlement_id END
+              WHERE trade.guild_id=$1 AND trade.status='ACTIVE'
+                AND (trade.proposer_settlement_id=s.id OR trade.receiver_settlement_id=s.id)
+                AND partner.resource_type='AMBER'
+            ) AS imported_amber,
             (SELECT rf.id FROM rebel_factions rf WHERE rf.settlement_id=s.id
               AND rf.status IN ('ORGANIZING','ACTIVE','OCCUPYING') LIMIT 1) AS live_faction_id
        FROM settlements s JOIN countries c ON c.id=s.country_id
@@ -162,6 +173,7 @@ export async function processStabilityTurn(client: DbClient, guildId: string, ne
     )).rowCount);
     const slaveRatio = Number(settlement.slave_population)/Math.max(1,Number(settlement.population)+Number(settlement.slave_population));
     const foreignCulture = settlement.culture_group!==settlement.primary_culture_group;
+    const stabilityReduction=formableModifiers(settlement.active_formable_key).stabilityRiskReduction??0;
     const pressure=assessRebellionPressure({
       prosperity:Number(settlement.prosperity),unrestActive:settlement.unrest_active,conquered:settlement.is_conquered,
       foreignCulture,activeMissionary:Boolean(activeMissionary),strictTaxation:policies.has("STRICT_TAXATION"),
@@ -169,7 +181,11 @@ export async function processStabilityTurn(client: DbClient, guildId: string, ne
       ruinStage:Number(settlement.ruin_stage),slaveCampLevel:buildings.get("slave_camp")??0,slaveRatio,
       recentRaid:Boolean(landRaid)||navalRaid,warExhaustion:Number(settlement.war_exhaustion),
       curiaLevel:buildings.get("curia")??0,innsBathsLevel:buildings.get("inns_baths")??0,
-      hasPantheon:buildings.has("pantheon")
+      hasPantheon:buildings.has("pantheon"),hasAmber:settlement.resource_type==="AMBER"||settlement.imported_amber,
+      stabilityRiskReduction:stabilityReduction,
+      stabilityRiskReductionLabel:settlement.active_formable_key
+        ?FORMABLE_COUNTRIES[settlement.active_formable_key]?.name??"Ülke etkisi"
+        :"Ülke etkisi"
     });
     const {factors,risk,eligible,scores}=pressure;
     const immune=settlement.recent_uprising_until_turn!==null && settlement.recent_uprising_until_turn>=newTurn;

@@ -1327,16 +1327,16 @@ export const battleService = {
       pool.query<{id:string;name:string}>(
         "SELECT id,name FROM countries WHERE guild_id=$1 AND status='ACTIVE' AND is_system_faction=FALSE ORDER BY name",[guildId]
       ),
-      pool.query<{id:string;display_name:string;settlement_name:string;personnel:number}>(
-        `SELECT faction.id,faction.display_name,settlement.name AS settlement_name,faction.personnel
+      pool.query<{id:string;display_name:string;army_name:string;settlement_name:string;personnel:number}>(
+        `SELECT faction.id,faction.display_name,faction.army_name,settlement.name AS settlement_name,faction.personnel
            FROM rebel_factions faction JOIN settlements settlement ON settlement.id=faction.settlement_id
-          WHERE faction.guild_id=$1 AND faction.status IN ('ORGANIZING','ACTIVE','OCCUPYING')
-          ORDER BY faction.display_name`,[guildId]
+          WHERE faction.guild_id=$1 AND faction.status NOT IN ('SUPPRESSED','ENFORCED')
+          ORDER BY faction.updated_at DESC,faction.display_name`,[guildId]
       )
     ]);
     return [
       ...rebels.rows.map((rebel)=>({value:`rebel:${rebel.id}`,
-        label:`🔥 İsyan • ${rebel.display_name} • ${rebel.settlement_name} (${Number(rebel.personnel).toLocaleString("tr-TR")})`,kind:"REBEL" as const})),
+        label:`🔥 ${rebel.display_name} • ${rebel.army_name} • ${rebel.settlement_name} (${Number(rebel.personnel).toLocaleString("tr-TR")})`,kind:"REBEL" as const})),
       ...countries.rows.map((country)=>({value:`country:${country.id}`,label:country.name,kind:"COUNTRY" as const}))
     ];
   },

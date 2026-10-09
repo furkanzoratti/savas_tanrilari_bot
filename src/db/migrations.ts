@@ -89,6 +89,7 @@ import { romanSenateRenewalMigration } from "./roman-senate-renewal-migration.js
 import { romanScipioInitialConsulMigration } from "./roman-scipio-initial-consul-migration.js";
 import { romanPoliticsChannelMigration } from "./roman-politics-channel-migration.js";
 import { romanDefaultFamiliesBackfillMigration } from "./roman-default-families-backfill-migration.js";
+import { npcDynastyAutomationMigration } from "./npc-dynasty-automation-migration.js";
 
 export const migrations = [
   {
@@ -2395,5 +2396,6 @@ export const migrations = [
   romanSenateRenewalMigration,
   romanScipioInitialConsulMigration,
   romanPoliticsChannelMigration,
-  romanDefaultFamiliesBackfillMigration
+  romanDefaultFamiliesBackfillMigration,
+  npcDynastyAutomationMigration
 ] as const;
