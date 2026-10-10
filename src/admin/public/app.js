@@ -270,11 +270,29 @@ async function romanPoliticsPage() {
 }
 
 const steppeTierLabels = { KHAN: "Han", LANDHOLDER: "Toprak Ağası" };
-const steppeResponseLabels = { PENDING: "Bekliyor", FULL: "Tam Katılım", LIMITED: "Sınırlı Katılım", NEUTRAL: "Tarafsız", REFUSE: "Reddetti" };
+const steppeResponseLabels = { PENDING: "Bekliyor", FULL: "Tam Katılım", LIMITED: "Sınırlı Katılım", NEUTRAL: "Tarafsız", REFUSE: "Reddetti", UNANSWERED: "Cevapsız" };
 
 function steppeDelta(value) {
   const amount = Number(value || 0);
   return `${amount > 0 ? "+" : ""}${number(amount)}`;
+}
+
+function steppeHegemonyPanel(hegemony, currentTurn) {
+  if (!hegemony) return "";
+  const openCalls = hegemony.calls.filter((call) => call.status === "OPEN");
+  const memberCards = hegemony.members.map((member) => `<article class="card dynasty-card">
+    <div class="card-head"><div><h3>🏹 ${escapeHtml(member.khan_title_name || member.country_name + " Hanı")}</h3><p>${escapeHtml(member.country_name)} · Hanlar Hanına bağlı</p></div><button class="button compact" data-edit-steppe-tributary="${member.country_id}">İlişkiyi düzenle</button></div>
+    <section class="detail-grid"><div class="detail-cell"><span>Han</span><strong>${escapeHtml(member.khan_holder_name || "Henüz Atanmadı")}</strong><small>${member.khan_holder_user_id ? `Discord: ${escapeHtml(member.khan_holder_user_id)}` : "Oyuncu atanmamış"}</small></div><div class="detail-cell"><span>Hanlar Hanına Bağlılık</span><strong>${number(member.loyalty)} / 100</strong></div><div class="detail-cell"><span>Kişisel İlişki</span><strong>${number(member.relation_score)}</strong></div><div class="detail-cell"><span>Konum</span><strong>Bağlı Han</strong><small>Haraç ve üst savaş çağrısına tabidir.</small></div></section>
+  </article>`).join("");
+  const callCards = hegemony.calls.map((call) => `<article class="card"><div class="card-head"><div><h3>${escapeHtml(call.target_label)}</h3><p>Tur ${number(call.opened_turn)} · ${escapeHtml(call.reason)}</p></div><span class="pill ${call.status === "OPEN" ? "warning" : "neutral"}">${call.status === "OPEN" ? "Yanıt bekliyor" : "Kapandı"}</span></div>${call.responses.map((response) => `<div class="data-row"><div><strong>${escapeHtml(response.khanTitleName || response.countryName + " Hanı")}</strong><small>${escapeHtml(response.khanHolderName || response.countryName)}</small></div><span>${escapeHtml(steppeResponseLabels[response.response] || response.response)}</span><small>Bağlılık ${steppeDelta(response.loyaltyDelta)} · İlişki ${steppeDelta(response.relationDelta)} · Otorite ${steppeDelta(response.authorityDelta)}</small></div>`).join("") || '<div class="empty compact-empty">Çağrıya bağlı Han bulunmuyor.</div>'}</article>`).join("");
+  const eventRows = hegemony.events.map((event) => `<div class="data-row"><div><strong>Tur ${number(event.game_turn)} · ${escapeHtml(event.country_name || "Hanlar Hanlığı")}</strong><small>${escapeHtml(event.description)}</small></div><span>Bağlılık ${steppeDelta(event.loyalty_delta)} · İlişki ${steppeDelta(event.relation_delta)} · Otorite ${steppeDelta(event.authority_delta)}</span></div>`).join("");
+  return `<section class="roman-republic-section">
+    <div class="page-head"><div><h1>👑 ${escapeHtml(hegemony.hegemon_country_name)} · Hanlar Hanlığı</h1><p>Hanlar Hanı → bağlı Dingling ve Xianbei Hanları</p></div><div class="actions"><span class="pill">Tur ${number(currentTurn)}</span><button class="button primary" data-edit-steppe-hegemony>Hanlar Hanı otoritesini düzenle</button></div></div>
+    <section class="detail-grid"><div class="detail-cell"><span>Hanlar Hanı Devleti</span><strong>${escapeHtml(hegemony.hegemon_country_name)}</strong></div><div class="detail-cell"><span>Hanlar Hanı</span><strong>${escapeHtml(hegemony.great_khan_holder_name || "Henüz Atanmadı")}</strong><small>${escapeHtml(hegemony.great_khan_title_name || "Xiongnu Hanı")}</small></div><div class="detail-cell"><span>Üst Otorite</span><strong>${number(hegemony.authority)} / 100</strong></div><div class="detail-cell"><span>Bağlı Han / Açık Çağrı</span><strong>${number(hegemony.members.length)} / ${number(openCalls.length)}</strong></div></section>
+    <div class="section-title"><h2>Hanlar Hanlığı Hiyerarşisi</h2><span>Dingling ve Xianbei Hanları doğrudan Hanlar Hanına bağlıdır</span></div><section class="dynasty-grid">${memberCards || '<div class="card empty">Bağlı Han bulunmuyor.</div>'}</section>
+    <div class="section-title"><h2>Hanlar Hanı Savaş Çağrıları</h2><span>Bağlı Hanların kararları üst bağlılık ve otoriteyi değiştirir</span></div><section class="content-grid">${callCards || '<div class="card empty">Henüz üst savaş çağrısı bulunmuyor.</div>'}</section>
+    <section class="card"><div class="card-head"><div><h2>Hanlar Hanlığı Kayıtları</h2><p>Haraç dışındaki üst siyasi olaylar</p></div></div>${eventRows || '<div class="empty compact-empty">Henüz üst siyasi kayıt yok.</div>'}</section>
+  </section>`;
 }
 
 function steppeConfederationPanel(confederation, currentTurn) {
@@ -297,11 +315,28 @@ function steppeConfederationPanel(confederation, currentTurn) {
 async function steppePoliticsPage() {
   setActiveRoute("steppe-politics"); loading();
   const data = await api("/api/steppe-politics");
-  page.innerHTML = data.confederations.length
-    ? data.confederations.map((confederation) => steppeConfederationPanel(confederation, data.currentTurn)).join("")
+  const sections = [steppeHegemonyPanel(data.hegemony, data.currentTurn), ...data.confederations.map((confederation) => steppeConfederationPanel(confederation, data.currentTurn))].filter(Boolean);
+  page.innerHTML = sections.length
+    ? sections.join("")
     : '<div class="page-head"><div><h1>Bozkır Siyaseti</h1><p>Konfederasyon iç hiyerarşisi</p></div></div><div class="card empty">Henüz bozkır konfederasyonu kurulmamış. Discord’da /bozkir-yonetim kur komutunu kullanın.</div>';
   const confederations = new Map(data.confederations.map((confederation) => [confederation.id, confederation]));
   const titles = new Map(data.confederations.flatMap((confederation) => confederation.titles).map((title) => [title.id, title]));
+  const tributaries = new Map((data.hegemony?.members || []).map((member) => [member.country_id, member]));
+  document.querySelector("[data-edit-steppe-hegemony]")?.addEventListener("click", () => {
+    if (!data.hegemony) return;
+    openEditor("Hanlar Hanı otoritesi", data.hegemony.hegemon_country_name, `<div class="form-grid"><label>Üst otorite<input id="edit-steppe-hegemony-authority" type="number" min="0" max="100" step="1" value="${number(data.hegemony.authority)}" required></label><label class="full">Düzenleme gerekçesi<textarea id="edit-steppe-hegemony-reason" maxlength="300" required></textarea></label></div>`, async () => {
+      await api("/api/admin/steppe-hegemony", { method: "PATCH", body: JSON.stringify({ authority: Number(document.getElementById("edit-steppe-hegemony-authority").value), reason: document.getElementById("edit-steppe-hegemony-reason").value }) });
+      closeEditor(); toast("Hanlar Hanı otoritesi güncellendi."); await steppePoliticsPage();
+    });
+  });
+  document.querySelectorAll("[data-edit-steppe-tributary]").forEach((button) => button.addEventListener("click", () => {
+    const member = tributaries.get(button.dataset.editSteppeTributary);
+    if (!member) return;
+    openEditor("Bağlı Han ilişkisi", member.khan_title_name || member.country_name, `<div class="form-grid"><label>Bağlılık<input id="edit-steppe-tributary-loyalty" type="number" min="0" max="100" step="1" value="${number(member.loyalty)}" required></label><label>Kişisel ilişki<input id="edit-steppe-tributary-relation" type="number" min="-100" max="100" step="1" value="${number(member.relation_score)}" required></label><label class="full">Düzenleme gerekçesi<textarea id="edit-steppe-tributary-reason" maxlength="300" required></textarea></label></div>`, async () => {
+      await api(`/api/admin/steppe-tributaries/${member.country_id}`, { method: "PATCH", body: JSON.stringify({ loyalty: Number(document.getElementById("edit-steppe-tributary-loyalty").value), relationScore: Number(document.getElementById("edit-steppe-tributary-relation").value), reason: document.getElementById("edit-steppe-tributary-reason").value }) });
+      closeEditor(); toast("Bağlı Han ilişkisi güncellendi."); await steppePoliticsPage();
+    });
+  }));
   document.querySelectorAll("[data-edit-steppe-confederation]").forEach((button) => button.addEventListener("click", () => {
     const confederation = confederations.get(button.dataset.editSteppeConfederation);
     if (!confederation) return;

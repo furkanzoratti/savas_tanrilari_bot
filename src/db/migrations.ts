@@ -99,6 +99,7 @@ import { steppeDefaultStatesMigration } from "./steppe-default-states-migration.
 import { steppeCultureReligionMigration } from "./steppe-culture-religion-migration.js";
 import { steppeSettlementsMigration } from "./steppe-settlements-migration.js";
 import { steppeWorldBackfillMigration } from "./steppe-world-backfill-migration.js";
+import { steppeGreatKhanateMigration } from "./steppe-great-khanate-migration.js";
 
 export const migrations = [
   {
@@ -2415,5 +2416,6 @@ export const migrations = [
   steppeDefaultStatesMigration,
   steppeCultureReligionMigration,
   steppeSettlementsMigration,
-  steppeWorldBackfillMigration
+  steppeWorldBackfillMigration,
+  steppeGreatKhanateMigration
 ] as const;

@@ -307,10 +307,11 @@ function senateProposalComponents(view:RomanPoliticsView):ActionRowBuilder<Strin
   )];
 }
 
-function senateVoteComponents(countryId:string,proposalId:string):ActionRowBuilder<ButtonBuilder>[] {
+export function senateVoteComponents(countryId:string,proposalId:string):ActionRowBuilder<ButtonBuilder>[] {
+  const code={YES:"Y",NO:"N"} as const;
   const row=(choice:"YES"|"NO",style:ButtonStyle)=>new ActionRowBuilder<ButtonBuilder>().addComponents(
     ...[0,2,5,10].map((amount)=>new ButtonBuilder()
-      .setCustomId(`roman-senate-vote|${countryId}|${proposalId}|${choice}|${amount}`)
+      .setCustomId(`rsv|${countryId}|${proposalId}|${code[choice]}|${amount}`)
       .setLabel(`${choice==="YES"?"Evet":"Hayır"} • ${amount?`${amount} Nüfuz`:"Nüfuz Yok"}`)
       .setStyle(style))
   );
@@ -318,7 +319,7 @@ function senateVoteComponents(countryId:string,proposalId:string):ActionRowBuild
     row("YES",ButtonStyle.Success),
     row("NO",ButtonStyle.Danger),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(`roman-senate-vote|${countryId}|${proposalId}|ABSTAIN|0`)
+      new ButtonBuilder().setCustomId(`rsv|${countryId}|${proposalId}|A|0`)
         .setLabel("Çekimser Kal").setStyle(ButtonStyle.Secondary)
     )
   ];
@@ -459,38 +460,88 @@ async function resolveRomanCommandContext(interaction:ChatInputCommandInteractio
 }
 
 export async function handleRomanRepublicAutocomplete(interaction:AutocompleteInteraction):Promise<boolean>{
-  if(interaction.commandName!=="roma")return false;
+  if(!["roma","roma-yonetim"].includes(interaction.commandName))return false;
   const action=interaction.options.getSubcommand(false)??"";
-  if(!["evlilik-teklif","evlilik-cevapla","cocuk-dene"].includes(action))return false;
   if(!interaction.guildId){await interaction.respond([]);return true;}
+  const focused=interaction.options.getFocused(true);
+  const query=String(focused.value).toLocaleLowerCase("tr-TR").trim();
+  const gameMaster=isGameMaster(interaction);
   const access=await romanRepublicService.playerAccess(interaction.guildId,interaction.user.id);
+  if(focused.name==="ulke"){
+    if(!gameMaster){
+      const choice=access&&(!query||access.countryName.toLocaleLowerCase("tr-TR").includes(query))
+        ?[{name:access.countryName.slice(0,100),value:access.countryName}]:[];
+      await interaction.respond(choice);return true;
+    }
+    const countries=action==="kur"
+      ?await gameService.listCountries(interaction.guildId)
+      :await romanRepublicService.listRepublicCountries(interaction.guildId);
+    await interaction.respond(countries.filter((country)=>!query||country.name.toLocaleLowerCase("tr-TR").includes(query))
+      .slice(0,25).map((country)=>({name:country.name.slice(0,100),value:country.name})));
+    return true;
+  }
   const requestedCountry=interaction.options.getString("ulke");
-  const country=requestedCountry&&isGameMaster(interaction)
+  const country=requestedCountry&&gameMaster
     ?await gameService.countryByName(interaction.guildId,requestedCountry)
     :null;
   const view=country
     ?await romanRepublicService.view(interaction.guildId,country.id)
     :access?await romanRepublicService.view(interaction.guildId,access.countryId)
-      :isGameMaster(interaction)?await romanRepublicService.view(interaction.guildId):null;
+      :gameMaster?await romanRepublicService.view(interaction.guildId):null;
   if(!view){await interaction.respond([]);return true;}
-  const focused=interaction.options.getFocused(true);
-  const query=String(focused.value).toLocaleLowerCase("tr-TR").trim();
   const ownFamily=view.families.find((family)=>family.id===access?.familyId)
     ??view.families.find((family)=>family.playerIds.includes(interaction.user.id));
+  if(focused.name==="aile"||focused.name==="hedef-aile"){
+    const families=focused.name==="hedef-aile"?view.families.filter((family)=>family.id!==ownFamily?.id):view.families;
+    await interaction.respond(families.filter((family)=>!query||family.name.toLocaleLowerCase("tr-TR").includes(query))
+      .slice(0,25).map((family)=>({name:`${family.name} • ${family.senateSeats} koltuk`.slice(0,100),value:family.id})));
+    return true;
+  }
+  if(focused.name==="yerleske"){
+    if(action==="vali-kaldir"){
+      await interaction.respond(view.governorships.filter((office)=>office.status==="ACTIVE"&&
+        (!query||office.settlementName.toLocaleLowerCase("tr-TR").includes(query)))
+        .slice(0,25).map((office)=>({name:`${office.settlementName} • ${office.governorName}`.slice(0,100),value:office.settlementId})));
+      return true;
+    }
+    const occupied=new Set(view.governorships.filter((office)=>office.status==="ACTIVE").map((office)=>office.settlementId));
+    const settlements=await gameService.listSettlements(view.countryId);
+    await interaction.respond(settlements.filter((settlement)=>(action!=="vali-ata"||!occupied.has(settlement.id))&&
+      (!query||settlement.name.toLocaleLowerCase("tr-TR").includes(query)))
+      .slice(0,25).map((settlement)=>({name:settlement.name.slice(0,100),value:settlement.id})));
+    return true;
+  }
+  if(focused.name==="vali"){
+    const selected=interaction.options.getString("aile")?.toLocaleLowerCase("tr-TR");
+    const family=view.families.find((item)=>item.id===selected||item.name.toLocaleLowerCase("tr-TR")===selected);
+    const members=family?.members??[];
+    await interaction.respond(members.filter((member)=>!query||member.name.toLocaleLowerCase("tr-TR").includes(query))
+      .slice(0,25).map((member)=>({name:`${member.name} • ${family?.name}`.slice(0,100),value:member.name})));
+    return true;
+  }
+  if(focused.name==="aday"){
+    if(action==="oy-ver"){
+      const candidates=view.election?.status==="OPEN"?view.election.candidates:[];
+      await interaction.respond(candidates.filter((candidate)=>!query||
+        `${candidate.candidateName} ${candidate.familyName}`.toLocaleLowerCase("tr-TR").includes(query))
+        .slice(0,25).map((candidate)=>({name:`${candidate.candidateName} • ${candidate.familyName}`.slice(0,100),value:candidate.id})));
+      return true;
+    }
+    const families=ownFamily?[ownFamily]:gameMaster?view.families:[];
+    const members=families.flatMap((family)=>family.members.map((member)=>({family,member})));
+    await interaction.respond(members.filter(({family,member})=>!query||
+      `${member.name} ${family.name}`.toLocaleLowerCase("tr-TR").includes(query))
+      .slice(0,25).map(({family,member})=>({name:`${member.name} • ${family.name}`.slice(0,100),value:member.name})));
+    return true;
+  }
   if(focused.name==="uye"||focused.name==="ebeveyn"){
-    const families=ownFamily?[ownFamily]:isGameMaster(interaction)?view.families:[];
+    const families=ownFamily?[ownFamily]:gameMaster?view.families:[];
     const members=families.flatMap((family)=>family.members.map((member)=>({family,member})))
       .filter(({member})=>focused.name==="ebeveyn"?Boolean(member.spouseName):member.age>=MINIMUM_MARRIAGE_AGE&&!member.spouseName)
       .filter(({family,member})=>!query||member.name.toLocaleLowerCase("tr-TR").includes(query)||family.name.toLocaleLowerCase("tr-TR").includes(query));
     await interaction.respond(members.slice(0,25).map(({family,member})=>({
       name:`${member.name} • ${family.name} • ${member.age} yaş`.slice(0,100),value:member.id
     })));
-    return true;
-  }
-  if(focused.name==="hedef-aile"){
-    await interaction.respond(view.families.filter((family)=>family.id!==ownFamily?.id)
-      .filter((family)=>!query||family.name.toLocaleLowerCase("tr-TR").includes(query)).slice(0,25)
-      .map((family)=>({name:family.name,value:family.id})));
     return true;
   }
   if(focused.name==="hedef-uye"){
@@ -507,6 +558,13 @@ export async function handleRomanRepublicAutocomplete(interaction:AutocompleteIn
     return true;
   }
   if(focused.name==="teklif"){
+    if(action==="teklif-oyla"||action==="teklif-bitir"){
+      const politics=await romanPoliticsService.view(interaction.guildId,view.countryId);
+      await interaction.respond(politics.proposals.filter((proposal)=>proposal.status==="OPEN"&&
+        (!query||`${proposal.title} ${proposal.proposerFamilyName}`.toLocaleLowerCase("tr-TR").includes(query)))
+        .slice(0,25).map((proposal)=>({name:`${proposal.title} • ${proposal.proposerFamilyName}`.slice(0,100),value:proposal.id})));
+      return true;
+    }
     const proposals=await romanFamilyLifeService.listProposals(interaction.guildId,view.countryId,interaction.user.id,isGameMaster(interaction));
     const directional=action==="evlilik-cevapla"&&ownFamily
       ?proposals.filter((proposal)=>proposal.target_family_id===ownFamily.id)
@@ -924,7 +982,7 @@ export async function handleRomanRepublicSelect(interaction:StringSelectMenuInte
 }
 
 export async function handleRomanRepublicButton(interaction:ButtonInteraction):Promise<boolean>{
-  if(!interaction.customId.startsWith("roman-vote|")&&!interaction.customId.startsWith("roman-senate-vote|")&&
+  if(!interaction.customId.startsWith("roman-vote|")&&!interaction.customId.startsWith("roman-senate-vote|")&&!interaction.customId.startsWith("rsv|")&&
     !interaction.customId.startsWith("roman-public-refresh|")&&!interaction.customId.startsWith("roman-birth-name|")&&
     !interaction.customId.startsWith("roman-marriage-accept|")&&!interaction.customId.startsWith("roman-marriage-reject|"))return false;
   if(!interaction.guildId)throw new GameError("Sunucu bulunamadı.");
@@ -965,11 +1023,11 @@ export async function handleRomanRepublicButton(interaction:ButtonInteraction):P
     await interaction.followUp({content:"✅ Roma siyasi paneli güncellendi.",flags:MessageFlags.Ephemeral});
     return true;
   }
-  if(interaction.customId.startsWith("roman-senate-vote|")){
-    const [,countryId,proposalId,choiceRaw,influenceRaw]=interaction.customId.split("|");
-    const choice=choiceRaw as "YES"|"NO"|"ABSTAIN";
+  if(interaction.customId.startsWith("roman-senate-vote|")||interaction.customId.startsWith("rsv|")){
+    const [,countryId,proposalId,choiceCode,influenceRaw]=interaction.customId.split("|");
+    const choice=({Y:"YES",N:"NO",A:"ABSTAIN",YES:"YES",NO:"NO",ABSTAIN:"ABSTAIN"} as const)[choiceCode??""];
     const influenceSpend=Number(influenceRaw);
-    if(!countryId||!proposalId||!["YES","NO","ABSTAIN"].includes(choice)||![0,2,5,10].includes(influenceSpend))throw new GameError("Senato oy formu bilgisi bozuk.");
+    if(!countryId||!proposalId||!choice||![0,2,5,10].includes(influenceSpend))throw new GameError("Senato oy formu bilgisi bozuk.");
     await interaction.deferUpdate();
     const politics=await romanPoliticsService.vote({guildId:interaction.guildId,countryId,actorId:interaction.user.id,
       gameMaster:isGameMaster(interaction),proposal:proposalId,choice,influenceSpend});

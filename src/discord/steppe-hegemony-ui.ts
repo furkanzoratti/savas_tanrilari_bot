@@ -1,12 +1,15 @@
 import {
   ActionRowBuilder,ButtonBuilder,ButtonStyle,ChannelType,EmbedBuilder,MessageFlags,StringSelectMenuBuilder,
-  type ButtonInteraction,type ChatInputCommandInteraction,type StringSelectMenuInteraction,type TextChannel
+  type AutocompleteInteraction,type ButtonInteraction,type ChatInputCommandInteraction,type StringSelectMenuInteraction,type TextChannel
 } from "discord.js";
 import { STEPPE_TRIBUTE_RESPONSES,type SteppeTributeResponse } from "../domain/steppe-hegemony.js";
 import {STEPPE_WAR_CALL_RESPONSES,steppeLoyaltyLabel,type SteppeWarCallResponse} from "../domain/steppe-politics.js";
 import { diplomacyService } from "../services/diplomacy-service.js";
 import { gameService,GameError } from "../services/game-service.js";
-import { steppeHegemonyService,type SteppeTributeOfferView } from "../services/steppe-hegemony-service.js";
+import {
+  steppeHegemonyService,type SteppeGreatKhanateView,type SteppeGreatKhanateWarCallResponseView,
+  type SteppeGreatKhanateWarCallView,type SteppeTributeOfferView
+} from "../services/steppe-hegemony-service.js";
 import {steppePoliticsService,type SteppePoliticsView,type SteppeWarCallResponseView,type SteppeWarCallView} from "../services/steppe-politics-service.js";
 import { isGameMaster,requireGameMaster,resolveCountry } from "./auth.js";
 import { playerMentionPayload } from "./player-mentions.js";
@@ -14,6 +17,50 @@ import { playerMentionPayload } from "./player-mentions.js";
 const RESPONSE_COLORS:Record<SteppeTributeResponse,number>={FULL:0x2e8b57,HALF:0xd4a72c,NONE:0xb22222};
 
 function delta(value:number):string{return value>0?`+${value}`:String(value);}
+
+export function greatKhanateEmbed(view:SteppeGreatKhanateView):EmbedBuilder{
+  const members=view.members.map((member)=>
+    `🏹 **${member.khanTitleName??`${member.countryName} Hanı`}** — ${member.khanHolderName??"Henüz Atanmadı"}`+
+    `${member.khanHolderUserId?` • <@${member.khanHolderUserId}>`:""}\n`+
+    `↳ **${member.countryName}** • Bağlılık **${member.loyalty}/100 • ${steppeLoyaltyLabel(member.loyalty)}** • İlişki **${delta(member.relationScore)}**`
+  );
+  return new EmbedBuilder().setColor(0xc6923b).setTitle(`👑 ${view.hegemonCountryName} • Hanlar Hanlığı`)
+    .setDescription([
+      `**Hanlar Hanı:** ${view.greatKhanHolderName??"Henüz Atanmadı"}${view.greatKhanHolderUserId?` • <@${view.greatKhanHolderUserId}>`:""}`,
+      `**Üst Otorite:** ${view.authority}/100`,"",members.join("\n\n")||"Bağlı Han bulunmuyor."
+    ].join("\n"))
+    .setFooter({text:`Tur ${view.currentTurn} • Haraç ve üst savaş çağrıları bu katmanda yürütülür.`});
+}
+
+export function greatKhanateCallsEmbed(view:SteppeGreatKhanateView):EmbedBuilder{
+  const labels:Record<string,string>={PENDING:"Yanıt bekleniyor",FULL:"Tam Katılım",LIMITED:"Sınırlı Destek",NEUTRAL:"Tarafsız",REFUSE:"Reddetti",UNANSWERED:"Cevapsız"};
+  const lines=view.warCalls.map((call)=>{
+    const responses=call.responses.map((response)=>`↳ **${response.khanTitleName??`${response.countryName} Hanı`}:** ${labels[response.response]??response.response}`).join("\n");
+    return `⚔️ **${call.targetLabel}** • Tur ${call.openedTurn} • ${call.status==="OPEN"?"Açık":"Kapalı"}\n${call.reason}\n${responses||"Bağlı Han yanıtı yok"}\nKimlik: \`${call.id}\``;
+  });
+  return new EmbedBuilder().setColor(0x9b2f2f).setTitle("📯 Hanlar Hanı • Üst Savaş Çağrıları")
+    .setDescription((lines.join("\n\n")||"Henüz üst savaş çağrısı yayımlanmadı.").slice(0,4000));
+}
+
+function greatKhanateWarCallEmbed(view:SteppeGreatKhanateView,call:SteppeGreatKhanateWarCallView,response:SteppeGreatKhanateWarCallResponseView):EmbedBuilder{
+  return new EmbedBuilder().setColor(0xb66a2b).setTitle("📯 Hanlar Hanının Savaş Çağrısı")
+    .setDescription(`**${view.hegemonCountryName} Hanlar Hanı**, **${response.khanTitleName??`${response.countryName} Hanı`}** makamını savaşa çağırıyor.`)
+    .addFields(
+      {name:"⚔️ Hedef / Cephe",value:call.targetLabel,inline:true},
+      {name:"🏹 Çağrılan Han",value:`${response.countryName} • ${response.khanHolderName??"Henüz Atanmadı"}`,inline:true},
+      {name:"📜 Gerekçe",value:call.reason},
+      {name:"Karar",value:"Tam katılım, sınırlı destek, tarafsızlık veya ret seçeneklerinden biriyle yanıt verin. Sonuç üst bağlılığı, ilişkiyi ve Hanlar Hanı otoritesini etkiler; ordular otomatik hareket etmez."}
+    ).setFooter({text:`Üst çağrı ${call.id}`});
+}
+
+function greatKhanateWarCallButtons(callId:string,countryId:string):ActionRowBuilder<ButtonBuilder>{
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(`steppe_overlord_war_call|${callId}|${countryId}|FULL`).setLabel("Tam Katılım").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`steppe_overlord_war_call|${callId}|${countryId}|LIMITED`).setLabel("Sınırlı Destek").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`steppe_overlord_war_call|${callId}|${countryId}|NEUTRAL`).setLabel("Tarafsız Kal").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`steppe_overlord_war_call|${callId}|${countryId}|REFUSE`).setLabel("Reddet").setStyle(ButtonStyle.Danger)
+  );
+}
 
 function steppeHierarchyEmbed(view:SteppePoliticsView):EmbedBuilder{
   const khan=view.titles.find((title)=>title.tier==="KHAN");
@@ -138,6 +185,63 @@ async function assertTargetAccess(
   }
 }
 
+export async function handleSteppeHegemonyAutocomplete(interaction:AutocompleteInteraction):Promise<boolean>{
+  if(!["bozkir","bozkir-yonetim"].includes(interaction.commandName))return false;
+  if(!interaction.guildId){await interaction.respond([]);return true;}
+  const focused=interaction.options.getFocused(true);
+  const query=String(focused.value).toLocaleLowerCase("tr-TR").trim();
+  const gameMaster=isGameMaster(interaction);
+  const hegemony=await steppeHegemonyService.view(interaction.guildId);
+  if(focused.name==="ulke"){
+    if(!gameMaster){
+      const own=await gameService.countryForUser(interaction.guildId,interaction.user.id)
+        ??await steppePoliticsService.countryForTitleHolder(interaction.guildId,interaction.user.id);
+      const allowed=own&&(!query||own.name.toLocaleLowerCase("tr-TR").includes(query))?[own]:[];
+      await interaction.respond(allowed.map((country)=>({name:country.name.slice(0,100),value:country.name})));
+      return true;
+    }
+    let countries=hegemony
+      ?[{id:hegemony.hegemonCountryId,name:hegemony.hegemonCountryName},...hegemony.members.map((member)=>({id:member.countryId,name:member.countryName}))]
+      :[];
+    if(!countries.length)countries=(await gameService.listCountries(interaction.guildId))
+      .filter((country)=>country.name.toLocaleLowerCase("tr-TR").includes("konfederasyon"));
+    await interaction.respond(countries.filter((country)=>!query||country.name.toLocaleLowerCase("tr-TR").includes(query))
+      .slice(0,25).map((country)=>({name:country.name.slice(0,100),value:country.name})));
+    return true;
+  }
+  const selected=interaction.options.getString("ulke");
+  const country=selected
+    ?await gameService.countryByName(interaction.guildId,selected)
+    :gameMaster&&hegemony?await gameService.countryByName(interaction.guildId,hegemony.hegemonCountryName)
+      :await gameService.countryForUser(interaction.guildId,interaction.user.id)
+        ??await steppePoliticsService.countryForTitleHolder(interaction.guildId,interaction.user.id);
+  if(!country){await interaction.respond([]);return true;}
+  const view=await steppePoliticsService.view(interaction.guildId,country.id);
+  if(focused.name==="unvan"){
+    const titles=view?.titles??[];
+    await interaction.respond(titles.filter((title)=>!query||
+      `${title.titleName} ${title.holderName}`.toLocaleLowerCase("tr-TR").includes(query))
+      .slice(0,25).map((title)=>({name:`${title.titleName} • ${title.holderName}`.slice(0,100),value:title.id})));
+    return true;
+  }
+  if(focused.name==="yerleske"){
+    const settlements=await gameService.listSettlements(country.id);
+    await interaction.respond(settlements.filter((settlement)=>!query||settlement.name.toLocaleLowerCase("tr-TR").includes(query))
+      .slice(0,25).map((settlement)=>({name:settlement.name.slice(0,100),value:settlement.id})));
+    return true;
+  }
+  if(focused.name==="cagri"){
+    const action=interaction.options.getSubcommand(false);
+    const calls=action==="ust-cagri-kapat"?(hegemony?.warCalls??[]):(view?.warCalls??[]);
+    await interaction.respond(calls.filter((call)=>call.status==="OPEN"&&
+      (!query||`${call.targetLabel} ${call.reason}`.toLocaleLowerCase("tr-TR").includes(query)))
+      .slice(0,25).map((call)=>({name:`${call.targetLabel} • Tur ${call.openedTurn}`.slice(0,100),value:call.id})));
+    return true;
+  }
+  await interaction.respond([]);
+  return true;
+}
+
 export async function handleSteppeHegemonyCommand(interaction:ChatInputCommandInteraction):Promise<boolean>{
   if(!["bozkir","bozkir-yonetim"].includes(interaction.commandName))return false;
   if(!interaction.guildId)throw new GameError("Bu işlem yalnızca bir Discord sunucusunda kullanılabilir.");
@@ -162,11 +266,28 @@ export async function handleSteppeHegemonyCommand(interaction:ChatInputCommandIn
       relationScore:interaction.options.getInteger("iliski"),reason:interaction.options.getString("gerekce",true)});
     else if(action==="cagri-kapat")view=await steppePoliticsService.closeWarCall({guildId:interaction.guildId,countryId:country.id,actorId:interaction.user.id,
       warCallId:interaction.options.getString("cagri",true)});
+    else if(action==="ust-cagri-kapat"){
+      const greatKhanate=await steppeHegemonyService.view(interaction.guildId);
+      if(!greatKhanate||greatKhanate.hegemonCountryId!==country.id)throw new GameError("Seçilen devlet mevcut Hanlar Hanı devleti değil.");
+      await steppeHegemonyService.closeWarCall({guildId:interaction.guildId,actorId:interaction.user.id,
+        warCallId:interaction.options.getString("cagri",true)});
+      await interaction.editReply({content:"✅ Hanlar Hanının üst savaş çağrısı sonuçlandırıldı.",embeds:[greatKhanateCallsEmbed((await steppeHegemonyService.view(interaction.guildId))!)]});
+      return true;
+    }
     else throw new GameError("Bu bozkır yönetim işlemi desteklenmiyor.");
     await interaction.editReply({content:"✅ Bozkır iç siyaseti güncellendi.",embeds:[steppeHierarchyEmbed(view)]});
     return true;
   }
   const country=await resolveCountry(interaction,interaction.options.getString("ulke"));
+  if(action==="hanlar-hanligi"||action==="hanlar-hani-cagrilari"){
+    await interaction.deferReply({flags:MessageFlags.Ephemeral});
+    const view=await steppeHegemonyService.view(interaction.guildId);
+    if(!view)throw new GameError("Hanlar Hanlığı henüz kurulmamış.");
+    if(country.id!==view.hegemonCountryId&&!view.members.some((member)=>member.countryId===country.id))
+      throw new GameError("Seçilen devlet Hanlar Hanlığı yapısında bulunmuyor.");
+    await interaction.editReply({embeds:[action==="hanlar-hani-cagrilari"?greatKhanateCallsEmbed(view):greatKhanateEmbed(view)]});
+    return true;
+  }
   if(action==="durum"||action==="hiyerarsi"||action==="iliskiler"||action==="cagrilar"){
     await interaction.deferReply({flags:MessageFlags.Ephemeral});
     const view=await steppePoliticsService.view(interaction.guildId,country.id);
@@ -189,6 +310,24 @@ export async function handleSteppeHegemonyCommand(interaction:ChatInputCommandIn
       await steppePoliticsService.attachWarCallMessage(call.id,response.titleId,channel.id,message.id);published++;
     }
     await interaction.editReply(`✅ **${country.name}** Hanı adına ${published} Toprak Ağasına savaş çağrısı gönderildi. Ordular otomatik hareket ettirilmedi.`);
+    return true;
+  }
+  if(action==="hanlar-hani-cagrisi"){
+    await interaction.deferReply({flags:MessageFlags.Ephemeral});
+    const channel=await requireDiplomacyChannel(interaction);
+    const call=await steppeHegemonyService.openWarCall({guildId:interaction.guildId,actorId:interaction.user.id,
+      hegemonCountryId:country.id,targetLabel:interaction.options.getString("hedef",true),
+      reason:interaction.options.getString("gerekce",true),gameMaster:isGameMaster(interaction)});
+    const view=await steppeHegemonyService.view(interaction.guildId);if(!view)throw new GameError("Hanlar Hanlığı bulunamadı.");
+    let published=0;
+    for(const response of call.responses){
+      const players=response.khanHolderUserId?[response.khanHolderUserId]:await gameService.playerIds(response.countryId);
+      const notification=playerMentionPayload(players,`**${response.countryName} Hanı** • Oyuncu atanmamış; oyun yöneticisi yanıtlayabilir.`);
+      const message=await channel.send({content:notification.content,allowedMentions:notification.allowedMentions,
+        embeds:[greatKhanateWarCallEmbed(view,call,response)],components:[greatKhanateWarCallButtons(call.id,response.countryId)]});
+      await steppeHegemonyService.attachWarCallMessage(call.id,response.countryId,channel.id,message.id);published++;
+    }
+    await interaction.editReply(`✅ **${view.hegemonCountryName} Hanlar Hanı** adına ${published} bağlı Hana üst savaş çağrısı gönderildi. Ordular otomatik hareket ettirilmedi.`);
     return true;
   }
   if(action!=="harac")throw new GameError("Bu bozkır işlemi desteklenmiyor.");
@@ -237,6 +376,26 @@ export async function handleSteppeHegemonySelect(interaction:StringSelectMenuInt
 }
 
 export async function handleSteppeHegemonyButton(interaction:ButtonInteraction):Promise<boolean>{
+  const overlordWarCallMatch=/^steppe_overlord_war_call\|([0-9a-f-]+)\|([0-9a-f-]+)\|(FULL|LIMITED|NEUTRAL|REFUSE)$/i.exec(interaction.customId);
+  if(overlordWarCallMatch){
+    if(!interaction.guildId)throw new GameError("Bu çağrı yalnızca sunucu içinde yanıtlanabilir.");
+    await interaction.deferReply({flags:MessageFlags.Ephemeral});
+    const response=await steppeHegemonyService.warCallResponse(overlordWarCallMatch[1]!,overlordWarCallMatch[2]!);
+    if(!response)throw new GameError("Hanlar Hanı savaş çağrısı yanıt kaydı bulunamadı.");
+    const choice=overlordWarCallMatch[3]!.toUpperCase() as SteppeWarCallResponse;
+    const result=await steppeHegemonyService.respondWarCall({guildId:interaction.guildId,actorId:interaction.user.id,
+      warCallId:response.warCallId,countryId:response.countryId,response:choice,gameMaster:isGameMaster(interaction)});
+    const effect=STEPPE_WAR_CALL_RESPONSES[choice];
+    const embed=EmbedBuilder.from(interaction.message.embeds[0]!).setColor(effect.color).setTitle("📯 Hanlar Hanı Çağrısı Yanıtlandı")
+      .setFields(
+        {name:"🏹 Bağlı Han",value:`${response.khanTitleName??`${response.countryName} Hanı`} • ${response.khanHolderName??response.countryName}`,inline:true},
+        {name:"📜 Karar",value:`**${effect.label}**`,inline:true},
+        {name:"⚖️ Üst Siyasi Sonuç",value:`Bağlılık ${delta(effect.loyaltyDelta)} • İlişki ${delta(effect.relationDelta)} • Otorite ${delta(effect.authorityDelta)}`}
+      ).setFooter({text:"Ordu hareketi veya savaş katılımı otomatik uygulanmadı."});
+    await interaction.message.edit({content:`🏹 **${response.countryName} Hanı**, Hanlar Hanının savaş çağrısına **${effect.label}** yanıtını verdi.`,embeds:[embed],components:[]});
+    await interaction.editReply(`✅ ${result.countryName} Hanının yanıtı kaydedildi; ordu hareketi yapılmadı.`);
+    return true;
+  }
   const warCallMatch=/^steppe_war_call\|([0-9a-f-]+)\|([0-9a-f-]+)\|(FULL|LIMITED|NEUTRAL|REFUSE)$/i.exec(interaction.customId);
   if(warCallMatch){
     if(!interaction.guildId)throw new GameError("Bu çağrı yalnızca sunucu içinde yanıtlanabilir.");

@@ -20,18 +20,31 @@ describe("bozkır haraç teklif arayüzü",()=>{
   it("hegemonun kullanacağı bozkir harac komutunu kaydeder",()=>{
     const command=commandBuilders.find((item)=>item.name==="bozkir");
     expect(command?.options?.map((option)=>option.name)).toEqual([
-      "harac","durum","hiyerarsi","iliskiler","savas-cagrisi","cagrilar"
+      "harac","durum","hiyerarsi","hanlar-hanligi","iliskiler","savas-cagrisi","hanlar-hani-cagrisi","cagrilar","hanlar-hani-cagrilari"
     ]);
     expect(command?.options?.[0]?.options?.find((option)=>option.name==="ulke")?.required).toBe(false);
+    for(const subcommand of command?.options??[]){
+      expect(subcommand.options?.find((option)=>option.name==="ulke")).toMatchObject({autocomplete:true});
+    }
     const management=commandBuilders.find((item)=>item.name==="bozkir-yonetim");
     expect(management?.options?.map((option)=>option.name)).toEqual([
-      "kur","unvan-ekle","toprak-bagla","deger-ayarla","cagri-kapat"
+      "kur","unvan-ekle","toprak-bagla","deger-ayarla","cagri-kapat","ust-cagri-kapat"
     ]);
     const setup=management?.options?.find((option)=>option.name==="kur");
     expect(setup?.options?.map((option)=>option.name)).toContain("han");
     expect(setup?.options?.map((option)=>option.name)).not.toContain("hanlar-hani");
     const addTitle=management?.options?.find((option)=>option.name==="unvan-ekle");
     expect(addTitle?.options?.map((option)=>option.name)).not.toContain("seviye");
+    for(const subcommand of management?.options??[]){
+      expect(subcommand.options?.find((option)=>option.name==="ulke")).toMatchObject({autocomplete:true});
+    }
+    const holding=management?.options?.find((option)=>option.name==="toprak-bagla");
+    expect(holding?.options?.find((option)=>option.name==="unvan")).toMatchObject({autocomplete:true});
+    expect(holding?.options?.find((option)=>option.name==="yerleske")).toMatchObject({autocomplete:true});
+    for(const action of ["cagri-kapat","ust-cagri-kapat"]){
+      expect(management?.options?.find((option)=>option.name===action)?.options?.find((option)=>option.name==="cagri"))
+        .toMatchObject({autocomplete:true});
+    }
   });
 
   it("her hedef devlet için tutarsız, seçimli bir teklif kartı üretir",()=>{

@@ -295,6 +295,14 @@ export const romanRepublicService={
     return withTransaction((client)=>romanFamilyAccess(client,guildId,userId));
   },
 
+  async listRepublicCountries(guildId:string):Promise<Array<{id:string;name:string}>>{
+    return (await pool.query<{id:string;name:string}>(`
+      SELECT country.id,country.name
+        FROM roman_republics republic JOIN countries country ON country.id=republic.country_id
+       WHERE republic.guild_id=$1 AND republic.status='ACTIVE' AND country.status='ACTIVE'
+       ORDER BY country.name`,[guildId])).rows;
+  },
+
   async view(guildId:string,countryId?:string):Promise<RomanRepublicView|null>{
     const client=await pool.connect();
     try{return await viewWithClient(client,guildId,countryId);}finally{client.release();}

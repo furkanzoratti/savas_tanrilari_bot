@@ -33,6 +33,8 @@ const ACTION_LABELS: Record<string, string> = {
   "admin.panel.ai.plan.review": "AI devlet planı incelendi",
   "admin.panel.steppe.confederation.update": "Bozkır konfederasyonu otoritesi güncellendi",
   "admin.panel.steppe.title.update": "Bozkır makamı güncellendi",
+  "admin.panel.steppe.hegemony.update": "Hanlar Hanlığı otoritesi güncellendi",
+  "admin.panel.steppe.tributary.update": "Bağlı Han ilişkisi güncellendi",
   "CHARACTER_ASSIGN": "Karakter görevlendirildi",
   "CHARACTER_UNASSIGN": "Karakter görevi kaldırıldı",
   "ACADEMY_CHARACTER_CREATE": "Akademi karakteri oluşturuldu",
@@ -81,7 +83,9 @@ const ENTITY_LABELS: Record<string, string> = {
   country: "Devlet", settlement: "Yerleşke", character: "Karakter", dynasty: "Hanedan", dynasty_member: "Hanedan üyesi", army: "Ordu", fleet: "Filo",
   battle: "Savaş", naval_operation: "Deniz operasyonu", state_war: "Savaş ilanı",
   movement_order: "Hareket emri", map: "Harita", map_edge: "Harita geçişi", guild: "Oyun",
-  steppe_confederation: "Bozkır konfederasyonu", steppe_internal_title: "Bozkır makamı"
+  steppe_confederation: "Bozkır konfederasyonu", steppe_internal_title: "Bozkır makamı",
+  steppe_hegemony: "Hanlar Hanlığı", steppe_tributary: "Bağlı Han",
+  steppe_hegemony_war_call: "Hanlar Hanı savaş çağrısı"
 };
 
 const FIELD_LABELS: Record<string, string> = {

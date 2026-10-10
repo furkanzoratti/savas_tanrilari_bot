@@ -240,6 +240,23 @@ const server = createServer(async (request, response) => {
         await body(request)
       ));
     }
+    if (request.method === "PATCH" && url.pathname === "/api/admin/steppe-hegemony") {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.updateSteppeHegemony(session.sub, await body(request)));
+    }
+    const steppeTributaryUpdateMatch = request.method === "PATCH"
+      ? url.pathname.match(/^\/api\/admin\/steppe-tributaries\/([0-9a-f-]+)$/iu)
+      : null;
+    if (steppeTributaryUpdateMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.updateSteppeTributary(
+        session.sub,
+        steppeTributaryUpdateMatch[1]!,
+        await body(request)
+      ));
+    }
     const steppeTitleUpdateMatch = request.method === "PATCH"
       ? url.pathname.match(/^\/api\/admin\/steppe-titles\/([0-9a-f-]+)$/iu)
       : null;

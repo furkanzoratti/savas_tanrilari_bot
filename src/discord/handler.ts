@@ -83,7 +83,7 @@ import { handleCharacterAutocomplete, handleCharacterCommand, publishCharacterTu
 import { characterService, processCharacterTurn } from "../services/character-service.js";
 import { handleDynastyAutocomplete,handleDynastyButton,handleDynastyCommand,handleDynastyModal,processDynastyAutomation } from "./dynasty-ui.js";
 import { handleDiplomacyButton, handleDiplomacyCommand } from "./diplomacy-ui.js";
-import { handleSteppeHegemonyButton,handleSteppeHegemonyCommand,handleSteppeHegemonySelect } from "./steppe-hegemony-ui.js";
+import { handleSteppeHegemonyAutocomplete,handleSteppeHegemonyButton,handleSteppeHegemonyCommand,handleSteppeHegemonySelect } from "./steppe-hegemony-ui.js";
 import { handlePlayerAutoPurchaseButton, handlePlayerAutoPurchaseCommand } from "./player-auto-purchase-ui.js";
 import { handleWarDeclarationButton, handleWarDeclarationCommand, handleWarDeclarationModal } from "./war-declaration-ui.js";
 import { mercenaryCompanyAutocompleteAllowed, mercenarySubcommandRequiresGameMaster } from "./mercenary-access.js";
@@ -391,7 +391,7 @@ async function handleMercenaryCommand(interaction: ChatInputCommandInteraction):
 async function handleTrade(interaction: ChatInputCommandInteraction): Promise<void> {
   if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
   const sub = interaction.options.getSubcommand();
-  await interaction.deferReply({ ephemeral: sub !== "teklif" });
+  await interaction.deferReply({flags:sub!=="teklif"?MessageFlags.Ephemeral:undefined});
   const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
 
   if (sub === "teklif") {
@@ -1397,7 +1397,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
   if (interaction.commandName === "hazine-hareketleri") {
     requireGameMaster(interaction);
     if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
-    await interaction.deferReply({ephemeral:true});
+    await interaction.deferReply({flags:MessageFlags.Ephemeral});
     const report = await treasuryLedgerService.turnReport(
       interaction.guildId,interaction.options.getString("ulke",true),interaction.options.getInteger("tur")
     );
@@ -1425,7 +1425,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     const footer = "Gelir "+gold(report.income)+" • Gider "+gold(report.expense)+" • Net "+(report.net>=0?"+":"−")+gold(Math.abs(report.net))+
       (report.turn===report.currentTurn?" • Güncel hazine "+gold(report.country.currentTreasury):"");
     await interaction.editReply({embeds:[new EmbedBuilder().setColor(0xc59b45).setTitle("💰 "+report.country.name+" • Tur "+report.turn+" Mali Dökümü").setDescription(pages[0]!).setFooter({text:footer})]});
-    for (let index=1;index<pages.length;index+=1) await interaction.followUp({ephemeral:true,embeds:[new EmbedBuilder().setColor(0xc59b45).setTitle("💰 Mali Döküm • Devam "+(index+1)).setDescription(pages[index]!).setFooter({text:footer})]});
+    for (let index=1;index<pages.length;index+=1) await interaction.followUp({flags:MessageFlags.Ephemeral,embeds:[new EmbedBuilder().setColor(0xc59b45).setTitle("💰 Mali Döküm • Devam "+(index+1)).setDescription(pages[index]!).setFooter({text:footer})]});
   } else if (interaction.commandName === "yok-edilen-devletler") {
     requireGameMaster(interaction);
     if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
@@ -1595,7 +1595,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     await startPurchase(interaction, "build");
   } else if (interaction.commandName === "bina-yik") {
     if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
-    await interaction.deferReply({ephemeral:true});
+    await interaction.deferReply({flags:MessageFlags.Ephemeral});
     const country=await resolveCountry(interaction,interaction.options.getString("ulke"));
     const settlement=await findSettlement(country.id,interaction.options.getString("yerleske",true));
     const result=await gameService.demolishBuilding({
@@ -1659,7 +1659,8 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     const bonus = interaction.options.getInteger("bonus") ?? 0;
     const rolls = Array.from({ length: count }, () => Math.floor(Math.random() * sides) + 1);
     const total = rolls.reduce((sum, roll) => sum + roll, 0) + bonus;
-    await interaction.reply({ content: `🎲 **${count}d${sides}${bonus ? bonus > 0 ? `+${bonus}` : bonus : ""}** → [${rolls.join(", ")}]${bonus ? ` ${bonus > 0 ? "+" : ""}${bonus}` : ""} = **${total}**`, ephemeral: interaction.options.getBoolean("gizli") ?? false });
+    await interaction.reply({ content: `🎲 **${count}d${sides}${bonus ? bonus > 0 ? `+${bonus}` : bonus : ""}** → [${rolls.join(", ")}]${bonus ? ` ${bonus > 0 ? "+" : ""}${bonus}` : ""} = **${total}**`,
+      flags:(interaction.options.getBoolean("gizli")??false)?MessageFlags.Ephemeral:undefined });
   } else if (interaction.commandName === "rol-siralama") {
     if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
     await interaction.deferReply();
@@ -1907,6 +1908,7 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
 
 async function handleAutocomplete(interaction: AutocompleteInteraction): Promise<void> {
   if (await handleRomanRepublicAutocomplete(interaction)) return;
+  if (await handleSteppeHegemonyAutocomplete(interaction)) return;
   if (await handleDynastyAutocomplete(interaction)) return;
   if (await handleNavalOperationsAutocomplete(interaction)) return;
   if (await handleLandRaidsAutocomplete(interaction)) return;
