@@ -20,6 +20,11 @@ const phaseLabels: Record<string, string> = { OPEN: "Hareketler Açık", CLOSED:
 
 type SettlementDocument = CountryDocument["settlements"][number];
 
+export interface DocumentSettlementScope{
+  visibleSettlementIds:readonly string[];
+  roleLabel:string;
+}
+
 const DISCORD_EMBEDS_PER_MESSAGE = 10;
 const DISCORD_EMBED_TEXT_PER_MESSAGE = 6_000;
 const DOCUMENT_BATCH_TEXT_LIMIT = 5_900;
@@ -109,7 +114,12 @@ function renderMercenaryContract(contract: CountryDocument["mercenaries"][number
   ].join("\n");
 }
 
-export function renderDocument(document: CountryDocument): EmbedBuilder[] {
+export function renderDocument(document: CountryDocument,scope?:DocumentSettlementScope): EmbedBuilder[] {
+  const visibleSettlementIds=scope?new Set(scope.visibleSettlementIds):null;
+  const detailedSettlements=visibleSettlementIds
+    ?document.settlements.filter((settlement)=>visibleSettlementIds.has(settlement.id))
+    :document.settlements;
+  const hiddenSettlementCount=document.settlements.length-detailedSettlements.length;
   const tradeSummary = document.tradeAgreements.length
     ? document.tradeAgreements.map((agreement) => `${agreement.status === "ACTIVE" ? "✅" : "⏳"} **${agreement.partner_name}** • ${TRADE_ROUTE_LABELS[agreement.route]}\n${agreement.proposer_settlement_name} (${RESOURCES[agreement.proposer_resource].label}) ⇄ ${agreement.receiver_settlement_name} (${RESOURCES[agreement.receiver_resource].label})`).join("\n\n")
     : "Aktif veya bekleyen ticaret antlaşması yok.";
@@ -170,10 +180,14 @@ export function renderDocument(document: CountryDocument): EmbedBuilder[] {
         ? (document.pacts ?? []).map((pact) => `• **${pact.name}** — ${pact.purpose}`).join("\n")
         : "Herhangi bir pakta üye değil.") },
       { name: "🤝 Ticaret Antlaşmaları", value: spacedSection(tradeSummary) }
+      ,...(scope?[{
+        name:"🏕️ Bozkır Toprak Yetkisi",
+        value:spacedSection(`**${scope.roleLabel}**\nDevlet toplamları ${document.settlements.length} yerleşkenin tamamını kapsar. Ayrıntılı yerleşke belgesi: **${detailedSettlements.length}**.${hiddenSettlementCount>0?`\n🔒 **${hiddenSettlementCount}** bağlı yerleşkenin ayrıntıları bu makam için kapalıdır.`:""}`)
+      }]:[])
     )
     .setFooter({ text: "Tüm değerler mevcut bina, kaynak, ticaret, haraplık ve seferberlik etkileriyle hesaplanır." });
 
-  const settlementEmbeds = document.settlements.map((settlement) => {
+  const settlementEmbeds = detailedSettlements.map((settlement) => {
     const occupiedSlots = settlement.buildings.filter((building) => building.level > 0 || building.status === "BUILDING").length;
     const activeConstruction = settlement.buildings.filter((building) => building.status === "BUILDING").length;
     const culture = CULTURE_GROUPS[settlement.culture_group]?.label ?? settlement.culture_group;

@@ -85,5 +85,17 @@ describe("kültür ve yerleşke kartı", () => {
     expect(fields.find((field) => field.name === "👥 Nüfus")?.value).toContain("🎖️ **Ordu Limiti**");
     expect(fields.find((field) => field.name === "👥 Nüfus")?.value).toContain("7.500");
     expect(fields.find((field) => field.name === "💰 Gelir Kalemleri")?.value).not.toContain("Deniz Ticareti");
+
+    const scopedDocument={...document,settlements:[
+      document.settlements[0]!,
+      {...document.settlements[0]!,id:"landholder-city",name:"Toprak Ağası Şehri"}
+    ]};
+    const scoped=renderDocument(scopedDocument,{visibleSettlementIds:["city"],roleLabel:"Han Belgesi"});
+    expect(scoped).toHaveLength(2);
+    expect(scoped[1]!.toJSON().title).toContain("Roma");
+    expect(scoped.map((embed)=>embed.toJSON().title).join(" ")).not.toContain("Toprak Ağası Şehri");
+    const authorityField=scoped[0]!.toJSON().fields?.find((field)=>field.name==="🏕️ Bozkır Toprak Yetkisi");
+    expect(authorityField?.value).toContain("Devlet toplamları 2 yerleşkenin tamamını kapsar");
+    expect(authorityField?.value).toContain("1** bağlı yerleşkenin ayrıntıları");
   });
 });

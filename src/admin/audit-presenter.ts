@@ -31,6 +31,8 @@ const ACTION_LABELS: Record<string, string> = {
   "admin.panel.ai.test_mode.update": "AI test modu güncellendi",
   "admin.panel.ai.plan.generate": "AI devlet planı taslağı üretildi",
   "admin.panel.ai.plan.review": "AI devlet planı incelendi",
+  "admin.panel.steppe.confederation.update": "Bozkır konfederasyonu otoritesi güncellendi",
+  "admin.panel.steppe.title.update": "Bozkır makamı güncellendi",
   "CHARACTER_ASSIGN": "Karakter görevlendirildi",
   "CHARACTER_UNASSIGN": "Karakter görevi kaldırıldı",
   "ACADEMY_CHARACTER_CREATE": "Akademi karakteri oluşturuldu",
@@ -78,7 +80,8 @@ const ACTION_LABELS: Record<string, string> = {
 const ENTITY_LABELS: Record<string, string> = {
   country: "Devlet", settlement: "Yerleşke", character: "Karakter", dynasty: "Hanedan", dynasty_member: "Hanedan üyesi", army: "Ordu", fleet: "Filo",
   battle: "Savaş", naval_operation: "Deniz operasyonu", state_war: "Savaş ilanı",
-  movement_order: "Hareket emri", map: "Harita", map_edge: "Harita geçişi", guild: "Oyun"
+  movement_order: "Hareket emri", map: "Harita", map_edge: "Harita geçişi", guild: "Oyun",
+  steppe_confederation: "Bozkır konfederasyonu", steppe_internal_title: "Bozkır makamı"
 };
 
 const FIELD_LABELS: Record<string, string> = {
@@ -110,7 +113,8 @@ const FIELD_LABELS: Record<string, string> = {
   executionApplied: "Oyun emri uygulandı", decision: "İnceleme kararı", reviewNote: "İnceleme notu",
   dynastyId: "Hanedan", title: "Unvan", relation: "Akrabalık", age: "Yaş", health: "Sağlık",
   diedTurn: "Ölüm turu", reason: "Ölüm nedeni", memberName: "Hanedan üyesi",
-  spouseName: "Yerel soylu eş", spouseAge: "Eşin yaşı"
+  spouseName: "Yerel soylu eş", spouseAge: "Eşin yaşı", authority: "Otorite",
+  loyalty: "Sadakat", relationScore: "İlişki", holderName: "Makam sahibi", holderUserId: "Discord kullanıcısı"
 };
 
 const VALUE_LABELS: Record<string, string> = {

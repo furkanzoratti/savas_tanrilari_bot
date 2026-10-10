@@ -8,7 +8,8 @@ export type ReligionKey =
   | "ANATOLIAN_FAITHS" | "ARMENIAN_FAITH" | "CAUCASIAN_FAITH" | "PHOENICIAN_CANAANITE_FAITH"
   | "JUDAISM" | "MESOPOTAMIAN_FAITH" | "EGYPTIAN_FAITH" | "KUSH_NUBIAN_FAITH"
   | "NABATAEAN_FAITH" | "SOUTH_ARABIAN_FAITH" | "ZOROASTRIANISM" | "HELLENO_IRANIAN_SYNCRETISM"
-  | "BRAHMANISM" | "BUDDHISM" | "JAINISM" | "DRAVIDIAN_FAITHS" | "CHRISTIANITY";
+  | "BRAHMANISM" | "BUDDHISM" | "JAINISM" | "DRAVIDIAN_FAITHS" | "CHRISTIANITY"
+  | "INNER_ASIAN_SKY_FAITH";
 
 export type ReligionUnitType = keyof typeof UNITS;
 
@@ -135,7 +136,8 @@ export const RELIGIONS: Record<ReligionKey, ReligionDefinition> = {
   BUDDHISM: { label:"Budizm",localEffect:"Olumsuz yerleşke olayı ihtimali -5 puan",nationalEffect:"Diplomat görevlerine +1",local:{negativeEventRiskReduction:5},national:{diplomatTaskBonus:1} },
   JAINISM: { label:"Jainizm",localEffect:"Kara ticareti +%8",nationalEffect:"Tüccar görevlerine +1",local:{landTradeIncomePercent:.08},national:{merchantTaskBonus:1} },
   DRAVIDIAN_FAITHS: { label:"Dravid İnançları",localEffect:"Liman geliri +%8",nationalEffect:"Gemi bakım maliyeti -%3",local:{seaTradeIncomePercent:.08},national:{shipUpkeepDiscount:.03} },
-  CHRISTIANITY: { label:"Hristiyanlık",localEffect:"Yerleşke toplam geliri +%5",nationalEffect:"Bina maliyeti -%5; Misyoner ve Diplomat görevlerine +1",local:{settlementIncomePercent:.05},national:{buildingCostDiscount:.05,diplomatTaskBonus:1,missionaryTaskBonus:1} }
+  CHRISTIANITY: { label:"Hristiyanlık",localEffect:"Yerleşke toplam geliri +%5",nationalEffect:"Bina maliyeti -%5; Misyoner ve Diplomat görevlerine +1",local:{settlementIncomePercent:.05},national:{buildingCostDiscount:.05,diplomatTaskBonus:1,missionaryTaskBonus:1} },
+  INNER_ASIAN_SKY_FAITH: { label:"İç Asya Gök İnancı",localEffect:"Atlı birlik alım maliyeti -%5",nationalEffect:"Kara yağması kazancı +%5",local:{unitPurchaseDiscounts:[{discount:.05,units:CAVALRY}]},national:{landRaidIncomePercent:.05} }
 };
 
 export const SECONDARY_RELIGIONS: Record<ReligionKey, SecondaryReligionDefinition> = {
@@ -168,7 +170,8 @@ export const SECONDARY_RELIGIONS: Record<ReligionKey, SecondaryReligionDefinitio
   BUDDHISM: { key:"BUDDHIST_STHAVIRA_TRADITION",label:"Sthavira Geleneği",effect:"Olumsuz yerleşke olayı ihtimali -2 puan",modifiers:{negativeEventRiskReduction:2} },
   JAINISM: { key:"JAIN_SRAMANA_COMMUNITY",label:"Şramana Cemaati",effect:"Dış ticaret geliri +%2",modifiers:{foreignTradeIncomePercent:.02} },
   DRAVIDIAN_FAITHS: { key:"DRAVIDIAN_MURUGAN_CULT",label:"Murugan Kültü",effect:"Mızraklı birlik alım maliyeti -%2",modifiers:{unitPurchaseDiscounts:[{discount:.02,units:SPEAR_RANGED}]} },
-  CHRISTIANITY: { key:"CHRISTIAN_CATHOLICISM",label:"Katoliklik",effect:"Olumsuz yerleşke olayı ihtimali -5 puan",modifiers:{negativeEventRiskReduction:5} }
+  CHRISTIANITY: { key:"CHRISTIAN_CATHOLICISM",label:"Katoliklik",effect:"Olumsuz yerleşke olayı ihtimali -5 puan",modifiers:{negativeEventRiskReduction:5} },
+  INNER_ASIAN_SKY_FAITH: { key:"INNER_ASIAN_ANCESTOR_SHAMANISM",label:"Atalar ve Kam Geleneği",effect:"Yerleşke huzursuzluğu -2 puan",modifiers:{unrestReduction:2} }
 };
 
 export type SecondaryReligionKey = (typeof SECONDARY_RELIGIONS)[ReligionKey]["key"];
@@ -367,7 +370,8 @@ export function defaultReligionForCulture(culture: CultureGroup): ReligionKey {
     CAUCASIAN:"CAUCASIAN_FAITH",SARMATIAN:"SCYTHO_SARMATIAN_FAITH",SCYTHIAN:"SCYTHO_SARMATIAN_FAITH",
     WEST_IRANIAN:"ZOROASTRIANISM",EAST_IRANIAN:"HELLENO_IRANIAN_SYNCRETISM",GANDHARAN:"BUDDHISM",
     MADHYADESHI:"BRAHMANISM",MAGADHAN:"BUDDHISM",KALINGAN:"BUDDHISM",MAHARASHTRI:"BRAHMANISM",
-    ANDHRA:"BRAHMANISM",TAMIL:"DRAVIDIAN_FAITHS",SOUTHEAST_ASIAN:"BUDDHISM"
+    ANDHRA:"BRAHMANISM",TAMIL:"DRAVIDIAN_FAITHS",SOUTHEAST_ASIAN:"BUDDHISM",
+    DINGLING:"INNER_ASIAN_SKY_FAITH",XIANBEI:"INNER_ASIAN_SKY_FAITH",XIONGNU:"INNER_ASIAN_SKY_FAITH"
   };
   return map[culture];
 }

@@ -46,6 +46,7 @@ import { warDeclarationService } from "../services/war-declaration-service.js";
 import { DEFAULT_WELCOME_MESSAGE, renderWelcomeMessage, welcomeService } from "../services/welcome-service.js";
 import { tradeService } from "../services/trade-service.js";
 import { treasuryLedgerService, type TreasuryMovement } from "../services/treasury-ledger-service.js";
+import { steppePoliticsService } from "../services/steppe-politics-service.js";
 import { assertCountryAccess,assertCountryExecutiveAccess,isGameMaster,requireGameMaster,resolveCountry } from "./auth.js";
 import { buildingChoices, shipChoices, unitChoices } from "./commands.js";
 import { batchDocumentEmbeds, renderDocument } from "./document.js";
@@ -231,10 +232,27 @@ async function handleCharacterTurnRecovery(interaction: ChatInputCommandInteract
 }
 async function sendDocument(interaction: ChatInputCommandInteraction, countryId: string): Promise<void> {
   if (!interaction.deferred && !interaction.replied) await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const embeds = renderDocument(await gameService.document(countryId, { includeArmies: false }));
+  const [document,steppeAccess]=await Promise.all([
+    gameService.document(countryId,{includeArmies:false}),
+    interaction.guildId&&!isGameMaster(interaction)
+      ?steppePoliticsService.settlementDocumentAccess(interaction.guildId,countryId,interaction.user.id)
+      :Promise.resolve(null)
+  ]);
+  const embeds=renderDocument(document,steppeAccess?{
+    visibleSettlementIds:steppeAccess.settlementIds,
+    roleLabel:steppeAccess.tier==="KHAN"?"Han Belgesi":`${steppeAccess.titleName} Belgesi`
+  }:undefined);
   const batches = batchDocumentEmbeds(embeds);
   await interaction.editReply({ embeds: batches[0] ?? [], files: [new AttachmentBuilder(TEMPLE_BANNER_PATH, { name: TEMPLE_BANNER_NAME })] });
   for (const batch of batches.slice(1)) await interaction.followUp({ embeds: batch, files: [new AttachmentBuilder(TEMPLE_BANNER_PATH, { name: TEMPLE_BANNER_NAME })], flags: MessageFlags.Ephemeral });
+}
+
+async function resolveDocumentCountry(interaction:ChatInputCommandInteraction){
+  if(!interaction.guildId)throw new GameError("Sunucu bulunamadı.");
+  const requested=interaction.options.getString("ulke");
+  if(requested&&isGameMaster(interaction))return resolveCountry(interaction,requested);
+  const steppeCountry=await steppePoliticsService.countryForTitleHolder(interaction.guildId,interaction.user.id);
+  return steppeCountry??resolveCountry(interaction,requested);
 }
 
 async function startPurchase(interaction: ChatInputCommandInteraction, kind: "build" | "unit" | "ship"): Promise<void> {
@@ -1491,13 +1509,20 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
   } else if(interaction.commandName==="yerleskelerim"){
     if(!interaction.guildId)throw new GameError("Sunucu bulunamadı.");
     await interaction.deferReply({flags:MessageFlags.Ephemeral});
-    const country=await resolveCountry(interaction,interaction.options.getString("ulke"));
-    const embeds=renderSettlementsOverview(await gameService.document(country.id,{includeArmies:false}));
+    const country=await resolveDocumentCountry(interaction);
+    const [document,steppeAccess]=await Promise.all([
+      gameService.document(country.id,{includeArmies:false}),
+      isGameMaster(interaction)?Promise.resolve(null):steppePoliticsService.settlementDocumentAccess(interaction.guildId,country.id,interaction.user.id)
+    ]);
+    const embeds=renderSettlementsOverview(document,steppeAccess?{
+      visibleSettlementIds:steppeAccess.settlementIds,
+      roleLabel:steppeAccess.tier==="KHAN"?"Han Belgesi":`${steppeAccess.titleName} Belgesi`
+    }:undefined);
     await interaction.editReply({embeds:[embeds[0]!],files:[new AttachmentBuilder(SETTLEMENTS_OVERVIEW_BANNER_PATH,{name:SETTLEMENTS_OVERVIEW_BANNER_NAME})]});
     for(const embed of embeds.slice(1))await interaction.followUp({embeds:[embed],flags:MessageFlags.Ephemeral});
   } else if (interaction.commandName === "belge") {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
+    const country=await resolveDocumentCountry(interaction);
     await sendDocument(interaction, country.id);
   } else if (interaction.commandName === "hazine-tasi") {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });

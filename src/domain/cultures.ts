@@ -33,7 +33,10 @@ export const CULTURE_GROUPS = {
   MAHARASHTRI: { label: "Maharashtri–Dekan" },
   ANDHRA: { label: "Andhra" },
   TAMIL: { label: "Tamil" },
-  SOUTHEAST_ASIAN: { label: "Güneydoğu Asyalı" }
+  SOUTHEAST_ASIAN: { label: "Güneydoğu Asyalı" },
+  DINGLING: { label: "Dingling" },
+  XIANBEI: { label: "Xianbei" },
+  XIONGNU: { label: "Xiongnu" }
 } as const;
 
 export type CultureGroup = keyof typeof CULTURE_GROUPS;

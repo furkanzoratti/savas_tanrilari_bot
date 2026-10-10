@@ -269,6 +269,57 @@ async function romanPoliticsPage() {
     : '<div class="page-head"><div><h1>Roma Siyaseti</h1><p>Roma Cumhuriyeti iç yönetimi</p></div></div><div class="card empty">Henüz Roma Cumhuriyeti kaydı bulunmuyor. Discord’da /roma-yonetim kur komutunu kullanın.</div>';
 }
 
+const steppeTierLabels = { KHAN: "Han", LANDHOLDER: "Toprak Ağası" };
+const steppeResponseLabels = { PENDING: "Bekliyor", FULL: "Tam Katılım", LIMITED: "Sınırlı Katılım", NEUTRAL: "Tarafsız", REFUSE: "Reddetti" };
+
+function steppeDelta(value) {
+  const amount = Number(value || 0);
+  return `${amount > 0 ? "+" : ""}${number(amount)}`;
+}
+
+function steppeConfederationPanel(confederation, currentTurn) {
+  const openCalls = confederation.calls.filter((call) => call.status === "OPEN");
+  const titleCards = confederation.titles.map((title) => `<article class="card dynasty-card">
+    <div class="card-head"><div><h3>${escapeHtml(title.title_name)}</h3><p>${escapeHtml(steppeTierLabels[title.tier] || title.tier)}${title.liege_title_name ? ` · ${escapeHtml(title.liege_title_name)} makamına bağlı` : ""}</p></div><button class="button compact" data-edit-steppe-title="${title.id}">Düzenle</button></div>
+    <section class="detail-grid"><div class="detail-cell"><span>Makam sahibi</span><strong>${escapeHtml(title.holder_name)}</strong><small>${title.holder_user_id ? `Discord: ${escapeHtml(title.holder_user_id)}` : "Oyuncu atanmamış"}</small></div><div class="detail-cell"><span>Sadakat</span><strong>${number(title.loyalty)} / 100</strong></div><div class="detail-cell"><span>İlişki</span><strong>${number(title.relation_score)}</strong></div><div class="detail-cell"><span>Topraklar</span><strong>${title.holdings.length ? title.holdings.map((holding) => escapeHtml(holding.name)).join(", ") : "Bağlı yerleşke yok"}</strong></div></section>
+  </article>`).join("");
+  const callCards = confederation.calls.map((call) => `<article class="card"><div class="card-head"><div><h3>${escapeHtml(call.target_label)}</h3><p>Tur ${number(call.opened_turn)} · ${escapeHtml(call.reason)}</p></div><span class="pill ${call.status === "OPEN" ? "warning" : "neutral"}">${call.status === "OPEN" ? "Yanıt bekliyor" : "Kapandı"}</span></div>${call.responses.map((response) => `<div class="data-row"><div><strong>${escapeHtml(response.titleName)}</strong><small>${escapeHtml(response.holderName)}</small></div><span>${escapeHtml(steppeResponseLabels[response.response] || response.response)}</span><small>Sadakat ${steppeDelta(response.loyaltyDelta)} · İlişki ${steppeDelta(response.relationDelta)} · Otorite ${steppeDelta(response.authorityDelta)}</small></div>`).join("") || '<div class="empty compact-empty">Çağrıya bağlı Han bulunmuyor.</div>'}</article>`).join("");
+  const eventRows = confederation.events.map((event) => `<div class="data-row"><div><strong>Tur ${number(event.game_turn)} · ${escapeHtml(event.title_name || "Konfederasyon")}</strong><small>${escapeHtml(event.description)}</small></div><span>Sadakat ${steppeDelta(event.loyalty_delta)} · İlişki ${steppeDelta(event.relation_delta)} · Otorite ${steppeDelta(event.authority_delta)}</span></div>`).join("");
+  return `<section class="roman-republic-section">
+    <div class="page-head"><div><h1>🐎 ${escapeHtml(confederation.country_name)} · Bozkır Siyaseti</h1><p>Ülkenin Hanı, doğrudan Han toprakları ve devletsiz Toprak Ağaları</p></div><div class="actions"><span class="pill">Tur ${number(currentTurn)}</span><button class="button primary" data-edit-steppe-confederation="${confederation.id}">Otoriteyi düzenle</button></div></div>
+    <section class="detail-grid"><div class="detail-cell"><span>Han otoritesi</span><strong>${number(confederation.authority)} / 100</strong></div><div class="detail-cell"><span>Aktif makamlar</span><strong>${number(confederation.titles.length)}</strong></div><div class="detail-cell"><span>Açık savaş çağrısı</span><strong>${number(openCalls.length)}</strong></div><div class="detail-cell"><span>Hanlar Hanı ilişkisi</span><strong>Devletler arası haraç sistemi</strong><small>Bu ülkenin iç hiyerarşisine dahil değildir.</small></div></section>
+    <div class="section-title"><h2>Ülke içi yapı</h2><span>Toprak Ağaları → Ülkenin Hanı</span></div><section class="dynasty-grid">${titleCards || '<div class="card empty">Henüz makam oluşturulmamış.</div>'}</section>
+    <div class="section-title"><h2>Savaş çağrıları</h2><span>Han yanıtları ve siyasi sonuçları</span></div><section class="content-grid">${callCards || '<div class="card empty">Henüz savaş çağrısı bulunmuyor.</div>'}</section>
+    <section class="card"><div class="card-head"><div><h2>Son siyasi kayıtlar</h2><p>Yönetici düzenlemeleri ve çağrı sonuçları</p></div></div>${eventRows || '<div class="empty compact-empty">Henüz siyasi kayıt yok.</div>'}</section>
+  </section>`;
+}
+
+async function steppePoliticsPage() {
+  setActiveRoute("steppe-politics"); loading();
+  const data = await api("/api/steppe-politics");
+  page.innerHTML = data.confederations.length
+    ? data.confederations.map((confederation) => steppeConfederationPanel(confederation, data.currentTurn)).join("")
+    : '<div class="page-head"><div><h1>Bozkır Siyaseti</h1><p>Konfederasyon iç hiyerarşisi</p></div></div><div class="card empty">Henüz bozkır konfederasyonu kurulmamış. Discord’da /bozkir-yonetim kur komutunu kullanın.</div>';
+  const confederations = new Map(data.confederations.map((confederation) => [confederation.id, confederation]));
+  const titles = new Map(data.confederations.flatMap((confederation) => confederation.titles).map((title) => [title.id, title]));
+  document.querySelectorAll("[data-edit-steppe-confederation]").forEach((button) => button.addEventListener("click", () => {
+    const confederation = confederations.get(button.dataset.editSteppeConfederation);
+    if (!confederation) return;
+    openEditor("Han otoritesi", confederation.country_name, `<div class="form-grid"><label>Otorite<input id="edit-steppe-authority" type="number" min="0" max="100" step="1" value="${number(confederation.authority)}" required></label><label class="full">Düzenleme gerekçesi<textarea id="edit-steppe-reason" maxlength="300" required></textarea></label></div>`, async () => {
+      await api(`/api/admin/steppe-confederations/${confederation.id}`, { method: "PATCH", body: JSON.stringify({ authority: Number(document.getElementById("edit-steppe-authority").value), reason: document.getElementById("edit-steppe-reason").value }) });
+      closeEditor(); toast("Konfederasyon otoritesi güncellendi."); await steppePoliticsPage();
+    });
+  }));
+  document.querySelectorAll("[data-edit-steppe-title]").forEach((button) => button.addEventListener("click", () => {
+    const title = titles.get(button.dataset.editSteppeTitle);
+    if (!title) return;
+    openEditor("Bozkır makamını düzenle", title.title_name, `<div class="form-grid"><label>Makam sahibi<input id="edit-steppe-holder-name" maxlength="100" value="${escapeHtml(title.holder_name)}" required></label><label>Discord kullanıcı kimliği<input id="edit-steppe-holder-user" value="${escapeHtml(title.holder_user_id || "")}" placeholder="Oyuncusuz makam için boş bırak"></label><label>Sadakat<input id="edit-steppe-loyalty" type="number" min="0" max="100" step="1" value="${number(title.loyalty)}" required></label><label>İlişki<input id="edit-steppe-relation" type="number" min="-100" max="100" step="1" value="${number(title.relation_score)}" required></label><label class="full">Düzenleme gerekçesi<textarea id="edit-steppe-title-reason" maxlength="300" required></textarea></label></div>`, async () => {
+      await api(`/api/admin/steppe-titles/${title.id}`, { method: "PATCH", body: JSON.stringify({ holderName: document.getElementById("edit-steppe-holder-name").value, holderUserId: document.getElementById("edit-steppe-holder-user").value || null, loyalty: Number(document.getElementById("edit-steppe-loyalty").value), relationScore: Number(document.getElementById("edit-steppe-relation").value), reason: document.getElementById("edit-steppe-title-reason").value }) });
+      closeEditor(); toast("Bozkır makamı güncellendi."); await steppePoliticsPage();
+    });
+  }));
+}
+
 function dynastyMemberConnections(member) {
   const values = [
     member.spouse_name ? `Eş: ${member.spouse_name}` : "",
@@ -1006,6 +1057,7 @@ async function navigate(route) {
     if (route === "characters") return charactersPage();
     if (route === "dynasties") return dynastiesPage();
     if (route === "roman-politics") return romanPoliticsPage();
+    if (route === "steppe-politics") return steppePoliticsPage();
     if (route === "assignments") return assignmentsPage();
     if (route === "ai-governance") return aiGovernancePage();
     if (route === "battles") return battlesPage();

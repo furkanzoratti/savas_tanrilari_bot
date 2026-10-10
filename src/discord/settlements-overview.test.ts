@@ -8,6 +8,7 @@ function documentWithSettlements(count:number):CountryDocument {
     guild:{current_turn:30,turn_phase:"OPEN"},
     country:{name:"Roma",treasury:25_000,primary_culture_group:"ITALIC"},
     settlements:Array.from({length:count},(_,index)=>({
+      id:`settlement-${index+1}`,
       name:`Yerleşke ${index+1}`,
       local_treasury:1_000+index,
       payableIncome:500,
@@ -56,5 +57,20 @@ describe("renderSettlementsOverview",()=>{
     const lines=description.split("\n");
     expect(lines.find((line)=>line.includes("Kültür"))).not.toContain("Din");
     expect(lines.find((line)=>line.includes("Din ve Mezhep"))).not.toContain("Kültür");
+  });
+
+  it("Han belgesinde devlet toplamlarını koruyup yalnız doğrudan Han topraklarını ayrıntılandırır",()=>{
+    const embeds=renderSettlementsOverview(documentWithSettlements(6),{
+      visibleSettlementIds:["settlement-1","settlement-2"],roleLabel:"Han Belgesi"
+    });
+    const description=embeds[0]!.toJSON().description??"";
+    expect(embeds[0]!.toJSON().title).toContain("Han Belgesi");
+    expect(description).toContain("Devlet Yerleşkeleri:** 6");
+    expect(description).toContain("Ayrıntılı Erişim:** 2");
+    expect(description).toContain("Dönem Geliri:** 5.000 Altın");
+    expect(description).toContain("Yerleşke 1");
+    expect(description).toContain("Yerleşke 2");
+    expect(description).not.toContain("Yerleşke 3");
+    expect(description).toContain("4 yerleşke");
   });
 });

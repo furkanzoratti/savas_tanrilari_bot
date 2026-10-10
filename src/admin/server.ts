@@ -130,6 +130,10 @@ const server = createServer(async (request, response) => {
       if (!requireSession(request, response)) return;
       return json(response, 200, await adminPanelService.romanPolitics());
     }
+    if (request.method === "GET" && url.pathname === "/api/steppe-politics") {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await adminPanelService.steppePolitics());
+    }
     const dynastyMatch = request.method === "GET" ? url.pathname.match(/^\/api\/dynasties\/([0-9a-f-]+)$/iu) : null;
     if (dynastyMatch) {
       if (!requireSession(request, response)) return;
@@ -223,6 +227,30 @@ const server = createServer(async (request, response) => {
       const session = requireMutation(request, response);
       if (!session) return;
       return json(response, 200, await adminPanelService.updateSettlement(session.sub, settlementUpdateMatch[1]!, await body(request)));
+    }
+    const steppeConfederationUpdateMatch = request.method === "PATCH"
+      ? url.pathname.match(/^\/api\/admin\/steppe-confederations\/([0-9a-f-]+)$/iu)
+      : null;
+    if (steppeConfederationUpdateMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.updateSteppeConfederation(
+        session.sub,
+        steppeConfederationUpdateMatch[1]!,
+        await body(request)
+      ));
+    }
+    const steppeTitleUpdateMatch = request.method === "PATCH"
+      ? url.pathname.match(/^\/api\/admin\/steppe-titles\/([0-9a-f-]+)$/iu)
+      : null;
+    if (steppeTitleUpdateMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.updateSteppeTitle(
+        session.sub,
+        steppeTitleUpdateMatch[1]!,
+        await body(request)
+      ));
     }
     const rebellionUpdateMatch = request.method === "PATCH" ? url.pathname.match(/^\/api\/admin\/rebellions\/([0-9a-f-]+)$/iu) : null;
     if (rebellionUpdateMatch) {

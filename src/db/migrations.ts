@@ -94,6 +94,10 @@ import { romanFamilyLifecycleMigration } from "./roman-family-lifecycle-migratio
 import { romanFamilyMarriageBirthMigration } from "./roman-family-marriage-birth-migration.js";
 import { romanFamilyMarriageMessageMigration } from "./roman-family-marriage-message-migration.js";
 import { romanFamilyPlayerAccessMigration } from "./roman-family-player-access-migration.js";
+import { steppeInternalPoliticsMigration } from "./steppe-internal-politics-migration.js";
+import { steppeDefaultStatesMigration } from "./steppe-default-states-migration.js";
+import { steppeCultureReligionMigration } from "./steppe-culture-religion-migration.js";
+import { steppeSettlementsMigration } from "./steppe-settlements-migration.js";
 
 export const migrations = [
   {
@@ -2405,5 +2409,9 @@ export const migrations = [
   romanFamilyLifecycleMigration,
   romanFamilyMarriageBirthMigration,
   romanFamilyMarriageMessageMigration,
-  romanFamilyPlayerAccessMigration
+  romanFamilyPlayerAccessMigration,
+  steppeInternalPoliticsMigration,
+  steppeDefaultStatesMigration,
+  steppeCultureReligionMigration,
+  steppeSettlementsMigration
 ] as const;
