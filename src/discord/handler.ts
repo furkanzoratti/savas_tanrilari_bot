@@ -1931,9 +1931,8 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
   if(interaction.commandName==="savas"&&interaction.options.getSubcommand(false)==="baslat"&&["taraf-a","taraf-b"].includes(focused.name)){
     if(!interaction.guildId||!isGameMaster(interaction)){await interaction.respond([]);return;}
     const query=String(focused.value).toLocaleLowerCase("tr-TR").trim();
-    const targets=await battleService.listStartTargets(interaction.guildId);
-    await interaction.respond(targets.filter((target)=>!query||target.label.toLocaleLowerCase("tr-TR").includes(query))
-      .slice(0,25).map((target)=>({name:target.label.slice(0,100),value:target.value})));
+    const targets=await battleService.listStartTargets(interaction.guildId,query);
+    await interaction.respond(targets.map((target)=>({name:target.label.slice(0,100),value:target.value})));
     return;
   }
   if (interaction.commandName==="hristiyan-sinir"&&focused.name==="yerleske") {

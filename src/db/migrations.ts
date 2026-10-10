@@ -104,6 +104,7 @@ import { steppeArmyDoctrineMigration } from "./steppe-army-doctrine-migration.js
 import { centralAsianStatesMigration } from "./central-asian-states-migration.js";
 import { centralAsianQiangCorrectionMigration } from "./central-asian-qiang-correction-migration.js";
 import { langkasukaStateMigration } from "./langkasuka-state-migration.js";
+import { activeRebelFactionRepairMigration } from "./active-rebel-faction-repair-migration.js";
 
 export const migrations = [
   {
@@ -2425,5 +2426,6 @@ export const migrations = [
   steppeArmyDoctrineMigration,
   centralAsianStatesMigration,
   centralAsianQiangCorrectionMigration,
-  langkasukaStateMigration
+  langkasukaStateMigration,
+  activeRebelFactionRepairMigration
 ] as const;

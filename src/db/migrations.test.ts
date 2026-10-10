@@ -428,3 +428,13 @@ describe("yüz yetmiş dördüncü migration", () => {
     expect(migration?.sql).toContain("MALAYIC");
   });
 });
+
+describe("yüz yetmiş beşinci migration", () => {
+  const migration = migrations.find((item) => item.version === 175);
+
+  it("fraksiyon kaydı eksik açık isyanları savaş sistemine geri kazandırır", () => {
+    expect(migration?.name).toBe("active_settlements_missing_rebel_faction_repair");
+    expect(migration?.sql).toContain("rebellion_active=TRUE");
+    expect(migration?.sql).toContain("INSERT INTO rebel_factions");
+  });
+});

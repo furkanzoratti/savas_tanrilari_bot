@@ -652,7 +652,7 @@ async function resolveBattleTarget(client: DbClient, guildId: string, rawValue: 
             settlement.name AS settlement_name
        FROM rebel_factions faction JOIN settlements settlement ON settlement.id=faction.settlement_id
       WHERE faction.guild_id=$1 AND faction.status IN ('ORGANIZING','ACTIVE','OCCUPYING')
-        AND (${rebelToken?"faction.id::text=$2":"LOWER(faction.display_name)=LOWER($2)"})
+        AND (${rebelToken?"faction.id::text=$2":"(LOWER(faction.display_name)=LOWER($2) OR LOWER(faction.army_name)=LOWER($2))"})
       ORDER BY faction.updated_at DESC LIMIT 1 FOR UPDATE OF faction`,[guildId,rebelToken??value]
   )).rows[0];
   if(!faction)throw new GameError("Seçilen ülke veya etkin isyancı grup bulunamadı.");
@@ -1347,23 +1347,43 @@ export const battleService = {
     return battle ? loadView(pool as unknown as DbClient, battle.id) : null;
   },
 
-  async listStartTargets(guildId:string):Promise<BattleStartTargetChoice[]>{
-    const [countries,rebels]=await Promise.all([
-      pool.query<{id:string;name:string}>(
-        "SELECT id,name FROM countries WHERE guild_id=$1 AND status='ACTIVE' AND is_system_faction=FALSE ORDER BY name",[guildId]
-      ),
-      pool.query<{id:string;display_name:string;army_name:string;settlement_name:string;personnel:number}>(
-        `SELECT faction.id,faction.display_name,faction.army_name,settlement.name AS settlement_name,faction.personnel
-           FROM rebel_factions faction JOIN settlements settlement ON settlement.id=faction.settlement_id
-          WHERE faction.guild_id=$1 AND faction.status NOT IN ('SUPPRESSED','ENFORCED')
-          ORDER BY faction.updated_at DESC,faction.display_name`,[guildId]
-      )
-    ]);
-    return [
-      ...rebels.rows.map((rebel)=>({value:`rebel:${rebel.id}`,
-        label:`🔥 ${rebel.display_name} • ${rebel.army_name} • ${rebel.settlement_name} (${Number(rebel.personnel).toLocaleString("tr-TR")})`,kind:"REBEL" as const})),
-      ...countries.rows.map((country)=>({value:`country:${country.id}`,label:country.name,kind:"COUNTRY" as const}))
-    ];
+  async listStartTargets(guildId:string,rawQuery=""):Promise<BattleStartTargetChoice[]>{
+    const query=rawQuery.trim();
+    const result=await pool.query<{
+      id:string;kind:"COUNTRY"|"REBEL";display_name:string;army_name:string|null;
+      settlement_name:string|null;owner_country_name:string|null;personnel:number|null;
+    }>(
+      `WITH targets AS (
+         SELECT faction.id,'REBEL'::text AS kind,faction.display_name,faction.army_name,
+                settlement.name AS settlement_name,owner.name AS owner_country_name,faction.personnel,
+                faction.updated_at,0 AS kind_order,
+                CONCAT_WS(' ',faction.display_name,faction.army_name,settlement.name,owner.name) AS search_text
+           FROM rebel_factions faction
+           JOIN settlements settlement ON settlement.id=faction.settlement_id
+           JOIN countries owner ON owner.id=faction.against_country_id
+          WHERE faction.guild_id=$1 AND faction.status IN ('ORGANIZING','ACTIVE','OCCUPYING')
+            AND faction.personnel>0
+            AND NOT EXISTS(
+              SELECT 1 FROM battle_sides side_record
+              JOIN battles battle ON battle.id=side_record.battle_id
+              WHERE side_record.rebel_faction_id=faction.id
+                AND battle.status NOT IN ('FINISHED','CANCELLED')
+            )
+         UNION ALL
+         SELECT country.id,'COUNTRY'::text,country.name,NULL,NULL,NULL,NULL,NULL,1,country.name
+           FROM countries country
+          WHERE country.guild_id=$1 AND country.status='ACTIVE' AND country.is_system_faction=FALSE
+       )
+       SELECT id,kind,display_name,army_name,settlement_name,owner_country_name,personnel
+         FROM targets
+        WHERE $2='' OR search_text ILIKE '%'||$2||'%'
+        ORDER BY kind_order,updated_at DESC NULLS LAST,display_name
+        LIMIT 25`,[guildId,query]
+    );
+    return result.rows.map((target)=>target.kind==="REBEL"
+      ? {value:`rebel:${target.id}`,
+          label:`🔥 ${target.display_name} • ${target.army_name} • ${target.settlement_name} / ${target.owner_country_name} (${Number(target.personnel).toLocaleString("tr-TR")})`,kind:"REBEL"}
+      : {value:`country:${target.id}`,label:target.display_name,kind:"COUNTRY"});
   },
 
   async playerFleetStatus(input: { guildId: string; battleId: string; actorId: string }): Promise<PlayerBattleFleetStatus> {
