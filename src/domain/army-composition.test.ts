@@ -98,4 +98,28 @@ describe("ordu kompozisyonu ve güncel birlik dengesi", () => {
     expect(roll.clash).toBe(12);
     expect(roll.damage).toBe(10);
   });
+
+  it("bozkır birliklerini kendi süvari ağırlıklı doktriniyle değerlendirir", () => {
+    const excellent = assessArmyComposition({
+      horse_archer: 4_000, steppe_cavalry: 2_500, kurgan_shieldbearer: 2_000, oba_archer: 1_500
+    }, "FIELD", "STEPPE");
+    expect(excellent).toMatchObject({ tier: "EXCELLENT", label: "Büyük Bozkır Ordusu", clashMultiplier: 1.15, damageMultiplier: 1.08 });
+
+    const ordinary = assessArmyComposition({
+      horse_archer: 4_000, steppe_cavalry: 2_500, kurgan_shieldbearer: 2_000, oba_archer: 1_500
+    });
+    expect(ordinary.label).not.toBe("Büyük Bozkır Ordusu");
+  });
+
+  it("tek tip bozkır ordusunu ve standart birlik karışımını cezalandırır", () => {
+    expect(assessArmyComposition({ horse_archer: 10_000 }, "FIELD", "STEPPE").tier).toBe("MONOTYPE");
+    expect(assessArmyComposition({
+      horse_archer: 3_000, steppe_cavalry: 2_000, heavy_infantry: 5_000
+    }, "FIELD", "STEPPE").tier).toBe("MONOTYPE");
+  });
+
+  it("bozkır kuşatma kadrosuna açık arazi bonusu taşımaz", () => {
+    const result = assessArmyComposition({ kurgan_shieldbearer: 6_000, oba_archer: 4_000 }, "SIEGE_RESTRICTED", "STEPPE");
+    expect(result).toMatchObject({ tier: "STANDARD", label: "Bozkır Kuşatma Düzeni", clashMultiplier: 1, damageMultiplier: 1 });
+  });
 });

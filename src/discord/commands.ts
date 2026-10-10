@@ -483,7 +483,7 @@ export const commandBuilders = [
       .addStringOption(romanCountryOption))
     .addSubcommand((sub)=>sub.setName("evlilik-teklifleri").setDescription("Bekleyen Roma aile evliliği tekliflerini gösterir")
       .addStringOption(romanCountryOption))
-    .addSubcommand((sub)=>sub.setName("cocuk-dene").setDescription("Ailenizdeki evli bir çift için doğum zarı atar")
+    .addSubcommand((sub)=>sub.setName("cocuk-dene").setDescription("Doğum zarı atar veya isim bekleyen doğumu yeniden açar")
       .addStringOption((o)=>o.setName("ebeveyn").setDescription("Çocuk sahibi olmayı deneyecek evli aile üyesi").setRequired(true).setAutocomplete(true))
       .addStringOption(romanCountryOption))
     .addSubcommand((sub)=>sub.setName("siyasi-durum").setDescription("Ailelerin itibar, skandal ve siyasi hizip durumunu gösterir")
@@ -617,8 +617,7 @@ export const commandBuilders = [
     .setName("ozel-birlik-yetkisi").setDescription("Yalnızca yönetici: ülkelere özel birlik erişimi verir veya kaldırır")
     .addSubcommand((sub) => sub.setName("ayarla").setDescription("Bir ülkenin özel birlik erişimini değiştirir")
       .addStringOption((o) => o.setName("ulke").setDescription("Yetkisi değiştirilecek ülke").setRequired(true))
-      .addStringOption((o) => o.setName("birlik").setDescription("Özel birlik türü").setRequired(true)
-        .addChoices(...Object.entries(SPECIAL_UNITS).map(([value, unit]) => ({ name: unit.name, value }))))
+      .addStringOption((o) => o.setName("birlik").setDescription("Özel birlik türünü yazmaya başlayarak seçin").setRequired(true).setAutocomplete(true))
       .addStringOption((o) => o.setName("islem").setDescription("Erişim işlemi").setRequired(true).addChoices(
         { name: "Erişim aç", value: "UNLOCK" },
         { name: "Erişimi kaldır", value: "LOCK" }

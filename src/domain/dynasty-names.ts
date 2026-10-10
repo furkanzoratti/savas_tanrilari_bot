@@ -42,7 +42,14 @@ export const DYNASTY_CULTURAL_NAMES:Partial<Record<CultureGroup,CulturalNamePool
   MAHARASHTRI:{MALE:["Simuka","Satakarni","Kanha","Hala","Pulumavi","Gautamiputra"],FEMALE:["Naganika","Gautami Balashri","Vasishthi","Mrigavati","Lilavati","Prabhavati"]},
   ANDHRA:{MALE:["Satakarni","Pulumavi","Yajna Sri","Sivasvati","Skandastambhi","Lambodara"],FEMALE:["Gautami","Vasishthi","Naganika","Madhari","Sivakhada","Balashri"]},
   TAMIL:{MALE:["Karikala","Neduncheliyan","Perunarkilli","Senguttuvan","Ilamchetchenni","Nalliyakkodan"],FEMALE:["Kannagi","Kopperundevi","Manimekalai","Venmal","Madhavi","Alli"]},
-  SOUTHEAST_ASIAN:{MALE:["Soma","Kaundinya","Sri Mara","Fan Shih-man","Hun Pan-huang","Jayavarman"],FEMALE:["Liuye","Soma Devi","Kulaprabhavati","Jayadevi","Indrani","Vasudhara"]}
+  SOUTHEAST_ASIAN:{MALE:["Soma","Kaundinya","Sri Mara","Fan Shih-man","Hun Pan-huang","Jayavarman"],FEMALE:["Liuye","Soma Devi","Kulaprabhavati","Jayadevi","Indrani","Vasudhara"]},
+  KANGJU:{MALE:["Spitamenes","Oxyartes","Arsames","Bessos","Dataphernes","Arimazes"],FEMALE:["Roxana","Apama","Barsine","Stateira","Amastris","Aryazate"]},
+  WUSUN:{MALE:["Nandoumi","Liejiaomi","Wengguimi","Nimi","Yuanguimi","Cenzou"],FEMALE:["Jieyou","Shaofu","Dishi","Youjie","Kunmi","Aiying"]},
+  TARIM_SAKA:{MALE:["Vijita","Yola","Visva","Samghata","Nanda","Sena"],FEMALE:["Vijaya","Sima","Rruma","Tara","Yasna","Padma"]},
+  TOCHARIAN:{MALE:["Suvarnapuşpa","Haripuşpa","Kumarayana","Swarna","Tottika","Po-Sang"],FEMALE:["Jiva","Akşaya","Suvarna","Kamala","Mitra","Kumari"]},
+  ZHANGZHUNG:{MALE:["Ligmincha","Nyima","Muwér","Tonggyung","Tönpa","Gyalpo"],FEMALE:["Öden","Tsering","Metok","Drolma","Yangchen","Lhamo"]},
+  TIBETAN:{MALE:["Namri","Nyatsen","Drigum","Nyatri","Löntsen","Tsenpo"],FEMALE:["Tritsun","Tsering","Pema","Yangchen","Dolma","Lhamo"]},
+  QIANG:{MALE:["Dianyu","Mitang","Wuyihu","Beigong","Qiangliang","Longbu"],FEMALE:["Yingzhu","Amei","Rongna","Muzhu","Bailan","Qiongyu"]}
 };
 
 const FALLBACK:CulturalNamePool={

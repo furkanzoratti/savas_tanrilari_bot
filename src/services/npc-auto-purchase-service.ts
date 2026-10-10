@@ -12,6 +12,7 @@ import {
 } from "./game-service.js";
 import { formableModifiers } from "../domain/formable-countries.js";
 import { shipCostMultiplier } from "../domain/resources.js";
+import { STEPPE_ARMY_UNIT_TYPES } from "../domain/steppe-army.js";
 
 export type NpcAutoPurchaseScope = "ALL_PLAYERLESS" | "INCLUDED_ONLY";
 export type NpcCountryOverrideStatus = "AUTO" | "INCLUDE" | "EXCLUDE";
@@ -171,8 +172,12 @@ function currentArmyComposition(doc: CountryDocument): BattleComposition {
   return composition;
 }
 
-function compositionDistance(composition: BattleComposition): number {
-  const assessment = assessArmyComposition(composition, "FIELD");
+function compositionDistance(composition: BattleComposition, steppe = false): number {
+  const assessment = assessArmyComposition(composition, "FIELD", steppe ? "STEPPE" : "STANDARD");
+  if (steppe) {
+    const tierScore = { EXCELLENT: 0, BALANCED: 0.1, STANDARD: 0.25, LIMITED: 0.6, MONOTYPE: 1 }[assessment.tier];
+    return tierScore + Math.pow(Math.max(0, assessment.dominantUnitShare - 0.55), 2);
+  }
   const roleDistance = (Object.keys(COMPOSITION_TARGET) as Array<keyof typeof COMPOSITION_TARGET>)
     .reduce((sum, role) => sum + Math.pow(assessment.roleShares[role] - COMPOSITION_TARGET[role], 2), 0);
   const dominancePenalty = Math.pow(Math.max(0, assessment.dominantUnitShare - 0.55), 2) * 2;
@@ -189,14 +194,15 @@ function qualityMixDistance(composition: BattleComposition, target: number): num
 function orderedCompositionNeeds(
   composition: BattleComposition,
   candidates: readonly PurchasableUnitType[],
-  qualityMixTarget?: number
+  qualityMixTarget?: number,
+  steppe = false
 ): PurchasableUnitType[] {
   return [...candidates].sort((left, right) => {
     const leftProjected = { ...composition, [left]: (composition[left] ?? 0) + NPC_UNIT_PURCHASE_BATCH };
     const rightProjected = { ...composition, [right]: (composition[right] ?? 0) + NPC_UNIT_PURCHASE_BATCH };
-    const leftScore = compositionDistance(leftProjected)
+    const leftScore = compositionDistance(leftProjected, steppe)
       + (qualityMixTarget === undefined ? 0 : qualityMixDistance(leftProjected, qualityMixTarget) * 0.10);
-    const rightScore = compositionDistance(rightProjected)
+    const rightScore = compositionDistance(rightProjected, steppe)
       + (qualityMixTarget === undefined ? 0 : qualityMixDistance(rightProjected, qualityMixTarget) * 0.10);
     const scoreDifference = leftScore - rightScore;
     if (Math.abs(scoreDifference) > 1e-9) return scoreDifference;
@@ -329,14 +335,18 @@ export function planCountryPurchases(
 
   const unlockedSpecials: readonly PurchasableUnitType[] = doc.specialUnitUnlocks ?? [];
   const baseUnitSet = new Set<PurchasableUnitType>(BASE_PURCHASABLE_UNITS);
-  const defaultCandidates = [...BASE_PURCHASABLE_UNITS, ...unlockedSpecials.filter((unitType) => !baseUnitSet.has(unitType))];
-  const unlockedSet = new Set<PurchasableUnitType>([...BASE_PURCHASABLE_UNITS, ...unlockedSpecials]);
+  const defaultCandidates = doc.isSteppeConfederation
+    ? [...STEPPE_ARMY_UNIT_TYPES] as PurchasableUnitType[]
+    : [...BASE_PURCHASABLE_UNITS, ...unlockedSpecials.filter((unitType) => !baseUnitSet.has(unitType))];
+  const unlockedSet = new Set<PurchasableUnitType>(doc.isSteppeConfederation
+    ? STEPPE_ARMY_UNIT_TYPES
+    : [...BASE_PURCHASABLE_UNITS, ...unlockedSpecials]);
   const unitCandidates = (options.unitCandidates ?? defaultCandidates).filter((unitType) => unlockedSet.has(unitType));
   const composition = options.compositionBaseline === "EMPTY" ? {} : currentArmyComposition(doc);
   const grouped = new Map<string, UnitAction>();
   while (remainingPersonnel >= NPC_UNIT_PURCHASE_BATCH && remainingBudget > 0) {
     let selected: { settlement: CountryDocument["settlements"][number]; unitType: PurchasableUnitType; cost: number } | undefined;
-    for (const unitType of orderedCompositionNeeds(composition, unitCandidates, options.qualityMixTarget)) {
+    for (const unitType of orderedCompositionNeeds(composition, unitCandidates, options.qualityMixTarget, doc.isSteppeConfederation)) {
       const eligible = doc.settlements
         .filter((settlement) => (settlementCapacity.get(settlement.id) ?? 0) >= NPC_UNIT_PURCHASE_BATCH)
         .map((settlement) => ({

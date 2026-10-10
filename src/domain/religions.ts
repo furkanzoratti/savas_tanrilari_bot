@@ -9,7 +9,7 @@ export type ReligionKey =
   | "JUDAISM" | "MESOPOTAMIAN_FAITH" | "EGYPTIAN_FAITH" | "KUSH_NUBIAN_FAITH"
   | "NABATAEAN_FAITH" | "SOUTH_ARABIAN_FAITH" | "ZOROASTRIANISM" | "HELLENO_IRANIAN_SYNCRETISM"
   | "BRAHMANISM" | "BUDDHISM" | "JAINISM" | "DRAVIDIAN_FAITHS" | "CHRISTIANITY"
-  | "INNER_ASIAN_SKY_FAITH";
+  | "INNER_ASIAN_SKY_FAITH" | "BON_FAITH" | "QIANG_MOUNTAIN_FAITH";
 
 export type ReligionUnitType = keyof typeof UNITS;
 
@@ -60,13 +60,14 @@ const ALL_LAND = [
   "carthaginian_war_elephant","iberian_caetrati","germanic_shock_warrior","anatolian_thureophoroi",
   "triarii_veteran","punic_veteran","gaesatae","peltast","silver_shield","machimoi_phalangitai",
   "mauryan_war_elephant","desert_raider","egyptian_war_chariot","germanic_companion_cavalry",
-  "balearic_slinger","sarmatian_longswordsmen","briton_noble_spearmen"
+  "balearic_slinger","sarmatian_longswordsmen","briton_noble_spearmen","steppe_cavalry",
+  "kurgan_shieldbearer","oba_archer"
 ] as ReligionUnitType[];
-const RANGED = ["slinger","archer","briton_longbow","balearic_slinger"] as ReligionUnitType[];
-const CAVALRY = ["light_cavalry","heavy_cavalry","horse_archer","camel_cavalry","carthaginian_war_elephant","mauryan_war_elephant","desert_raider","egyptian_war_chariot","germanic_companion_cavalry"] as ReligionUnitType[];
-const LIGHT_CAVALRY = ["light_cavalry","camel_cavalry","desert_raider"] as ReligionUnitType[];
+const RANGED = ["slinger","archer","briton_longbow","balearic_slinger","oba_archer"] as ReligionUnitType[];
+const CAVALRY = ["light_cavalry","heavy_cavalry","horse_archer","camel_cavalry","carthaginian_war_elephant","mauryan_war_elephant","desert_raider","egyptian_war_chariot","germanic_companion_cavalry","steppe_cavalry"] as ReligionUnitType[];
+const LIGHT_CAVALRY = ["light_cavalry","camel_cavalry","desert_raider","horse_archer","steppe_cavalry"] as ReligionUnitType[];
 const SPEAR_RANGED = ["spear","hoplite","triarii_veteran","silver_shield","machimoi_phalangitai","briton_noble_spearmen",...RANGED] as ReligionUnitType[];
-const HEAVY_SPEAR = ["heavy_infantry","legionary","hoplite","persian_immortal","punic_veteran","gaesatae","sarmatian_longswordsmen","spear","triarii_veteran","silver_shield","machimoi_phalangitai","briton_noble_spearmen"] as ReligionUnitType[];
+const HEAVY_SPEAR = ["heavy_infantry","legionary","hoplite","persian_immortal","punic_veteran","gaesatae","sarmatian_longswordsmen","spear","triarii_veteran","silver_shield","machimoi_phalangitai","briton_noble_spearmen","kurgan_shieldbearer"] as ReligionUnitType[];
 const CELTIC_UNITS = ["light_infantry","spear","peltast","iberian_caetrati","briton_noble_spearmen"] as ReligionUnitType[];
 
 type PartialModifiers = Partial<Omit<ReligionModifiers,"unitPurchaseDiscounts"|"unitUpkeepDiscounts">> & {
@@ -137,7 +138,9 @@ export const RELIGIONS: Record<ReligionKey, ReligionDefinition> = {
   JAINISM: { label:"Jainizm",localEffect:"Kara ticareti +%8",nationalEffect:"Tüccar görevlerine +1",local:{landTradeIncomePercent:.08},national:{merchantTaskBonus:1} },
   DRAVIDIAN_FAITHS: { label:"Dravid İnançları",localEffect:"Liman geliri +%8",nationalEffect:"Gemi bakım maliyeti -%3",local:{seaTradeIncomePercent:.08},national:{shipUpkeepDiscount:.03} },
   CHRISTIANITY: { label:"Hristiyanlık",localEffect:"Yerleşke toplam geliri +%5",nationalEffect:"Bina maliyeti -%5; Misyoner ve Diplomat görevlerine +1",local:{settlementIncomePercent:.05},national:{buildingCostDiscount:.05,diplomatTaskBonus:1,missionaryTaskBonus:1} },
-  INNER_ASIAN_SKY_FAITH: { label:"İç Asya Gök İnancı",localEffect:"Atlı birlik alım maliyeti -%5",nationalEffect:"Kara yağması kazancı +%5",local:{unitPurchaseDiscounts:[{discount:.05,units:CAVALRY}]},national:{landRaidIncomePercent:.05} }
+  INNER_ASIAN_SKY_FAITH: { label:"İç Asya Gök İnancı",localEffect:"Atlı birlik alım maliyeti -%5",nationalEffect:"Kara yağması kazancı +%5",local:{unitPurchaseDiscounts:[{discount:.05,units:CAVALRY}]},national:{landRaidIncomePercent:.05} },
+  BON_FAITH: { label:"Bön İnancı",localEffect:"Kuşatma erzak dayanıklılığı +1 tur",nationalEffect:"Olumsuz yerleşke olayı ihtimali -3 puan",local:{starvationBonus:1},national:{negativeEventRiskReduction:3} },
+  QIANG_MOUNTAIN_FAITH: { label:"Qiang Dağ ve Gök İnancı",localEffect:"Olumsuz yerleşke olayı ihtimali -5 puan",nationalEffect:"Mızraklı ve menzilli birlik bakımı -%3",local:{negativeEventRiskReduction:5},national:{unitUpkeepDiscounts:[{discount:.03,units:SPEAR_RANGED}]} }
 };
 
 export const SECONDARY_RELIGIONS: Record<ReligionKey, SecondaryReligionDefinition> = {
@@ -171,7 +174,9 @@ export const SECONDARY_RELIGIONS: Record<ReligionKey, SecondaryReligionDefinitio
   JAINISM: { key:"JAIN_SRAMANA_COMMUNITY",label:"Şramana Cemaati",effect:"Dış ticaret geliri +%2",modifiers:{foreignTradeIncomePercent:.02} },
   DRAVIDIAN_FAITHS: { key:"DRAVIDIAN_MURUGAN_CULT",label:"Murugan Kültü",effect:"Mızraklı birlik alım maliyeti -%2",modifiers:{unitPurchaseDiscounts:[{discount:.02,units:SPEAR_RANGED}]} },
   CHRISTIANITY: { key:"CHRISTIAN_CATHOLICISM",label:"Katoliklik",effect:"Olumsuz yerleşke olayı ihtimali -5 puan",modifiers:{negativeEventRiskReduction:5} },
-  INNER_ASIAN_SKY_FAITH: { key:"INNER_ASIAN_ANCESTOR_SHAMANISM",label:"Atalar ve Kam Geleneği",effect:"Yerleşke huzursuzluğu -2 puan",modifiers:{unrestReduction:2} }
+  INNER_ASIAN_SKY_FAITH: { key:"INNER_ASIAN_ANCESTOR_SHAMANISM",label:"Atalar ve Kam Geleneği",effect:"Yerleşke huzursuzluğu -2 puan",modifiers:{unrestReduction:2} },
+  BON_FAITH: { key:"BON_MOUNTAIN_ANCESTOR_CULT",label:"Dağ ve Atalar Kültü",effect:"Yerleşke huzursuzluğu -2 puan",modifiers:{unrestReduction:2} },
+  QIANG_MOUNTAIN_FAITH: { key:"QIANG_WHITE_STONE_CULT",label:"Beyaz Taş ve Dağ Kültü",effect:"Yerleşke huzursuzluğu -2 puan",modifiers:{unrestReduction:2} }
 };
 
 export type SecondaryReligionKey = (typeof SECONDARY_RELIGIONS)[ReligionKey]["key"];
@@ -371,7 +376,9 @@ export function defaultReligionForCulture(culture: CultureGroup): ReligionKey {
     WEST_IRANIAN:"ZOROASTRIANISM",EAST_IRANIAN:"HELLENO_IRANIAN_SYNCRETISM",GANDHARAN:"BUDDHISM",
     MADHYADESHI:"BRAHMANISM",MAGADHAN:"BUDDHISM",KALINGAN:"BUDDHISM",MAHARASHTRI:"BRAHMANISM",
     ANDHRA:"BRAHMANISM",TAMIL:"DRAVIDIAN_FAITHS",SOUTHEAST_ASIAN:"BUDDHISM",
-    DINGLING:"INNER_ASIAN_SKY_FAITH",XIANBEI:"INNER_ASIAN_SKY_FAITH",XIONGNU:"INNER_ASIAN_SKY_FAITH"
+    DINGLING:"INNER_ASIAN_SKY_FAITH",XIANBEI:"INNER_ASIAN_SKY_FAITH",XIONGNU:"INNER_ASIAN_SKY_FAITH",
+    KANGJU:"SCYTHO_SARMATIAN_FAITH",WUSUN:"INNER_ASIAN_SKY_FAITH",TARIM_SAKA:"SCYTHO_SARMATIAN_FAITH",
+    TOCHARIAN:"BUDDHISM",ZHANGZHUNG:"BON_FAITH",TIBETAN:"BON_FAITH",QIANG:"QIANG_MOUNTAIN_FAITH"
   };
   return map[culture];
 }

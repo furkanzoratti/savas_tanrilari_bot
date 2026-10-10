@@ -37,7 +37,7 @@ function currentCompositionLabel(view: BattleView, side: BattleSideKey): string 
     : view.battle.terrain === "SIEGE" && side === "A"
       ? siegeAttackerDismountedComposition(view.sides.A.composition, selectedDismountments)
       : view.sides[side].composition;
-  return assessArmyComposition(composition,context).label;
+  return assessArmyComposition(composition,context,view.sides[side].composition_profile ?? "STANDARD").label;
 }
 
 function expectedSide(view: BattleView): BattleSideKey | null {

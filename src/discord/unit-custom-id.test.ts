@@ -27,5 +27,8 @@ describe("asker alım modalı kimlikleri", () => {
     expect(encodeUnitTypeForCustomId("balearic_slinger")).toBe("bsl");
     expect(encodeUnitTypeForCustomId("sarmatian_longswordsmen")).toBe("sls");
     expect(encodeUnitTypeForCustomId("briton_noble_spearmen")).toBe("bns");
+    expect(encodeUnitTypeForCustomId("steppe_cavalry")).toBe("scv");
+    expect(decodeUnitTypeFromCustomId("ksb")).toBe("kurgan_shieldbearer");
+    expect(decodeUnitTypeFromCustomId("oa")).toBe("oba_archer");
   });
 });

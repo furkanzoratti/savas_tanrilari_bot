@@ -41,6 +41,13 @@ const regionalNames: Partial<Record<CultureGroup, readonly [readonly string[], r
   ANDHRA: [["Gautamiputra", "Pulumavi", "Yajna", "Sivasvati"], ["Andhralı", "Krishnalı", "Amaravatili"]],
   TAMIL: [["Karikala", "Neduncheliyan", "Senguttuvan", "Perunarkilli"], ["Chola", "Pandya", "Chera"]],
   SOUTHEAST_ASIAN: [["Soma", "Kaundinya", "Jayavarman", "Rudravarman"], ["Mekonglu", "Funanlı", "Denizdoğan"]],
+  KANGJU: [["Spitamenes", "Oxyartes", "Arsames", "Dataphernes"], ["Kangjulu", "Davanlı", "Sırderyalı"]],
+  WUSUN: [["Nandoumi", "Liejiaomi", "Wengguimi", "Nimi"], ["Çigulu", "İlili", "Kunmo Yeminli"]],
+  TARIM_SAKA: [["Vijita", "Yola", "Visva", "Samghata"], ["Hotanlı", "Yarkentli", "Yeşim Yeminli"]],
+  TOCHARIAN: [["Suvarnapuşpa", "Haripuşpa", "Kumarayana", "Swarna"], ["Kuçalı", "Tohar", "Tanrı Dağlı"]],
+  ZHANGZHUNG: [["Ligmincha", "Nyima", "Muwér", "Tonggyung"], ["Kunlunlu", "Kailashlı", "Bön Yeminli"]],
+  TIBETAN: [["Namri", "Nyatsen", "Drigum", "Nyatri"], ["Yarlunglu", "Yaylalı", "Kar Aslanı"]],
+  QIANG: [["Dianyu", "Mitang", "Wuyihu", "Beigong"], ["Hehuanglı", "Minshanlı", "Beyaz Taşlı"]],
   UNASSIGNED: [["Ariston", "Dagan", "Varro", "Brennos"], ["Halk Önderi", "Özgür", "Demir Yeminli"]]
 };
 

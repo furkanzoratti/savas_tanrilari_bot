@@ -4,7 +4,7 @@ import { pool, withTransaction } from "../db/pool.js";
 import {
   BASE_SIEGE_STARVATION_TURNS, BATTLE_TERRAINS, BATTLE_UNIT_STATS, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, SIEGE_ASSAULT_FRONTAGE, SIEGE_ATTACKER_DISMOUNT_MAP, activeSiegeAssaultAssets, applyRestrictedBattleLoss, baseRetreatRate, battleEnds, commanderClashBonus, compositionTotal, egyptianWarChariotPressureBonus, fieldPressureAfterRound, hasAssaultForce, orderState, resolveRound, restoreSiegeAttackerCasualtyTypes, roundDamageFactors, siegeAssaultAccess, siegeAssaultComposition, siegeAssaultGroups, siegeAttackerBreaks, siegeAttackerDismountedComposition, siegeAttackerRetreatExposure, siegeDefenderCaptured, siegeDefenderGroups, siegeDefenderReserveBonus, siegeDefenseModifiers, siegeFrontageProfile, siegeOrderState, siegePressureAfterRound,
   rollBattlePool, rollNavalPool, rollSiegeSupport,
-  type BattleComposition, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain,
+  type ArmyCompositionProfile, type BattleComposition, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain,
   type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeComposition, type SiegeDismountUnitType, type SiegeTarget, type SiegeTargets
 } from "../domain/battle.js";
 import { SPECIAL_UNIT_TYPES } from "../domain/special-units.js";
@@ -80,6 +80,7 @@ export interface BattleParticipantRow {
   embarked_army_loss: number;
   composition: BattleComposition; initial_composition: BattleComposition;
   dismounted_composition: BattleComposition;
+  is_steppe_confederation?: boolean;
 }
 
 export interface BattleParticipantChoice {
@@ -96,6 +97,7 @@ export interface BattleSideRow {
   active_ship_total?:number;disabled_ship_total?:number;sunk_ship_total?:number;
   initial_hull_hp?:number;operational_hull_hp?:number;remaining_hull_hp?:number;
   naval_maneuver_points:number;naval_order:NavalBattleOrder|null;naval_order_locked:boolean;
+  composition_profile?: ArmyCompositionProfile;
 }
 
 export interface BattleRow {
@@ -490,6 +492,25 @@ async function isSideMember(client: DbClient, battleId: string, side: BattleSide
   )).rowCount);
 }
 
+async function battleSideCompositionProfile(
+  client: DbClient,
+  battleId: string,
+  side: BattleSideKey
+): Promise<ArmyCompositionProfile> {
+  const row = (await client.query<{ total: string; steppe: string }>(`
+    WITH side_countries AS (
+      SELECT country_id FROM battle_sides WHERE battle_id=$1 AND side_key=$2 AND country_id IS NOT NULL
+      UNION
+      SELECT country_id FROM battle_side_participants WHERE battle_id=$1 AND side_key=$2
+    )
+    SELECT COUNT(*)::text AS total,COUNT(confederation.id)::text AS steppe
+      FROM side_countries side_country
+      LEFT JOIN steppe_confederations confederation
+        ON confederation.country_id=side_country.country_id AND confederation.status='ACTIVE'`, [battleId, side])).rows[0];
+  const total = Number(row?.total ?? 0);
+  return total > 0 && Number(row?.steppe ?? 0) === total ? "STEPPE" : "STANDARD";
+}
+
 async function loadView(client: DbClient, battleId: string, lock = false): Promise<BattleView> {
   const battle = (await client.query<BattleRow>(`SELECT * FROM battles WHERE id=$1${lock ? " FOR UPDATE" : ""}`, [battleId])).rows[0];
   if (!battle) throw new GameError("Savaş bulunamadı.");
@@ -505,7 +526,9 @@ async function loadView(client: DbClient, battleId: string, lock = false): Promi
   if (rows.length !== 2) throw new GameError("Savaş tarafları eksik.");
   const participants = (await client.query<BattleParticipantRow>(
     `SELECT bsp.*,COALESCE(rebel.display_name,c.name) AS country_name,source.name AS source_settlement_name,
-            embarked_army.name AS embarked_army_name
+            embarked_army.name AS embarked_army_name,
+            EXISTS(SELECT 1 FROM steppe_confederations confederation
+              WHERE confederation.country_id=bsp.country_id AND confederation.status='ACTIVE') AS is_steppe_confederation
        FROM battle_side_participants bsp JOIN countries c ON c.id=bsp.country_id
       JOIN battle_sides side_record ON side_record.battle_id=bsp.battle_id AND side_record.side_key=bsp.side_key
       LEFT JOIN rebel_factions rebel ON rebel.id=side_record.rebel_faction_id AND bsp.country_id=side_record.country_id
@@ -520,6 +543,8 @@ async function loadView(client: DbClient, battleId: string, lock = false): Promi
     row.country_ids = sideParticipants.map((participant) => participant.country_id);
     row.country_names = sideParticipants.map((participant) => participant.country_name);
     row.country_name = row.country_names.join(" + ") || row.country_name;
+    row.composition_profile = sideParticipants.length > 0 && sideParticipants.every((participant) => participant.is_steppe_confederation)
+      ? "STEPPE" : "STANDARD";
   }
   if(battle.terrain==="NAVAL"){
     if(battle.status!=="DRAFT")await initializeBattleShipHulls(client,battleId);
@@ -2653,6 +2678,7 @@ export const battleService = {
       let rolledDismounted: BattleComposition = {};
       const activationTurn = view.battle.army_composition_activation_turn;
       const compositionEnabled = activationTurn !== null && activationTurn !== undefined && (view.battle.game_turn ?? 0) >= activationTurn;
+      const compositionProfile = await battleSideCompositionProfile(client, active.id, side);
       let roll;
       if (view.battle.terrain === "NAVAL") {
         const activeShips=await battleHullComposition(client,active.id,side,"ACTIVE");
@@ -2681,7 +2707,7 @@ export const battleService = {
         const rollComposition = side === "A"
           ? siegeAssaultComposition(effectiveComposition, target.support_assets, wallAfterSupport, gateAfterSupport, terrain.frontageA)
           : siegeDefenderGroups(target.composition, wallAfterSupport, gateAfterSupport).combined;
-        roll = rollBattlePool(rollComposition, Number.MAX_SAFE_INTEGER, undefined, "SIEGE_RESTRICTED", undefined, compositionEnabled);
+        roll = rollBattlePool(rollComposition, Number.MAX_SAFE_INTEGER, undefined, "SIEGE_RESTRICTED", undefined, compositionEnabled, compositionProfile);
         roll.clash += support.clash; roll.damage += support.damage;
         roll.detail.__siege = { engaged: 0, clash: support.clash, damage: support.damage };
       } else {
@@ -2690,7 +2716,7 @@ export const battleService = {
         roll = rollBattlePool(target.composition, frontage, undefined, "FIELD", {
           opponentComposition: view.sides[opponentSide].composition,
           opponentFrontage
-        }, compositionEnabled);
+        }, compositionEnabled, compositionProfile);
       }
       if (view.battle.terrain === "NAVAL" && navalClashBonus > 0) roll.clash += navalClashBonus;
       const temporary = (await client.query<{ clash_multiplier:number; damage_multiplier:number; disable_doctrine_first_round:boolean }>(

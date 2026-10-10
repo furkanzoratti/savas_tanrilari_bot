@@ -117,7 +117,10 @@ export const BATTLE_UNIT_STATS: Record<BattleUnitType, {
   heavy_cavalry: { label: "Ağır Süvari", clashDice: 2, clashSides: 10, damageDice: 2, damageSides: 10, durability: 3 },
   legionary: { label: "Lejyoner", clashDice: 2, clashSides: 10, damageDice: 2, damageSides: 8, durability: 3 },
   hoplite: { label: "Hoplit", clashDice: 2, clashSides: 8, damageDice: 1, damageSides: 12, durability: 3 },
-  horse_archer: { label: "Atlı Okçu", clashDice: 2, clashSides: 8, damageDice: 2, damageSides: 8, durability: 2 },
+  horse_archer: { label: "Bozkır Atlı Okçu", clashDice: 2, clashSides: 8, damageDice: 2, damageSides: 8, durability: 2 },
+  steppe_cavalry: { label: "Bozkır Süvarisi", clashDice: 2, clashSides: 10, damageDice: 2, damageSides: 8, durability: 2 },
+  kurgan_shieldbearer: { label: "Kurgan Kalkanlıları", clashDice: 2, clashSides: 8, damageDice: 1, damageSides: 12, durability: 3 },
+  oba_archer: { label: "Oba Yaycıları", clashDice: 1, clashSides: 10, damageDice: 1, damageSides: 12, durability: 1 },
   camel_cavalry: { label: "Deve Süvarisi", clashDice: 2, clashSides: 8, damageDice: 1, damageSides: 10, durability: 2 },
   briton_longbow: { label: "Briton Uzun Yaycıları", clashDice: 1, clashSides: 12, damageDice: 2, damageSides: 12, durability: 1 },
   persian_immortal: { label: "Pers Ölümsüzleri", clashDice: 2, clashSides: 8, damageDice: 2, damageSides: 10, durability: 3 },
@@ -178,6 +181,7 @@ export interface BattleCounterContext {
 
 export type ArmyCompositionTier = "MONOTYPE" | "LIMITED" | "STANDARD" | "BALANCED" | "EXCELLENT";
 export type ArmyCompositionContext = "FIELD" | "SIEGE_RESTRICTED";
+export type ArmyCompositionProfile = "STANDARD" | "STEPPE";
 
 export interface ArmyCompositionAssessment {
   tier: ArmyCompositionTier;
@@ -210,12 +214,12 @@ export const ASSAULT_UNIT_TYPES = [
   "light_infantry", "militia", "spear", "heavy_infantry", "legionary", "hoplite",
   "persian_immortal", "iberian_caetrati", "germanic_shock_warrior", "anatolian_thureophoroi",
   "triarii_veteran", "punic_veteran", "gaesatae", "peltast", "silver_shield", "machimoi_phalangitai",
-  "sarmatian_longswordsmen", "briton_noble_spearmen"
+  "sarmatian_longswordsmen", "briton_noble_spearmen", "kurgan_shieldbearer"
 ] as const satisfies readonly BattleUnitType[];
 
 export const CAVALRY_UNIT_TYPES = [
   "light_cavalry", "heavy_cavalry", "horse_archer", "camel_cavalry", "carthaginian_war_elephant",
-  "mauryan_war_elephant", "desert_raider", "egyptian_war_chariot", "germanic_companion_cavalry"
+  "mauryan_war_elephant", "desert_raider", "egyptian_war_chariot", "germanic_companion_cavalry", "steppe_cavalry"
 ] as const satisfies readonly BattleUnitType[];
 
 export function assaultUnitTotal(composition: BattleComposition): number {
@@ -226,7 +230,8 @@ export function assaultUnitTotal(composition: BattleComposition): number {
 const SIEGE_DEFENDER_DISMOUNT_MAP = {
   light_cavalry: "light_infantry",
   heavy_cavalry: "heavy_infantry",
-  horse_archer: "archer",
+  horse_archer: "oba_archer",
+  steppe_cavalry: "kurgan_shieldbearer",
   camel_cavalry: "spear",
   germanic_companion_cavalry: "heavy_infantry"
 } as const satisfies Partial<Record<BattleUnitType, BattleUnitType>>;
@@ -234,7 +239,8 @@ const SIEGE_DEFENDER_DISMOUNT_MAP = {
 export const SIEGE_ATTACKER_DISMOUNT_MAP = {
   light_cavalry: "light_infantry",
   heavy_cavalry: "heavy_infantry",
-  horse_archer: "archer",
+  horse_archer: "oba_archer",
+  steppe_cavalry: "kurgan_shieldbearer",
   camel_cavalry: "spear",
   germanic_companion_cavalry: "heavy_infantry"
 } as const satisfies Partial<Record<BattleUnitType, BattleUnitType>>;
@@ -315,14 +321,14 @@ const COMPOSITION_TIERS: Record<ArmyCompositionTier, Pick<ArmyCompositionAssessm
 };
 
 export const roleWeights: Record<BattleUnitType, Partial<Record<keyof ArmyCompositionAssessment["roleShares"], number>>> = {
-  light_infantry: { line: 1 }, militia: { line: 1 }, heavy_infantry: { line: 1 }, legionary: { line: 1 }, persian_immortal: { line: 1 },
+  light_infantry: { line: 1 }, militia: { line: 1 }, heavy_infantry: { line: 1 }, legionary: { line: 1 }, persian_immortal: { line: 1 }, kurgan_shieldbearer: { line: 1 },
   punic_veteran: { line: 1 }, gaesatae: { line: 1 }, peltast: { line: 0.8, ranged: 0.2 },
   spear: { spear: 1 }, hoplite: { line: 0.5, spear: 0.5 }, triarii_veteran: { spear: 1 },
   silver_shield: { spear: 1 }, machimoi_phalangitai: { spear: 1 }, briton_noble_spearmen: { spear: 1 },
-  slinger: { ranged: 1 }, archer: { ranged: 1 }, briton_longbow: { ranged: 1 }, balearic_slinger: { ranged: 1 },
+  slinger: { ranged: 1 }, archer: { ranged: 1 }, oba_archer: { ranged: 1 }, briton_longbow: { ranged: 1 }, balearic_slinger: { ranged: 1 },
   light_cavalry: { mobile: 1 }, heavy_cavalry: { mobile: 1 }, camel_cavalry: { mobile: 1 }, carthaginian_war_elephant: { mobile: 1 },
   mauryan_war_elephant: { mobile: 1 }, desert_raider: { mobile: 1 }, egyptian_war_chariot: { ranged: 0.5, mobile: 0.5 }, germanic_companion_cavalry: { mobile: 1 },
-  horse_archer: { ranged: 0.5, mobile: 0.5 },
+  horse_archer: { ranged: 0.5, mobile: 0.5 }, steppe_cavalry: { spear: 0.3, mobile: 0.7 },
   iberian_caetrati: { line: 1 }, germanic_shock_warrior: { line: 1 }, sarmatian_longswordsmen: { line: 1 },
   anatolian_thureophoroi: { line: 0.70, spear: 0.30 }
 };
@@ -334,7 +340,8 @@ const spearCounterWeights: Partial<Record<BattleUnitType, number>> = {
   triarii_veteran: 1,
   silver_shield: 1,
   machimoi_phalangitai: 1,
-  briton_noble_spearmen: 1
+  briton_noble_spearmen: 1,
+  steppe_cavalry: 0.3
 };
 
 const cavalryCounterWeights: Partial<Record<BattleUnitType, number>> = {
@@ -346,7 +353,8 @@ const cavalryCounterWeights: Partial<Record<BattleUnitType, number>> = {
   mauryan_war_elephant: 1,
   desert_raider: 1,
   egyptian_war_chariot: 1,
-  germanic_companion_cavalry: 1
+  germanic_companion_cavalry: 1,
+  steppe_cavalry: 1
 };
 
 function weightedCounterTotal(
@@ -393,10 +401,66 @@ function cavalryOnly(fullComposition: BattleComposition, casualtyComposition?: B
 
 const inRange = (value: number, minimum: number, maximum: number): boolean => value >= minimum && value <= maximum;
 
+function assessSteppeComposition(
+  composition: BattleComposition,
+  context: ArmyCompositionContext
+): ArmyCompositionAssessment {
+  const quantities = unitKeys.map((key) => ({ key, quantity: Math.max(0, composition[key] ?? 0) })).filter((entry) => entry.quantity > 0);
+  const total = quantities.reduce((sum, entry) => sum + entry.quantity, 0);
+  const roleShares: ArmyCompositionAssessment["roleShares"] = { line: 0, spear: 0, ranged: 0, mobile: 0 };
+  if (total <= 0) return { tier: "LIMITED", ...COMPOSITION_TIERS.LIMITED, label: "Eksik Bozkır Kadrosu", dominantUnitShare: 0, meaningfulUnitCount: 0, roleShares };
+
+  const shares = quantities.map((entry) => ({ ...entry, share: entry.quantity / total }));
+  for (const entry of shares) {
+    for (const [role, weight] of Object.entries(roleWeights[entry.key]) as Array<[keyof typeof roleShares, number]>) {
+      roleShares[role] += entry.share * weight;
+    }
+  }
+  const shareOf = (key: BattleUnitType): number => Math.max(0, composition[key] ?? 0) / total;
+  const horseArcher = shareOf("horse_archer");
+  const cavalry = shareOf("steppe_cavalry");
+  const line = shareOf("kurgan_shieldbearer");
+  const archer = shareOf("oba_archer");
+  const mounted = horseArcher + cavalry;
+  const steppeShare = horseArcher + cavalry + line + archer;
+  const dominantUnitShare = Math.max(...shares.map((entry) => entry.share));
+  const meaningfulUnitCount = shares.filter((entry) => entry.share >= 0.10).length;
+
+  if (context === "SIEGE_RESTRICTED") {
+    const siegeLine = roleShares.line + roleShares.spear;
+    const siegeRanged = roleShares.ranged;
+    if (dominantUnitShare >= 0.80) return { tier: "MONOTYPE", ...COMPOSITION_TIERS.MONOTYPE, label: "Tekdüze Kuşatma Kadrosu", dominantUnitShare, meaningfulUnitCount, roleShares };
+    return {
+      tier: "STANDARD", ...COMPOSITION_TIERS.STANDARD, label: siegeLine >= 0.35 && siegeRanged >= 0.15 ? "Bozkır Kuşatma Düzeni" : "Standart Kuşatma Düzeni",
+      dominantUnitShare, meaningfulUnitCount, roleShares
+    };
+  }
+
+  let tier: ArmyCompositionTier;
+  let label: string;
+  if (dominantUnitShare >= 0.80 || steppeShare < 0.80) {
+    tier = "MONOTYPE"; label = "Dağınık Bozkır Ordusu";
+  } else if (inRange(mounted, 0.65, 0.80) && inRange(horseArcher, 0.30, 0.50)
+    && inRange(cavalry, 0.20, 0.35) && inRange(line, 0.10, 0.25) && inRange(archer, 0.10, 0.25)
+    && dominantUnitShare <= 0.55) {
+    tier = "EXCELLENT"; label = "Büyük Bozkır Ordusu";
+  } else if (inRange(mounted, 0.60, 0.85) && horseArcher >= 0.25 && cavalry >= 0.15
+    && line + archer >= 0.15 && dominantUnitShare <= 0.60) {
+    tier = "BALANCED"; label = "Bozkır Savaş Düzeni";
+  } else if (inRange(mounted, 0.40, 0.60) && meaningfulUnitCount >= 3) {
+    tier = "STANDARD"; label = "Karma Oba Ordusu";
+  } else {
+    tier = "LIMITED"; label = "Eksik Bozkır Düzeni";
+  }
+  return { tier, ...COMPOSITION_TIERS[tier], label, dominantUnitShare, meaningfulUnitCount, roleShares };
+}
+
 export function assessArmyComposition(
   composition: BattleComposition,
-  context: ArmyCompositionContext = "FIELD"
+  context: ArmyCompositionContext = "FIELD",
+  profile: ArmyCompositionProfile = "STANDARD"
 ): ArmyCompositionAssessment {
+  if (profile === "STEPPE") return assessSteppeComposition(composition, context);
   const quantities = unitKeys.map((key) => ({ key, quantity: Math.max(0, composition[key] ?? 0) })).filter((entry) => entry.quantity > 0);
   const total = quantities.reduce((sum, entry) => sum + entry.quantity, 0);
   const roleShares: ArmyCompositionAssessment["roleShares"] = { line: 0, spear: 0, ranged: 0, mobile: 0 };
@@ -522,7 +586,7 @@ export function siegeAssaultGroups(
   const infantryFrontage = profile.state === "INTACT" ? access.capacity : profile.attackerInfantry;
   const infantry = engagedComposition(meleeSource, infantryFrontage);
   const rangedSource: BattleComposition = {};
-  for (const key of ["slinger", "archer", "briton_longbow", "balearic_slinger"] as BattleUnitType[]) {
+  for (const key of ["slinger", "archer", "oba_archer", "briton_longbow", "balearic_slinger"] as BattleUnitType[]) {
     const quantity = composition[key] ?? 0;
     if (quantity > 0) rangedSource[key] = quantity;
   }
@@ -599,7 +663,7 @@ export function siegeDefenderGroups(
   const dismounted = siegeDefenderComposition(composition);
   const rangedSource: BattleComposition = {};
   const infantrySource: BattleComposition = {};
-  const rangedTypes = new Set<BattleUnitType>(["slinger", "archer", "briton_longbow", "balearic_slinger"]);
+  const rangedTypes = new Set<BattleUnitType>(["slinger", "archer", "oba_archer", "briton_longbow", "balearic_slinger"]);
   for (const key of unitKeys) {
     const quantity = Math.max(0, dismounted[key] ?? 0);
     if (quantity <= 0) continue;
@@ -617,10 +681,11 @@ export function rollBattlePool(
   randomInt = (max: number) => Math.floor(Math.random() * max),
   context: ArmyCompositionContext = "FIELD",
   counterContext?: BattleCounterContext,
-  applyComposition = true
+  applyComposition = true,
+  profile: ArmyCompositionProfile = "STANDARD"
 ): BattleRoll {
   const engaged = engagedComposition(composition, frontage);
-  const compositionAssessment = assessArmyComposition(engaged, context);
+  const compositionAssessment = assessArmyComposition(engaged, context, profile);
   const appliedComposition = applyComposition ? compositionAssessment : { ...compositionAssessment, clashMultiplier: 1, damageMultiplier: 1 };
   const detail: BattleRoll["detail"] = {};
   let clash = 0;

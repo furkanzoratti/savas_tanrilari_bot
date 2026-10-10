@@ -20,6 +20,7 @@ import { TRADE_ROUTE_LABELS, type TradeRoute } from "../domain/trade.js";
 import { MERCENARY_COMPANIES, MERCENARY_CONTRACT_LIMITS, mercenarySlotCost, mercenarySlotsUsed, mercenaryTier, type MercenaryCompanyKey } from "../domain/mercenaries.js";
 import { NPC_AUTO_PURCHASE_DOCTRINES, type NpcAutoPurchaseDoctrine } from "../domain/npc-auto-purchase.js";
 import { SPECIAL_UNITS, isSpecialUnitType, type SpecialUnitType } from "../domain/special-units.js";
+import { isSteppeArmyUnitType } from "../domain/steppe-army.js";
 import { FORMABLE_COUNTRIES, FORMABLE_TIER_LABELS, formableModifiers, formableTier, type FormableTier } from "../domain/formable-countries.js";
 import { ESPIONAGE_TARGETS } from "../domain/espionage.js";
 import { RESOURCES, shipCostMultiplier, type ResourceType } from "../domain/resources.js";
@@ -1811,7 +1812,9 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
     const document = await gameService.document(countryId);
     const settlement = document.settlements.find((item) => item.id === settlementId);
     if (!settlement) throw new GameError("Yerleşke bulunamadı.");
-    const availableUnits = unitChoices.filter(([key]) => !isSpecialUnitType(key) || (document.specialUnitUnlocks ?? []).includes(key));
+    const availableUnits = unitChoices.filter(([key]) => document.isSteppeConfederation
+      ? isSteppeArmyUnitType(key) && (document.specialUnitUnlocks ?? []).includes(key)
+      : !isSpecialUnitType(key) || (document.specialUnitUnlocks ?? []).includes(key));
     const menuCount = Math.ceil(availableUnits.length / 25);
     const unitMenus = Array.from({ length: menuCount }, (_, index) => {
       const chunk = availableUnits.slice(index * 25, index * 25 + 25);
@@ -1916,6 +1919,15 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
   if (await handleEspionageAutocomplete(interaction)) return;
   if (await handleCityAutocomplete(interaction)) return;
   const focused = interaction.options.getFocused(true);
+  if (interaction.commandName === "ozel-birlik-yetkisi" && focused.name === "birlik") {
+    if (!isGameMaster(interaction)) { await interaction.respond([]); return; }
+    const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
+    await interaction.respond(Object.entries(SPECIAL_UNITS)
+      .filter(([key, unit]) => !query || key.includes(query) || unit.name.toLocaleLowerCase("tr-TR").includes(query))
+      .slice(0, 25)
+      .map(([value, unit]) => ({ name: unit.name.slice(0, 100), value })));
+    return;
+  }
   if(interaction.commandName==="savas"&&interaction.options.getSubcommand(false)==="baslat"&&["taraf-a","taraf-b"].includes(focused.name)){
     if(!interaction.guildId||!isGameMaster(interaction)){await interaction.respond([]);return;}
     const query=String(focused.value).toLocaleLowerCase("tr-TR").trim();

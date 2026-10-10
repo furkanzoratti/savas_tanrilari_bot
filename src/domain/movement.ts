@@ -111,7 +111,10 @@ export function siegeCapacity(totalTroops: number): number {
 
 export function isPureLightHeavyCavalry(composition: Partial<Record<BattleUnitType, number>>): boolean {
   const active = Object.entries(composition).filter(([, quantity]) => whole(quantity) > 0);
-  return active.length > 0 && active.every(([unitType]) => unitType === "light_cavalry" || unitType === "heavy_cavalry");
+  return active.length > 0 && active.every(([unitType]) =>
+    unitType === "light_cavalry" || unitType === "heavy_cavalry"
+    || unitType === "horse_archer" || unitType === "steppe_cavalry"
+  );
 }
 
 export interface ArmyMovementInput {

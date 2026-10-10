@@ -13,7 +13,7 @@ vi.mock("./game-service.js", async (importOriginal) => {
 import { planPlayerPurchases,playerArmyUnitCandidates,playerAutoPurchasePlanFingerprint } from "./player-auto-purchase-service.js";
 import { assessArmyComposition } from "../domain/battle.js";
 
-function documentFixture(options: { naval?: boolean; specialUnits?: string[] } = {}) {
+function documentFixture(options: { naval?: boolean; specialUnits?: string[]; steppe?: boolean } = {}) {
   return {
     guild: { discord_id: "guild", current_turn: 30 },
     country: { id: "country", name: "Test Ülkesi", active_formable_key: null },
@@ -21,6 +21,7 @@ function documentFixture(options: { naval?: boolean; specialUnits?: string[] } =
     militaryLimit: 20_000,
     militaryUsed: 0,
     specialUnitUnlocks: options.specialUnits ?? [],
+    isSteppeConfederation: Boolean(options.steppe),
     settlements: [{
       id: "city", name: "Test Şehri", local_treasury: 100_000,
       is_conquered: false, isBesieged: false, is_coastal: Boolean(options.naval),
@@ -81,6 +82,14 @@ describe("oyuncu otomatik alım planlaması", () => {
     const quality = ["heavy_infantry", "heavy_cavalry", "hoplite"].some((unitType) => types.has(unitType as any));
     expect(low).toBe(true);
     expect(quality).toBe(true);
+  });
+
+  it("bozkır otomatik alımında standart birlikleri aday havuzuna sokmaz", () => {
+    const specials = ["horse_archer","steppe_cavalry","kurgan_shieldbearer","oba_archer"];
+    expect(playerArmyUnitCandidates("GENERAL", specials as any, true)).toEqual(specials);
+    const plan = planPlayerPurchases("guild", 30, "GENERAL", documentFixture({ specialUnits: specials, steppe: true }));
+    expect(plan.unitActions.length).toBeGreaterThan(0);
+    expect(plan.unitActions.every((action) => specials.includes(action.unitType))).toBe(true);
   });
 
   it("JSONB alan ve eylem sırası değişse bile aynı planı geçerli kabul eder",()=>{

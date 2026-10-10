@@ -1,7 +1,10 @@
 export const SPECIAL_UNITS = {
   legionary: { name: "Lejyoner", price: 5_000, upkeep: 500 },
   hoplite: { name: "Hoplit", price: 3_500, upkeep: 400 },
-  horse_archer: { name: "Atlı Okçu", price: 4_500, upkeep: 450 },
+  horse_archer: { name: "Bozkır Atlı Okçu", price: 2_500, upkeep: 250 },
+  steppe_cavalry: { name: "Bozkır Süvarisi", price: 2_250, upkeep: 225 },
+  kurgan_shieldbearer: { name: "Kurgan Kalkanlıları", price: 3_000, upkeep: 300 },
+  oba_archer: { name: "Oba Yaycıları", price: 1_750, upkeep: 175 },
   camel_cavalry: { name: "Deve Süvarisi", price: 4_000, upkeep: 350 },
   briton_longbow: { name: "Briton Uzun Yaycıları", price: 3_500, upkeep: 400 },
   persian_immortal: { name: "Pers Ölümsüzleri", price: 5_000, upkeep: 500 },

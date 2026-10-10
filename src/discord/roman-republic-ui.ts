@@ -75,13 +75,14 @@ function birthResultMessage(result:RomanFamilyBirthAttemptResult):string{
   const complication=result.complication==="DEATH"?`⚰️ ${result.motherName} doğum sırasında hayatını kaybetti.`
     :result.complication==="ILLNESS"?`🩺 ${result.motherName} hastalandı ve 3 tur yeni gebelik deneyemeyecek.`
       :"✅ Doğum sorunsuz tamamlandı.";
+  if(result.resumed)return `👶 **Adlandırılmayı bekleyen doğum geri açıldı.**\n${roll}\n**${gender} çocuk** • ${result.motherName} ile ${result.fatherName}\n${complication}\nÇocuğun adını aşağıdaki düğmeyle belirleyin.`;
   return `${roll}\n👶 Doğum başarılı • **${gender} çocuk**\n${complication}\nÇocuğun adını aşağıdaki düğmeyle belirleyin.`;
 }
 
 function birthNameButton(countryId:string,result:RomanFamilyBirthAttemptResult):ActionRowBuilder<ButtonBuilder>[] {
   if(!result.success||!result.pendingBirthId)return[];
   return[new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(`roman-birth-name|${countryId}|${result.pendingBirthId}`).setLabel("Çocuğa Ad Ver").setEmoji("👶").setStyle(ButtonStyle.Primary)
+    new ButtonBuilder().setCustomId(`roman-birth-name|${countryId}|${result.pendingBirthId}`).setLabel(result.resumed?"Bekleyen Çocuğa Ad Ver":"Çocuğa Ad Ver").setEmoji("👶").setStyle(ButtonStyle.Primary)
   )];
 }
 

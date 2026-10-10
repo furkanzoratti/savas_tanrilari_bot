@@ -19,7 +19,7 @@ export interface RomanFamilyMarriageProposalView{
 }
 
 export interface RomanFamilyBirthAttemptResult{
-  success:boolean;attemptRoll:number;ageModifier:number;pendingBirthId:string|null;
+  success:boolean;resumed:boolean;attemptRoll:number;ageModifier:number;pendingBirthId:string|null;
   childGender:DynastyGender|null;genderRoll:number|null;complication:BirthComplication|null;
   complicationRoll:number|null;motherName:string;fatherName:string;
 }
@@ -239,6 +239,24 @@ export const romanFamilyLifeService={
       const rep=await republic(client,input.guildId,input.countryId,true);
       const parent=await member(client,rep.id,input.parentMember,true);
       await requireFamilyLeader(client,rep.id,parent.family_id,input.actorId,input.gameMaster);
+      const pending=(await client.query<{
+        id:string;attempt_roll:number;age_modifier:number;gender:DynastyGender;gender_roll:number;
+        complication:BirthComplication;complication_roll:number;mother_name:string;father_name:string;
+      }>(`
+        SELECT session.id,session.attempt_roll,session.age_modifier,session.gender,session.gender_roll,
+               session.complication,session.complication_roll,mother.name AS mother_name,father.name AS father_name
+          FROM roman_family_birth_sessions session
+          JOIN roman_family_members mother ON mother.id=session.mother_id
+          JOIN roman_family_members father ON father.id=session.father_id
+         WHERE session.family_id=$1 AND session.status='PENDING_NAME'
+         ORDER BY session.created_at DESC LIMIT 1
+         FOR UPDATE OF session`,[parent.family_id])).rows[0];
+      if(pending)return{
+        success:true,resumed:true,attemptRoll:Number(pending.attempt_roll),ageModifier:Number(pending.age_modifier),
+        pendingBirthId:pending.id,childGender:pending.gender,genderRoll:Number(pending.gender_roll),
+        complication:pending.complication,complicationRoll:Number(pending.complication_roll),
+        motherName:pending.mother_name,fatherName:pending.father_name
+      };
       if(parent.status!=="ALIVE"||!parent.spouse_id)throw new GameError("Seçilen aile üyesinin yaşayan bir eşi bulunmalıdır.");
       const spouse=await member(client,rep.id,parent.spouse_id,true);
       if(spouse.status!=="ALIVE"||spouse.spouse_id!==parent.id)throw new GameError("Seçilen çiftin karşılıklı ve yaşayan evlilik kaydı bulunmalıdır.");
@@ -250,8 +268,6 @@ export const romanFamilyLifeService={
         throw new GameError(mother.name+" hasta olduğu için yeni gebelik deneyemez.");
       const modifier=birthAgeModifier(mother.age);
       if(modifier===null)throw new GameError("Doğum yapacak eş 18-44 yaş aralığında olmalıdır.");
-      const pending=await client.query("SELECT 1 FROM roman_family_birth_sessions WHERE family_id=$1 AND status='PENDING_NAME'",[parent.family_id]);
-      if(pending.rowCount)throw new GameError("Bu ailede adı henüz konulmamış bir çocuk bulunuyor.");
       const [firstMemberId,secondMemberId]=orderedDynastyCoupleIds(mother.id,father.id);
       const prior=(await client.query<{last_attempt_turn:number}>(
         `SELECT last_attempt_turn FROM roman_family_couple_birth_attempts
@@ -272,7 +288,7 @@ export const romanFamilyLifeService={
         await addEvent(client,rep.id,rep.current_turn,"FAMILY_BIRTH_ATTEMPT_FAILED",parent.family_id,input.actorId,{
           motherName:mother.name,fatherName:father.name,attemptRoll,ageModifier:modifier,automatic:false
         });
-        return{success:false,attemptRoll,ageModifier:modifier,pendingBirthId:null,childGender:null,genderRoll:null,
+        return{success:false,resumed:false,attemptRoll,ageModifier:modifier,pendingBirthId:null,childGender:null,genderRoll:null,
           complication:null,complicationRoll:null,motherName:mother.name,fatherName:father.name};
       }
       const genderRoll=randomInt(1,3);
@@ -302,7 +318,7 @@ export const romanFamilyLifeService={
         sessionId:session.id,motherName:mother.name,fatherName:father.name,childGender,attemptRoll,ageModifier:modifier,
         genderRoll,complicationRoll,complication
       });
-      return{success:true,attemptRoll,ageModifier:modifier,pendingBirthId:session.id,childGender,genderRoll,
+      return{success:true,resumed:false,attemptRoll,ageModifier:modifier,pendingBirthId:session.id,childGender,genderRoll,
         complication,complicationRoll,motherName:mother.name,fatherName:father.name};
     });
   },

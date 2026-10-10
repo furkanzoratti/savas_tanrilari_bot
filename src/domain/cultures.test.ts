@@ -26,4 +26,14 @@ describe("Hint kültür grupları", () => {
       "SOUTHEAST_ASIAN"
     ]));
   });
+
+  it("Orta Asya vahası, bozkır ve Tibet kültürlerini listeler", () => {
+    expect(CULTURE_GROUPS.KANGJU.label).toBe("Kangju");
+    expect(CULTURE_GROUPS.WUSUN.label).toBe("Wusun");
+    expect(CULTURE_GROUPS.TARIM_SAKA.label).toBe("Tarım Sakası");
+    expect(CULTURE_GROUPS.TOCHARIAN.label).toBe("Tohar");
+    expect(CULTURE_GROUPS.ZHANGZHUNG.label).toBe("Zhang Zhung");
+    expect(CULTURE_GROUPS.TIBETAN.label).toBe("Tibetli");
+    expect(CULTURE_GROUPS.QIANG.label).toBe("Qiang");
+  });
 });

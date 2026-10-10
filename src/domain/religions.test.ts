@@ -17,6 +17,12 @@ describe("din sistemi",()=>{
     expect(secondaryReligionEffectScale(9)).toBe(0);
     expect(Object.keys(SECONDARY_RELIGIONS)).toHaveLength(Object.keys(RELIGIONS).length);
   });
+  it("Bön ve Qiang dağ inançlarını ikincil gelenekleriyle tanımlar",()=>{
+    expect(RELIGIONS.BON_FAITH.label).toBe("Bön İnancı");
+    expect(SECONDARY_RELIGIONS.BON_FAITH.label).toBe("Dağ ve Atalar Kültü");
+    expect(RELIGIONS.QIANG_MOUNTAIN_FAITH.label).toBe("Qiang Dağ ve Gök İnancı");
+    expect(SECONDARY_RELIGIONS.QIANG_MOUNTAIN_FAITH.label).toBe("Beyaz Taş ve Dağ Kültü");
+  });
   it("ülke etkisini özgür nüfusun en az yüzde 75'i aynı dine bağlıysa açar",()=>{
     expect(dominantReligion([
       {religion_key:"HELLENIC_FAITH",religion_adherence_percent:75,population:100_000}

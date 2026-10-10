@@ -168,6 +168,12 @@ export const steppePoliticsService={
         INSERT INTO steppe_internal_titles(confederation_id,tier,title_name,holder_name,holder_user_id,loyalty,relation_score,created_turn)
         VALUES($1,'KHAN',$2,$3,$4,100,100,$5) RETURNING id`,
         [confed.id,`${country.name} Hanı`,input.holderName.trim(),input.holderUserId??null,country.current_turn])).rows[0]!;
+      await client.query(`
+        INSERT INTO country_special_unit_unlocks(country_id,unit_type,granted_by)
+        SELECT $1,unlocked.unit_type,$2
+        FROM unnest($3::text[]) AS unlocked(unit_type)
+        ON CONFLICT(country_id,unit_type) DO NOTHING`,
+      [country.id,input.actorId,["horse_archer","steppe_cavalry","kurgan_shieldbearer","oba_archer"]]);
       await addEvent(client,{confederationId:confed.id,turn:Number(country.current_turn),type:"CONFEDERATION_FOUNDED",titleId:title.id,
         actorId:input.actorId,description:`${country.name} bozkır hiyerarşisi kuruldu.`});
       await audit(client,input.guildId,input.actorId,"STEPPE_POLITICS_SETUP","steppe_confederation",confed.id,input);

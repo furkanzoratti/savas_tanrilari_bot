@@ -379,3 +379,30 @@ describe("yüz üçüncü migration", () => {
     expect(migration?.sql).toContain("settlements_secondary_religion_sync");
   });
 });
+
+describe("yüz yetmiş birinci migration", () => {
+  const migration = migrations.find((item) => item.version === 171);
+
+  it("bozkır birliklerini özel birlik kısıtına ve etkin konfederasyonlara ekler", () => {
+    expect(migration?.name).toBe("steppe_army_doctrine_and_special_units");
+    expect(migration?.sql).toContain("'steppe_cavalry'");
+    expect(migration?.sql).toContain("'kurgan_shieldbearer'");
+    expect(migration?.sql).toContain("'oba_archer'");
+    expect(migration?.sql).toContain("confederation.status='ACTIVE'");
+    expect(migration?.sql).toContain("country_special_unit_unlocks");
+  });
+});
+
+describe("yüz yetmiş ikinci migration", () => {
+  const migration = migrations.find((item) => item.version === 172);
+
+  it("Orta Asya devletlerini kültür, inanç ve yerleşkeleriyle ekler", () => {
+    expect(migration?.name).toBe("central_asian_states_cultures_religions_and_settlements");
+    expect(migration?.sql).toContain("Kangju Konfederasyonu");
+    expect(migration?.sql).toContain("Usunlar");
+    expect(migration?.sql).toContain("Kaşgar");
+    expect(migration?.sql).toContain("Zhang Zhung");
+    expect(migration?.sql).toContain("Qiang Kabileleri");
+    expect(migration?.sql).toContain("base_land_trade_income");
+  });
+});

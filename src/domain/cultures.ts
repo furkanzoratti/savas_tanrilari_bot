@@ -36,7 +36,14 @@ export const CULTURE_GROUPS = {
   SOUTHEAST_ASIAN: { label: "Güneydoğu Asyalı" },
   DINGLING: { label: "Dingling" },
   XIANBEI: { label: "Xianbei" },
-  XIONGNU: { label: "Xiongnu" }
+  XIONGNU: { label: "Xiongnu" },
+  KANGJU: { label: "Kangju" },
+  WUSUN: { label: "Wusun" },
+  TARIM_SAKA: { label: "Tarım Sakası" },
+  TOCHARIAN: { label: "Tohar" },
+  ZHANGZHUNG: { label: "Zhang Zhung" },
+  TIBETAN: { label: "Tibetli" },
+  QIANG: { label: "Qiang" }
 } as const;
 
 export type CultureGroup = keyof typeof CULTURE_GROUPS;

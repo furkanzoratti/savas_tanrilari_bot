@@ -15,6 +15,7 @@ import { cancelActiveGarrisonReplenishment, completeDueGarrisonReplenishments, s
 import { isSpecialUnitType, type SpecialUnitType } from "../domain/special-units.js";
 import { applyFormableShipUpkeepDiscount, FORMABLE_COUNTRIES, formableBuildingDiscount, formableEffectLines, formableModifiers, formableTier, formableUnitDiscount, isFormableCountryKey, missingFormableTerritories, type FormableCountryDefinition, type FormableCountryKey, type FormableTier } from "../domain/formable-countries.js";
 import { assessArmyComposition, type BattleComposition, type BattleUnitType } from "../domain/battle.js";
+import { isSteppeArmyUnitType } from "../domain/steppe-army.js";
 import { calculateTreasuryTransferQuota } from "../domain/treasury-transfer.js";
 import { assimilationCompletionTurn } from "../domain/assimilation.js";
 import type { ArmyView } from "./army-service.js";
@@ -222,6 +223,7 @@ export interface CountryDocument {
   country: CountryRow;
   playerIds: string[];
   specialUnitUnlocks?: SpecialUnitType[];
+  isSteppeConfederation?: boolean;
   characters: CountryCharacter[];
   armies: ArmyView[];
   musteringUnits: Array<{ settlement_id: string; unit_type: keyof typeof UNITS; quantity: number }>;
@@ -1797,6 +1799,9 @@ export const gameService = {
       const lastStand=lastStandRow?{startedTurn:Number(lastStandRow.started_turn),deadlineTurn:Number(lastStandRow.deadline_turn),status:lastStandRow.status}:null;
       const playerIds = (await client.query<{ discord_user_id: string }>("SELECT discord_user_id FROM country_members WHERE country_id=$1 ORDER BY discord_user_id", [countryId])).rows.map((row) => row.discord_user_id);
       const specialUnitUnlocks = (await client.query<{ unit_type: SpecialUnitType }>("SELECT unit_type FROM country_special_unit_unlocks WHERE country_id=$1 ORDER BY unit_type", [countryId])).rows.map((row) => row.unit_type);
+      const isSteppeConfederation = Boolean((await client.query(
+        "SELECT 1 FROM steppe_confederations WHERE country_id=$1 AND status='ACTIVE' LIMIT 1", [countryId]
+      )).rowCount);
       const settlements = (await client.query<SettlementRow>("SELECT * FROM settlements WHERE country_id = $1 ORDER BY name", [countryId])).rows;
       const religionDistributions=await loadReligionDistributions(client,settlements.map((settlement)=>settlement.id));
       const dominantReligionProfile=dominantReligionFromDistributions(settlements.map((settlement)=>({
@@ -1894,7 +1899,7 @@ export const gameService = {
           commander_skill_bonus: Number(army.commander_skill_bonus), created_turn: Number(army.created_turn),
           units: armyUnits, siegeAssets, siegeComposition, enhancedSiegeComposition, composition,
           total: Object.values(composition).reduce<number>((sum, value) => sum + Number(value ?? 0), 0),
-          assessment: assessArmyComposition(composition, "FIELD"),
+          assessment: assessArmyComposition(composition, "FIELD", isSteppeConfederation ? "STEPPE" : "STANDARD"),
           composition_active: activationTurn === null || guild.current_turn >= activationTurn,
           composition_activation_turn: activationTurn
         };
@@ -2161,6 +2166,7 @@ export const gameService = {
         country: displayedCountry,
         playerIds,
         specialUnitUnlocks,
+        isSteppeConfederation,
         characters,
         armies,
         musteringUnits,
@@ -2657,6 +2663,12 @@ export const gameService = {
       if (await countryHasMaintenanceDebt(client, country.id)) throw new GameError("Ödenmemiş bakım açığı giderilmeden yeni asker emri verilemez.");
       const unit = UNITS[input.unitType];
       if (!unit) throw new GameError("Birim türü bulunamadı.");
+      const steppeConfederation = Boolean((await client.query(
+        "SELECT 1 FROM steppe_confederations WHERE country_id=$1 AND status='ACTIVE' LIMIT 1", [country.id]
+      )).rowCount);
+      if (steppeConfederation && !isSteppeArmyUnitType(input.unitType)) {
+        throw new GameError("Bozkır konfederasyonları yalnızca Bozkır Atlı Okçu, Bozkır Süvarisi, Kurgan Kalkanlıları ve Oba Yaycıları yetiştirebilir.");
+      }
       if (isSpecialUnitType(input.unitType)) {
         const unlocked = await client.query(
           "SELECT 1 FROM country_special_unit_unlocks WHERE country_id=$1 AND unit_type=$2",

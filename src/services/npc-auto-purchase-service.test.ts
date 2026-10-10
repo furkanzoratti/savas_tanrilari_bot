@@ -19,13 +19,14 @@ const config: NpcAutoPurchaseConfig = {
   scope: "ALL_PLAYERLESS"
 };
 
-function document(input: { treasury: number; militaryUsed: number; trainingRemaining: number; buildingStarted?: boolean; units?: Array<{ unit_type: string; quantity: number; status: string; force_type: string }>; levelOneBuildings?: string[]; naval?: boolean; besieged?: boolean; conquered?: boolean }): CountryDocument {
+function document(input: { treasury: number; militaryUsed: number; trainingRemaining: number; buildingStarted?: boolean; units?: Array<{ unit_type: string; quantity: number; status: string; force_type: string }>; levelOneBuildings?: string[]; naval?: boolean; besieged?: boolean; conquered?: boolean; steppe?: boolean }): CountryDocument {
   return {
     guild: { current_turn: 3 },
     country: { id: "country" },
     militaryLimit: 10_000,
     militaryUsed: input.militaryUsed,
-    specialUnitUnlocks: [],
+    specialUnitUnlocks: input.steppe ? ["horse_archer","steppe_cavalry","kurgan_shieldbearer","oba_archer"] : [],
+    isSteppeConfederation: Boolean(input.steppe),
     settlements: [{
       id: "settlement",
       name: "Test Şehri",
@@ -113,5 +114,15 @@ describe("NPC ek alım planlaması", () => {
     expect(plan.buildingActions.length).toBeGreaterThan(0);
     expect(plan.unitActions).toHaveLength(0);
     expect(plan.shipActions).toHaveLength(0);
+  });
+
+  it("bozkır devletinde yalnızca dört bozkır birimini planlar", () => {
+    const plan = planCountryPurchases(
+      document({ treasury: 30_000, militaryUsed: 0, trainingRemaining: 10_000, steppe: true }),
+      { ...config, budgetPercent: 100 }, "ARMY_ONLY", 0
+    );
+    const allowed = new Set(["horse_archer","steppe_cavalry","kurgan_shieldbearer","oba_archer"]);
+    expect(plan.unitActions.length).toBeGreaterThan(0);
+    expect(plan.unitActions.every((action) => allowed.has(action.unitType))).toBe(true);
   });
 });
