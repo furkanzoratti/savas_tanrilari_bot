@@ -2,11 +2,24 @@ export const steppeDefaultStatesMigration={
   version:166,
   name:"steppe_default_states_and_internal_governance",
   sql:`
+    UPDATE countries
+       SET status='ACTIVE'
+     WHERE lower(name) IN (
+       lower('Dingling Konfederasyonu'),lower('Xianbei Konfederasyonu'),lower('Xiongnu Konfederasyonu')
+     );
+
     INSERT INTO countries(guild_id,name,treasury)
-    SELECT xiongnu.guild_id,required.name,0
-      FROM countries xiongnu
-      CROSS JOIN (VALUES('Dingling Konfederasyonu'),('Xianbei Konfederasyonu')) AS required(name)
-     WHERE xiongnu.status='ACTIVE' AND lower(xiongnu.name)=lower('Xiongnu Konfederasyonu')
+    SELECT guild.discord_id,required.name,0
+      FROM guilds guild
+      CROSS JOIN (VALUES
+        ('Dingling Konfederasyonu'),
+        ('Xianbei Konfederasyonu'),
+        ('Xiongnu Konfederasyonu')
+      ) AS required(name)
+     WHERE NOT EXISTS(
+       SELECT 1 FROM countries existing
+        WHERE existing.guild_id=guild.discord_id AND lower(existing.name)=lower(required.name)
+     )
     ON CONFLICT(guild_id,name) DO NOTHING;
 
     INSERT INTO steppe_confederations(guild_id,country_id,authority,created_turn,created_by)

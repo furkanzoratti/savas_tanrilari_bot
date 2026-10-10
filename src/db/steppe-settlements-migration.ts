@@ -35,7 +35,7 @@ const settlements:readonly SteppeSettlementSeed[]=[
   {country:"Xiongnu Konfederasyonu",name:"Nen Nehri Pazarı",population:46_000,landTradeIncome:4_200,resource:"SILK",culture:"XIONGNU",holdingTitle:"Khingan Toprak Ağası",commonLabel:null}
 ] as const;
 
-const titleSeeds=[
+export const STEPPE_TITLE_SEEDS=[
   ["Dingling Konfederasyonu","Baykal Toprak Ağası",62,10],
   ["Dingling Konfederasyonu","Sayan Toprak Ağası",58,5],
   ["Xianbei Konfederasyonu","Hangay Toprak Ağası",64,12],
@@ -47,7 +47,7 @@ const titleSeeds=[
 
 const quote=(value:string)=>`'${value.replaceAll("'","''")}'`;
 const settlementValues=settlements.map((row)=>`(${quote(row.country)},${quote(row.name)},${row.population},${row.landTradeIncome},${quote(row.resource)},${quote(row.culture)},${row.holdingTitle?quote(row.holdingTitle):"NULL"},${row.commonLabel?quote(row.commonLabel):"NULL"})`).join(",\n      ");
-const titleValues=titleSeeds.map(([country,title,loyalty,relation])=>`(${quote(country)},${quote(title)},${loyalty},${relation})`).join(",\n      ");
+const titleValues=STEPPE_TITLE_SEEDS.map(([country,title,loyalty,relation])=>`(${quote(country)},${quote(title)},${loyalty},${relation})`).join(",\n      ");
 
 export const steppeSettlementsMigration={
   version:168,
