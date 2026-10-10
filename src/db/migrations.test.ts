@@ -416,3 +416,15 @@ describe("yüz yetmiş üçüncü migration", () => {
     expect(migration?.sql).toContain("Minshan Yaylaları");
   });
 });
+
+describe("yüz yetmiş dördüncü migration", () => {
+  const migration = migrations.find((item) => item.version === 174);
+
+  it("Langkasuka ile Kedah ve Mekong Deltası yerleşkelerini ekler", () => {
+    expect(migration?.name).toBe("langkasuka_country_culture_and_settlements");
+    expect(migration?.sql).toContain("Langkasuka");
+    expect(migration?.sql).toContain("Kedah");
+    expect(migration?.sql).toContain("Mekong Deltası");
+    expect(migration?.sql).toContain("MALAYIC");
+  });
+});

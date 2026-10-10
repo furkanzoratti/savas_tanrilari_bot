@@ -34,6 +34,7 @@ export const CULTURE_GROUPS = {
   ANDHRA: { label: "Andhra" },
   TAMIL: { label: "Tamil" },
   SOUTHEAST_ASIAN: { label: "Güneydoğu Asyalı" },
+  MALAYIC: { label: "Malay" },
   DINGLING: { label: "Dingling" },
   XIANBEI: { label: "Xianbei" },
   XIONGNU: { label: "Xiongnu" },

@@ -43,6 +43,7 @@ export const DYNASTY_CULTURAL_NAMES:Partial<Record<CultureGroup,CulturalNamePool
   ANDHRA:{MALE:["Satakarni","Pulumavi","Yajna Sri","Sivasvati","Skandastambhi","Lambodara"],FEMALE:["Gautami","Vasishthi","Naganika","Madhari","Sivakhada","Balashri"]},
   TAMIL:{MALE:["Karikala","Neduncheliyan","Perunarkilli","Senguttuvan","Ilamchetchenni","Nalliyakkodan"],FEMALE:["Kannagi","Kopperundevi","Manimekalai","Venmal","Madhavi","Alli"]},
   SOUTHEAST_ASIAN:{MALE:["Soma","Kaundinya","Sri Mara","Fan Shih-man","Hun Pan-huang","Jayavarman"],FEMALE:["Liuye","Soma Devi","Kulaprabhavati","Jayadevi","Indrani","Vasudhara"]},
+  MALAYIC:{MALE:["Bhagadatta","Merong","Sri Mara","Dharmasena","Indravarman","Jayasena"],FEMALE:["Soma Devi","Sri Dewi","Indrani","Ratnavati","Candradevi","Gunavati"]},
   KANGJU:{MALE:["Spitamenes","Oxyartes","Arsames","Bessos","Dataphernes","Arimazes"],FEMALE:["Roxana","Apama","Barsine","Stateira","Amastris","Aryazate"]},
   WUSUN:{MALE:["Nandoumi","Liejiaomi","Wengguimi","Nimi","Yuanguimi","Cenzou"],FEMALE:["Jieyou","Shaofu","Dishi","Youjie","Kunmi","Aiying"]},
   TARIM_SAKA:{MALE:["Vijita","Yola","Visva","Samghata","Nanda","Sena"],FEMALE:["Vijaya","Sima","Rruma","Tara","Yasna","Padma"]},

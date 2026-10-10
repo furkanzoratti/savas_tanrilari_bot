@@ -41,6 +41,7 @@ const regionalNames: Partial<Record<CultureGroup, readonly [readonly string[], r
   ANDHRA: [["Gautamiputra", "Pulumavi", "Yajna", "Sivasvati"], ["Andhralı", "Krishnalı", "Amaravatili"]],
   TAMIL: [["Karikala", "Neduncheliyan", "Senguttuvan", "Perunarkilli"], ["Chola", "Pandya", "Chera"]],
   SOUTHEAST_ASIAN: [["Soma", "Kaundinya", "Jayavarman", "Rudravarman"], ["Mekonglu", "Funanlı", "Denizdoğan"]],
+  MALAYIC: [["Bhagadatta", "Sri Mara", "Merong", "Dharmasena"], ["Kedahlı", "Pattanili", "Boğaz Muhafızı", "Demir Ustası"]],
   KANGJU: [["Spitamenes", "Oxyartes", "Arsames", "Dataphernes"], ["Kangjulu", "Davanlı", "Sırderyalı"]],
   WUSUN: [["Nandoumi", "Liejiaomi", "Wengguimi", "Nimi"], ["Çigulu", "İlili", "Kunmo Yeminli"]],
   TARIM_SAKA: [["Vijita", "Yola", "Visva", "Samghata"], ["Hotanlı", "Yarkentli", "Yeşim Yeminli"]],

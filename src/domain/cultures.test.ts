@@ -11,6 +11,7 @@ describe("Hint kültür grupları", () => {
     expect(CULTURE_GROUPS.ANDHRA.label).toBe("Andhra");
     expect(CULTURE_GROUPS.TAMIL.label).toBe("Tamil");
     expect(CULTURE_GROUPS.SOUTHEAST_ASIAN.label).toBe("Güneydoğu Asyalı");
+    expect(CULTURE_GROUPS.MALAYIC.label).toBe("Malay");
   });
 
   it("yeni kültürleri komut seçimlerine açar", () => {
@@ -23,7 +24,8 @@ describe("Hint kültür grupları", () => {
       "MAHARASHTRI",
       "ANDHRA",
       "TAMIL",
-      "SOUTHEAST_ASIAN"
+      "SOUTHEAST_ASIAN",
+      "MALAYIC"
     ]));
   });
 

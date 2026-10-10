@@ -103,6 +103,7 @@ import { steppeGreatKhanateMigration } from "./steppe-great-khanate-migration.js
 import { steppeArmyDoctrineMigration } from "./steppe-army-doctrine-migration.js";
 import { centralAsianStatesMigration } from "./central-asian-states-migration.js";
 import { centralAsianQiangCorrectionMigration } from "./central-asian-qiang-correction-migration.js";
+import { langkasukaStateMigration } from "./langkasuka-state-migration.js";
 
 export const migrations = [
   {
@@ -2423,5 +2424,6 @@ export const migrations = [
   steppeGreatKhanateMigration,
   steppeArmyDoctrineMigration,
   centralAsianStatesMigration,
-  centralAsianQiangCorrectionMigration
+  centralAsianQiangCorrectionMigration,
+  langkasukaStateMigration
 ] as const;
