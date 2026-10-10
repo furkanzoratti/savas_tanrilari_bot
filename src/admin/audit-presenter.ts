@@ -8,6 +8,11 @@ const ACTION_LABELS: Record<string, string> = {
   "admin.panel.dynasty.member.update": "Hanedan üyesi güncellendi",
   "admin.panel.dynasty.member.death": "Hanedan üyesi öldü olarak işlendi",
   "admin.panel.dynasty.local_noble_marriage": "Yerel soylu evliliği yapıldı",
+  "admin.panel.roman.family.update": "Roma siyasi ailesi güncellendi",
+  "admin.panel.roman.member.add": "Roma ailesine üye eklendi",
+  "admin.panel.roman.member.update": "Roma aile üyesi güncellendi",
+  "admin.panel.roman.member.death": "Roma aile üyesi öldü olarak işlendi",
+  "admin.panel.roman.member.remove": "Roma aile üyesi kayıttan kaldırıldı",
   "admin.panel.army.update": "Ordu bilgileri güncellendi",
   "admin.panel.army.unit.update": "Ordu mevcudu güncellendi",
   "admin.panel.army.create": "Yeni ordu oluşturuldu",
@@ -85,7 +90,8 @@ const ENTITY_LABELS: Record<string, string> = {
   movement_order: "Hareket emri", map: "Harita", map_edge: "Harita geçişi", guild: "Oyun",
   steppe_confederation: "Bozkır konfederasyonu", steppe_internal_title: "Bozkır makamı",
   steppe_hegemony: "Hanlar Hanlığı", steppe_tributary: "Bağlı Han",
-  steppe_hegemony_war_call: "Hanlar Hanı savaş çağrısı"
+  steppe_hegemony_war_call: "Hanlar Hanı savaş çağrısı",
+  roman_family: "Roma siyasi ailesi", roman_family_member: "Roma aile üyesi"
 };
 
 const FIELD_LABELS: Record<string, string> = {
@@ -118,7 +124,13 @@ const FIELD_LABELS: Record<string, string> = {
   dynastyId: "Hanedan", title: "Unvan", relation: "Akrabalık", age: "Yaş", health: "Sağlık",
   diedTurn: "Ölüm turu", reason: "Ölüm nedeni", memberName: "Hanedan üyesi",
   spouseName: "Yerel soylu eş", spouseAge: "Eşin yaşı", authority: "Otorite",
-  loyalty: "Sadakat", relationScore: "İlişki", holderName: "Makam sahibi", holderUserId: "Discord kullanıcısı"
+  loyalty: "Sadakat", relationScore: "İlişki", holderName: "Makam sahibi", holderUserId: "Discord kullanıcısı",
+  politicalInfluence: "Siyasi nüfuz", political_influence: "Siyasi nüfuz", senateSeats: "Senato koltuğu",
+  senate_seats: "Senato koltuğu", reputation: "İtibar", scandal: "Skandal", politicalBloc: "Siyasi blok",
+  political_bloc: "Siyasi blok", leaderUserId: "Aile yöneticisi", leader_user_id: "Aile yöneticisi",
+  gender: "Cinsiyet", position: "Hanedeki konum", sortOrder: "Liste sırası", sort_order: "Liste sırası",
+  sickUntilTurn: "Hastalık bitiş turu", sick_until_turn: "Hastalık bitiş turu",
+  spouseId: "Eş", spouse_id: "Eş", motherId: "Anne", mother_id: "Anne", fatherId: "Baba", father_id: "Baba"
 };
 
 const VALUE_LABELS: Record<string, string> = {

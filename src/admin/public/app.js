@@ -93,6 +93,7 @@ const rebellionFactionStatusLabels = { ORGANIZING: "Örgütleniyor", ACTIVE: "Ay
 const rebelSiegeAssetKeys = ["ladder_group","ram","mantlet","ballista","catapult","siege_tower"];
 const rebellionOutcomeLabels = { OUTBREAK: "İsyan çıktı", IMMUNE: "Koruma altında", ESCALATED: "Gerilim arttı", CALMED: "Gerilim azaldı", UNCHANGED: "Değişmedi" };
 const romanBlocLabels = { CENTRIST: "Merkez", OPTIMATES: "Optimates", POPULARES: "Populares", EQUITES: "Equites", MILITARISTS: "Askerî hizip", TRADITIONALISTS: "Gelenekçiler" };
+const romanPositionLabels = { HEAD: "Aile reisi", SPOUSE: "Eş", CHILD: "Çocuk", PARENT: "Ebeveyn", HEAD_SIBLING: "Aile reisinin kardeşi", SPOUSE_SIBLING: "Eşin kardeşi", HOUSEHOLD: "Hane mensubu" };
 const romanFamilyColorKeys = {
   "scipio ailesi": "scipio", "magnus ailesi": "magnus", "cato ailesi": "cato", "nero ailesi": "nero",
   "julius ailesi": "julius", "aemilius ailesi": "aemilius", "fabius ailesi": "fabius", "valerius ailesi": "valerius",
@@ -246,9 +247,9 @@ function romanRepublicPanel(republic, currentTurn) {
   const familyCards = republic.families.map((family, index) => {
     const members = family.members || [];
     return `<article class="card roman-family-card ${romanFamilyColorKey(family.name, index)}">
-      <div class="roman-family-head"><div><span class="roman-color-dot"></span><strong>${escapeHtml(family.name)}</strong><small>${escapeHtml(romanBlocLabels[family.political_bloc] || family.political_bloc)}</small></div>${family.is_consul ? '<span class="pill">Konsül ailesi</span>' : `<span class="pill neutral">${number(family.senate_seats)} koltuk</span>`}</div>
+      <div class="roman-family-head"><div><span class="roman-color-dot"></span><strong>${escapeHtml(family.name)}</strong><small>${escapeHtml(romanBlocLabels[family.political_bloc] || family.political_bloc)}</small></div><div class="roman-family-actions">${family.is_consul ? '<span class="pill">Konsül ailesi</span>' : `<span class="pill neutral">${number(family.senate_seats)} koltuk</span>`}<button class="button compact" data-edit-roman-family="${family.id}">Aileyi yönet</button><button class="button primary compact" data-add-roman-member="${family.id}">＋ Üye ekle</button></div></div>
       <div class="roman-family-stats"><span><small>Aile hazinesi</small><strong>${money(family.treasury)}</strong></span><span><small>Siyasi nüfuz</small><strong>${number(family.political_influence)}</strong></span><span><small>İtibar / Skandal</small><strong>${number(family.reputation)} / ${number(family.scandal)}</strong></span><span><small>Oyuncu</small><strong>${number(family.player_count)}</strong></span></div>
-      <div class="roman-members">${members.length ? members.map((member) => `<span><b>${escapeHtml(member.name)}</b><small>${number(member.age)} yaş · ${escapeHtml(member.relation)}</small></span>`).join("") : '<span class="muted">Oyuncu ailesi; kadro oyuncular tarafından doldurulacak.</span>'}</div>
+      <div class="roman-members">${members.length ? members.map((member) => `<div class="roman-member-row ${member.status === "DEAD" ? "dead" : ""}"><div class="roman-member-meta"><b>${escapeHtml(member.name)}</b><small>${number(member.age)} yaş · ${escapeHtml(dynastyGenderLabels[member.gender] || member.gender)} · ${escapeHtml(romanPositionLabels[member.position] || member.position)}</small><small>${escapeHtml(member.relation)}${member.spouseName ? ` · Eş: ${escapeHtml(member.spouseName)}` : ""}</small>${member.status === "DEAD" ? `<small class="danger-text">Ölü · Tur ${number(member.diedTurn)} · ${escapeHtml(member.deathReason || "Neden belirtilmedi")}</small>` : member.health === "SICK" ? `<small class="warning-text">Hasta · Tur ${number(member.sickUntilTurn)} sonuna kadar</small>` : ""}</div><div class="roman-member-actions"><button class="button compact" data-edit-roman-member="${member.id}" data-family-id="${family.id}">Düzenle</button>${member.status === "ALIVE" ? `<button class="button compact danger" data-kill-roman-member="${member.id}" data-family-id="${family.id}">Öldü</button>` : ""}<button class="button compact danger" data-remove-roman-member="${member.id}" data-family-id="${family.id}">Kaldır</button></div></div>`).join("") : '<span class="muted">Bu ailede kayıtlı üye bulunmuyor.</span>'}</div>
     </article>`;
   }).join("");
   const proposalRows = republic.proposals.map((proposal) => `<div class="data-row roman-proposal"><div><strong>${escapeHtml(proposal.title)}</strong><small>${escapeHtml(proposal.proposer_family_name)} · Son Tur ${number(proposal.closes_turn)}</small></div><span class="pill ${proposal.status === "OPEN" ? "" : "neutral"}">${proposal.status === "OPEN" ? "Oylamada" : escapeHtml(proposal.status)}</span><span>Evet ${number(proposal.yes_weight)} / Hayır ${number(proposal.no_weight)}</span></div>`).join("");
@@ -264,9 +265,101 @@ function romanRepublicPanel(republic, currentTurn) {
 async function romanPoliticsPage() {
   setActiveRoute("roman-politics"); loading();
   const data = await api("/api/roman-politics");
+  data.republics.forEach((republic) => { republic.current_turn = data.currentTurn; });
   page.innerHTML = data.republics.length
     ? data.republics.map((republic) => romanRepublicPanel(republic, data.currentTurn)).join("")
     : '<div class="page-head"><div><h1>Roma Siyaseti</h1><p>Roma Cumhuriyeti iç yönetimi</p></div></div><div class="card empty">Henüz Roma Cumhuriyeti kaydı bulunmuyor. Discord’da /roma-yonetim kur komutunu kullanın.</div>';
+  const familyEntries = data.republics.flatMap((republic) => republic.families.map((family) => ({ republic, family })));
+  const families = new Map(familyEntries.map((entry) => [entry.family.id, entry]));
+  const members = new Map(familyEntries.flatMap(({ republic, family }) => (family.members || []).map((member) => [member.id, { republic, family, member }])));
+  document.querySelectorAll("[data-edit-roman-family]").forEach((button) => button.addEventListener("click", () => {
+    const entry = families.get(button.dataset.editRomanFamily); if (entry) openRomanFamilyEditor(entry.republic, entry.family);
+  }));
+  document.querySelectorAll("[data-add-roman-member]").forEach((button) => button.addEventListener("click", () => {
+    const entry = families.get(button.dataset.addRomanMember); if (entry) openRomanFamilyMemberEditor(entry.republic, entry.family);
+  }));
+  document.querySelectorAll("[data-edit-roman-member]").forEach((button) => button.addEventListener("click", () => {
+    const entry = members.get(button.dataset.editRomanMember); if (entry) openRomanFamilyMemberEditor(entry.republic, entry.family, entry.member);
+  }));
+  document.querySelectorAll("[data-kill-roman-member]").forEach((button) => button.addEventListener("click", () => {
+    const entry = members.get(button.dataset.killRomanMember); if (entry) openRomanFamilyMemberDeathEditor(entry.republic, entry.family, entry.member);
+  }));
+  document.querySelectorAll("[data-remove-roman-member]").forEach((button) => button.addEventListener("click", () => {
+    const entry = members.get(button.dataset.removeRomanMember); if (entry) openRomanFamilyMemberRemovalEditor(entry.republic, entry.family, entry.member);
+  }));
+}
+
+function openRomanFamilyEditor(republic, family) {
+  const blocOptions = Object.entries(romanBlocLabels).map(([value, label]) => `<option value="${value}" ${selected(value, family.political_bloc)}>${escapeHtml(label)}</option>`).join("");
+  openEditor("Roma siyasi ailesini yönet", `${republic.country_name} · ${family.name}`, `<div class="preview-warning"><strong>Tam aile yönetimi</strong><span>Ekonomi ve siyasi değerler anında uygulanır. Her değişiklik gerekçesiyle birlikte GM denetim kaydına yazılır.</span></div><div class="form-grid"><label>Aile adı<input id="roman-family-name" value="${escapeHtml(family.name)}" minlength="2" maxlength="80" required></label><label>Aile hazinesi<input id="roman-family-treasury" type="number" min="0" step="1" value="${Number(family.treasury)}" required></label><label>Siyasi nüfuz<input id="roman-family-influence" type="number" min="0" step="1" value="${Number(family.political_influence)}" required></label><label>Senato koltuğu<input id="roman-family-seats" type="number" min="0" max="${Number(republic.senate_total_seats)}" step="1" value="${Number(family.senate_seats)}" required><small>Toplam doluluk ${number(republic.families.reduce((sum, item) => sum + Number(item.senate_seats || 0), 0))} / ${number(republic.senate_total_seats)}.</small></label><label>İtibar<input id="roman-family-reputation" type="number" min="0" max="100" step="1" value="${Number(family.reputation)}" required></label><label>Skandal<input id="roman-family-scandal" type="number" min="0" max="100" step="1" value="${Number(family.scandal)}" required></label><label>Siyasi blok<select id="roman-family-bloc">${blocOptions}</select></label><label>Aile yöneticisi Discord kullanıcı kimliği<input id="roman-family-leader" value="${escapeHtml(family.leader_user_id || "")}" maxlength="30" placeholder="Boş bırakılabilir"></label></div><label>Değişiklik gerekçesi<textarea id="roman-family-reason" minlength="2" maxlength="300" rows="3" required placeholder="Örn. Senato kararı, yönetici düzeltmesi…"></textarea></label>`, async () => {
+    await api(`/api/admin/roman-families/${family.id}`, { method: "PATCH", body: JSON.stringify({
+      name: document.getElementById("roman-family-name").value,
+      treasury: Number(document.getElementById("roman-family-treasury").value),
+      politicalInfluence: Number(document.getElementById("roman-family-influence").value),
+      senateSeats: Number(document.getElementById("roman-family-seats").value),
+      reputation: Number(document.getElementById("roman-family-reputation").value),
+      scandal: Number(document.getElementById("roman-family-scandal").value),
+      politicalBloc: document.getElementById("roman-family-bloc").value,
+      leaderUserId: document.getElementById("roman-family-leader").value.trim() || null,
+      reason: document.getElementById("roman-family-reason").value
+    }) });
+    closeEditor(); toast(`${family.name} güncellendi.`); await romanPoliticsPage();
+  });
+}
+
+function romanFamilyRelationOptions(republic, member, kind) {
+  const current = kind === "spouse" ? member?.spouseId : kind === "mother" ? member?.motherId : member?.fatherId;
+  const gender = kind === "mother" ? "FEMALE" : kind === "father" ? "MALE" : null;
+  const candidates = republic.families.flatMap((family) => (family.members || []).map((candidate) => ({ ...candidate, familyName: family.name })));
+  return `<option value="">Yok / belirtilmedi</option>${candidates.filter((candidate) => candidate.id !== member?.id && (!gender || candidate.gender === gender) && (kind !== "spouse" || candidate.id === current || (candidate.status === "ALIVE" && !candidate.spouseId))).map((candidate) => `<option value="${candidate.id}" ${selected(candidate.id, current)}>${escapeHtml(candidate.name)} · ${escapeHtml(candidate.familyName)}${candidate.status === "DEAD" ? " · Ölü" : ""}</option>`).join("")}`;
+}
+
+function romanFamilyMemberInput() {
+  const optionalId = (id) => document.getElementById(id).value || null;
+  const health = document.getElementById("roman-member-health").value;
+  return {
+    name: document.getElementById("roman-member-name").value,
+    gender: document.getElementById("roman-member-gender").value,
+    age: Number(document.getElementById("roman-member-age").value),
+    position: document.getElementById("roman-member-position").value,
+    relation: document.getElementById("roman-member-relation").value,
+    health,
+    sickUntilTurn: health === "SICK" ? Number(document.getElementById("roman-member-sick-until").value) : null,
+    sortOrder: Number(document.getElementById("roman-member-sort-order").value),
+    spouseId: optionalId("roman-member-spouse"),
+    motherId: optionalId("roman-member-mother"),
+    fatherId: optionalId("roman-member-father"),
+    reason: document.getElementById("roman-member-reason").value
+  };
+}
+
+function openRomanFamilyMemberEditor(republic, family, member = null) {
+  const dead = member?.status === "DEAD";
+  const health = dead ? "HEALTHY" : (member?.health || "HEALTHY");
+  const positionOptions = Object.entries(romanPositionLabels).map(([value, label]) => `<option value="${value}" ${selected(value, member?.position || "HOUSEHOLD")}>${escapeHtml(label)}</option>`).join("");
+  openEditor(member ? "Roma aile üyesini düzenle" : "Roma ailesine üye ekle", `${family.name} · ${republic.country_name}`, `<div class="preview-warning"><strong>Kimlik, yaş ve aile bağları üzerinde tam denetim</strong><span>Eş seçimi karşılıklı işlenir. Anne, baba ve eş aynı Roma Cumhuriyeti içindeki diğer ailelerden de seçilebilir.</span></div><div class="form-grid"><label>Adı<input id="roman-member-name" value="${escapeHtml(member?.name || "")}" minlength="2" maxlength="80" required></label><label>Cinsiyet<select id="roman-member-gender"><option value="MALE" ${selected("MALE", member?.gender || "MALE")}>Erkek</option><option value="FEMALE" ${selected("FEMALE", member?.gender)}>Kadın</option></select></label><label>Yaş<input id="roman-member-age" type="number" min="0" max="120" step="1" value="${Number(member?.age ?? 0)}" required></label><label>Hanedeki konum<select id="roman-member-position">${positionOptions}</select></label><label>Akrabalık / açıklama<input id="roman-member-relation" value="${escapeHtml(member?.relation || "Hane mensubu")}" minlength="2" maxlength="120" required></label><label>Liste sırası<input id="roman-member-sort-order" type="number" min="-10000" max="10000" step="1" value="${Number(member?.sortOrder ?? 0)}" required></label><label>Sağlık<select id="roman-member-health" ${dead ? "disabled" : ""}><option value="HEALTHY" ${selected("HEALTHY", health)}>Sağlıklı</option><option value="SICK" ${selected("SICK", health)}>Hasta</option></select></label><label>Hastalık bitiş turu<input id="roman-member-sick-until" type="number" min="${Number(republic.current_turn ?? 0)}" step="1" value="${Number(member?.sickUntilTurn ?? Number(republic.current_turn ?? 0) + 3)}" ${dead ? "disabled" : ""}></label><label>Eş<select id="roman-member-spouse">${romanFamilyRelationOptions(republic, member, "spouse")}</select></label><label>Anne<select id="roman-member-mother">${romanFamilyRelationOptions(republic, member, "mother")}</select></label><label>Baba<select id="roman-member-father">${romanFamilyRelationOptions(republic, member, "father")}</select></label></div>${dead ? `<div class="preview-warning"><strong>Ölü üye</strong><span>Kimlik ve akrabalık kaydı düzeltilebilir. Üyeyi yeniden hayata döndürmek yerine kayıt kaldırılıp yeni yaşayan kayıt eklenmelidir.</span></div>` : ""}<label>Değişiklik gerekçesi<textarea id="roman-member-reason" minlength="2" maxlength="300" rows="3" required placeholder="Örn. Oyuncu kadro düzeltmesi, yaş kaydı düzeltmesi…"></textarea></label>`, async () => {
+    await api(member ? `/api/admin/roman-family-members/${member.id}` : `/api/admin/roman-families/${family.id}/members`, {
+      method: member ? "PATCH" : "POST", body: JSON.stringify(romanFamilyMemberInput())
+    });
+    closeEditor(); toast(member ? `${member.name} güncellendi.` : `${family.name} ailesine yeni üye eklendi.`); await romanPoliticsPage();
+  });
+}
+
+function openRomanFamilyMemberDeathEditor(republic, family, member) {
+  openEditor("Roma aile üyesini öldü olarak işle", `${family.name} · ${member.name}`, `<div class="preview-warning"><strong>Ölüm kalıcı tarih kaydıdır.</strong><span>Üye ölü olarak korunur; bekleyen evlilik ve isim bekleyen doğum işlemleri iptal edilir. Aile kadrosundan tamamen silinmez.</span></div><label>Ölüm nedeni<textarea id="roman-member-death-reason" minlength="2" maxlength="200" rows="3" required placeholder="Örn. Hastalık, savaş, yaşlılık…"></textarea></label>`, async () => {
+    await api(`/api/admin/roman-family-members/${member.id}/death`, { method: "POST", body: JSON.stringify({ reason: document.getElementById("roman-member-death-reason").value }) });
+    closeEditor(); toast(`${member.name} ölü olarak işlendi.`); await romanPoliticsPage();
+  });
+}
+
+function openRomanFamilyMemberRemovalEditor(republic, family, member) {
+  openEditor("Roma aile üyesini kayıttan kaldır", `${family.name} · ${member.name}`, `<div class="preview-warning danger-zone"><strong>Bu işlem aile üyesi kaydını tamamen siler.</strong><span>Evlilik ve doğum bağlantıları etkilenebilir. Tarihsel bir ölüm için bu işlem yerine “Öldü” seçeneğini kullan.</span></div><label>Kaldırma gerekçesi<textarea id="roman-member-remove-reason" minlength="2" maxlength="300" rows="3" required></textarea></label><label>Onay<input id="roman-member-remove-confirmation" required autocomplete="off" placeholder="KALDIR yaz"></label>`, async () => {
+    await api(`/api/admin/roman-family-members/${member.id}`, { method: "DELETE", body: JSON.stringify({
+      confirmation: document.getElementById("roman-member-remove-confirmation").value.trim(),
+      reason: document.getElementById("roman-member-remove-reason").value
+    }) });
+    closeEditor(); toast(`${member.name} aile kaydından kaldırıldı.`); await romanPoliticsPage();
+  });
 }
 
 const steppeTierLabels = { KHAN: "Han", LANDHOLDER: "Toprak Ağası" };

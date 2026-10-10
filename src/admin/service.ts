@@ -103,6 +103,39 @@ const localNobleMarriageSchema = z.object({
   age: z.coerce.number().int().min(MINIMUM_MARRIAGE_AGE).max(120)
 });
 
+const romanFamilyUpdateSchema = z.object({
+  name: z.string().trim().min(2).max(80),
+  treasury: z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+  politicalInfluence: z.coerce.number().int().min(0).max(1_000_000),
+  senateSeats: z.coerce.number().int().min(0).max(100),
+  reputation: z.coerce.number().int().min(0).max(100),
+  scandal: z.coerce.number().int().min(0).max(100),
+  politicalBloc: z.enum(["CENTRIST", "OPTIMATES", "POPULARES", "EQUITES", "MILITARISTS", "TRADITIONALISTS"]),
+  leaderUserId: z.string().trim().max(30).nullable(),
+  reason: z.string().trim().min(2).max(300)
+});
+
+const romanFamilyMemberUpdateSchema = z.object({
+  name: z.string().trim().min(2).max(80),
+  gender: z.enum(["MALE", "FEMALE"]),
+  age: z.coerce.number().int().min(0).max(120),
+  position: z.enum(["HEAD", "SPOUSE", "CHILD", "PARENT", "HEAD_SIBLING", "SPOUSE_SIBLING", "HOUSEHOLD"]),
+  relation: z.string().trim().min(2).max(120),
+  health: z.enum(["HEALTHY", "SICK"]),
+  sickUntilTurn: z.coerce.number().int().min(0).nullable(),
+  sortOrder: z.coerce.number().int().min(-10_000).max(10_000),
+  spouseId: z.string().uuid().nullable(),
+  motherId: z.string().uuid().nullable(),
+  fatherId: z.string().uuid().nullable(),
+  reason: z.string().trim().min(2).max(300)
+});
+
+const romanFamilyMemberDeathSchema = z.object({ reason: z.string().trim().min(2).max(200) });
+const romanFamilyMemberRemovalSchema = z.object({
+  confirmation: z.literal("KALDIR"),
+  reason: z.string().trim().min(2).max(300)
+});
+
 type LocalNobleMarriageCandidate = {
   status: "ALIVE" | "DEAD";
   age: number | null;
@@ -336,6 +369,84 @@ async function reconcileAdminDynastySuccession(
       countryName: dynasty.country_name, reason: "Uygun varis bulunmuyor", source: "ADMIN_PANEL"
     });
   }
+}
+
+type AdminRomanFamilyContext = {
+  id: string;
+  republic_id: string;
+  name: string;
+  current_turn: number;
+  senate_total_seats: number;
+  country_name: string;
+};
+
+async function adminRomanFamilyContext(client: AdminDbClient | typeof adminPool, familyId: string, lock = false) {
+  const row = (await client.query<AdminRomanFamilyContext>(
+    `SELECT family.id,family.republic_id,family.name,guild.current_turn,republic.senate_total_seats,
+            country.name AS country_name
+       FROM roman_families family
+       JOIN roman_republics republic ON republic.id=family.republic_id
+       JOIN countries country ON country.id=republic.country_id
+       JOIN guilds guild ON guild.discord_id=republic.guild_id
+      WHERE family.id=$1 AND republic.guild_id=$2 AND family.status='ACTIVE'
+      ${lock ? "FOR UPDATE OF family" : ""}`,
+    [familyId, adminConfig.guildId]
+  )).rows[0];
+  if (!row) throw new Error("Roma siyasi ailesi bulunamadı.");
+  return row;
+}
+
+async function adminRomanFamilyMember(client: AdminDbClient, memberId: string, lock = false) {
+  const row = (await client.query<Record<string, unknown> & {
+    id: string; family_id: string; republic_id: string; family_name: string; name: string;
+    gender: "MALE" | "FEMALE"; status: "ALIVE" | "DEAD"; health: "HEALTHY" | "SICK";
+    spouse_id: string | null; current_turn: number; country_name: string;
+  }>(
+    `SELECT member.*,family.republic_id,family.name AS family_name,guild.current_turn,country.name AS country_name
+       FROM roman_family_members member
+       JOIN roman_families family ON family.id=member.family_id
+       JOIN roman_republics republic ON republic.id=family.republic_id
+       JOIN countries country ON country.id=republic.country_id
+       JOIN guilds guild ON guild.discord_id=republic.guild_id
+      WHERE member.id=$1 AND republic.guild_id=$2${lock ? " FOR UPDATE OF member" : ""}`,
+    [memberId, adminConfig.guildId]
+  )).rows[0];
+  if (!row) throw new Error("Roma aile üyesi bulunamadı.");
+  return row;
+}
+
+async function validateAdminRomanRelation(
+  client: AdminDbClient,
+  republicId: string,
+  relationId: string | null,
+  label: string,
+  gender?: "MALE" | "FEMALE"
+) {
+  if (!relationId) return null;
+  const row = (await client.query<{ id: string; name: string; gender: "MALE" | "FEMALE"; spouse_id: string | null; status: "ALIVE" | "DEAD" }>(
+    `SELECT member.id,member.name,member.gender,member.spouse_id,member.status
+       FROM roman_family_members member
+       JOIN roman_families family ON family.id=member.family_id
+      WHERE member.id=$1 AND family.republic_id=$2`,
+    [relationId, republicId]
+  )).rows[0];
+  if (!row) throw new Error(`${label} aynı Roma Cumhuriyeti içindeki bir aileden seçilmelidir.`);
+  if (gender && row.gender !== gender) throw new Error(`${label} için seçilen üyenin cinsiyeti uygun değil.`);
+  return row;
+}
+
+async function romanAdminEvent(
+  client: AdminDbClient,
+  family: AdminRomanFamilyContext,
+  actorId: string,
+  eventType: string,
+  details: Record<string, unknown>
+) {
+  await client.query(
+    `INSERT INTO roman_republic_events(republic_id,game_turn,event_type,actor_user_id,family_id,details)
+     VALUES($1,$2,$3,$4,$5,$6::jsonb)`,
+    [family.republic_id, family.current_turn, eventType, actorId, family.id, JSON.stringify({ ...details, source: "ADMIN_PANEL" })]
+  );
 }
 
 async function auditEntityNames(ids: string[]): Promise<Map<string, string>> {
@@ -882,10 +993,19 @@ export const adminPanelService = {
                   WHERE player.family_id=family.id AND player.status='ACTIVE') AS player_count,
                 COALESCE((SELECT jsonb_agg(jsonb_build_object(
                   'id',member.id,'name',member.name,'gender',member.gender,'age',member.age,
-                  'position',member.position,'relation',member.relation
-                ) ORDER BY member.sort_order,member.age DESC)
+                  'position',member.position,'relation',member.relation,'status',member.status,
+                  'health',member.health,'sickUntilTurn',member.sick_until_turn,
+                  'bornTurn',member.born_turn,'diedTurn',member.died_turn,'deathReason',member.death_reason,
+                  'sortOrder',member.sort_order,'spouseId',member.spouse_id,'spouseName',spouse.name,
+                  'motherId',member.mother_id,'motherName',mother.name,
+                  'fatherId',member.father_id,'fatherName',father.name,
+                  'birthFamilyId',member.birth_family_id
+                ) ORDER BY CASE WHEN member.status='ALIVE' THEN 0 ELSE 1 END,member.sort_order,member.age DESC)
                   FROM roman_family_members member
-                 WHERE member.family_id=family.id AND member.status='ALIVE'),'[]'::jsonb) AS members
+                  LEFT JOIN roman_family_members spouse ON spouse.id=member.spouse_id
+                  LEFT JOIN roman_family_members mother ON mother.id=member.mother_id
+                  LEFT JOIN roman_family_members father ON father.id=member.father_id
+                 WHERE member.family_id=family.id),'[]'::jsonb) AS members
            FROM roman_families family
           WHERE family.republic_id=$1 AND family.status='ACTIVE'
           ORDER BY family.senate_seats DESC,family.political_influence DESC,family.name`,
@@ -926,6 +1046,173 @@ export const adminPanelService = {
       result.push({...republic,families,election,proposals});
     }
     return{currentTurn:Number(guild.current_turn),republics:result};
+  },
+
+  async updateRomanFamily(actorId: string, familyId: string, rawInput: unknown) {
+    const input = romanFamilyUpdateSchema.parse(rawInput);
+    return withAdminTransaction(async (client) => {
+      const family = await adminRomanFamilyContext(client, familyId, true);
+      const previous = (await client.query(
+        `SELECT id,name,treasury,political_influence,senate_seats,reputation,scandal,political_bloc,leader_user_id
+           FROM roman_families WHERE id=$1`, [family.id]
+      )).rows[0]!;
+      const duplicate = await client.query(
+        "SELECT 1 FROM roman_families WHERE republic_id=$1 AND lower(name)=lower($2) AND id<>$3",
+        [family.republic_id, input.name, family.id]
+      );
+      if (duplicate.rowCount) throw new Error("Bu Cumhuriyette aynı adlı başka bir siyasi aile bulunuyor.");
+      const otherSeats = Number((await client.query<{ total: string }>(
+        "SELECT COALESCE(SUM(senate_seats),0)::text AS total FROM roman_families WHERE republic_id=$1 AND status='ACTIVE' AND id<>$2",
+        [family.republic_id, family.id]
+      )).rows[0]?.total ?? 0);
+      if (otherSeats + input.senateSeats > family.senate_total_seats) {
+        throw new Error(`Senato toplamı ${family.senate_total_seats} koltuğu aşamaz. Diğer ailelerde ${otherSeats} koltuk bulunuyor.`);
+      }
+      const updated = (await client.query(
+        `UPDATE roman_families SET name=$1,treasury=$2,political_influence=$3,senate_seats=$4,
+                reputation=$5,scandal=$6,political_bloc=$7,leader_user_id=$8,updated_at=NOW()
+          WHERE id=$9 RETURNING id,name,treasury,political_influence,senate_seats,reputation,scandal,
+                                political_bloc,leader_user_id`,
+        [input.name, input.treasury, input.politicalInfluence, input.senateSeats, input.reputation,
+          input.scandal, input.politicalBloc, input.leaderUserId, family.id]
+      )).rows[0]!;
+      await romanAdminEvent(client, family, actorId, "ADMIN_FAMILY_UPDATED", {
+        familyName: input.name, reason: input.reason, previous, updated
+      });
+      await writeAdminAudit(client, actorId, "admin.panel.roman.family.update", "roman_family", family.id, {
+        previous, updated, reason: input.reason
+      });
+      return updated;
+    });
+  },
+
+  async addRomanFamilyMember(actorId: string, familyId: string, rawInput: unknown) {
+    const input = romanFamilyMemberUpdateSchema.parse(rawInput);
+    return withAdminTransaction(async (client) => {
+      const family = await adminRomanFamilyContext(client, familyId, true);
+      const duplicate = await client.query(
+        "SELECT 1 FROM roman_family_members WHERE family_id=$1 AND lower(name)=lower($2)", [family.id, input.name]
+      );
+      if (duplicate.rowCount) throw new Error("Bu ailede aynı adlı bir üye zaten bulunuyor.");
+      const spouse = await validateAdminRomanRelation(client, family.republic_id, input.spouseId, "Eş");
+      await validateAdminRomanRelation(client, family.republic_id, input.motherId, "Anne", "FEMALE");
+      await validateAdminRomanRelation(client, family.republic_id, input.fatherId, "Baba", "MALE");
+      if (spouse?.spouse_id) throw new Error("Seçilen eş başka bir üyeyle evli görünüyor.");
+      if (input.health === "SICK" && (input.sickUntilTurn === null || input.sickUntilTurn < family.current_turn)) {
+        throw new Error("Hasta üye için iyileşme turu mevcut turdan erken olamaz.");
+      }
+      const created = (await client.query<Record<string, unknown> & { id: string }>(
+        `INSERT INTO roman_family_members(
+           family_id,birth_family_id,name,gender,age,position,relation,spouse_id,mother_id,father_id,
+           status,health,sick_until_turn,born_turn,sort_order
+         ) VALUES($1,$1,$2,$3,$4,$5,$6,$7,$8,$9,'ALIVE',$10,$11,$12,$13) RETURNING *`,
+        [family.id, input.name, input.gender, input.age, input.position, input.relation, input.spouseId,
+          input.motherId, input.fatherId, input.health, input.health === "SICK" ? input.sickUntilTurn : null,
+          family.current_turn - input.age, input.sortOrder]
+      )).rows[0]!;
+      if (spouse) await client.query("UPDATE roman_family_members SET spouse_id=$1,updated_at=NOW() WHERE id=$2", [created.id, spouse.id]);
+      await romanAdminEvent(client, family, actorId, "ADMIN_FAMILY_MEMBER_ADDED", {
+        memberId: created.id, memberName: input.name, reason: input.reason
+      });
+      await writeAdminAudit(client, actorId, "admin.panel.roman.member.add", "roman_family_member", created.id, {
+        familyId: family.id, familyName: family.name, memberName: input.name, age: input.age,
+        position: input.position, relation: input.relation, reason: input.reason
+      });
+      return created;
+    });
+  },
+
+  async updateRomanFamilyMember(actorId: string, memberId: string, rawInput: unknown) {
+    const input = romanFamilyMemberUpdateSchema.parse(rawInput);
+    return withAdminTransaction(async (client) => {
+      const snapshot = await adminRomanFamilyMember(client, memberId);
+      const family = await adminRomanFamilyContext(client, snapshot.family_id, true);
+      const member = await adminRomanFamilyMember(client, memberId, true);
+      for (const relationId of [input.spouseId, input.motherId, input.fatherId]) {
+        if (relationId === member.id) throw new Error("Bir üye kendisinin eşi veya ebeveyni olamaz.");
+      }
+      const duplicate = await client.query(
+        "SELECT 1 FROM roman_family_members WHERE family_id=$1 AND lower(name)=lower($2) AND id<>$3",
+        [family.id, input.name, member.id]
+      );
+      if (duplicate.rowCount) throw new Error("Bu ailede aynı adlı başka bir üye bulunuyor.");
+      const spouse = await validateAdminRomanRelation(client, family.republic_id, input.spouseId, "Eş");
+      await validateAdminRomanRelation(client, family.republic_id, input.motherId, "Anne", "FEMALE");
+      await validateAdminRomanRelation(client, family.republic_id, input.fatherId, "Baba", "MALE");
+      if (spouse?.spouse_id && spouse.spouse_id !== member.id) throw new Error("Seçilen eş başka bir üyeyle evli görünüyor.");
+      if (member.status === "ALIVE" && input.health === "SICK" &&
+          (input.sickUntilTurn === null || input.sickUntilTurn < family.current_turn)) {
+        throw new Error("Hasta üye için iyileşme turu mevcut turdan erken olamaz.");
+      }
+      if (member.spouse_id !== input.spouseId && member.spouse_id) {
+        await client.query("UPDATE roman_family_members SET spouse_id=NULL,updated_at=NOW() WHERE id=$1 AND spouse_id=$2", [member.spouse_id, member.id]);
+      }
+      const updated = (await client.query(
+        `UPDATE roman_family_members SET name=$1,gender=$2,age=$3,position=$4,relation=$5,
+                health=$6,sick_until_turn=$7,spouse_id=$8,mother_id=$9,father_id=$10,
+                born_turn=$11,sort_order=$12,updated_at=NOW()
+          WHERE id=$13 RETURNING *`,
+        [input.name, input.gender, input.age, input.position, input.relation,
+          member.status === "DEAD" ? "HEALTHY" : input.health,
+          member.status === "ALIVE" && input.health === "SICK" ? input.sickUntilTurn : null,
+          input.spouseId, input.motherId, input.fatherId, family.current_turn - input.age,
+          input.sortOrder, member.id]
+      )).rows[0]!;
+      if (spouse) await client.query("UPDATE roman_family_members SET spouse_id=$1,updated_at=NOW() WHERE id=$2", [member.id, spouse.id]);
+      await romanAdminEvent(client, family, actorId, "ADMIN_FAMILY_MEMBER_UPDATED", {
+        memberId: member.id, memberName: input.name, reason: input.reason
+      });
+      await writeAdminAudit(client, actorId, "admin.panel.roman.member.update", "roman_family_member", member.id, {
+        previous: member, updated, reason: input.reason
+      });
+      return updated;
+    });
+  },
+
+  async killRomanFamilyMember(actorId: string, memberId: string, rawInput: unknown) {
+    const input = romanFamilyMemberDeathSchema.parse(rawInput);
+    return withAdminTransaction(async (client) => {
+      const snapshot = await adminRomanFamilyMember(client, memberId);
+      const family = await adminRomanFamilyContext(client, snapshot.family_id, true);
+      const member = await adminRomanFamilyMember(client, memberId, true);
+      if (member.status !== "ALIVE") throw new Error("Bu Roma aile üyesi zaten ölü.");
+      await client.query(
+        `UPDATE roman_family_members SET status='DEAD',health='HEALTHY',sick_until_turn=NULL,
+                died_turn=$1,death_reason=$2,updated_at=NOW() WHERE id=$3`,
+        [family.current_turn, input.reason, member.id]
+      );
+      await client.query(
+        `UPDATE roman_family_marriage_proposals SET status='CANCELLED',resolved_turn=$1,resolved_by=$2,resolved_at=NOW()
+          WHERE status='PENDING' AND (proposer_member_id=$3 OR target_member_id=$3)`,
+        [family.current_turn, actorId, member.id]
+      );
+      await client.query(
+        `UPDATE roman_family_birth_sessions SET status='CANCELLED',resolved_at=NOW()
+          WHERE status='PENDING_NAME' AND (parent_member_id=$1 OR mother_id=$1 OR father_id=$1)`, [member.id]
+      );
+      const result = { id: member.id, familyId: family.id, memberName: member.name, diedTurn: family.current_turn, reason: input.reason };
+      await romanAdminEvent(client, family, actorId, "ADMIN_FAMILY_MEMBER_DEATH", result);
+      await writeAdminAudit(client, actorId, "admin.panel.roman.member.death", "roman_family_member", member.id, result);
+      return result;
+    });
+  },
+
+  async removeRomanFamilyMember(actorId: string, memberId: string, rawInput: unknown) {
+    const input = romanFamilyMemberRemovalSchema.parse(rawInput);
+    return withAdminTransaction(async (client) => {
+      const snapshot = await adminRomanFamilyMember(client, memberId);
+      const family = await adminRomanFamilyContext(client, snapshot.family_id, true);
+      const member = await adminRomanFamilyMember(client, memberId, true);
+      const details = {
+        familyId: family.id, familyName: family.name, memberId: member.id, memberName: member.name,
+        status: member.status, age: member.age, position: member.position, relation: member.relation,
+        reason: input.reason
+      };
+      await romanAdminEvent(client, family, actorId, "ADMIN_FAMILY_MEMBER_REMOVED", details);
+      await writeAdminAudit(client, actorId, "admin.panel.roman.member.remove", "roman_family_member", member.id, details);
+      await client.query("DELETE FROM roman_family_members WHERE id=$1", [member.id]);
+      return details;
+    });
   },
 
   async steppePolitics(){

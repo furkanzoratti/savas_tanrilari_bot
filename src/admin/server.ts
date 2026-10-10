@@ -317,6 +317,46 @@ const server = createServer(async (request, response) => {
       if (!session) return;
       return json(response, 200, await adminPanelService.killDynastyMember(session.sub, dynastyMemberDeathMatch[1]!, await body(request)));
     }
+    const romanFamilyUpdateMatch = request.method === "PATCH"
+      ? url.pathname.match(/^\/api\/admin\/roman-families\/([0-9a-f-]+)$/iu)
+      : null;
+    if (romanFamilyUpdateMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.updateRomanFamily(session.sub, romanFamilyUpdateMatch[1]!, await body(request)));
+    }
+    const romanFamilyMemberCreateMatch = request.method === "POST"
+      ? url.pathname.match(/^\/api\/admin\/roman-families\/([0-9a-f-]+)\/members$/iu)
+      : null;
+    if (romanFamilyMemberCreateMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.addRomanFamilyMember(session.sub, romanFamilyMemberCreateMatch[1]!, await body(request)));
+    }
+    const romanFamilyMemberUpdateMatch = request.method === "PATCH"
+      ? url.pathname.match(/^\/api\/admin\/roman-family-members\/([0-9a-f-]+)$/iu)
+      : null;
+    if (romanFamilyMemberUpdateMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.updateRomanFamilyMember(session.sub, romanFamilyMemberUpdateMatch[1]!, await body(request)));
+    }
+    const romanFamilyMemberDeathMatch = request.method === "POST"
+      ? url.pathname.match(/^\/api\/admin\/roman-family-members\/([0-9a-f-]+)\/death$/iu)
+      : null;
+    if (romanFamilyMemberDeathMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.killRomanFamilyMember(session.sub, romanFamilyMemberDeathMatch[1]!, await body(request)));
+    }
+    const romanFamilyMemberRemovalMatch = request.method === "DELETE"
+      ? url.pathname.match(/^\/api\/admin\/roman-family-members\/([0-9a-f-]+)$/iu)
+      : null;
+    if (romanFamilyMemberRemovalMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.removeRomanFamilyMember(session.sub, romanFamilyMemberRemovalMatch[1]!, await body(request)));
+    }
     const aiProfileMatch = request.method === "PATCH" ? url.pathname.match(/^\/api\/admin\/ai-governance\/countries\/([0-9a-f-]+)$/iu) : null;
     if (aiProfileMatch) {
       const session = requireMutation(request, response);

@@ -266,16 +266,24 @@ textarea { resize: vertical; line-height: 1.45; }
 .roman-family-head > div { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 2px 8px; }
 .roman-family-head strong { font-size: 16px; }
 .roman-family-head small { grid-column: 2; color: var(--muted); }
+.roman-family-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px; }
 .roman-family-stats { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 7px; }
 .roman-family-stats span { padding: 9px; border-radius: 8px; background: var(--bg); }
 .roman-family-stats small,.roman-family-stats strong { display: block; }
 .roman-family-stats small { margin-bottom: 4px; color: var(--muted); font-size: 10px; }
 .roman-family-stats strong { font-size: 12px; }
 .roman-members { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; }
-.roman-members > span { min-width: 0; padding: 8px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.roman-members > span,.roman-member-row { min-width: 0; padding: 8px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
 .roman-members b,.roman-members small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .roman-members b { font-size: 12px; }
 .roman-members small { margin-top: 3px; color: var(--muted); font-size: 10px; }
+.roman-member-row { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: start; gap: 8px; }
+.roman-member-row.dead { opacity: .75; border-style: dashed; }
+.roman-member-meta { min-width: 0; }
+.roman-member-actions { display: flex; flex-direction: column; gap: 5px; }
+.danger-text { color: var(--danger) !important; }
+.warning-text { color: #e5b95c !important; }
+.danger-zone { border-color: rgba(239,119,119,.55) !important; background: rgba(239,119,119,.08) !important; }
 .roman-bottom-grid { align-items: start; }
 .roman-election-row { grid-template-columns: minmax(160px,1fr) auto; }
 .roman-proposal { grid-template-columns: minmax(190px,1fr) auto auto; }

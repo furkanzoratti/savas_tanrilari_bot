@@ -14,6 +14,15 @@ describe("GM panel audit presenter", () => {
     expect(auditActionLabel("admin.panel.dynasty.member.add")).toBe("Hanedana yeni üye eklendi");
     expect(auditActionLabel("admin.panel.dynasty.member.death")).toBe("Hanedan üyesi öldü olarak işlendi");
     expect(auditActionLabel("admin.panel.dynasty.local_noble_marriage")).toBe("Yerel soylu evliliği yapıldı");
+    expect(auditActionLabel("admin.panel.roman.family.update")).toBe("Roma siyasi ailesi güncellendi");
+    expect(auditActionLabel("admin.panel.roman.member.remove")).toBe("Roma aile üyesi kayıttan kaldırıldı");
+  });
+
+  it("Roma ailesi siyasi değerlerindeki değişiklikleri açıkça özetler", () => {
+    expect(auditDetailsSummary({
+      previous: { political_influence: 20, senate_seats: 5, reputation: 50, scandal: 0 },
+      updated: { political_influence: 35, senate_seats: 8, reputation: 62, scandal: 7 }
+    }, new Map())).toBe("Siyasi nüfuz: 20 → 35 • Senato koltuğu: 5 → 8 • İtibar: 50 → 62 • Skandal: 0 → 7");
   });
 
   it("hanedan üyesi sağlık ve ölüm ayrıntılarını Türkçe özetler", () => {
