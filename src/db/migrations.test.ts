@@ -401,8 +401,18 @@ describe("yüz yetmiş ikinci migration", () => {
     expect(migration?.sql).toContain("Kangju Konfederasyonu");
     expect(migration?.sql).toContain("Usunlar");
     expect(migration?.sql).toContain("Kaşgar");
-    expect(migration?.sql).toContain("Zhang Zhung");
     expect(migration?.sql).toContain("Qiang Kabileleri");
     expect(migration?.sql).toContain("base_land_trade_income");
+  });
+});
+
+describe("yüz yetmiş üçüncü migration", () => {
+  const migration = migrations.find((item) => item.version === 173);
+
+  it("hatalı çift Qiang kaydını temizleyip doğru ülkeyi yeniden adlandırır", () => {
+    expect(migration?.name).toBe("central_asian_qiang_country_correction");
+    expect(migration?.sql).toContain("Zhang Zhung");
+    expect(migration?.sql).toContain("Hehuang Vadisi");
+    expect(migration?.sql).toContain("Minshan Yaylaları");
   });
 });

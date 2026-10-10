@@ -24,7 +24,6 @@ export const CENTRAL_ASIAN_STATE_SEEDS:readonly CentralAsianStateSeed[]=[
   {country:"Kangju Konfederasyonu",primaryCulture:"KANGJU"},
   {country:"Usunlar",primaryCulture:"WUSUN"},
   {country:"Kaşgar",primaryCulture:"TARIM_SAKA"},
-  {country:"Zhang Zhung",primaryCulture:"ZHANGZHUNG"},
   {country:"Qiang Kabileleri",primaryCulture:"QIANG"}
 ] as const;
 
@@ -43,12 +42,9 @@ export const CENTRAL_ASIAN_SETTLEMENT_SEEDS:readonly CentralAsianSettlementSeed[
   {country:"Kaşgar",name:"Yarkent",population:36_000,landTradeIncome:4_200,resource:"GRAIN",culture:"TARIM_SAKA",religion:"SCYTHO_SARMATIAN_FAITH",adherence:78},
   {country:"Kaşgar",name:"Hotan",population:41_000,landTradeIncome:5_000,resource:"SILK",culture:"TARIM_SAKA",religion:"BUDDHISM",adherence:82},
 
-  {country:"Zhang Zhung",name:"Zhang Zhung",population:32_000,landTradeIncome:2_400,resource:"GOLD",culture:"ZHANGZHUNG",religion:"BON_FAITH",adherence:85},
-  {country:"Zhang Zhung",name:"Kunlun Yaylası",population:22_000,landTradeIncome:1_700,resource:"LEATHER",culture:"ZHANGZHUNG",religion:"BON_FAITH",adherence:85},
-  {country:"Zhang Zhung",name:"Yarlung Vadisi",population:38_000,landTradeIncome:2_600,resource:"GRAIN",culture:"TIBETAN",religion:"BON_FAITH",adherence:82},
-
-  {country:"Qiang Kabileleri",name:"Hehuang Vadisi",population:34_000,landTradeIncome:2_400,resource:"GRAIN",culture:"QIANG",religion:"QIANG_MOUNTAIN_FAITH",adherence:85},
-  {country:"Qiang Kabileleri",name:"Minshan Yaylaları",population:28_000,landTradeIncome:2_000,resource:"TIMBER",culture:"QIANG",religion:"QIANG_MOUNTAIN_FAITH",adherence:85}
+  {country:"Qiang Kabileleri",name:"Zhang Zhung",population:32_000,landTradeIncome:2_400,resource:"GOLD",culture:"QIANG",religion:"QIANG_MOUNTAIN_FAITH",adherence:85},
+  {country:"Qiang Kabileleri",name:"Kunlun Yaylası",population:22_000,landTradeIncome:1_700,resource:"LEATHER",culture:"QIANG",religion:"QIANG_MOUNTAIN_FAITH",adherence:85},
+  {country:"Qiang Kabileleri",name:"Yarlung Vadisi",population:38_000,landTradeIncome:2_600,resource:"GRAIN",culture:"QIANG",religion:"QIANG_MOUNTAIN_FAITH",adherence:82}
 ] as const;
 
 const quote=(value:string)=>`'${value.replaceAll("'","''")}'`;

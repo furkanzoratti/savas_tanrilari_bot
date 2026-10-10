@@ -1186,14 +1186,31 @@ export const gameService = {
     return withTransaction(async (client) => {
       const country = await getCountry(client, input.countryId);
       if (country.guild_id !== input.guildId) throw new GameError("Ülke bu sunucuya ait değil.");
+      const settlementName = input.name.trim();
+      if (settlementName.length < 2 || settlementName.length > 100) {
+        throw new GameError("Yerleşke adı 2-100 karakter arasında olmalıdır.");
+      }
+      const duplicate = await client.query<{ id: string }>(
+        "SELECT id FROM settlements WHERE country_id=$1 AND name=$2 LIMIT 1",
+        [country.id, settlementName]
+      );
+      if (duplicate.rowCount) {
+        throw new GameError(`**${settlementName}** adlı yerleşke **${country.name}** ülkesinde zaten mevcut.`);
+      }
       const existingSettlementCount = Number((await client.query<{ count: number }>("SELECT COUNT(*)::integer AS count FROM settlements WHERE country_id=$1", [country.id])).rows[0]?.count ?? 0);
       const startingLocalTreasury = existingSettlementCount === 0 ? country.treasury : 0;
       const result = await client.query<SettlementRow>(
-        `INSERT INTO settlements(
-          country_id,name,population,slave_population,base_income,tax_income,land_trade_income,sea_trade_income,base_land_trade_income,base_population_growth,resource_type,culture_group,religion_key,religion_adherence_percent,local_treasury,is_coastal
-        ) VALUES ($1,$2,$3,$4,0,0,0,0,$5,0,$6,$7,$8,75,$9,$10) RETURNING *`,
-        [input.countryId, input.name.trim(), input.population, input.slaves, input.landTradeIncome, input.resourceType, input.cultureGroup, input.religionKey, startingLocalTreasury, input.isCoastal ?? false]
-      );
+          `INSERT INTO settlements(
+            country_id,name,population,slave_population,base_income,tax_income,land_trade_income,sea_trade_income,base_land_trade_income,base_population_growth,resource_type,culture_group,religion_key,religion_adherence_percent,local_treasury,is_coastal
+          ) VALUES ($1,$2,$3,$4,0,0,0,0,$5,0,$6,$7,$8,75,$9,$10) RETURNING *`,
+          [input.countryId, settlementName, input.population, input.slaves, input.landTradeIncome, input.resourceType, input.cultureGroup, input.religionKey, startingLocalTreasury, input.isCoastal ?? false]
+        ).catch((error: unknown) => {
+        const databaseError = error as { code?: string; constraint?: string };
+        if (databaseError.code === "23505" && databaseError.constraint === "settlements_country_id_name_key") {
+          throw new GameError(`**${settlementName}** adlı yerleşke **${country.name}** ülkesinde zaten mevcut.`);
+        }
+        throw error;
+      });
       const settlement = result.rows[0]!;
       await ensureStandardGarrison(client, settlement.id, settlement.population, settlement.garrison_level, true);
       settlement.garrison_level = garrisonLevel(settlement.population);

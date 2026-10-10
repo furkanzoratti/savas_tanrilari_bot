@@ -102,6 +102,7 @@ import { steppeWorldBackfillMigration } from "./steppe-world-backfill-migration.
 import { steppeGreatKhanateMigration } from "./steppe-great-khanate-migration.js";
 import { steppeArmyDoctrineMigration } from "./steppe-army-doctrine-migration.js";
 import { centralAsianStatesMigration } from "./central-asian-states-migration.js";
+import { centralAsianQiangCorrectionMigration } from "./central-asian-qiang-correction-migration.js";
 
 export const migrations = [
   {
@@ -2421,5 +2422,6 @@ export const migrations = [
   steppeWorldBackfillMigration,
   steppeGreatKhanateMigration,
   steppeArmyDoctrineMigration,
-  centralAsianStatesMigration
+  centralAsianStatesMigration,
+  centralAsianQiangCorrectionMigration
 ] as const;
