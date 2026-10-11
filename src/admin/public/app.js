@@ -419,9 +419,39 @@ function steppeKurultayPanel(kurultay) {
   </section>`;
 }
 
+function steppeTributePanel(hegemony, offers, currentTurn) {
+  const responseLabels = { PENDING: "Yanıt bekliyor", FULL: "Tam ödeme", HALF: "Yarım ödeme", NONE: "Ödeme yok", CANCELLED: "İptal" };
+  const rows = (offers || []).map((offer) => `<div class="data-row"><div><strong>${escapeHtml(offer.hegemon_country_name)} → ${escapeHtml(offer.tributary_country_name)}</strong><small>Tur ${number(offer.turn)}</small></div><span>${escapeHtml(responseLabels[offer.response] || offer.response)}</span></div>`).join("");
+  return `<section class="roman-republic-section">
+    <div class="page-head"><div><h1>🐎 Bozkır Haracı</h1><p>Bozkıra özgü tek diplomatik ödeme işlemi</p></div><div class="actions"><span class="pill">Tur ${number(currentTurn)}</span></div></div>
+    <section class="detail-grid"><div class="detail-cell"><span>Haraç isteyen devlet</span><strong>${escapeHtml(hegemony?.hegemon_country_name || "Henüz belirlenmedi")}</strong></div><div class="detail-cell"><span>İşleyiş</span><strong>Teklif ve yanıt</strong><small>Tam ödeme, yarım ödeme veya ödeme yok</small></div></section>
+    <section class="card"><div class="card-head"><div><h2>Son haraç teklifleri</h2><p>Otorite, bağlılık ve savaş çağrısı sistemi kullanılmaz.</p></div></div>${rows || '<div class="empty compact-empty">Henüz haraç teklifi bulunmuyor.</div>'}</section>
+  </section>`;
+}
+
 async function steppePoliticsPage() {
   setActiveRoute("steppe-politics"); loading();
   const data = await api("/api/steppe-politics");
+  {
+    page.innerHTML = [
+      `<div class="page-head"><div><h1>Bozkır Kurultayı ve Haraç</h1><p>Bozkır devletleri diğer devletlerle aynı komutları kullanır; burada yalnız iki özel işlem yönetilir.</p></div></div>`,
+      steppeKurultayPanel(data.kurultay),
+      steppeTributePanel(data.hegemony, data.tributeOffers, data.currentTurn)
+    ].join("");
+    document.querySelector("[data-steppe-kurultay-npc-vote]")?.addEventListener("click", () => {
+      const kurultay = data.kurultay;
+      if (!kurultay || kurultay.status !== "OPEN") return;
+      const voters = kurultay.voters.filter((voter) => !voter.holderUserId && !voter.candidateTitleId);
+      if (!voters.length) return toast("Oy kullanmamış NPC Han bulunmuyor.", "error");
+      const voterOptions = voters.map((voter) => `<option value="${voter.titleId}">${escapeHtml(voter.titleName)} · ${escapeHtml(voter.holderName)} · ${number(voter.weight)} puan</option>`).join("");
+      const candidateOptions = kurultay.candidates.map((candidate) => `<option value="${candidate.titleId}">${escapeHtml(candidate.holderName)} · ${escapeHtml(candidate.countryName)}</option>`).join("");
+      openEditor("NPC Kurultay oyu", `${number(kurultay.sequence)}. Büyük Bozkır Kurultayı`, `<div class="preview-warning"><strong>Oy kesindir ve değiştirilemez.</strong><span>Yalnız oyuncuya atanmamış Hanlar panelden oy kullanabilir.</span></div><div class="form-grid"><label>Oy kullanacak NPC Han<select id="steppe-kurultay-voter" required>${voterOptions}</select></label><label>Han adayı<select id="steppe-kurultay-candidate" required>${candidateOptions}</select></label></div>`, async () => {
+        await api(`/api/admin/steppe-kurultay/${kurultay.id}/vote`, { method: "POST", body: JSON.stringify({ voterTitleId: document.getElementById("steppe-kurultay-voter").value, candidateTitleId: document.getElementById("steppe-kurultay-candidate").value }) });
+        closeEditor(); toast("NPC Kurultay oyu kaydedildi."); await steppePoliticsPage();
+      });
+    });
+    return;
+  }
   const sections = [steppeHegemonyPanel(data.hegemony, data.currentTurn), steppeKurultayPanel(data.kurultay), ...data.confederations.map((confederation) => steppeConfederationPanel(confederation, data.currentTurn))].filter(Boolean);
   page.innerHTML = sections.length
     ? sections.join("")

@@ -47,7 +47,6 @@ import { warDeclarationService } from "../services/war-declaration-service.js";
 import { DEFAULT_WELCOME_MESSAGE, renderWelcomeMessage, welcomeService } from "../services/welcome-service.js";
 import { tradeService } from "../services/trade-service.js";
 import { treasuryLedgerService, type TreasuryMovement } from "../services/treasury-ledger-service.js";
-import { steppePoliticsService } from "../services/steppe-politics-service.js";
 import { assertCountryAccess,assertCountryExecutiveAccess,isGameMaster,requireGameMaster,resolveCountry } from "./auth.js";
 import { buildingChoices, shipChoices, unitChoices } from "./commands.js";
 import { batchDocumentEmbeds, renderDocument } from "./document.js";
@@ -233,41 +232,15 @@ async function handleCharacterTurnRecovery(interaction: ChatInputCommandInteract
 }
 async function sendDocument(interaction: ChatInputCommandInteraction, countryId: string): Promise<void> {
   if (!interaction.deferred && !interaction.replied) await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const [document,steppeAccess]=await Promise.all([
-    gameService.document(countryId,{includeArmies:false}),
-    resolveSteppeDocumentAccess(interaction,countryId)
-  ]);
-  const embeds=renderDocument(document,steppeAccess?{
-    visibleSettlementIds:steppeAccess.settlementIds,
-    roleLabel:steppeAccess.tier==="KHAN"?"Han Belgesi":`${steppeAccess.titleName} Belgesi`
-  }:undefined);
+  const document=await gameService.document(countryId,{includeArmies:false});
+  const embeds=renderDocument(document);
   const batches = batchDocumentEmbeds(embeds);
   await interaction.editReply({ embeds: batches[0] ?? [], files: [new AttachmentBuilder(TEMPLE_BANNER_PATH, { name: TEMPLE_BANNER_NAME })] });
   for (const batch of batches.slice(1)) await interaction.followUp({ embeds: batch, files: [new AttachmentBuilder(TEMPLE_BANNER_PATH, { name: TEMPLE_BANNER_NAME })], flags: MessageFlags.Ephemeral });
 }
 
-async function resolveSteppeDocumentAccess(
-  interaction:ChatInputCommandInteraction,countryId:string
-):Promise<Awaited<ReturnType<typeof steppePoliticsService.settlementDocumentAccess>>>{
-  if(!interaction.guildId)return null;
-  const explicitGameMasterCountry=isGameMaster(interaction)&&Boolean(interaction.options.getString("ulke"));
-  if(explicitGameMasterCountry)return null;
-  const access=await steppePoliticsService.settlementDocumentAccess(interaction.guildId,countryId,interaction.user.id);
-  if(access)return access;
-  if(await steppePoliticsService.isActiveSteppeCountry(interaction.guildId,countryId)){
-    throw new GameError(
-      "Bu bozkır devletinin belgesi yalnızca oyuncuya atanmış Han veya Toprak Ağası makamıyla görüntülenebilir. Yönetim panelindeki Bozkır Siyaseti bölümünden oyuncuyu ilgili makama atayın."
-    );
-  }
-  return null;
-}
-
 async function resolveDocumentCountry(interaction:ChatInputCommandInteraction){
-  if(!interaction.guildId)throw new GameError("Sunucu bulunamadı.");
-  const requested=interaction.options.getString("ulke");
-  if(requested&&isGameMaster(interaction))return resolveCountry(interaction,requested);
-  const steppeCountry=await steppePoliticsService.countryForTitleHolder(interaction.guildId,interaction.user.id);
-  return steppeCountry??resolveCountry(interaction,requested);
+  return resolveCountry(interaction,interaction.options.getString("ulke"));
 }
 
 async function startPurchase(interaction: ChatInputCommandInteraction, kind: "build" | "unit" | "ship"): Promise<void> {
@@ -1530,14 +1503,8 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     if(!interaction.guildId)throw new GameError("Sunucu bulunamadı.");
     await interaction.deferReply({flags:MessageFlags.Ephemeral});
     const country=await resolveDocumentCountry(interaction);
-    const [document,steppeAccess]=await Promise.all([
-      gameService.document(country.id,{includeArmies:false}),
-      resolveSteppeDocumentAccess(interaction,country.id)
-    ]);
-    const embeds=renderSettlementsOverview(document,steppeAccess?{
-      visibleSettlementIds:steppeAccess.settlementIds,
-      roleLabel:steppeAccess.tier==="KHAN"?"Han Belgesi":`${steppeAccess.titleName} Belgesi`
-    }:undefined);
+    const document=await gameService.document(country.id,{includeArmies:false});
+    const embeds=renderSettlementsOverview(document);
     await interaction.editReply({embeds:[embeds[0]!],files:[new AttachmentBuilder(SETTLEMENTS_OVERVIEW_BANNER_PATH,{name:SETTLEMENTS_OVERVIEW_BANNER_NAME})]});
     for(const embed of embeds.slice(1))await interaction.followUp({embeds:[embed],flags:MessageFlags.Ephemeral});
   } else if (interaction.commandName === "belge") {

@@ -1219,6 +1219,24 @@ export const adminPanelService = {
   async steppePolitics(){
     const guild=(await adminPool.query<{current_turn:number}>("SELECT current_turn FROM guilds WHERE discord_id=$1",[adminConfig.guildId])).rows[0];
     if(!guild)throw new Error("Yönetilecek Discord sunucusu veritabanında bulunamadı.");
+    {
+      const hegemony=(await adminPool.query<{
+        hegemon_country_id:string;hegemon_country_name:string;
+      }>(`SELECT hegemony.hegemon_country_id,country.name AS hegemon_country_name
+            FROM steppe_hegemonies hegemony
+            JOIN countries country ON country.id=hegemony.hegemon_country_id
+           WHERE hegemony.guild_id=$1`,[adminConfig.guildId])).rows[0]??null;
+      const tributeOffers=(await adminPool.query(`
+        SELECT offer.id,offer.turn,offer.response,offer.created_at,offer.responded_at,
+               hegemon.name AS hegemon_country_name,tributary.name AS tributary_country_name
+          FROM steppe_tribute_offers offer
+          JOIN countries hegemon ON hegemon.id=offer.hegemon_country_id
+          JOIN countries tributary ON tributary.id=offer.tributary_country_id
+         WHERE offer.guild_id=$1
+         ORDER BY offer.created_at DESC LIMIT 30`,[adminConfig.guildId])).rows;
+      const kurultay=await steppeKurultayService.view(adminConfig.guildId);
+      return{currentTurn:Number(guild.current_turn),hegemony,tributeOffers,kurultay};
+    }
     const hegemonyRow=(await adminPool.query<{
       guild_id:string;hegemon_country_id:string;hegemon_country_name:string;authority:number;
       great_khan_title_name:string|null;great_khan_holder_name:string|null;great_khan_holder_user_id:string|null;
@@ -1298,7 +1316,7 @@ export const adminPanelService = {
         isHegemon:hegemonyRow?.hegemon_country_id===confederation.country_id});
     }
     const kurultay=await steppeKurultayService.view(adminConfig.guildId);
-    return{currentTurn:Number(guild.current_turn),hegemony,confederations:result,kurultay};
+    return{currentTurn:Number(guild!.current_turn),hegemony,confederations:result,kurultay};
   },
 
   async voteSteppeKurultayNpc(actorId:string,electionId:string,rawInput:unknown){

@@ -488,15 +488,8 @@ export const steppeHegemonyService={
         `UPDATE steppe_tribute_offers SET response=$2,paid_amount=$3,responded_by=$4,responded_at=NOW()
           WHERE id=$1`,[input.offerId,input.response,paid,input.actorId]
       );
-      const currentAuthority=Number((await client.query<{authority:number}>(
-        "SELECT authority FROM steppe_hegemonies WHERE guild_id=$1 FOR UPDATE",[input.guildId]
-      )).rows[0]?.authority??0);
-      await client.query(
-        "UPDATE steppe_hegemonies SET authority=$2,updated_at=NOW() WHERE guild_id=$1",
-        [input.guildId,clampSteppeMeter(currentAuthority+terms.authorityChange)]
-      );
       await addHegemonyEvent(client,{guildId:input.guildId,turn:Number(normalized.turn),type:"TRIBUTE_RESPONSE",
-        countryId:normalized.tributary_country_id,actorId:input.actorId,authorityDelta:terms.authorityChange,
+        countryId:normalized.tributary_country_id,actorId:input.actorId,
         description:`${normalized.tributary_country_name} haraç talebine ${terms.label} yanıtını verdi.`,
         details:{offerId:normalized.id,response:input.response}});
       if(paid>0){
@@ -511,8 +504,7 @@ export const steppeHegemonyService={
       }
       await audit(client,input.guildId,input.actorId,"STEPPE_TRIBUTE_RESPONSE",input.offerId,{
         response:input.response,requestedAmount:requested,paidAmount:paid,
-        hegemonCountryId:normalized.hegemon_country_id,tributaryCountryId:normalized.tributary_country_id,
-        authorityChange:terms.authorityChange
+        hegemonCountryId:normalized.hegemon_country_id,tributaryCountryId:normalized.tributary_country_id
       });
       const result=(await client.query<InternalSteppeTributeOffer>(`${offerViewSql} WHERE offer.id=$1`,[input.offerId])).rows[0]!;
       return normalizeOffer(result);

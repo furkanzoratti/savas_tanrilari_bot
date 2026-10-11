@@ -646,8 +646,7 @@ async function resolveBattleTarget(client: DbClient, guildId: string, rawValue: 
   const value=rawValue.trim();
   const countryToken=value.startsWith("country:")?value.slice(8):null;
   const rebelToken=value.startsWith("rebel:")?value.slice(6):null;
-  const steppeToken=value.startsWith("steppe:")?value.slice(7):null;
-  if(!rebelToken&&!steppeToken){
+  if(!rebelToken){
     const country=(await client.query<{id:string;name:string}>(
       `SELECT id,name FROM countries
         WHERE guild_id=$1 AND status='ACTIVE' AND is_system_faction=FALSE
@@ -655,30 +654,6 @@ async function resolveBattleTarget(client: DbClient, guildId: string, rawValue: 
     )).rows[0];
     if(country)return {id:country.id,name:country.name,kind:"COUNTRY",rebelFactionId:null,steppeTitleId:null,steppeCountryId:null,
       steppeSettlementIds:[],composition:{},armyName:null,leaderName:null,leaderSkillBonus:0,rebelSettlementId:null,rebelSettlementName:null,siegeAssets:{}};
-  }
-  if(!rebelToken){
-    const title=(await client.query<{
-      id:string;title_name:string;holder_name:string;country_id:string;culture_group:string;settlement_ids:string[];
-    }>(`SELECT title.id,title.title_name,title.holder_name,confederation.country_id,country.primary_culture_group AS culture_group,
-               COALESCE(array_agg(holding.settlement_id::text) FILTER(WHERE holding.settlement_id IS NOT NULL),'{}') AS settlement_ids
-          FROM steppe_internal_titles title
-          JOIN steppe_confederations confederation ON confederation.id=title.confederation_id
-          JOIN countries country ON country.id=confederation.country_id
-          LEFT JOIN steppe_title_holdings holding ON holding.title_id=title.id
-         WHERE confederation.guild_id=$1 AND confederation.status='ACTIVE' AND title.status='ACTIVE'
-           AND (${steppeToken?"title.id::text=$2":"(lower(title.title_name)=lower($2) OR lower(title.holder_name)=lower($2))"})
-         GROUP BY title.id,title.title_name,title.holder_name,confederation.country_id,country.primary_culture_group
-         LIMIT 1`,[guildId,steppeToken??value])).rows[0];
-    if(title){
-      const proxyName=`__STEPPE_TITLE__${title.id}`;
-      const proxy=(await client.query<{id:string}>(`
-        INSERT INTO countries(guild_id,name,status,destroyed_reason,is_system_faction,primary_culture_group)
-        VALUES($1,$2,'YOK_EDİLDİ','SYSTEM_STEPPE_TITLE_PROXY',TRUE,$3)
-        ON CONFLICT(guild_id,name) DO UPDATE SET is_system_faction=TRUE RETURNING id`,[guildId,proxyName,title.culture_group])).rows[0]!;
-      return{id:proxy.id,name:title.title_name,kind:"STEPPE_TITLE",rebelFactionId:null,steppeTitleId:title.id,
-        steppeCountryId:title.country_id,steppeSettlementIds:title.settlement_ids??[],composition:{},armyName:`${title.title_name} Kuvvetleri`,
-        leaderName:title.holder_name,leaderSkillBonus:0,rebelSettlementId:null,rebelSettlementName:null,siegeAssets:{}};
-    }
   }
   const faction=(await client.query<{
     id:string;display_name:string;composition:BattleComposition;army_name:string;leader_name:string;
@@ -692,7 +667,7 @@ async function resolveBattleTarget(client: DbClient, guildId: string, rawValue: 
         AND (${rebelToken?"faction.id::text=$2":"(LOWER(faction.display_name)=LOWER($2) OR LOWER(faction.army_name)=LOWER($2))"})
       ORDER BY faction.updated_at DESC LIMIT 1 FOR UPDATE OF faction`,[guildId,rebelToken??value]
   )).rows[0];
-  if(!faction)throw new GameError("Seçilen ülke veya etkin isyancı grup bulunamadı.");
+  if(!faction)throw new GameError("Seçilen devlet veya etkin isyancı grup bulunamadı.");
   if(!compositionTotal(faction.composition??{}))throw new GameError("Seçilen isyancı grubun savaşa girecek askeri kalmadı.");
   const occupied=await client.query(
     `SELECT 1 FROM battle_sides side_record JOIN battles battle ON battle.id=side_record.battle_id
@@ -1414,22 +1389,6 @@ export const battleService = {
          SELECT country.id,'COUNTRY'::text,country.name,NULL,NULL,NULL,NULL,NULL,1,country.name
            FROM countries country
           WHERE country.guild_id=$1 AND country.status='ACTIVE' AND country.is_system_faction=FALSE
-         UNION ALL
-         SELECT title.id,'STEPPE_TITLE'::text,title.title_name,
-                title.title_name||' Kuvvetleri',NULL,country.name,
-                COALESCE((SELECT SUM(unit.quantity) FROM armies army JOIN army_units unit ON unit.army_id=army.id
-                  WHERE army.steppe_title_id=title.id),0)::integer,
-                (SELECT MAX(conflict.updated_at) FROM steppe_internal_conflicts conflict
-                  WHERE conflict.guild_id=$1 AND conflict.status='ACTIVE' AND conflict.battle_id IS NULL
-                    AND title.id IN (conflict.attacker_title_id,conflict.defender_title_id)),1,
-                CONCAT_WS(' ',title.title_name,title.holder_name,country.name)
-           FROM steppe_internal_titles title
-           JOIN steppe_confederations confederation ON confederation.id=title.confederation_id AND confederation.status='ACTIVE'
-           JOIN countries country ON country.id=confederation.country_id
-          WHERE title.status='ACTIVE'
-            AND EXISTS(SELECT 1 FROM steppe_internal_conflicts conflict
-              WHERE conflict.guild_id=$1 AND conflict.status='ACTIVE' AND conflict.battle_id IS NULL
-                AND title.id IN (conflict.attacker_title_id,conflict.defender_title_id))
        )
        SELECT id,kind,display_name,army_name,settlement_name,owner_country_name,personnel
          FROM targets
@@ -1440,9 +1399,7 @@ export const battleService = {
     return result.rows.map((target)=>target.kind==="REBEL"
       ? {value:`rebel:${target.id}`,
           label:`🔥 ${target.display_name} • ${target.army_name} • ${target.settlement_name} / ${target.owner_country_name} (${Number(target.personnel).toLocaleString("tr-TR")})`,kind:"REBEL"}
-      :target.kind==="STEPPE_TITLE"
-        ?{value:`steppe:${target.id}`,label:`⚔️ ${target.display_name} • ${target.owner_country_name} (${Number(target.personnel??0).toLocaleString("tr-TR")})`,kind:"STEPPE_TITLE"}
-        : {value:`country:${target.id}`,label:target.display_name,kind:"COUNTRY"});
+      : {value:`country:${target.id}`,label:target.display_name,kind:"COUNTRY"});
   },
 
   async playerFleetStatus(input: { guildId: string; battleId: string; actorId: string }): Promise<PlayerBattleFleetStatus> {

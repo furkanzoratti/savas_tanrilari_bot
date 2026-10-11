@@ -228,23 +228,6 @@ const server = createServer(async (request, response) => {
       if (!session) return;
       return json(response, 200, await adminPanelService.updateSettlement(session.sub, settlementUpdateMatch[1]!, await body(request)));
     }
-    const steppeConfederationUpdateMatch = request.method === "PATCH"
-      ? url.pathname.match(/^\/api\/admin\/steppe-confederations\/([0-9a-f-]+)$/iu)
-      : null;
-    if (steppeConfederationUpdateMatch) {
-      const session = requireMutation(request, response);
-      if (!session) return;
-      return json(response, 200, await adminPanelService.updateSteppeConfederation(
-        session.sub,
-        steppeConfederationUpdateMatch[1]!,
-        await body(request)
-      ));
-    }
-    if (request.method === "PATCH" && url.pathname === "/api/admin/steppe-hegemony") {
-      const session = requireMutation(request, response);
-      if (!session) return;
-      return json(response, 200, await adminPanelService.updateSteppeHegemony(session.sub, await body(request)));
-    }
     const steppeKurultayVoteMatch = request.method === "POST"
       ? url.pathname.match(/^\/api\/admin\/steppe-kurultay\/([0-9a-f-]+)\/vote$/iu)
       : null;
@@ -254,18 +237,6 @@ const server = createServer(async (request, response) => {
       return json(response, 200, await adminPanelService.voteSteppeKurultayNpc(
         session.sub,
         steppeKurultayVoteMatch[1]!,
-        await body(request)
-      ));
-    }
-    const steppeTitleUpdateMatch = request.method === "PATCH"
-      ? url.pathname.match(/^\/api\/admin\/steppe-titles\/([0-9a-f-]+)$/iu)
-      : null;
-    if (steppeTitleUpdateMatch) {
-      const session = requireMutation(request, response);
-      if (!session) return;
-      return json(response, 200, await adminPanelService.updateSteppeTitle(
-        session.sub,
-        steppeTitleUpdateMatch[1]!,
         await body(request)
       ));
     }

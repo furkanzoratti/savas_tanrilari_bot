@@ -326,6 +326,10 @@ export async function handleSteppeHegemonyCommand(interaction:ChatInputCommandIn
   if(!["bozkir","bozkir-yonetim"].includes(interaction.commandName))return false;
   if(!interaction.guildId)throw new GameError("Bu işlem yalnızca bir Discord sunucusunda kullanılabilir.");
   const action=interaction.options.getSubcommand();
+  const allowedActions=interaction.commandName==="bozkir"
+    ?new Set(["harac","kurultay"])
+    :new Set(["kurultay-baslat","kurultay-bitir"]);
+  if(!allowedActions.has(action))throw new GameError("Bu eski bozkır işlemi kaldırıldı. Bozkır devletleri artık normal devlet komutlarını kullanır.");
   if(interaction.commandName==="bozkir-yonetim"){
     requireGameMaster(interaction);
     await interaction.deferReply({flags:MessageFlags.Ephemeral});
@@ -532,6 +536,9 @@ export async function handleSteppeHegemonySelect(interaction:StringSelectMenuInt
 }
 
 export async function handleSteppeHegemonyButton(interaction:ButtonInteraction):Promise<boolean>{
+  if(interaction.customId.startsWith("steppe_overlord_war_call|")||interaction.customId.startsWith("steppe_war_call|")){
+    throw new GameError("Bozkır savaş çağrısı sistemi kaldırıldı. Savaş işlemlerinde normal devlet komutlarını kullanın.");
+  }
   const overlordWarCallMatch=/^steppe_overlord_war_call\|([0-9a-f-]+)\|([0-9a-f-]+)\|(FULL|LIMITED|NEUTRAL|REFUSE)$/i.exec(interaction.customId);
   if(overlordWarCallMatch){
     if(!interaction.guildId)throw new GameError("Bu çağrı yalnızca sunucu içinde yanıtlanabilir.");
@@ -589,7 +596,6 @@ export async function handleSteppeHegemonyButton(interaction:ButtonInteraction):
     offerId:offer.id,response:choice
   });
   const label=STEPPE_TRIBUTE_RESPONSES[choice].label;
-  const authorityChange=STEPPE_TRIBUTE_RESPONSES[choice].authorityChange;
   const embed=EmbedBuilder.from(interaction.message.embeds[0]!)
     .setColor(RESPONSE_COLORS[choice])
     .setTitle("🐎 Bozkır Haraç Teklifi Sonuçlandı")
@@ -597,8 +603,7 @@ export async function handleSteppeHegemonyButton(interaction:ButtonInteraction):
     .setFields(
       {name:"👑 Hegemon Devlet",value:result.hegemon_country_name,inline:true},
       {name:"🏹 Yanıtlayan Devlet",value:result.tributary_country_name,inline:true},
-      {name:"📜 Karar",value:`**${label}**`,inline:true},
-      {name:"👑 Hanlar Hanı Otoritesi",value:delta(authorityChange),inline:true}
+      {name:"📜 Karar",value:`**${label}**`,inline:true}
     )
     .setFooter({text:`${interaction.user.username} tarafından sonuçlandırıldı.`});
   await interaction.message.edit({

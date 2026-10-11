@@ -19,16 +19,12 @@ const offer={
 };
 
 describe("bozkır haraç teklif arayüzü",()=>{
-  it("yalnız ülke seviyesindeki Hanlar Hanlığı komutlarını kaydeder",()=>{
+  it("yalnız haraç ve Kurultay komutlarını kaydeder",()=>{
     const command=commandBuilders.find((item)=>item.name==="bozkir");
-    expect(command?.options?.map((option)=>option.name)).toEqual([
-      "durum","harac","hanlar-hanligi","kurultay","hanlar-hani-cagrisi","hanlar-hani-cagrilari"
-    ]);
+    expect(command?.options?.map((option)=>option.name)).toEqual(["harac","kurultay"]);
     const management=commandBuilders.find((item)=>item.name==="bozkir-yonetim");
-    expect(management?.options?.map((option)=>option.name)).toEqual([
-      "ust-otorite-ayarla","kurultay-baslat","kurultay-bitir","ust-cagri-kapat"
-    ]);
-    expect(JSON.stringify([command,management])).not.toMatch(/unvan-ekle|toprak-bagla|ic-savas|ordu-bagla/);
+    expect(management?.options?.map((option)=>option.name)).toEqual(["kurultay-baslat","kurultay-bitir"]);
+    expect(JSON.stringify([command,management])).not.toMatch(/savas-cagrisi|otorite|hanlar-hanligi|unvan-ekle|toprak-bagla|ic-savas|ordu-bagla/);
   });
 
   it("Kurultayda yalnız Hanları seçtirir ve makam ağırlıklarını açıkça gösterir",()=>{
