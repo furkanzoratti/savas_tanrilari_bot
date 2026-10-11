@@ -117,7 +117,9 @@ export async function handleCityCommand(interaction: ChatInputCommandInteraction
   }
   const sub = interaction.options.getSubcommand();
   const publicReply = interaction.commandName === "olay" || (interaction.commandName === "akademi" && sub === "egit");
-  await interaction.deferReply({ ephemeral: !publicReply });
+  if(!interaction.deferred&&!interaction.replied){
+    await interaction.deferReply(publicReply?{}:{flags:MessageFlags.Ephemeral});
+  }
   const requestedCountry = interaction.options.getString("ulke");
   const country = interaction.commandName === "olay" && requestedCountry
     ? await gameService.countryByName(interaction.guildId, requestedCountry)

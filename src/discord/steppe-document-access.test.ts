@@ -14,4 +14,12 @@ describe("bozkır belge erişimi",()=>{
     expect(handler.match(/resolveSteppeDocumentAccess\(interaction,country\.id\)/g)?.length).toBe(1);
     expect(handler).toContain("visibleSettlementIds:steppeAccess.settlementIds");
   });
+
+  it("yönetici kendi makamıyla bakarken kapsamı korur, açık ülke seçiminde tam belge açar",()=>{
+    const handler=readFileSync(new URL("./handler.ts",import.meta.url),"utf8");
+    expect(handler).toContain('const explicitGameMasterCountry=isGameMaster(interaction)&&Boolean(interaction.options.getString("ulke"))');
+    expect(handler).toContain("if(explicitGameMasterCountry)return null");
+    expect(handler).toContain("if(requested&&isGameMaster(interaction))return resolveCountry(interaction,requested)");
+    expect(handler).not.toContain("if(!interaction.guildId||isGameMaster(interaction))return null");
+  });
 });

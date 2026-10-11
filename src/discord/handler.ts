@@ -249,7 +249,9 @@ async function sendDocument(interaction: ChatInputCommandInteraction, countryId:
 async function resolveSteppeDocumentAccess(
   interaction:ChatInputCommandInteraction,countryId:string
 ):Promise<Awaited<ReturnType<typeof steppePoliticsService.settlementDocumentAccess>>>{
-  if(!interaction.guildId||isGameMaster(interaction))return null;
+  if(!interaction.guildId)return null;
+  const explicitGameMasterCountry=isGameMaster(interaction)&&Boolean(interaction.options.getString("ulke"));
+  if(explicitGameMasterCountry)return null;
   const access=await steppePoliticsService.settlementDocumentAccess(interaction.guildId,countryId,interaction.user.id);
   if(access)return access;
   if(await steppePoliticsService.isActiveSteppeCountry(interaction.guildId,countryId)){
@@ -2548,6 +2550,10 @@ export function attachInteractionHandler(client: Client): void {
       }
       else if (interaction.isChatInputCommand()) {
         try {
+          if(!interaction.deferred&&!interaction.replied&&["akademi","otomatik-alim"].includes(interaction.commandName)){
+            const publicAcademyTraining=interaction.commandName==="akademi"&&interaction.options.getSubcommand(false)==="egit";
+            await interaction.deferReply(publicAcademyTraining?{}:{flags:MessageFlags.Ephemeral});
+          }
           await handleCommand(interaction);
           void recordPlayerCommandResult(interaction, true);
         } catch (error) {

@@ -1931,11 +1931,12 @@ export const battleService = {
         `SELECT a.id,a.name,a.country_id,COALESCE(title.title_name,c.name) AS country_name,bsp.country_id AS battle_country_id
            FROM armies a JOIN countries c ON c.id=a.country_id
            JOIN battle_sides side_record ON side_record.battle_id=$3 AND side_record.side_key=$4
-           JOIN battle_side_participants bsp ON bsp.battle_id=side_record.battle_id AND bsp.side_key=side_record.side_key AND bsp.is_primary=TRUE
+           JOIN battle_side_participants bsp ON bsp.battle_id=side_record.battle_id
+            AND bsp.side_key=side_record.side_key AND bsp.country_id=a.country_id
            LEFT JOIN steppe_internal_titles title ON title.id=side_record.steppe_title_id
           WHERE a.id=$1 AND a.guild_id=$2
             AND ((side_record.steppe_title_id IS NOT NULL AND a.steppe_title_id=side_record.steppe_title_id)
-              OR (side_record.steppe_title_id IS NULL AND bsp.country_id=a.country_id)) FOR UPDATE OF a`,
+              OR side_record.steppe_title_id IS NULL) FOR UPDATE OF a`,
         [input.armyId, input.guildId, battle.id, input.side]
       )).rows[0];
       if (!army) throw new GameError("Ordu bulunamadı veya seçilen savaş tarafındaki bir devlete ait değil.");

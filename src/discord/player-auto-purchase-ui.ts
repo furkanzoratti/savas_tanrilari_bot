@@ -84,7 +84,7 @@ function resultEmbed(result: PlayerAutoPurchaseExecution): EmbedBuilder {
 
 export async function handlePlayerAutoPurchaseCommand(interaction: ChatInputCommandInteraction): Promise<void> {
   if (!interaction.guildId) throw new GameError("Bu komut yalnızca bir Discord sunucusunda kullanılabilir.");
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  if(!interaction.deferred&&!interaction.replied)await interaction.deferReply({flags:MessageFlags.Ephemeral});
   const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
   await assertCountryExecutiveAccess(interaction,country.id);
   const mode = interaction.options.getString("tur", true) as PlayerAutoPurchaseMode;
