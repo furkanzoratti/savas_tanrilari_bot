@@ -25,6 +25,8 @@ export interface DynastyMemberView{
 
 export interface DynastyView{
   id:string;guild_id:string;country_id:string;country_name:string;name:string;
+  steppe_title_id:string|null;steppe_title_name:string|null;steppe_title_tier:"KHAN"|"LANDHOLDER"|null;
+  steppe_holder_user_id:string|null;
   current_turn:number;last_birth_attempt_turn:number|null;published_channel_id:string|null;published_message_id:string|null;
   members:DynastyMemberView[];
   events:Array<{id:string;game_turn:number;event_type:string;member_id:string|null;details:Record<string,unknown>;created_at:Date|string}>;
@@ -51,12 +53,16 @@ export interface DynastyDeathLogStatus{
 export type DynastyMarriageStatus="PENDING"|"ACCEPTED"|"REJECTED"|"CANCELLED";
 export interface DynastyMarriageProposalView{
   id:string;guild_id:string;proposer_country_id:string;target_country_id:string;
+  proposer_dynasty_id:string;target_dynasty_id:string;
   proposer_member_id:string;target_member_id:string;status:DynastyMarriageStatus;
   created_turn:number;resolved_turn:number|null;created_by:string;resolved_by:string|null;
   created_at:Date|string;resolved_at:Date|string|null;
   public_channel_id:string|null;public_message_id:string|null;
   proposer_country_name:string;target_country_name:string;
+  proposer_dynasty_name:string;target_dynasty_name:string;
   proposer_member_name:string;target_member_name:string;
+  proposer_steppe_title_id:string|null;target_steppe_title_id:string|null;
+  proposer_holder_user_id:string|null;target_holder_user_id:string|null;
 }
 
 type DynastyMarriageMember=DynastyMemberView&{
@@ -84,10 +90,24 @@ async function dynastyForCountry(client:DbClient,guildId:string,countryId:string
   const row=(await client.query<{id:string;name:string;country_name:string;last_birth_attempt_turn:number|null}>(
     `SELECT dynasty.id,dynasty.name,country.name AS country_name,dynasty.last_birth_attempt_turn
        FROM dynasties dynasty JOIN countries country ON country.id=dynasty.country_id
-      WHERE dynasty.country_id=$1 AND dynasty.guild_id=$2${lock?" FOR UPDATE OF dynasty":""}`,
+      WHERE dynasty.country_id=$1 AND dynasty.guild_id=$2 AND dynasty.steppe_title_id IS NULL${lock?" FOR UPDATE OF dynasty":""}`,
     [countryId,guildId]
   )).rows[0];
   if(!row)throw new GameError("Bu devlet için henüz hanedan oluşturulmadı.");
+  return row;
+}
+
+async function dynastyForContext(
+  client:DbClient,guildId:string,countryId:string,dynastyId:string|undefined,lock=false
+):Promise<{id:string;name:string;country_name:string;last_birth_attempt_turn:number|null}>{
+  if(!dynastyId)return dynastyForCountry(client,guildId,countryId,lock);
+  const row=(await client.query<{id:string;name:string;country_name:string;last_birth_attempt_turn:number|null}>(
+    `SELECT dynasty.id,dynasty.name,country.name AS country_name,dynasty.last_birth_attempt_turn
+       FROM dynasties dynasty JOIN countries country ON country.id=dynasty.country_id
+      WHERE dynasty.id=$1 AND dynasty.country_id=$2 AND dynasty.guild_id=$3${lock?" FOR UPDATE OF dynasty":""}`,
+    [dynastyId,countryId,guildId]
+  )).rows[0];
+  if(!row)throw new GameError("Bu hane için hanedan kaydı bulunamadı.");
   return row;
 }
 
@@ -161,12 +181,20 @@ async function lockMarriageMembers(client:DbClient,memberIds:string[]):Promise<v
 async function loadMarriageProposal(client:DbClient,guildId:string,proposalId:string,lock=false):Promise<DynastyMarriageProposalView>{
   const row=(await client.query<DynastyMarriageProposalView>(
     `SELECT proposal.*,proposer_country.name AS proposer_country_name,target_country.name AS target_country_name,
-            proposer_member.name AS proposer_member_name,target_member.name AS target_member_name
+            proposer_member.dynasty_id AS proposer_dynasty_id,target_member.dynasty_id AS target_dynasty_id,
+            proposer_dynasty.name AS proposer_dynasty_name,target_dynasty.name AS target_dynasty_name,
+            proposer_member.name AS proposer_member_name,target_member.name AS target_member_name,
+            proposer_dynasty.steppe_title_id AS proposer_steppe_title_id,target_dynasty.steppe_title_id AS target_steppe_title_id,
+            proposer_title.holder_user_id AS proposer_holder_user_id,target_title.holder_user_id AS target_holder_user_id
        FROM dynasty_marriage_proposals proposal
        JOIN countries proposer_country ON proposer_country.id=proposal.proposer_country_id
        JOIN countries target_country ON target_country.id=proposal.target_country_id
        JOIN dynasty_members proposer_member ON proposer_member.id=proposal.proposer_member_id
        JOIN dynasty_members target_member ON target_member.id=proposal.target_member_id
+       JOIN dynasties proposer_dynasty ON proposer_dynasty.id=proposer_member.dynasty_id
+       JOIN dynasties target_dynasty ON target_dynasty.id=target_member.dynasty_id
+       LEFT JOIN steppe_internal_titles proposer_title ON proposer_title.id=proposer_dynasty.steppe_title_id
+       LEFT JOIN steppe_internal_titles target_title ON target_title.id=target_dynasty.steppe_title_id
       WHERE proposal.id=$1 AND proposal.guild_id=$2${lock?" FOR UPDATE OF proposal":""}`,
     [proposalId,guildId]
   )).rows[0];
@@ -229,6 +257,9 @@ async function addEvent(
 async function reconcileSuccession(
   client:DbClient,dynastyId:string,turn:number,countryName:string,eventTexts:string[]
 ):Promise<void>{
+  const steppeTitle=(await client.query<{title_name:string;tier:"KHAN"|"LANDHOLDER"}>(`
+    SELECT title.title_name,title.tier FROM dynasties dynasty
+    JOIN steppe_internal_titles title ON title.id=dynasty.steppe_title_id WHERE dynasty.id=$1`,[dynastyId])).rows[0]??null;
   let monarch=(await client.query<{id:string;name:string;gender:DynastyGender}>(
     `SELECT id,name,gender FROM dynasty_members
       WHERE dynasty_id=$1 AND status='ALIVE' AND is_monarch=TRUE LIMIT 1 FOR UPDATE`,[dynastyId]
@@ -247,18 +278,21 @@ async function reconcileSuccession(
     }
     await client.query("UPDATE dynasty_members SET is_monarch=FALSE,is_heir=FALSE WHERE dynasty_id=$1",[dynastyId]);
     await client.query(
-      "UPDATE dynasty_members SET is_monarch=TRUE,title=$1,relation='Hükümdar',updated_at=NOW() WHERE id=$2",
-      [successor.gender==="MALE"?"Kral":"Kraliçe",successor.id]
+      "UPDATE dynasty_members SET is_monarch=TRUE,title=$1,relation=$2,updated_at=NOW() WHERE id=$3",
+      [steppeTitle?.title_name??(successor.gender==="MALE"?"Kral":"Kraliçe"),steppeTitle?"Hane Reisi":"Hükümdar",successor.id]
     );
     monarch=successor;
     await addEvent(client,dynastyId,turn,"SUCCESSION",successor.id,{countryName,name:successor.name});
-    eventTexts.push("👑 **"+countryName+"** tahtına **"+successor.name+"** geçti.");
+    eventTexts.push(steppeTitle
+      ?"👑 **"+successor.name+"**, **"+steppeTitle.title_name+"** hanesinin başına geçti."
+      :"👑 **"+countryName+"** tahtına **"+successor.name+"** geçti.");
     const spouse=(await client.query<{id:string;gender:DynastyGender}>(
       "SELECT id,gender FROM dynasty_members WHERE spouse_id=$1 AND status='ALIVE' LIMIT 1",[successor.id]
     )).rows[0];
     if(spouse)await client.query(
-      "UPDATE dynasty_members SET title=$1,relation='Hükümdarın eşi',updated_at=NOW() WHERE id=$2 AND is_monarch=FALSE",
-      [spouse.gender==="FEMALE"?"Kraliçe":"Kral Eşi",spouse.id]
+      "UPDATE dynasty_members SET title=$1,relation=$2,updated_at=NOW() WHERE id=$3 AND is_monarch=FALSE",
+      [steppeTitle?(steppeTitle.tier==="KHAN"?"Han Eşi":"Toprak Ağası Eşi"):(spouse.gender==="FEMALE"?"Kraliçe":"Kral Eşi"),
+        steppeTitle?"Hane Reisinin Eşi":"Hükümdarın eşi",spouse.id]
     );
   }
   await client.query("UPDATE dynasty_members SET is_heir=FALSE WHERE dynasty_id=$1 AND id=$2",[dynastyId,monarch.id]);
@@ -277,12 +311,16 @@ async function reconcileSuccession(
     await client.query("UPDATE dynasty_members SET is_heir=(id=$2),updated_at=NOW() WHERE dynasty_id=$1 AND status='ALIVE'",[dynastyId,next.id]);
     if(existingHeir?.id!==next.id){
       await addEvent(client,dynastyId,turn,"HEIR_DESIGNATED",next.id,{name:next.name,automatic:true,malePreference:true});
-      eventTexts.push("📜 **"+next.name+"**, **"+countryName+"** tahtının yeni varisi oldu.");
+      eventTexts.push(steppeTitle
+        ?"📜 **"+next.name+"**, **"+steppeTitle.title_name+"** hanesinin yeni varisi oldu."
+        :"📜 **"+next.name+"**, **"+countryName+"** tahtının yeni varisi oldu.");
     }
   }else{
     await client.query("UPDATE dynasty_members SET is_heir=FALSE,updated_at=NOW() WHERE dynasty_id=$1",[dynastyId]);
     await addEvent(client,dynastyId,turn,"SUCCESSION_CRISIS",monarch.id,{countryName,reason:"Uygun varis bulunmuyor"});
-    eventTexts.push("⚠️ **"+countryName+"** devletinde uygun taht varisi bulunmuyor.");
+    eventTexts.push(steppeTitle
+      ?"⚠️ **"+steppeTitle.title_name+"** hanesinde uygun varis bulunmuyor."
+      :"⚠️ **"+countryName+"** devletinde uygun taht varisi bulunmuyor.");
   }
 }
 
@@ -299,11 +337,15 @@ async function killMember(
     `UPDATE dynasty_marriage_proposals SET status='CANCELLED',resolved_turn=$1,resolved_by='system:death',resolved_at=NOW()
       WHERE status='PENDING' AND (proposer_member_id=$2 OR target_member_id=$2)`,[turn,member.id]
   );
-  if(member.spouse_id)await client.query(
-    `UPDATE dynasty_members SET relation='Önceki hükümdarın eşi',
-       title=CASE WHEN gender='FEMALE' THEN 'Dul Kraliçe' ELSE 'Dul Kral Eşi' END,updated_at=NOW()
-      WHERE id=$1 AND status='ALIVE' AND is_monarch=FALSE AND $2=TRUE`,[member.spouse_id,member.is_monarch]
-  );
+  if(member.spouse_id&&member.is_monarch){
+    const steppeTitle=(await client.query<{tier:"KHAN"|"LANDHOLDER"}>(`SELECT title.tier FROM dynasties dynasty
+      JOIN steppe_internal_titles title ON title.id=dynasty.steppe_title_id WHERE dynasty.id=$1`,[dynastyId])).rows[0]??null;
+    await client.query(`UPDATE dynasty_members SET relation=$2,
+       title=CASE WHEN $3::boolean THEN $4 WHEN gender='FEMALE' THEN 'Dul Kraliçe' ELSE 'Dul Kral Eşi' END,updated_at=NOW()
+      WHERE id=$1 AND status='ALIVE' AND is_monarch=FALSE`,[member.spouse_id,
+      steppeTitle?"Önceki Hane Reisinin Eşi":"Önceki hükümdarın eşi",Boolean(steppeTitle),
+      steppeTitle?.tier==="KHAN"?"Dul Han Eşi":"Dul Toprak Ağası Eşi"]);
+  }
   await addEvent(client,dynastyId,turn,"DEATH",member.id,{name:member.name,age:member.age,reason,wasMonarch:member.is_monarch,wasHeir:member.is_heir});
   const ageText=member.age===null?"yaşı bilinmiyorken":member.age+" yaşında";
   eventTexts.push("⚰️ **"+countryName+"** • **"+member.name+"**, "+ageText+" hayatını kaybetti. Sebep: **"+reason+"**.");
@@ -535,8 +577,10 @@ async function processNpcMarriages(
        FROM dynasty_members member
        JOIN dynasties dynasty ON dynasty.id=member.dynasty_id
        JOIN countries country ON country.id=dynasty.country_id
+       LEFT JOIN steppe_internal_titles steppe_title ON steppe_title.id=dynasty.steppe_title_id
       WHERE dynasty.guild_id=$1 AND country.status='ACTIVE' AND COALESCE(country.is_system_faction,FALSE)=FALSE
-        AND NOT EXISTS(SELECT 1 FROM country_members player WHERE player.country_id=country.id)
+        AND ((dynasty.steppe_title_id IS NULL AND NOT EXISTS(SELECT 1 FROM country_members player WHERE player.country_id=country.id))
+          OR (dynasty.steppe_title_id IS NOT NULL AND steppe_title.holder_user_id IS NULL))
         AND member.status='ALIVE' AND member.spouse_id IS NULL AND member.age>=$2
       ORDER BY country.name,member.age DESC,member.name`,[guildId,MINIMUM_MARRIAGE_AGE]
   )).rows.map((row)=>({...row,age:Number(row.age)}));
@@ -600,8 +644,10 @@ async function processNpcDynastyTurn(client:DbClient,guildId:string,turn:number)
             country.primary_culture_group AS culture_group
        FROM countries country
        JOIN dynasties dynasty ON dynasty.country_id=country.id
+       LEFT JOIN steppe_internal_titles steppe_title ON steppe_title.id=dynasty.steppe_title_id
       WHERE country.guild_id=$1 AND country.status='ACTIVE' AND COALESCE(country.is_system_faction,FALSE)=FALSE
-        AND NOT EXISTS(SELECT 1 FROM country_members player WHERE player.country_id=country.id)
+        AND ((dynasty.steppe_title_id IS NULL AND NOT EXISTS(SELECT 1 FROM country_members player WHERE player.country_id=country.id))
+          OR (dynasty.steppe_title_id IS NOT NULL AND steppe_title.holder_user_id IS NULL))
       ORDER BY country.name FOR UPDATE OF dynasty`,[guildId]
   )).rows;
   const events:DynastyTurnEvent[]=[];
@@ -620,13 +666,16 @@ async function processNpcDynastyTurn(client:DbClient,guildId:string,turn:number)
   return{births,marriages:marriageResult.marriages,events};
 }
 
-async function loadViewByClause(column:"country_id"|"id",value:string):Promise<DynastyView|null>{
+async function loadViewByClause(column:"country_id"|"id"|"steppe_title_id",value:string):Promise<DynastyView|null>{
   const dynasty=(await pool.query<Omit<DynastyView,"members"|"events">>(
     `SELECT dynasty.id,dynasty.guild_id,dynasty.country_id,country.name AS country_name,dynasty.name,
+            dynasty.steppe_title_id,title.title_name AS steppe_title_name,title.tier AS steppe_title_tier,
+            title.holder_user_id AS steppe_holder_user_id,
             guild.current_turn,dynasty.last_birth_attempt_turn,dynasty.published_channel_id,dynasty.published_message_id
        FROM dynasties dynasty JOIN countries country ON country.id=dynasty.country_id
        JOIN guilds guild ON guild.discord_id=dynasty.guild_id
-      WHERE dynasty.${column}=$1`,[value]
+       LEFT JOIN steppe_internal_titles title ON title.id=dynasty.steppe_title_id
+      WHERE dynasty.${column}=$1${column==="country_id"?" AND dynasty.steppe_title_id IS NULL":""}`,[value]
   )).rows[0];
   if(!dynasty)return null;
   const storedMembers=(await pool.query<DynastyMemberView>(
@@ -667,13 +716,39 @@ async function loadViewByClause(column:"country_id"|"id",value:string):Promise<D
 export const dynastyService={
   viewByCountry(countryId:string){return loadViewByClause("country_id",countryId);},
   viewById(dynastyId:string){return loadViewByClause("id",dynastyId);},
+  viewBySteppeTitle(titleId:string){return loadViewByClause("steppe_title_id",titleId);},
+
+  async viewForSteppeTitleHolder(guildId:string,userId:string):Promise<DynastyView|null>{
+    const row=(await pool.query<{dynasty_id:string}>(`
+      SELECT dynasty.id AS dynasty_id
+        FROM steppe_internal_titles title
+        JOIN steppe_confederations confederation ON confederation.id=title.confederation_id
+        JOIN dynasties dynasty ON dynasty.steppe_title_id=title.id
+       WHERE confederation.guild_id=$1 AND confederation.status='ACTIVE' AND title.status='ACTIVE'
+         AND title.holder_user_id=$2
+       ORDER BY CASE title.tier WHEN 'KHAN' THEN 0 ELSE 1 END,title.created_at LIMIT 1`,[guildId,userId])).rows[0];
+    return row?loadViewByClause("id",row.dynasty_id):null;
+  },
+
+  async marriageCandidatesForCountry(guildId:string,countryId:string,excludeDynastyId?:string|null){
+    return (await pool.query<{
+      id:string;name:string;title:string;age:number|null;status:DynastyMemberStatus;spouse_id:string|null;
+      dynasty_id:string;dynasty_name:string;
+    }>(`SELECT member.id,member.name,member.title,member.age,member.status,member.spouse_id,
+               dynasty.id AS dynasty_id,dynasty.name AS dynasty_name
+          FROM dynasties dynasty JOIN dynasty_members member ON member.dynasty_id=dynasty.id
+         WHERE dynasty.guild_id=$1 AND dynasty.country_id=$2 AND member.status='ALIVE'
+           AND ($3::uuid IS NULL OR dynasty.id<>$3)
+         ORDER BY dynasty.name,member.is_monarch DESC,member.is_heir DESC,member.age DESC`,
+      [guildId,countryId,excludeDynastyId??null])).rows;
+  },
 
   async create(input:{guildId:string;countryId:string;actorId:string;name:string}):Promise<string>{
     return withTransaction(async(client)=>{
       const country=await activeCountry(client,input.guildId,input.countryId);
       const name=input.name.trim().replace(/\s+/g," ");
       if(name.length<2||name.length>80)throw new GameError("Hanedan adı 2-80 karakter arasında olmalıdır.");
-      const duplicate=await client.query("SELECT 1 FROM dynasties WHERE country_id=$1",[country.id]);
+      const duplicate=await client.query("SELECT 1 FROM dynasties WHERE country_id=$1 AND steppe_title_id IS NULL",[country.id]);
       if(duplicate.rowCount)throw new GameError("Bu devletin hanedan kaydı zaten oluşturulmuş.");
       const created=(await client.query<{id:string}>(
         "INSERT INTO dynasties(guild_id,country_id,name,created_by) VALUES($1,$2,$3,$4) RETURNING id",
@@ -789,18 +864,22 @@ export const dynastyService={
   },
 
   async listMarriageProposals(guildId:string,countryId:string,status:DynastyMarriageStatus="PENDING"):Promise<DynastyMarriageProposalView[]>{
-    return (await pool.query<DynastyMarriageProposalView>(
-      `SELECT proposal.*,proposer_country.name AS proposer_country_name,target_country.name AS target_country_name,
-              proposer_member.name AS proposer_member_name,target_member.name AS target_member_name
-         FROM dynasty_marriage_proposals proposal
-         JOIN countries proposer_country ON proposer_country.id=proposal.proposer_country_id
-         JOIN countries target_country ON target_country.id=proposal.target_country_id
-         JOIN dynasty_members proposer_member ON proposer_member.id=proposal.proposer_member_id
-         JOIN dynasty_members target_member ON target_member.id=proposal.target_member_id
-        WHERE proposal.guild_id=$1 AND proposal.status=$2
-          AND (proposal.proposer_country_id=$3 OR proposal.target_country_id=$3)
-        ORDER BY proposal.created_at DESC LIMIT 25`,[guildId,status,countryId]
-    )).rows;
+    const ids=(await pool.query<{id:string}>(`SELECT proposal.id FROM dynasty_marriage_proposals proposal
+      WHERE proposal.guild_id=$1 AND proposal.status=$2
+        AND (proposal.proposer_country_id=$3 OR proposal.target_country_id=$3)
+      ORDER BY proposal.created_at DESC LIMIT 25`,[guildId,status,countryId])).rows;
+    const client=await pool.connect();
+    try{const rows:DynastyMarriageProposalView[]=[];for(const row of ids)rows.push(await loadMarriageProposal(client,guildId,row.id));return rows;}finally{client.release();}
+  },
+
+  async listMarriageProposalsByDynasty(guildId:string,dynastyId:string,status:DynastyMarriageStatus="PENDING"):Promise<DynastyMarriageProposalView[]>{
+    const ids=(await pool.query<{id:string}>(`SELECT proposal.id FROM dynasty_marriage_proposals proposal
+      JOIN dynasty_members proposer ON proposer.id=proposal.proposer_member_id
+      JOIN dynasty_members target ON target.id=proposal.target_member_id
+      WHERE proposal.guild_id=$1 AND proposal.status=$2 AND (proposer.dynasty_id=$3 OR target.dynasty_id=$3)
+      ORDER BY proposal.created_at DESC LIMIT 25`,[guildId,status,dynastyId])).rows;
+    const client=await pool.connect();
+    try{const rows:DynastyMarriageProposalView[]=[];for(const row of ids)rows.push(await loadMarriageProposal(client,guildId,row.id));return rows;}finally{client.release();}
   },
 
   async marriageProposalById(guildId:string,proposalId:string):Promise<DynastyMarriageProposalView>{
@@ -819,9 +898,9 @@ export const dynastyService={
 
   async proposeMarriage(input:{
     guildId:string;proposerCountryId:string;targetCountryId:string;proposerMemberId:string;targetMemberId:string;actorId:string;
+    proposerDynastyId?:string;
   }):Promise<DynastyMarriageProposalView>{
     return withTransaction(async(client)=>{
-      if(input.proposerCountryId===input.targetCountryId)throw new GameError("Ülkeler arası teklif için iki farklı devlet seçilmelidir.");
       await activeCountry(client,input.guildId,input.proposerCountryId);
       await activeCountry(client,input.guildId,input.targetCountryId);
       await lockMarriageMembers(client,[input.proposerMemberId,input.targetMemberId]);
@@ -829,6 +908,8 @@ export const dynastyService={
       const target=await memberAcrossGuild(client,input.guildId,input.targetMemberId,true);
       if(proposer.country_id!==input.proposerCountryId)throw new GameError("Teklifi yapan üye seçilen devlete ait değil.");
       if(target.country_id!==input.targetCountryId)throw new GameError("Hedef üye seçilen devlete ait değil.");
+      if(input.proposerDynastyId&&proposer.dynasty_id!==input.proposerDynastyId)throw new GameError("Teklifi yapan üye yönettiğiniz haneye ait değil.");
+      if(proposer.dynasty_id===target.dynasty_id)throw new GameError("Aynı hane içindeki evlilikler teklif sistemiyle yapılamaz.");
       requireMarriageEligibility(proposer,proposer.name);
       requireMarriageEligibility(target,target.name);
       const pending=await client.query(
@@ -849,12 +930,14 @@ export const dynastyService={
   },
 
   async respondMarriage(input:{
-    guildId:string;responderCountryId:string;proposalId:string;actorId:string;decision:"ACCEPT"|"REJECT";
+    guildId:string;responderCountryId:string;proposalId:string;actorId:string;decision:"ACCEPT"|"REJECT";responderDynastyId?:string;
   }):Promise<{proposal:DynastyMarriageProposalView;dynastyIds:string[]}>{
     return withTransaction(async(client)=>{
       const proposal=await loadMarriageProposal(client,input.guildId,input.proposalId,true);
       if(proposal.status!=="PENDING")throw new GameError("Bu evlilik teklifi artık beklemede değil.");
       if(proposal.target_country_id!==input.responderCountryId)throw new GameError("Bu teklifi yalnızca hedef devlet yanıtlayabilir.");
+      if(input.responderDynastyId&&proposal.target_dynasty_id!==input.responderDynastyId)
+        throw new GameError("Bu teklifi yalnızca hedef hanenin yöneticisi yanıtlayabilir.");
       await activeCountry(client,input.guildId,input.responderCountryId);
       const turn=await currentTurn(client,input.guildId);
       if(input.decision==="REJECT"){
@@ -876,11 +959,13 @@ export const dynastyService={
     });
   },
 
-  async withdrawMarriage(input:{guildId:string;proposerCountryId:string;proposalId:string;actorId:string}):Promise<DynastyMarriageProposalView>{
+  async withdrawMarriage(input:{guildId:string;proposerCountryId:string;proposalId:string;actorId:string;proposerDynastyId?:string}):Promise<DynastyMarriageProposalView>{
     return withTransaction(async(client)=>{
       const proposal=await loadMarriageProposal(client,input.guildId,input.proposalId,true);
       if(proposal.status!=="PENDING")throw new GameError("Bu evlilik teklifi artık beklemede değil.");
       if(proposal.proposer_country_id!==input.proposerCountryId)throw new GameError("Bu teklifi yalnızca gönderen devlet geri çekebilir.");
+      if(input.proposerDynastyId&&proposal.proposer_dynasty_id!==input.proposerDynastyId)
+        throw new GameError("Bu teklifi yalnızca gönderen hanenin yöneticisi geri çekebilir.");
       await activeCountry(client,input.guildId,input.proposerCountryId);
       const turn=await currentTurn(client,input.guildId);
       await client.query(
@@ -960,7 +1045,7 @@ export const dynastyService={
 
   async attemptBirth(input:{
     guildId:string;countryId:string;actorId:string;parentMemberId?:string|null;
-    allowAnyMarriedMember?:boolean;
+    allowAnyMarriedMember?:boolean;dynastyId?:string;
   }):Promise<{
     success:boolean;attemptRoll:number;ageModifier:number;pendingBirthId:string|null;childGender:DynastyGender|null;
     genderRoll:number|null;complication:"DEATH"|"ILLNESS"|"HEALTHY"|null;complicationRoll:number|null;
@@ -968,7 +1053,7 @@ export const dynastyService={
   }>{
     return withTransaction(async(client)=>{
       await activeCountry(client,input.guildId,input.countryId);
-      const dynasty=await dynastyForCountry(client,input.guildId,input.countryId,true);
+      const dynasty=await dynastyForContext(client,input.guildId,input.countryId,input.dynastyId,true);
       const turn=await currentTurn(client,input.guildId);
       const pendingName=await client.query(
         "SELECT 1 FROM dynasty_birth_sessions WHERE dynasty_id=$1 AND status='PENDING_NAME' LIMIT 1",
@@ -1074,11 +1159,11 @@ export const dynastyService={
   },
 
   async nameBirth(input:{
-    guildId:string;countryId:string;actorId:string;pendingBirthId:string;childName:string;allowManager?:boolean;
+    guildId:string;countryId:string;actorId:string;pendingBirthId:string;childName:string;allowManager?:boolean;dynastyId?:string;
   }):Promise<{dynastyId:string;childId:string;childName:string;childGender:DynastyGender;motherName:string;fatherName:string}>{
     return withTransaction(async(client)=>{
       await activeCountry(client,input.guildId,input.countryId);
-      const dynasty=await dynastyForCountry(client,input.guildId,input.countryId,true);
+      const dynasty=await dynastyForContext(client,input.guildId,input.countryId,input.dynastyId,true);
       type PendingBirth={
         id:string;initiated_by:string;parent_member_id:string;mother_id:string;father_id:string;game_turn:number;
         attempt_roll:number;age_modifier:number;gender_roll:number;gender:DynastyGender;

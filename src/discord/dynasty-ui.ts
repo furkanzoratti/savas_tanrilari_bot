@@ -42,12 +42,29 @@ function birthResultMessage(result:Awaited<ReturnType<typeof dynastyService.atte
     "Cinsiyet zarı: **1d2 → "+result.genderRoll+"** • Çocuk **"+gender+"**.\n"+complication+"\n\nŞimdi çocuğa isim verin.";
 }
 
-function birthNameButton(countryId:string,result:Awaited<ReturnType<typeof dynastyService.attemptBirth>>):ActionRowBuilder<ButtonBuilder>[] {
+function birthNameButton(countryId:string,dynastyId:string,result:Awaited<ReturnType<typeof dynastyService.attemptBirth>>):ActionRowBuilder<ButtonBuilder>[] {
   if(!result.success||!result.pendingBirthId)return[];
   return[new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId("dynasty_birth_name|"+countryId+"|"+result.pendingBirthId)
+    new ButtonBuilder().setCustomId("dynasty_birth_name|"+countryId+"|"+dynastyId+"|"+result.pendingBirthId)
       .setLabel("Çocuğa İsim Ver").setEmoji("👶").setStyle(ButtonStyle.Primary)
   )];
+}
+
+async function playerDynastyContext(interaction:ChatInputCommandInteraction|AutocompleteInteraction):Promise<{
+  country:{id:string;name:string};view:DynastyView;
+}|null>{
+  if(!interaction.guildId)return null;
+  const requested=interaction.options.getString("ulke");
+  if(!isGameMaster(interaction)){
+    const steppeView=await dynastyService.viewForSteppeTitleHolder(interaction.guildId,interaction.user.id);
+    if(steppeView)return{country:{id:steppeView.country_id,name:steppeView.country_name},view:steppeView};
+  }
+  const country=requested&&isGameMaster(interaction)
+    ?await gameService.countryByName(interaction.guildId,requested)
+    :await gameService.countryForUser(interaction.guildId,interaction.user.id);
+  if(!country)return null;
+  const view=await dynastyService.viewByCountry(country.id);
+  return view?{country,view}:null;
 }
 
 function marriageProposalEmbed(proposal:DynastyMarriageProposalView):EmbedBuilder{
@@ -64,7 +81,9 @@ function marriageProposalEmbed(proposal:DynastyMarriageProposalView):EmbedBuilde
     .setTitle(title).setImage(DYNASTY_MARRIAGE_BANNER_URL)
     .setDescription(
       "**Teklif Eden:** "+proposal.proposer_country_name+" • "+proposal.proposer_member_name+"\n"+
-      "**Hedef:** "+proposal.target_country_name+" • "+proposal.target_member_name+"\n\n"+status
+      "↳ "+proposal.proposer_dynasty_name+"\n"+
+      "**Hedef:** "+proposal.target_country_name+" • "+proposal.target_member_name+"\n"+
+      "↳ "+proposal.target_dynasty_name+"\n\n"+status
     )
     .setFooter({text:"Teklif • "+proposal.id});
 }
@@ -256,12 +275,13 @@ export function dynastyEmbed(view:DynastyView):EmbedBuilder{
   const stats=dynastyStats(view);
   const monarch=stats.living.find((member)=>member.is_monarch);
   const heir=stats.living.find((member)=>member.is_heir);
+  const steppeHouse=Boolean(view.steppe_title_id);
   const marital=!monarch?.spouse_name?"Bekâr":monarch.spouse_status==="DEAD"?"Dul":"Evli";
   const overview=[
-    "**👑 Hanedan Başkanı:** "+(monarch?memberName(monarch):"⚠️ Veraset krizi"),
-    "**⚔️ Hükümdar:** "+(monarch?monarch.title+" "+monarch.name:"Belirlenmedi"),
+    "**👑 "+(steppeHouse?"Hane Reisi":"Hanedan Başkanı")+":** "+(monarch?memberName(monarch):"⚠️ Veraset krizi"),
+    "**⚔️ "+(steppeHouse?"Bozkır Makamı":"Hükümdar")+":** "+(monarch?monarch.title+" "+monarch.name:"Belirlenmedi"),
     "**🕊️ Durum:** "+marital,
-    "**📜 Tahtın Varisi:** "+(heir?memberName(heir):"Belirlenmedi"),
+    "**📜 "+(steppeHouse?"Hane Varisi":"Tahtın Varisi")+":** "+(heir?memberName(heir):"Belirlenmedi"),
     "**⚖️ Veraset Sistemi:** Erkek Öncelikli Primogenitür",
     "",
     "**👥 Yaşayan Kan Üyesi:** "+stats.bloodLiving+" • **💍 Evlilik Yoluyla Bağlı:** "+stats.marriageLiving,
@@ -408,9 +428,9 @@ export async function handleDynastyCommand(interaction:ChatInputCommandInteracti
   await interaction.deferReply({flags:MessageFlags.Ephemeral});
   const sub=interaction.options.getSubcommand();
   if(interaction.commandName==="hanedan"){
-    const country=await resolveCountry(interaction,interaction.options.getString("ulke"));
-    const view=await dynastyService.viewByCountry(country.id);
-    if(!view)throw new GameError("Bu devlet için henüz hanedan oluşturulmadı.");
+    const context=await playerDynastyContext(interaction);
+    if(!context)throw new GameError("Yönetebileceğiniz bir devlet hanedanı veya bozkır hanesi bulunamadı.");
+    const {country,view}=context;
     if(sub==="bilgi"){
       await interaction.editReply({
         embeds:[dynastyEmbed(view)],
@@ -434,20 +454,18 @@ export async function handleDynastyCommand(interaction:ChatInputCommandInteracti
     }else if(sub==="cocuk-dene"){
       const result=await dynastyService.attemptBirth({
         guildId:interaction.guildId,countryId:country.id,actorId:interaction.user.id,
-        parentMemberId:interaction.options.getString("ebeveyn")
+        parentMemberId:interaction.options.getString("ebeveyn"),dynastyId:view.id
       });
-      await interaction.editReply({content:birthResultMessage(result),components:birthNameButton(country.id,result)});
+      await interaction.editReply({content:birthResultMessage(result),components:birthNameButton(country.id,view.id,result)});
       await refreshDynastyCard(interaction.client,view.id);
     }else if(sub==="evlilik-teklif"){
       const targetCountryName=interaction.options.getString("hedef-ulke",true);
       const targetCountry=await gameService.countryByName(interaction.guildId,targetCountryName);
       if(!targetCountry)throw new GameError("Hedef devlet bulunamadı.");
-      if(targetCountry.id===country.id)throw new GameError("Bu komut yalnızca farklı devletlerin hanedanları arasındaki evlilik içindir.");
-      if(!await dynastyService.viewByCountry(targetCountry.id))throw new GameError("Hedef devlet için henüz hanedan oluşturulmadı.");
       const proposal=await dynastyService.proposeMarriage({
         guildId:interaction.guildId,proposerCountryId:country.id,targetCountryId:targetCountry.id,
         proposerMemberId:interaction.options.getString("uye",true),targetMemberId:interaction.options.getString("hedef-uye",true),
-        actorId:interaction.user.id
+        actorId:interaction.user.id,proposerDynastyId:view.id
       });
       await interaction.editReply(
         "💍 Evlilik teklifi gönderildi: **"+proposal.proposer_member_name+"** ("+proposal.proposer_country_name+") → **"+
@@ -455,7 +473,9 @@ export async function handleDynastyCommand(interaction:ChatInputCommandInteracti
       );
       const channel=interaction.channel;
       if(channel?.isTextBased()&&!channel.isDMBased()){
-        const players=await gameService.playerIds(targetCountry.id);
+        const players=proposal.target_steppe_title_id
+          ?proposal.target_holder_user_id?[proposal.target_holder_user_id]:[]
+          :await gameService.playerIds(targetCountry.id);
         const notification=playerMentionPayload(players,"**"+targetCountry.name+"** • Oyuncu atanmamış; oyun yöneticisi yanıtlayabilir.");
         const message=await channel.send({
           content:notification.content,allowedMentions:notification.allowedMentions,
@@ -470,7 +490,7 @@ export async function handleDynastyCommand(interaction:ChatInputCommandInteracti
       const decision=interaction.options.getString("karar",true) as "ACCEPT"|"REJECT";
       const result=await dynastyService.respondMarriage({
         guildId:interaction.guildId,responderCountryId:country.id,proposalId:interaction.options.getString("teklif",true),
-        actorId:interaction.user.id,decision
+        actorId:interaction.user.id,decision,responderDynastyId:view.id
       });
       const accepted=decision==="ACCEPT";
       await interaction.editReply(accepted
@@ -479,7 +499,7 @@ export async function handleDynastyCommand(interaction:ChatInputCommandInteracti
       for(const dynastyId of result.dynastyIds)await refreshDynastyCard(interaction.client,dynastyId).catch(()=>false);
       await refreshMarriageProposalMessage(interaction.client,result.proposal).catch(()=>false);
     }else if(sub==="evlilik-teklifleri"){
-      const proposals=await dynastyService.listMarriageProposals(interaction.guildId,country.id);
+      const proposals=await dynastyService.listMarriageProposalsByDynasty(interaction.guildId,view.id);
       if(!proposals.length){await interaction.editReply("Bu devlet için bekleyen evlilik teklifi bulunmuyor.");return true;}
       await interaction.editReply({embeds:[new EmbedBuilder().setColor(0xc59b45).setTitle("💍 "+country.name+" • Bekleyen Evlilik Teklifleri").setImage(DYNASTY_MARRIAGE_BANNER_URL)
         .setDescription(proposals.map((proposal)=>{
@@ -489,7 +509,8 @@ export async function handleDynastyCommand(interaction:ChatInputCommandInteracti
         }).join("\n\n").slice(0,4000))],files:[new AttachmentBuilder(DYNASTY_MARRIAGE_BANNER_PATH,{name:DYNASTY_MARRIAGE_BANNER_NAME})]});
     }else if(sub==="evlilik-geri-cek"){
       const proposal=await dynastyService.withdrawMarriage({
-        guildId:interaction.guildId,proposerCountryId:country.id,proposalId:interaction.options.getString("teklif",true),actorId:interaction.user.id
+        guildId:interaction.guildId,proposerCountryId:country.id,proposalId:interaction.options.getString("teklif",true),actorId:interaction.user.id,
+        proposerDynastyId:view.id
       });
       await interaction.editReply("↩️ **"+proposal.target_country_name+"** devletine gönderilen hanedan evliliği teklifi geri çekildi.");
       await refreshMarriageProposalMessage(interaction.client,proposal).catch(()=>false);
@@ -561,7 +582,7 @@ export async function handleDynastyCommand(interaction:ChatInputCommandInteracti
       guildId:interaction.guildId,countryId:country.id,actorId:interaction.user.id,
       parentMemberId:interaction.options.getString("ebeveyn",true),allowAnyMarriedMember:true
     });
-    await interaction.editReply({content:birthResultMessage(result),components:birthNameButton(country.id,result)});
+    await interaction.editReply({content:birthResultMessage(result),components:birthNameButton(country.id,view.id,result)});
     await refreshDynastyCard(interaction.client,view.id);
     return true;
   }
@@ -612,10 +633,13 @@ export async function handleDynastyCommand(interaction:ChatInputCommandInteracti
 
 export async function handleDynastyButton(interaction:ButtonInteraction):Promise<boolean>{
   if(interaction.customId.startsWith("dynasty_birth_name|")){
-    const [,countryId,pendingBirthId]=interaction.customId.split("|");
+    const parts=interaction.customId.split("|");
+    const countryId=parts[1];
+    const dynastyId=parts.length===4?parts[2]:null;
+    const pendingBirthId=parts.length===4?parts[3]:parts[2];
     if(!interaction.guildId||!countryId||!pendingBirthId)throw new GameError("Doğum isimlendirme düğmesi geçersiz.");
     const modal=new ModalBuilder()
-      .setCustomId("dynasty_birth_modal|"+countryId+"|"+pendingBirthId)
+      .setCustomId("dynasty_birth_modal|"+countryId+"|"+(dynastyId?dynastyId+"|":"")+pendingBirthId)
       .setTitle("Hanedan Çocuğuna İsim Ver")
       .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder().setCustomId("child_name").setLabel("Çocuğun adı")
@@ -633,13 +657,17 @@ export async function handleDynastyButton(interaction:ButtonInteraction):Promise
   const proposal=await dynastyService.marriageProposalById(interaction.guildId,marriageMatch[2]!);
   if(proposal.status!=="PENDING")throw new GameError("Bu evlilik teklifi daha önce sonuçlandırılmış.");
   if(!isGameMaster(interaction)){
+    const steppeView=await dynastyService.viewForSteppeTitleHolder(interaction.guildId,interaction.user.id);
     const country=await gameService.countryForUser(interaction.guildId,interaction.user.id);
-    if(!country||country.id!==proposal.target_country_id)
-      throw new GameError("Bu evlilik teklifini yalnızca hedef devletin oyuncuları veya oyun yöneticisi yanıtlayabilir.");
+    const allowed=proposal.target_steppe_title_id
+      ?proposal.target_holder_user_id===interaction.user.id&&steppeView?.id===proposal.target_dynasty_id
+      :country?.id===proposal.target_country_id;
+    if(!allowed)
+      throw new GameError("Bu evlilik teklifini yalnızca hedef hanenin yöneticisi veya oyun yöneticisi yanıtlayabilir.");
   }
   const result=await dynastyService.respondMarriage({
     guildId:interaction.guildId,responderCountryId:proposal.target_country_id,proposalId:proposal.id,
-    actorId:interaction.user.id,decision
+    actorId:interaction.user.id,decision,...(isGameMaster(interaction)?{}:{responderDynastyId:proposal.target_dynasty_id})
   });
   const accepted=decision==="ACCEPT";
   await interaction.message.edit({
@@ -654,12 +682,15 @@ export async function handleDynastyButton(interaction:ButtonInteraction):Promise
 
 export async function handleDynastyModal(interaction:ModalSubmitInteraction):Promise<boolean>{
   if(!interaction.customId.startsWith("dynasty_birth_modal|"))return false;
-  const [,countryId,pendingBirthId]=interaction.customId.split("|");
+  const parts=interaction.customId.split("|");
+  const countryId=parts[1];
+  const dynastyId=parts.length===4?parts[2]:undefined;
+  const pendingBirthId=parts.length===4?parts[3]:parts[2];
   if(!interaction.guildId||!countryId||!pendingBirthId)throw new GameError("Doğum isimlendirme formu geçersiz.");
   await interaction.deferReply({flags:MessageFlags.Ephemeral});
   const result=await dynastyService.nameBirth({
     guildId:interaction.guildId,countryId,actorId:interaction.user.id,pendingBirthId,
-    childName:interaction.fields.getTextInputValue("child_name"),allowManager:isGameMaster(interaction)
+    childName:interaction.fields.getTextInputValue("child_name"),allowManager:isGameMaster(interaction),...(dynastyId?{dynastyId}:{})
   });
   const gender=result.childGender==="MALE"?"erkek":"kız";
   await interaction.editReply("👶 **"+result.childName+"** adlı "+gender+" çocuk hanedana kaydedildi.\n"+
@@ -680,12 +711,9 @@ export async function handleDynastyAutocomplete(interaction:AutocompleteInteract
     return true;
   }
   if(focused.name==="teklif"&&(sub==="evlilik-cevapla"||sub==="evlilik-geri-cek")){
-    const requested=interaction.options.getString("ulke");
-    const country=requested&&isGameMaster(interaction)
-      ?await gameService.countryByName(interaction.guildId,requested)
-      :await gameService.countryForUser(interaction.guildId,interaction.user.id);
-    const proposals=country?await dynastyService.listMarriageProposals(interaction.guildId,country.id):[];
-    await interaction.respond(proposals.filter((proposal)=>sub==="evlilik-cevapla"?proposal.target_country_id===country?.id:proposal.proposer_country_id===country?.id)
+    const context=await playerDynastyContext(interaction);
+    const proposals=context?await dynastyService.listMarriageProposalsByDynasty(interaction.guildId,context.view.id):[];
+    await interaction.respond(proposals.filter((proposal)=>sub==="evlilik-cevapla"?proposal.target_dynasty_id===context?.view.id:proposal.proposer_dynasty_id===context?.view.id)
       .filter((proposal)=>!query||(proposal.proposer_member_name+" "+proposal.target_member_name+" "+proposal.proposer_country_name).toLocaleLowerCase("tr-TR").includes(query))
       .slice(0,25).map((proposal)=>({
         name:(proposal.proposer_country_name+": "+proposal.proposer_member_name+" × "+proposal.target_member_name).slice(0,100),value:proposal.id
@@ -693,11 +721,8 @@ export async function handleDynastyAutocomplete(interaction:AutocompleteInteract
     return true;
   }
   if(focused.name==="ebeveyn"&&sub==="cocuk-dene"){
-    const requested=interaction.options.getString("ulke");
-    const country=requested&&isGameMaster(interaction)
-      ?await gameService.countryByName(interaction.guildId,requested)
-      :await gameService.countryForUser(interaction.guildId,interaction.user.id);
-    const view=country?await dynastyService.viewByCountry(country.id):null;
+    const context=await playerDynastyContext(interaction);
+    const view=context?.view??null;
     const monarch=view?.members.find((member)=>member.status==="ALIVE"&&member.is_monarch);
     const candidates=(view?.members??[]).filter((member)=>{
       if(member.status!=="ALIVE"||!member.spouse_id)return false;
@@ -712,40 +737,41 @@ export async function handleDynastyAutocomplete(interaction:AutocompleteInteract
     return true;
   }
   if(["uye","es","anne","baba","hedef-uye","birinci-uye","ikinci-uye"].includes(focused.name)){
-    let country=null as Awaited<ReturnType<typeof gameService.countryByName>>;
+    let view:DynastyView|null=null;
+    let externalCandidates:Awaited<ReturnType<typeof dynastyService.marriageCandidatesForCountry>>|null=null;
     let marriageSelection=false;
     if(sub==="evlilik-teklif"&&focused.name==="uye"){
-      const requested=interaction.options.getString("ulke");
-      country=requested&&isGameMaster(interaction)
-        ?await gameService.countryByName(interaction.guildId,requested)
-        :await gameService.countryForUser(interaction.guildId,interaction.user.id);
+      view=(await playerDynastyContext(interaction))?.view??null;
       marriageSelection=true;
     }else if(sub==="evlilik-teklif"&&focused.name==="hedef-uye"){
       const countryName=interaction.options.getString("hedef-ulke");
-      country=countryName?await gameService.countryByName(interaction.guildId,countryName):null;
+      const country=countryName?await gameService.countryByName(interaction.guildId,countryName):null;
+      const own=(await playerDynastyContext(interaction))?.view??null;
+      externalCandidates=country?await dynastyService.marriageCandidatesForCountry(interaction.guildId,country.id,own?.country_id===country.id?own.id:null):[];
       marriageSelection=true;
     }else if(sub==="ulkeler-arasi-evlendir"&&focused.name==="birinci-uye"){
       const countryName=interaction.options.getString("birinci-ulke");
-      country=countryName?await gameService.countryByName(interaction.guildId,countryName):null;
+      const country=countryName?await gameService.countryByName(interaction.guildId,countryName):null;
+      view=country?await dynastyService.viewByCountry(country.id):null;
       marriageSelection=true;
     }else if(sub==="ulkeler-arasi-evlendir"&&focused.name==="ikinci-uye"){
       const countryName=interaction.options.getString("ikinci-ulke");
-      country=countryName?await gameService.countryByName(interaction.guildId,countryName):null;
+      const country=countryName?await gameService.countryByName(interaction.guildId,countryName):null;
+      view=country?await dynastyService.viewByCountry(country.id):null;
       marriageSelection=true;
     }else if(sub==="kisi"&&focused.name==="uye"){
-      const requested=interaction.options.getString("ulke");
-      country=requested&&isGameMaster(interaction)
-        ?await gameService.countryByName(interaction.guildId,requested)
-        :await gameService.countryForUser(interaction.guildId,interaction.user.id);
+      view=(await playerDynastyContext(interaction))?.view??null;
     }else{
       const countryName=interaction.options.getString("ulke");
-      country=countryName?await gameService.countryByName(interaction.guildId,countryName):null;
+      const country=countryName?await gameService.countryByName(interaction.guildId,countryName):null;
+      view=country?await dynastyService.viewByCountry(country.id):null;
     }
-    const view=country?await dynastyService.viewByCountry(country.id):null;
     const selectedMember=interaction.options.getString("uye");
-    const candidates=(view?.members??[]).filter((member)=>member.status==="ALIVE"&&member.id!==selectedMember)
+    const candidates=(externalCandidates??view?.members??[]).filter((member)=>member.status==="ALIVE"&&member.id!==selectedMember)
       .filter((member)=>!marriageSelection||(member.age!==null&&member.age>=MINIMUM_MARRIAGE_AGE&&!member.spouse_id));
-    await interaction.respond(candidates.filter((member)=>!query||(member.name+" "+member.title).toLocaleLowerCase("tr-TR").includes(query)).slice(0,25).map((member)=>({name:(member.title+" "+member.name+" • "+age(member.age)).slice(0,100),value:member.id})));
+    await interaction.respond(candidates.filter((member)=>!query||(member.name+" "+member.title+("dynasty_name" in member?" "+member.dynasty_name:"")).toLocaleLowerCase("tr-TR").includes(query)).slice(0,25).map((member)=>({
+      name:(member.title+" "+member.name+("dynasty_name" in member?" • "+member.dynasty_name:"")+" • "+age(member.age)).slice(0,100),value:member.id
+    })));
     return true;
   }
   await interaction.respond([]);

@@ -940,7 +940,7 @@ export const gameService = {
                  (SELECT member.name FROM dynasty_members member WHERE member.dynasty_id=dynasty.id AND member.status='ALIVE' AND member.is_heir LIMIT 1) AS heir,
                  (SELECT COUNT(*)::integer FROM dynasty_members member WHERE member.dynasty_id=dynasty.id AND member.status='ALIVE') AS living_members,
                  (SELECT COUNT(*)::integer FROM dynasty_members member WHERE member.dynasty_id=dynasty.id AND member.status='ALIVE' AND member.health='SICK') AS sick_members
-            FROM dynasties dynasty WHERE dynasty.country_id=$1`,[countryId])).rows[0]??null;
+            FROM dynasties dynasty WHERE dynasty.country_id=$1 AND dynasty.steppe_title_id IS NULL`,[countryId])).rows[0]??null;
       const allies=(await client.query<{name:string}>(
         `SELECT partner.name FROM country_alliances alliance
            JOIN countries partner ON partner.id=CASE WHEN alliance.proposer_country_id=$1 THEN alliance.receiver_country_id ELSE alliance.proposer_country_id END

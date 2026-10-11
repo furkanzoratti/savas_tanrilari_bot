@@ -108,6 +108,8 @@ import { activeRebelFactionRepairMigration } from "./active-rebel-faction-repair
 import { navalCaptureEvacuationMigration } from "./naval-capture-evacuation-migration.js";
 import { steppeInternalConflictsMigration } from "./steppe-internal-conflicts-migration.js";
 import { steppeKurultayMigration } from "./steppe-kurultay-migration.js";
+import { steppeTitleDynastiesMigration } from "./steppe-title-dynasties-migration.js";
+import { steppeTitleFamilyRostersMigration } from "./steppe-title-family-rosters-migration.js";
 
 export const migrations = [
   {
@@ -2433,5 +2435,7 @@ export const migrations = [
   activeRebelFactionRepairMigration,
   navalCaptureEvacuationMigration,
   steppeInternalConflictsMigration,
-  steppeKurultayMigration
+  steppeKurultayMigration,
+  steppeTitleDynastiesMigration,
+  steppeTitleFamilyRostersMigration
 ] as const;

@@ -93,6 +93,90 @@ async function audit(client:DbClient,guildId:string,actorId:string,action:string
   );
 }
 
+interface SteppeFamilyNames{
+  spouse:string;father:string;mother:string;brother:string;sister:string;son:string;daughter:string;
+}
+
+function titleFamilyNames(countryName:string,titleId:string):SteppeFamilyNames{
+  const slot=Number.parseInt(titleId.replaceAll("-","").slice(0,8),16)%4;
+  const country=countryName.toLocaleLowerCase("tr-TR");
+  const pools:SteppeFamilyNames[]=country.includes("xiongnu")?[
+    {spouse:"Altani",father:"Touman",mother:"Eje",brother:"Laoshang",sister:"Saranai",son:"Tumen",daughter:"Aybüke"},
+    {spouse:"Börte",father:"Jizhu",mother:"Ulan",brother:"Hulugu",sister:"Yesui",son:"Jiyu",daughter:"İlbilge"},
+    {spouse:"Qulan",father:"Xuluquan",mother:"Yanzhi",brother:"Udan",sister:"Alçi",son:"Huhanye",daughter:"Yulduz"},
+    {spouse:"Yimeng",father:"Wuwei",mother:"Gua",brother:"Woyanqudi",sister:"Qutlu",son:"Zhizhi",daughter:"Alçina"}
+  ]:country.includes("xianbei")?[
+    {spouse:"Murong Lian",father:"Tulu",mother:"Aru",brother:"Qifu",sister:"Lihua",son:"Tanshihuai",daughter:"Yueying"},
+    {spouse:"Tuoba Yue",father:"Mohan",mother:"Yuehua",brother:"Yuwen",sister:"Ruolan",son:"Murong Hui",daughter:"Mulan"},
+    {spouse:"Yuwen Lan",father:"Kebineng",mother:"Mingzhu",brother:"Duan",sister:"Xiaolian",son:"Tuoba Liwei",daughter:"Xiaoyan"},
+    {spouse:"Duan Ming",father:"Pifu",mother:"Lanying",brother:"Helian",sister:"Meilin",son:"Yuwen Mohuai",daughter:"Lanyue"}
+  ]:[
+    {spouse:"Saran",father:"Boro",mother:"Alun",brother:"Kara Boro",sister:"Aybüke",son:"Alp Boro",daughter:"Selenge"},
+    {spouse:"Ayana",father:"Tarkan",mother:"Umay",brother:"Kutlug",sister:"Bengisu",son:"İlter",daughter:"Aysun"},
+    {spouse:"Qulan",father:"Erkin",mother:"İlbilge",brother:"Bars",sister:"Aruna",son:"Kağan",daughter:"Altınçiçek"},
+    {spouse:"Altunai",father:"Buka",mother:"Yulduz",brother:"Temür",sister:"Sevin",son:"Tirig",daughter:"Günay"}
+  ];
+  return pools[slot]!;
+}
+
+async function ensureTitleDynasty(client:DbClient,input:{
+  guildId:string;countryId:string;countryName:string;titleId:string;tier:SteppeTitleTier;titleName:string;holderName:string;turn:number;actorId:string;
+}):Promise<void>{
+  const houseName=`${input.holderName}${input.tier==="KHAN"?" Han Hanesi":" Hanesi"}`.slice(0,80);
+  const dynasty=(await client.query<{id:string}>(`INSERT INTO dynasties(guild_id,country_id,steppe_title_id,name,created_by)
+    VALUES($1,$2,$3,$4,$5)
+    ON CONFLICT(steppe_title_id) WHERE steppe_title_id IS NOT NULL DO UPDATE SET updated_at=NOW()
+    RETURNING id`,[input.guildId,input.countryId,input.titleId,houseName,input.actorId])).rows[0]!;
+  if((await client.query("SELECT 1 FROM dynasty_members WHERE dynasty_id=$1 LIMIT 1",[dynasty.id])).rowCount)return;
+  const rootAge=input.tier==="KHAN"?42:38;
+  const member=(await client.query<{id:string}>(`INSERT INTO dynasty_members(
+    dynasty_id,name,gender,age,title,relation,status,health,is_monarch,is_heir,born_turn
+  ) VALUES($1,$2,'MALE',$3,$4,'Hane Reisi','ALIVE','HEALTHY',TRUE,FALSE,$5) RETURNING id`,
+  [dynasty.id,input.holderName,rootAge,input.titleName,input.turn-rootAge])).rows[0]!;
+  const names=titleFamilyNames(input.countryName,input.titleId);
+  const spouseAge=input.tier==="KHAN"?36:33;
+  const fatherAge=input.tier==="KHAN"?66:62;
+  const motherAge=input.tier==="KHAN"?63:59;
+  const spouse=(await client.query<{id:string}>(`INSERT INTO dynasty_members(
+    dynasty_id,name,gender,age,title,relation,status,health,is_monarch,is_heir,born_turn
+  ) VALUES($1,$2,'FEMALE',$3,$4,'Hane Reisinin Eşi','ALIVE','HEALTHY',FALSE,FALSE,$5) RETURNING id`,
+  [dynasty.id,names.spouse,spouseAge,input.tier==="KHAN"?"Han Eşi":"Toprak Ağası Eşi",input.turn-spouseAge])).rows[0]!;
+  const father=(await client.query<{id:string}>(`INSERT INTO dynasty_members(
+    dynasty_id,name,gender,age,title,relation,status,health,is_monarch,is_heir,born_turn
+  ) VALUES($1,$2,'MALE',$3,$4,'Hane Reisinin Babası','ALIVE','HEALTHY',FALSE,FALSE,$5) RETURNING id`,
+  [dynasty.id,names.father,fatherAge,input.tier==="KHAN"?"Eski Han":"Aksakal",input.turn-fatherAge])).rows[0]!;
+  const mother=(await client.query<{id:string}>(`INSERT INTO dynasty_members(
+    dynasty_id,name,gender,age,title,relation,status,health,is_monarch,is_heir,born_turn
+  ) VALUES($1,$2,'FEMALE',$3,'Hatun','Hane Reisinin Annesi','ALIVE','HEALTHY',FALSE,FALSE,$4) RETURNING id`,
+  [dynasty.id,names.mother,motherAge,input.turn-motherAge])).rows[0]!;
+  await client.query("UPDATE dynasty_members SET spouse_id=$1,father_id=$2,mother_id=$3,updated_at=NOW() WHERE id=$4",
+    [spouse.id,father.id,mother.id,member.id]);
+  await client.query("UPDATE dynasty_members SET spouse_id=$1,updated_at=NOW() WHERE id=$2",[member.id,spouse.id]);
+  const brotherAge=input.tier==="KHAN"?37:33;
+  const sisterAge=input.tier==="KHAN"?34:30;
+  const sonAge=input.tier==="KHAN"?18:16;
+  const daughterAge=input.tier==="KHAN"?15:13;
+  await client.query(`INSERT INTO dynasty_members(
+    dynasty_id,name,gender,age,title,relation,status,health,is_monarch,is_heir,succession_rank,mother_id,father_id,born_turn
+  ) VALUES
+    ($1,$2,'MALE',$3,$4,'Hane Reisinin Erkek Kardeşi','ALIVE','HEALTHY',FALSE,FALSE,3,$5,$6,$7),
+    ($1,$8,'FEMALE',$9,$4,'Hane Reisinin Kız Kardeşi','ALIVE','HEALTHY',FALSE,FALSE,4,$5,$6,$10),
+    ($1,$11,'MALE',$12,$13,'Hane Reisinin Oğlu','ALIVE','HEALTHY',FALSE,TRUE,1,$14,$15,$16),
+    ($1,$17,'FEMALE',$18,$19,'Hane Reisinin Kızı','ALIVE','HEALTHY',FALSE,FALSE,2,$14,$15,$20)`,[
+    dynasty.id,names.brother,brotherAge,input.tier==="KHAN"?"Han Kardeşi":"Ağa Kardeşi",mother.id,father.id,input.turn-brotherAge,
+    names.sister,sisterAge,input.turn-sisterAge,names.son,sonAge,input.tier==="KHAN"?"Han Oğlu":"Ağa Oğlu",spouse.id,member.id,input.turn-sonAge,
+    names.daughter,daughterAge,input.tier==="KHAN"?"Han Kızı":"Ağa Kızı",input.turn-daughterAge
+  ]);
+  await client.query(`INSERT INTO dynasty_events(dynasty_id,game_turn,event_type,member_id,details)
+    VALUES($1,$2,'DYNASTY_CREATED',$3,$4::jsonb)`,[dynasty.id,input.turn,member.id,JSON.stringify({
+      name:houseName,source:"STEPPE_TITLE_FAMILY",titleId:input.titleId,titleName:input.titleName
+    })]);
+  await client.query(`INSERT INTO dynasty_events(dynasty_id,game_turn,event_type,details)
+    VALUES($1,$2,'FAMILY_ROSTER_INITIALIZED',$3::jsonb)`,[dynasty.id,input.turn,JSON.stringify({
+      source:"STEPPE_TITLE_FAMILY",memberCount:8,titleId:input.titleId,titleName:input.titleName
+    })]);
+}
+
 async function viewWithClient(client:DbClient,guildId:string,countryId:string):Promise<SteppePoliticsView|null>{
   const confed=await confederation(client,guildId,countryId);
   if(!confed)return null;
@@ -219,6 +303,8 @@ export const steppePoliticsService={
         INSERT INTO steppe_internal_titles(confederation_id,tier,title_name,holder_name,holder_user_id,loyalty,relation_score,created_turn)
         VALUES($1,'KHAN',$2,$3,$4,100,100,$5) RETURNING id`,
         [confed.id,`${country.name} Hanı`,input.holderName.trim(),input.holderUserId??null,country.current_turn])).rows[0]!;
+      await ensureTitleDynasty(client,{guildId:input.guildId,countryId:country.id,countryName:country.name,titleId:title.id,tier:"KHAN",
+        titleName:`${country.name} Hanı`,holderName:input.holderName.trim(),turn:Number(country.current_turn),actorId:input.actorId});
       await client.query(`
         INSERT INTO country_special_unit_unlocks(country_id,unit_type,granted_by)
         SELECT $1,unlocked.unit_type,$2
@@ -242,6 +328,8 @@ export const steppePoliticsService={
         INSERT INTO steppe_internal_titles(confederation_id,tier,title_name,holder_name,holder_user_id,liege_title_id,loyalty,relation_score,created_turn)
         VALUES($1,'LANDHOLDER',$2,$3,$4,$5,$6,$7,$8) RETURNING id`,[confed.id,input.titleName.trim(),input.holderName.trim(),input.holderUserId??null,
           liege.id,60,0,confed.current_turn])).rows[0]!;
+      await ensureTitleDynasty(client,{guildId:input.guildId,countryId:input.countryId,countryName:confed.country_name,titleId:title.id,tier:"LANDHOLDER",
+        titleName:input.titleName.trim(),holderName:input.holderName.trim(),turn:confed.current_turn,actorId:input.actorId});
       await addEvent(client,{confederationId:confed.id,turn:confed.current_turn,type:"TITLE_CREATED",titleId:title.id,actorId:input.actorId,
         description:`${input.titleName.trim()} Toprak Ağalığı ${input.holderName.trim()} adına oluşturuldu.`,details:{tier:"LANDHOLDER",liegeTitleId:liege.id}});
       await audit(client,input.guildId,input.actorId,"STEPPE_TITLE_CREATE","steppe_internal_title",title.id,input);
