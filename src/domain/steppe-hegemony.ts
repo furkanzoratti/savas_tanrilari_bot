@@ -1,8 +1,8 @@
 export const DEFAULT_STEPPE_HEGEMON_NAME = "Xiongnu Konfederasyonu";
 
 export const DEFAULT_STEPPE_TRIBUTARIES = [
-  { name: "Xianbei Konfederasyonu", loyalty: 60 },
-  { name: "Dingling Konfederasyonu", loyalty: 45 }
+  { name: "Xianbei Konfederasyonu" },
+  { name: "Dingling Konfederasyonu" }
 ] as const;
 
 export const STEPPE_TRIBUTE_FULL_RATE = 0.10;
@@ -11,12 +11,11 @@ export type SteppeTributeResponse = "FULL" | "HALF" | "NONE";
 
 export const STEPPE_TRIBUTE_RESPONSES: Record<SteppeTributeResponse, {
   label: string;
-  loyaltyChange: number;
   authorityChange: number;
 }> = {
-  FULL: { label: "Tam Ödeme", loyaltyChange: 5, authorityChange: 2 },
-  HALF: { label: "Yarım Ödeme", loyaltyChange: -4, authorityChange: -2 },
-  NONE: { label: "Ödeme Yok", loyaltyChange: -12, authorityChange: -5 }
+  FULL: { label: "Tam Ödeme", authorityChange: 0 },
+  HALF: { label: "Yarım Ödeme", authorityChange: -2 },
+  NONE: { label: "Ödeme Yok", authorityChange: -5 }
 };
 
 export function fullSteppeTributeDue(latestNetAcquisitionIncome: number): number {

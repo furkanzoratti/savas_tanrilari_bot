@@ -245,15 +245,15 @@ const server = createServer(async (request, response) => {
       if (!session) return;
       return json(response, 200, await adminPanelService.updateSteppeHegemony(session.sub, await body(request)));
     }
-    const steppeTributaryUpdateMatch = request.method === "PATCH"
-      ? url.pathname.match(/^\/api\/admin\/steppe-tributaries\/([0-9a-f-]+)$/iu)
+    const steppeKurultayVoteMatch = request.method === "POST"
+      ? url.pathname.match(/^\/api\/admin\/steppe-kurultay\/([0-9a-f-]+)\/vote$/iu)
       : null;
-    if (steppeTributaryUpdateMatch) {
+    if (steppeKurultayVoteMatch) {
       const session = requireMutation(request, response);
       if (!session) return;
-      return json(response, 200, await adminPanelService.updateSteppeTributary(
+      return json(response, 200, await adminPanelService.voteSteppeKurultayNpc(
         session.sub,
-        steppeTributaryUpdateMatch[1]!,
+        steppeKurultayVoteMatch[1]!,
         await body(request)
       ));
     }

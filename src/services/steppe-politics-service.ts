@@ -1,13 +1,14 @@
 import {pool,withTransaction,type DbClient} from "../db/pool.js";
 import {
-  clampSteppeAuthority,clampSteppeLoyalty,clampSteppeRelation,STEPPE_UNANSWERED_WAR_CALL,
-  STEPPE_WAR_CALL_RESPONSES,type SteppeTitleTier,type SteppeWarCallResponse
+  clampSteppeAuthority,STEPPE_UNANSWERED_WAR_CALL,
+  STEPPE_CONFLICT_LABELS,STEPPE_WAR_CALL_RESPONSES,
+  type SteppeConflictType,type SteppeTitleTier,type SteppeWarCallResponse
 } from "../domain/steppe-politics.js";
 import {GameError} from "./game-service.js";
 
 export interface SteppeInternalTitleView{
   id:string;tier:SteppeTitleTier;titleName:string;holderName:string;holderUserId:string|null;
-  liegeTitleId:string|null;liegeTitleName:string|null;loyalty:number;relationScore:number;
+  liegeTitleId:string|null;liegeTitleName:string|null;
   holdings:Array<{id:string;name:string}>;
 }
 export interface SteppeWarCallResponseView{
@@ -21,7 +22,14 @@ export interface SteppeWarCallView{
 export interface SteppePoliticsView{
   id:string;countryId:string;countryName:string;authority:number;currentTurn:number;
   titles:SteppeInternalTitleView[];warCalls:SteppeWarCallView[];
-  events:Array<{turn:number;type:string;description:string;titleName:string|null;loyaltyDelta:number;relationDelta:number;authorityDelta:number}>;
+  events:Array<{turn:number;type:string;description:string;titleName:string|null;authorityDelta:number}>;
+  conflicts:SteppeConflictView[];
+}
+export interface SteppeConflictView{
+  id:string;type:SteppeConflictType;attackerTitleId:string;attackerTitleName:string;attackerHolderName:string;
+  defenderTitleId:string;defenderTitleName:string;defenderHolderName:string;objectiveSettlementId:string|null;
+  objectiveSettlementName:string|null;reason:string;status:"ACTIVE"|"RESOLVED"|"CANCELLED";openedTurn:number;
+  battleId:string|null;battleStatus:string|null;winnerTitleId:string|null;winnerTitleName:string|null;resolutionReason:string|null;
 }
 export interface SteppeSettlementDocumentAccess{
   tier:SteppeTitleTier;titleName:string;holderName:string;settlementIds:string[];
@@ -40,22 +48,40 @@ async function confederation(client:DbClient,guildId:string,countryId:string,loc
 async function titleByValue(client:DbClient,confederationId:string,value:string,lock=false){
   return (await client.query<{
     id:string;tier:SteppeTitleTier;title_name:string;holder_name:string;holder_user_id:string|null;
-    liege_title_id:string|null;loyalty:number;relation_score:number;
-  }>(`SELECT id,tier,title_name,holder_name,holder_user_id,liege_title_id,loyalty,relation_score
+    liege_title_id:string|null;
+  }>(`SELECT id,tier,title_name,holder_name,holder_user_id,liege_title_id
         FROM steppe_internal_titles
        WHERE confederation_id=$1 AND status='ACTIVE' AND (id::text=$2 OR lower(title_name)=lower($2))
        LIMIT 1 ${lock?"FOR UPDATE":""}`,[confederationId,value.trim()])).rows[0]??null;
 }
 
+async function titleAcrossGuild(client:DbClient,guildId:string,value:string,lock=false){
+  const token=value.trim();
+  return (await client.query<{
+    id:string;tier:SteppeTitleTier;title_name:string;holder_name:string;holder_user_id:string|null;
+    liege_title_id:string|null;confederation_id:string;country_id:string;country_name:string;authority:number;current_turn:number;
+  }>(`SELECT title.id,title.tier,title.title_name,title.holder_name,title.holder_user_id,title.liege_title_id,
+             confederation.id AS confederation_id,confederation.country_id,
+             country.name AS country_name,confederation.authority,guild.current_turn
+        FROM steppe_internal_titles title
+        JOIN steppe_confederations confederation ON confederation.id=title.confederation_id
+        JOIN countries country ON country.id=confederation.country_id
+        JOIN guilds guild ON guild.discord_id=confederation.guild_id
+       WHERE confederation.guild_id=$1 AND confederation.status='ACTIVE' AND title.status='ACTIVE'
+         AND (title.id::text=$2 OR lower(title.title_name)=lower($2) OR lower(title.holder_name)=lower($2))
+       ORDER BY CASE WHEN title.id::text=$2 THEN 0 WHEN lower(title.title_name)=lower($2) THEN 1 ELSE 2 END
+       LIMIT 1 ${lock?"FOR UPDATE OF title,confederation":""}`,[guildId,token])).rows[0]??null;
+}
+
 async function addEvent(client:DbClient,input:{
   confederationId:string;turn:number;type:string;titleId?:string|null;actorId:string;
-  loyaltyDelta?:number;relationDelta?:number;authorityDelta?:number;description:string;details?:unknown;
+  authorityDelta?:number;description:string;details?:unknown;
 }){
   await client.query(
     `INSERT INTO steppe_political_events(
        confederation_id,game_turn,event_type,title_id,actor_user_id,loyalty_delta,relation_delta,authority_delta,description,details
      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)`,
-    [input.confederationId,input.turn,input.type,input.titleId??null,input.actorId,input.loyaltyDelta??0,input.relationDelta??0,
+    [input.confederationId,input.turn,input.type,input.titleId??null,input.actorId,0,0,
       input.authorityDelta??0,input.description,JSON.stringify(input.details??{})]
   );
 }
@@ -72,9 +98,9 @@ async function viewWithClient(client:DbClient,guildId:string,countryId:string):P
   if(!confed)return null;
   const titles=(await client.query<{
     id:string;tier:SteppeTitleTier;title_name:string;holder_name:string;holder_user_id:string|null;
-    liege_title_id:string|null;liege_title_name:string|null;loyalty:number;relation_score:number;
+    liege_title_id:string|null;liege_title_name:string|null;
   }>(`SELECT title.id,title.tier,title.title_name,title.holder_name,title.holder_user_id,title.liege_title_id,
-             liege.title_name AS liege_title_name,title.loyalty,title.relation_score
+             liege.title_name AS liege_title_name
         FROM steppe_internal_titles title
         LEFT JOIN steppe_internal_titles liege ON liege.id=title.liege_title_id
        WHERE title.confederation_id=$1 AND title.status='ACTIVE'
@@ -96,18 +122,36 @@ async function viewWithClient(client:DbClient,guildId:string,countryId:string):P
        WHERE response.war_call_id=ANY($1::uuid[]) ORDER BY title.title_name`,[calls.map((call)=>call.id)])).rows:[];
   const events=(await client.query<{
     game_turn:number;event_type:string;description:string;title_name:string|null;
-    loyalty_delta:number;relation_delta:number;authority_delta:number;
+    authority_delta:number;
   }>(`SELECT event.game_turn,event.event_type,event.description,title.title_name,
-             event.loyalty_delta,event.relation_delta,event.authority_delta
+             event.authority_delta
         FROM steppe_political_events event LEFT JOIN steppe_internal_titles title ON title.id=event.title_id
        WHERE event.confederation_id=$1 ORDER BY event.created_at DESC LIMIT 20`,[confed.id])).rows;
+  const conflicts=(await client.query<{
+    id:string;conflict_type:SteppeConflictType;attacker_title_id:string;attacker_title_name:string;attacker_holder_name:string;
+    defender_title_id:string;defender_title_name:string;defender_holder_name:string;objective_settlement_id:string|null;
+    objective_settlement_name:string|null;reason:string;status:"ACTIVE"|"RESOLVED"|"CANCELLED";opened_turn:number;
+    battle_id:string|null;battle_status:string|null;winner_title_id:string|null;winner_title_name:string|null;resolution_reason:string|null;
+  }>(`SELECT conflict.id,conflict.conflict_type,conflict.attacker_title_id,attacker.title_name AS attacker_title_name,
+             attacker.holder_name AS attacker_holder_name,conflict.defender_title_id,defender.title_name AS defender_title_name,
+             defender.holder_name AS defender_holder_name,conflict.objective_settlement_id,settlement.name AS objective_settlement_name,
+             conflict.reason,conflict.status,conflict.opened_turn,conflict.battle_id,battle.status AS battle_status,
+             conflict.winner_title_id,winner.title_name AS winner_title_name,conflict.resolution_reason
+        FROM steppe_internal_conflicts conflict
+        JOIN steppe_internal_titles attacker ON attacker.id=conflict.attacker_title_id
+        JOIN steppe_internal_titles defender ON defender.id=conflict.defender_title_id
+        LEFT JOIN settlements settlement ON settlement.id=conflict.objective_settlement_id
+        LEFT JOIN battles battle ON battle.id=conflict.battle_id
+        LEFT JOIN steppe_internal_titles winner ON winner.id=conflict.winner_title_id
+       WHERE conflict.guild_id=$1 AND (attacker.confederation_id=$2 OR defender.confederation_id=$2)
+       ORDER BY CASE conflict.status WHEN 'ACTIVE' THEN 0 ELSE 1 END,conflict.created_at DESC LIMIT 20`,[guildId,confed.id])).rows;
   return{
     id:confed.id,countryId:confed.country_id,countryName:confed.country_name,
     authority:Number(confed.authority),currentTurn:Number(confed.current_turn),
     titles:titles.map((title)=>({
       id:title.id,tier:title.tier,titleName:title.title_name,holderName:title.holder_name,holderUserId:title.holder_user_id,
-      liegeTitleId:title.liege_title_id,liegeTitleName:title.liege_title_name,loyalty:Number(title.loyalty),
-      relationScore:Number(title.relation_score),holdings:holdings.filter((holding)=>holding.title_id===title.id).map(({id,name})=>({id,name}))
+      liegeTitleId:title.liege_title_id,liegeTitleName:title.liege_title_name,
+      holdings:holdings.filter((holding)=>holding.title_id===title.id).map(({id,name})=>({id,name}))
     })),
     warCalls:calls.map((call)=>({
       id:call.id,targetLabel:call.target_label,reason:call.reason,openedTurn:Number(call.opened_turn),status:call.status,
@@ -117,7 +161,14 @@ async function viewWithClient(client:DbClient,guildId:string,countryId:string):P
       }))
     })),
     events:events.map((event)=>({turn:Number(event.game_turn),type:event.event_type,description:event.description,titleName:event.title_name,
-      loyaltyDelta:Number(event.loyalty_delta),relationDelta:Number(event.relation_delta),authorityDelta:Number(event.authority_delta)}))
+      authorityDelta:Number(event.authority_delta)})),
+    conflicts:conflicts.map((conflict)=>({id:conflict.id,type:conflict.conflict_type,attackerTitleId:conflict.attacker_title_id,
+      attackerTitleName:conflict.attacker_title_name,attackerHolderName:conflict.attacker_holder_name,
+      defenderTitleId:conflict.defender_title_id,defenderTitleName:conflict.defender_title_name,defenderHolderName:conflict.defender_holder_name,
+      objectiveSettlementId:conflict.objective_settlement_id,objectiveSettlementName:conflict.objective_settlement_name,
+      reason:conflict.reason,status:conflict.status,openedTurn:Number(conflict.opened_turn),battleId:conflict.battle_id,
+      battleStatus:conflict.battle_status,winnerTitleId:conflict.winner_title_id,winnerTitleName:conflict.winner_title_name,
+      resolutionReason:conflict.resolution_reason}))
   };
 }
 
@@ -181,7 +232,7 @@ export const steppePoliticsService={
     });
   },
 
-  async addTitle(input:{guildId:string;countryId:string;actorId:string;titleName:string;holderName:string;holderUserId?:string|null;loyalty?:number;relationScore?:number}){
+  async addTitle(input:{guildId:string;countryId:string;actorId:string;titleName:string;holderName:string;holderUserId?:string|null}){
     return withTransaction(async(client)=>{
       const confed=await confederation(client,input.guildId,input.countryId,true);if(!confed)throw new GameError("Önce bozkır iç siyasetini kurun.");
       const liege=(await client.query<{id:string}>(
@@ -190,7 +241,7 @@ export const steppePoliticsService={
       const title=(await client.query<{id:string}>(`
         INSERT INTO steppe_internal_titles(confederation_id,tier,title_name,holder_name,holder_user_id,liege_title_id,loyalty,relation_score,created_turn)
         VALUES($1,'LANDHOLDER',$2,$3,$4,$5,$6,$7,$8) RETURNING id`,[confed.id,input.titleName.trim(),input.holderName.trim(),input.holderUserId??null,
-          liege.id,clampSteppeLoyalty(input.loyalty??60),clampSteppeRelation(input.relationScore??0),confed.current_turn])).rows[0]!;
+          liege.id,60,0,confed.current_turn])).rows[0]!;
       await addEvent(client,{confederationId:confed.id,turn:confed.current_turn,type:"TITLE_CREATED",titleId:title.id,actorId:input.actorId,
         description:`${input.titleName.trim()} Toprak Ağalığı ${input.holderName.trim()} adına oluşturuldu.`,details:{tier:"LANDHOLDER",liegeTitleId:liege.id}});
       await audit(client,input.guildId,input.actorId,"STEPPE_TITLE_CREATE","steppe_internal_title",title.id,input);
@@ -216,27 +267,15 @@ export const steppePoliticsService={
     });
   },
 
-  async setValues(input:{guildId:string;countryId:string;actorId:string;title?:string|null;authority?:number|null;loyalty?:number|null;relationScore?:number|null;reason:string}){
+  async setAuthority(input:{guildId:string;countryId:string;actorId:string;authority:number;reason:string}){
     return withTransaction(async(client)=>{
-      if(input.authority==null&&input.loyalty==null&&input.relationScore==null)
-        throw new GameError("Otorite, sadakat veya ilişki değerlerinden en az birini girin.");
-      if(!input.title&&(input.loyalty!=null||input.relationScore!=null))
-        throw new GameError("Sadakat veya ilişki düzenlemek için bir bozkır unvanı seçin.");
       const confed=await confederation(client,input.guildId,input.countryId,true);if(!confed)throw new GameError("Bozkır iç siyaseti kurulu değil.");
-      let title:null|Awaited<ReturnType<typeof titleByValue>>=null;
-      if(input.title){title=await titleByValue(client,confed.id,input.title,true);if(!title)throw new GameError("Bozkır unvanı bulunamadı.");}
-      const nextAuthority=input.authority==null?Number(confed.authority):clampSteppeAuthority(input.authority);
-      const nextLoyalty=!title||input.loyalty==null?title?.loyalty??0:clampSteppeLoyalty(input.loyalty);
-      const nextRelation=!title||input.relationScore==null?title?.relation_score??0:clampSteppeRelation(input.relationScore);
-      if(input.authority!=null)await client.query("UPDATE steppe_confederations SET authority=$2,updated_at=NOW() WHERE id=$1",[confed.id,nextAuthority]);
-      if(title&&(input.loyalty!=null||input.relationScore!=null))await client.query(
-        "UPDATE steppe_internal_titles SET loyalty=$2,relation_score=$3,updated_at=NOW() WHERE id=$1",[title.id,nextLoyalty,nextRelation]
-      );
-      const loyaltyDelta=title?nextLoyalty-Number(title.loyalty):0,relationDelta=title?nextRelation-Number(title.relation_score):0;
+      const nextAuthority=clampSteppeAuthority(input.authority);
+      await client.query("UPDATE steppe_confederations SET authority=$2,updated_at=NOW() WHERE id=$1",[confed.id,nextAuthority]);
       const authorityDelta=nextAuthority-Number(confed.authority);
-      await addEvent(client,{confederationId:confed.id,turn:confed.current_turn,type:"MANUAL_ADJUSTMENT",titleId:title?.id??null,actorId:input.actorId,
-        loyaltyDelta,relationDelta,authorityDelta,description:input.reason});
-      await audit(client,input.guildId,input.actorId,"STEPPE_POLITICS_ADJUST",title?"steppe_internal_title":"steppe_confederation",title?.id??confed.id,input);
+      await addEvent(client,{confederationId:confed.id,turn:confed.current_turn,type:"MANUAL_AUTHORITY_ADJUSTMENT",actorId:input.actorId,
+        authorityDelta,description:input.reason});
+      await audit(client,input.guildId,input.actorId,"STEPPE_AUTHORITY_ADJUST","steppe_confederation",confed.id,input);
       return (await viewWithClient(client,input.guildId,input.countryId))!;
     });
   },
@@ -286,9 +325,9 @@ export const steppePoliticsService={
     return withTransaction(async(client)=>{
       const row=(await client.query<{
         confederation_id:string;country_id:string;current_turn:number;call_status:string;response_status:string;
-        title_name:string;holder_user_id:string|null;loyalty:number;relation_score:number;authority:number;
+        title_name:string;holder_user_id:string|null;authority:number;
       }>(`SELECT call.confederation_id,confederation.country_id,guild.current_turn,call.status AS call_status,
-                response.response AS response_status,title.title_name,title.holder_user_id,title.loyalty,title.relation_score,confederation.authority
+                response.response AS response_status,title.title_name,title.holder_user_id,confederation.authority
            FROM steppe_war_call_responses response
            JOIN steppe_war_calls call ON call.id=response.war_call_id
            JOIN steppe_confederations confederation ON confederation.id=call.confederation_id
@@ -300,15 +339,13 @@ export const steppePoliticsService={
       if(row.call_status!=="OPEN"||row.response_status!=="PENDING")throw new GameError("Bu savaş çağrısı artık yanıtlanamaz.");
       if(!input.gameMaster&&row.holder_user_id!==input.actorId)throw new GameError("Bu çağrıyı yalnızca ilgili Toprak Ağası veya oyun yöneticisi yanıtlayabilir.");
       const effect=STEPPE_WAR_CALL_RESPONSES[input.response];if(!effect)throw new GameError("Geçersiz savaş çağrısı yanıtı.");
-      await client.query("UPDATE steppe_internal_titles SET loyalty=$2,relation_score=$3,updated_at=NOW() WHERE id=$1",
-        [input.titleId,clampSteppeLoyalty(Number(row.loyalty)+effect.loyaltyDelta),clampSteppeRelation(Number(row.relation_score)+effect.relationDelta)]);
       await client.query("UPDATE steppe_confederations SET authority=$2,updated_at=NOW() WHERE id=$1",
         [row.confederation_id,clampSteppeAuthority(Number(row.authority)+effect.authorityDelta)]);
       await client.query(`UPDATE steppe_war_call_responses SET response=$3,loyalty_delta=$4,relation_delta=$5,authority_delta=$6,
         responded_by=$7,responded_at=NOW() WHERE war_call_id=$1 AND title_id=$2`,
-      [input.warCallId,input.titleId,input.response,effect.loyaltyDelta,effect.relationDelta,effect.authorityDelta,input.actorId]);
+      [input.warCallId,input.titleId,input.response,0,0,effect.authorityDelta,input.actorId]);
       await addEvent(client,{confederationId:row.confederation_id,turn:Number(row.current_turn),type:"WAR_CALL_RESPONSE",titleId:input.titleId,
-        actorId:input.actorId,loyaltyDelta:effect.loyaltyDelta,relationDelta:effect.relationDelta,authorityDelta:effect.authorityDelta,
+        actorId:input.actorId,authorityDelta:effect.authorityDelta,
         description:`${row.title_name} savaş çağrısına ${effect.label} yanıtını verdi.`,details:{warCallId:input.warCallId,response:input.response}});
       await audit(client,input.guildId,input.actorId,"STEPPE_WAR_CALL_RESPONSE","steppe_war_call",input.warCallId,input);
       return{countryId:row.country_id,effect};
@@ -321,19 +358,17 @@ export const steppePoliticsService={
       const call=(await client.query<{id:string}>(
         "SELECT id FROM steppe_war_calls WHERE id=$1 AND confederation_id=$2 AND status='OPEN' FOR UPDATE",[input.warCallId,confed.id]
       )).rows[0];if(!call)throw new GameError("Açık savaş çağrısı bulunamadı.");
-      const pending=(await client.query<{title_id:string;title_name:string;loyalty:number;relation_score:number}>(`
-        SELECT title.id AS title_id,title.title_name,title.loyalty,title.relation_score
+      const pending=(await client.query<{title_id:string;title_name:string}>(`
+        SELECT title.id AS title_id,title.title_name
           FROM steppe_war_call_responses response JOIN steppe_internal_titles title ON title.id=response.title_id
          WHERE response.war_call_id=$1 AND response.response='PENDING' FOR UPDATE OF response,title`,[call.id])).rows;
       let authority=Number(confed.authority);
       for(const title of pending){
         const effect=STEPPE_UNANSWERED_WAR_CALL;
         authority=clampSteppeAuthority(authority+effect.authorityDelta);
-        await client.query("UPDATE steppe_internal_titles SET loyalty=$2,relation_score=$3,updated_at=NOW() WHERE id=$1",
-          [title.title_id,clampSteppeLoyalty(Number(title.loyalty)+effect.loyaltyDelta),clampSteppeRelation(Number(title.relation_score)+effect.relationDelta)]);
         await client.query(`UPDATE steppe_war_call_responses SET response='UNANSWERED',loyalty_delta=$3,relation_delta=$4,authority_delta=$5,
           responded_by=$6,responded_at=NOW() WHERE war_call_id=$1 AND title_id=$2`,
-        [call.id,title.title_id,effect.loyaltyDelta,effect.relationDelta,effect.authorityDelta,input.actorId]);
+        [call.id,title.title_id,0,0,effect.authorityDelta,input.actorId]);
         await addEvent(client,{confederationId:confed.id,turn:confed.current_turn,type:"WAR_CALL_UNANSWERED",titleId:title.title_id,actorId:input.actorId,
           ...effect,description:`${title.title_name} savaş çağrısını cevapsız bıraktı.`,details:{warCallId:call.id}});
       }
@@ -341,6 +376,131 @@ export const steppePoliticsService={
       await client.query("UPDATE steppe_war_calls SET status='CLOSED',closed_by=$2,closed_at=NOW() WHERE id=$1",[call.id,input.actorId]);
       await audit(client,input.guildId,input.actorId,"STEPPE_WAR_CALL_CLOSE","steppe_war_call",call.id,{unanswered:pending.length});
       return (await viewWithClient(client,input.guildId,input.countryId))!;
+    });
+  },
+
+  async titleChoices(guildId:string,countryId?:string|null){
+    return (await pool.query<{id:string;title_name:string;holder_name:string;holder_user_id:string|null;tier:SteppeTitleTier;country_id:string;country_name:string}>(`
+      SELECT title.id,title.title_name,title.holder_name,title.holder_user_id,title.tier,confederation.country_id,country.name AS country_name
+        FROM steppe_internal_titles title
+        JOIN steppe_confederations confederation ON confederation.id=title.confederation_id
+        JOIN countries country ON country.id=confederation.country_id
+       WHERE confederation.guild_id=$1 AND confederation.status='ACTIVE' AND title.status='ACTIVE'
+         AND ($2::uuid IS NULL OR confederation.country_id=$2)
+       ORDER BY country.name,CASE title.tier WHEN 'KHAN' THEN 0 ELSE 1 END,title.title_name`,[guildId,countryId??null])).rows;
+  },
+
+  async armyChoices(guildId:string,titleValue:string){
+    const client=await pool.connect();
+    try{
+      const title=await titleAcrossGuild(client,guildId,titleValue);if(!title)return[];
+      return (await client.query<{id:string;name:string;total:number;steppe_title_id:string|null}>(`
+        SELECT army.id,army.name,COALESCE(SUM(unit.quantity),0)::integer AS total,army.steppe_title_id
+          FROM armies army LEFT JOIN army_units unit ON unit.army_id=army.id
+         WHERE army.guild_id=$1 AND army.country_id=$2
+         GROUP BY army.id,army.name,army.steppe_title_id ORDER BY army.name`,[guildId,title.country_id])).rows;
+    }finally{client.release();}
+  },
+
+  async assignArmy(input:{guildId:string;actorId:string;title:string;army:string;gameMaster:boolean}){
+    return withTransaction(async(client)=>{
+      const title=await titleAcrossGuild(client,input.guildId,input.title,true);if(!title)throw new GameError("Bozkır unvanı bulunamadı.");
+      if(!input.gameMaster&&title.holder_user_id!==input.actorId)throw new GameError("Bir orduyu yalnızca kendi bozkır unvanınıza bağlayabilirsiniz.");
+      const army=(await client.query<{id:string;name:string;country_id:string}>(`
+        SELECT id,name,country_id FROM armies WHERE guild_id=$1 AND country_id=$2 AND (id::text=$3 OR lower(name)=lower($3)) FOR UPDATE`,
+      [input.guildId,title.country_id,input.army.trim()])).rows[0];
+      if(!army)throw new GameError("Bu bozkır devletine ait ordu bulunamadı.");
+      if((await client.query(`SELECT 1 FROM battle_army_assignments assignment
+        JOIN battles battle ON battle.id=assignment.battle_id
+        WHERE assignment.army_id=$1 AND battle.status NOT IN ('FINISHED','CANCELLED') LIMIT 1`,[army.id])).rowCount)
+        throw new GameError("Etkin bir savaşta bulunan ordunun bozkır unvanı değiştirilemez.");
+      const invalid=(await client.query<{name:string}>(`
+        SELECT DISTINCT settlement.name FROM army_units unit
+        JOIN settlements settlement ON settlement.id=unit.settlement_id
+        WHERE unit.army_id=$1 AND NOT EXISTS(
+          SELECT 1 FROM steppe_title_holdings holding WHERE holding.title_id=$2 AND holding.settlement_id=unit.settlement_id
+        )`,[army.id,title.id])).rows;
+      if(invalid.length)throw new GameError(`Ordu, unvanın mülkü olmayan yerleşkelerden birlik içeriyor: ${invalid.map((row)=>row.name).join(", ")}.`);
+      if(!(await client.query("SELECT 1 FROM army_units WHERE army_id=$1 LIMIT 1",[army.id])).rowCount)
+        throw new GameError("Boş bir ordu bozkır unvanına bağlanamaz.");
+      await client.query("UPDATE armies SET steppe_title_id=$2,updated_at=NOW() WHERE id=$1",[army.id,title.id]);
+      await addEvent(client,{confederationId:title.confederation_id,turn:title.current_turn,type:"TITLE_ARMY_ASSIGNED",titleId:title.id,
+        actorId:input.actorId,description:`${army.name}, ${title.title_name} kuvveti olarak kaydedildi.`,details:{armyId:army.id}});
+      await audit(client,input.guildId,input.actorId,"STEPPE_TITLE_ARMY_ASSIGN","army",army.id,{titleId:title.id,titleName:title.title_name});
+      return{armyId:army.id,armyName:army.name,titleId:title.id,titleName:title.title_name,countryId:title.country_id,countryName:title.country_name};
+    });
+  },
+
+  async openConflict(input:{guildId:string;actorId:string;attackerTitle:string;defenderTitle:string;objectiveSettlement?:string|null;reason:string;gameMaster:boolean}){
+    return withTransaction(async(client)=>{
+      const attacker=await titleAcrossGuild(client,input.guildId,input.attackerTitle,true);
+      const defender=await titleAcrossGuild(client,input.guildId,input.defenderTitle,true);
+      if(!attacker||!defender)throw new GameError("Saldıran veya savunan bozkır unvanı bulunamadı.");
+      if(attacker.id===defender.id)throw new GameError("Bir unvan kendisine savaş açamaz.");
+      if(!input.gameMaster&&attacker.holder_user_id!==input.actorId)throw new GameError("İç savaşı yalnızca saldıran unvanın sahibi veya oyun yöneticisi açabilir.");
+      let type:SteppeConflictType;
+      if(attacker.tier==="LANDHOLDER"&&defender.tier==="LANDHOLDER"&&attacker.confederation_id===defender.confederation_id)type="LANDHOLDER_FEUD";
+      else if(attacker.tier==="KHAN"&&defender.tier==="LANDHOLDER"&&attacker.confederation_id===defender.confederation_id)type="KHAN_SUPPRESSION";
+      else if(attacker.tier==="LANDHOLDER"&&defender.tier==="KHAN"&&attacker.confederation_id===defender.confederation_id)type="LANDHOLDER_REVOLT";
+      else if(attacker.tier==="KHAN"&&defender.tier==="KHAN"&&attacker.confederation_id!==defender.confederation_id)type="KHAN_WAR";
+      else throw new GameError("Bu iki bozkır unvanı arasında desteklenen bir savaş türü yok. Toprak Ağaları yalnız kendi konfederasyonlarında savaşabilir; Hanlar ise başka Hanlarla savaşabilir.");
+      if(type==="KHAN_WAR"&&input.objectiveSettlement?.trim())
+        throw new GameError("Hanlar arası savaşta ülke sınırı değiştiren yerleşke devri normal savaş sonucu ve yerleşke devir sistemiyle işlenmelidir; iç savaş hedefini boş bırakın.");
+      if((await client.query(`SELECT 1 FROM steppe_internal_conflicts WHERE guild_id=$1 AND status='ACTIVE'
+        AND ((attacker_title_id=$2 AND defender_title_id=$3) OR (attacker_title_id=$3 AND defender_title_id=$2)) LIMIT 1`,
+      [input.guildId,attacker.id,defender.id])).rowCount)
+        throw new GameError("Bu iki bozkır unvanı arasında zaten etkin bir savaş ilanı bulunuyor.");
+      let objective:null|{id:string;name:string}=null;
+      if(input.objectiveSettlement?.trim()){
+        objective=(await client.query<{id:string;name:string}>(`
+          SELECT settlement.id,settlement.name FROM steppe_title_holdings holding
+          JOIN settlements settlement ON settlement.id=holding.settlement_id
+          WHERE holding.title_id=$1 AND (settlement.id::text=$2 OR lower(settlement.name)=lower($2))`,
+        [defender.id,input.objectiveSettlement.trim()])).rows[0]??null;
+        if(!objective)throw new GameError("Savaş hedefi savunan unvana ait bir yerleşke olmalıdır.");
+      }
+      const conflict=(await client.query<{id:string}>(`
+        INSERT INTO steppe_internal_conflicts(guild_id,attacker_title_id,defender_title_id,conflict_type,objective_settlement_id,reason,opened_turn,opened_by)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,[input.guildId,attacker.id,defender.id,type,objective?.id??null,input.reason.trim(),attacker.current_turn,input.actorId])).rows[0]!;
+      const description=`${attacker.title_name}, ${defender.title_name} unvanına karşı ${STEPPE_CONFLICT_LABELS[type]} başlattı.`;
+      for(const confederationId of new Set([attacker.confederation_id,defender.confederation_id]))await addEvent(client,{confederationId,turn:attacker.current_turn,
+        type:"INTERNAL_CONFLICT_OPENED",titleId:attacker.id,actorId:input.actorId,description,
+        details:{conflictId:conflict.id,type,defenderTitleId:defender.id,objectiveSettlementId:objective?.id??null}});
+      await audit(client,input.guildId,input.actorId,"STEPPE_INTERNAL_CONFLICT_OPEN","steppe_internal_conflict",conflict.id,input);
+      return{id:conflict.id,type,label:STEPPE_CONFLICT_LABELS[type],attackerTitleName:attacker.title_name,defenderTitleName:defender.title_name,
+        objectiveSettlementName:objective?.name??null,reason:input.reason.trim()};
+    });
+  },
+
+  async resolveConflict(input:{guildId:string;actorId:string;conflictId:string;winnerTitle:string;reason:string}){
+    return withTransaction(async(client)=>{
+      const conflict=(await client.query<{
+        id:string;attacker_title_id:string;defender_title_id:string;conflict_type:SteppeConflictType;objective_settlement_id:string|null;opened_turn:number;battle_id:string|null;
+      }>(`SELECT id,attacker_title_id,defender_title_id,conflict_type,objective_settlement_id,opened_turn,battle_id
+          FROM steppe_internal_conflicts WHERE id=$1 AND guild_id=$2 AND status='ACTIVE' FOR UPDATE`,[input.conflictId,input.guildId])).rows[0];
+      if(!conflict)throw new GameError("Etkin bozkır iç savaşı bulunamadı.");
+      const winner=await titleAcrossGuild(client,input.guildId,input.winnerTitle,true);if(!winner||![conflict.attacker_title_id,conflict.defender_title_id].includes(winner.id))
+        throw new GameError("Kazanan, iç savaşın iki tarafından biri olmalıdır.");
+      const loserId=winner.id===conflict.attacker_title_id?conflict.defender_title_id:conflict.attacker_title_id;
+      const loser=await titleAcrossGuild(client,input.guildId,loserId,true);if(!loser)throw new GameError("Kaybeden bozkır unvanı artık bulunamıyor.");
+      if(conflict.battle_id){
+        const battle=(await client.query<{status:string;winner_title_id:string|null}>(`
+          SELECT battle.status,winner_side.steppe_title_id AS winner_title_id FROM battles battle
+          LEFT JOIN battle_sides winner_side ON winner_side.battle_id=battle.id AND winner_side.side_key=battle.winner_side
+          WHERE battle.id=$1`,[conflict.battle_id])).rows[0];
+        if(!battle||battle.status!=="FINISHED")throw new GameError("Bağlı savaş dosyası henüz sonuçlanmadı.");
+        if(battle.winner_title_id&&battle.winner_title_id!==winner.id)throw new GameError("Seçilen kazanan, bağlı savaş dosyasının kazanan tarafıyla uyuşmuyor.");
+      }
+      const turn=Number((await client.query<{current_turn:number}>("SELECT current_turn FROM guilds WHERE discord_id=$1",[input.guildId])).rows[0]?.current_turn??conflict.opened_turn);
+      if(conflict.conflict_type!=="KHAN_WAR"&&winner.id===conflict.attacker_title_id&&conflict.objective_settlement_id){
+        await client.query(`UPDATE steppe_title_holdings SET title_id=$2,assigned_turn=$3,assigned_by=$4 WHERE settlement_id=$1`,
+          [conflict.objective_settlement_id,winner.id,turn,input.actorId]);
+      }
+      await client.query(`UPDATE steppe_internal_conflicts SET status='RESOLVED',winner_title_id=$2,resolution_reason=$3,
+        resolved_turn=$4,resolved_by=$5,updated_at=NOW() WHERE id=$1`,[conflict.id,winner.id,input.reason.trim(),turn,input.actorId]);
+      await audit(client,input.guildId,input.actorId,"STEPPE_INTERNAL_CONFLICT_RESOLVE","steppe_internal_conflict",conflict.id,
+        {winnerTitleId:winner.id,loserTitleId:loser.id,reason:input.reason});
+      return{id:conflict.id,winnerTitleName:winner.title_name,turn};
     });
   }
 };

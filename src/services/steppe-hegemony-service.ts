@@ -10,7 +10,7 @@ import {
 } from "../domain/steppe-hegemony.js";
 import { isAcquisitionTurn } from "../domain/mobilization.js";
 import {
-  clampSteppeRelation,STEPPE_UNANSWERED_WAR_CALL,STEPPE_WAR_CALL_RESPONSES,
+  STEPPE_UNANSWERED_WAR_CALL,STEPPE_WAR_CALL_RESPONSES,
   type SteppeWarCallResponse
 } from "../domain/steppe-politics.js";
 import { GameError } from "./game-service.js";
@@ -34,14 +34,14 @@ interface InternalSteppeTributeOffer extends SteppeTributeOfferView {
 }
 
 export interface SteppeGreatKhanateMemberView{
-  countryId:string;countryName:string;loyalty:number;relationScore:number;
+  countryId:string;countryName:string;
   khanTitleName:string|null;khanHolderName:string|null;khanHolderUserId:string|null;
 }
 export interface SteppeGreatKhanateWarCallResponseView{
   warCallId:string;countryId:string;countryName:string;khanTitleName:string|null;
   khanHolderName:string|null;khanHolderUserId:string|null;
   response:"PENDING"|SteppeWarCallResponse|"UNANSWERED";
-  loyaltyDelta:number;relationDelta:number;authorityDelta:number;channelId:string|null;messageId:string|null;
+  authorityDelta:number;channelId:string|null;messageId:string|null;
 }
 export interface SteppeGreatKhanateWarCallView{
   id:string;targetLabel:string;reason:string;openedTurn:number;status:"OPEN"|"CLOSED"|"CANCELLED";
@@ -51,7 +51,7 @@ export interface SteppeGreatKhanateView{
   guildId:string;currentTurn:number;hegemonCountryId:string;hegemonCountryName:string;authority:number;
   greatKhanTitleName:string|null;greatKhanHolderName:string|null;greatKhanHolderUserId:string|null;
   members:SteppeGreatKhanateMemberView[];warCalls:SteppeGreatKhanateWarCallView[];
-  events:Array<{turn:number;type:string;description:string;countryName:string|null;loyaltyDelta:number;relationDelta:number;authorityDelta:number}>;
+  events:Array<{turn:number;type:string;description:string;countryName:string|null;authorityDelta:number}>;
 }
 
 const offerViewSql=`SELECT offer.id,offer.guild_id,offer.hegemon_country_id,
@@ -103,8 +103,8 @@ async function ensureDefaultHegemony(client:DbClient,guildId:string,actorId:stri
     for(const tributary of DEFAULT_STEPPE_TRIBUTARIES){
       const country=byName.get(tributary.name.toLocaleLowerCase("tr-TR"))!;
       await client.query(
-        "INSERT INTO steppe_tributaries(guild_id,country_id,loyalty,joined_turn) VALUES($1,$2,$3,$4)",
-        [guildId,country.id,tributary.loyalty,guild.current_turn]
+        "INSERT INTO steppe_tributaries(guild_id,country_id,loyalty,joined_turn) VALUES($1,$2,50,$3)",
+        [guildId,country.id,guild.current_turn]
       );
     }
     hegemony={hegemon_country_id:hegemon.id};
@@ -201,9 +201,9 @@ async function greatKhanateViewWithClient(client:DbClient,guildId:string):Promis
        WHERE hegemony.guild_id=$1`,[guildId])).rows[0];
   if(!hegemony)return null;
   const members=(await client.query<{
-    country_id:string;country_name:string;loyalty:number;relation_score:number;
+    country_id:string;country_name:string;
     khan_title_name:string|null;khan_holder_name:string|null;khan_holder_user_id:string|null;
-  }>(`SELECT relation.country_id,country.name AS country_name,relation.loyalty,relation.relation_score,
+  }>(`SELECT relation.country_id,country.name AS country_name,
              khan.title_name AS khan_title_name,khan.holder_name AS khan_holder_name,khan.holder_user_id AS khan_holder_user_id
         FROM steppe_tributaries relation
         JOIN countries country ON country.id=relation.country_id
@@ -220,10 +220,10 @@ async function greatKhanateViewWithClient(client:DbClient,guildId:string):Promis
   const responses=calls.length?(await client.query<{
     war_call_id:string;country_id:string;country_name:string;khan_title_name:string|null;khan_holder_name:string|null;
     khan_holder_user_id:string|null;response:"PENDING"|SteppeWarCallResponse|"UNANSWERED";
-    loyalty_delta:number;relation_delta:number;authority_delta:number;channel_id:string|null;message_id:string|null;
+    authority_delta:number;channel_id:string|null;message_id:string|null;
   }>(`SELECT response.war_call_id,response.country_id,country.name AS country_name,
              khan.title_name AS khan_title_name,khan.holder_name AS khan_holder_name,khan.holder_user_id AS khan_holder_user_id,
-             response.response,response.loyalty_delta,response.relation_delta,response.authority_delta,
+             response.response,response.authority_delta,
              response.channel_id,response.message_id
         FROM steppe_hegemony_war_call_responses response
         JOIN countries country ON country.id=response.country_id
@@ -234,9 +234,9 @@ async function greatKhanateViewWithClient(client:DbClient,guildId:string):Promis
        WHERE response.war_call_id=ANY($1::uuid[]) ORDER BY country.name`,[calls.map((call)=>call.id)])).rows:[];
   const events=(await client.query<{
     game_turn:number;event_type:string;description:string;country_name:string|null;
-    loyalty_delta:number;relation_delta:number;authority_delta:number;
+    authority_delta:number;
   }>(`SELECT event.game_turn,event.event_type,event.description,country.name AS country_name,
-             event.loyalty_delta,event.relation_delta,event.authority_delta
+             event.authority_delta
         FROM steppe_hegemony_events event LEFT JOIN countries country ON country.id=event.country_id
        WHERE event.guild_id=$1 ORDER BY event.created_at DESC LIMIT 20`,[guildId])).rows;
   return{
@@ -244,33 +244,48 @@ async function greatKhanateViewWithClient(client:DbClient,guildId:string):Promis
     hegemonCountryName:hegemony.hegemon_country_name,authority:Number(hegemony.authority),
     greatKhanTitleName:hegemony.khan_title_name,greatKhanHolderName:hegemony.khan_holder_name,
     greatKhanHolderUserId:hegemony.khan_holder_user_id,
-    members:members.map((member)=>({countryId:member.country_id,countryName:member.country_name,loyalty:Number(member.loyalty),
-      relationScore:Number(member.relation_score),khanTitleName:member.khan_title_name,khanHolderName:member.khan_holder_name,
+    members:members.map((member)=>({countryId:member.country_id,countryName:member.country_name,
+      khanTitleName:member.khan_title_name,khanHolderName:member.khan_holder_name,
       khanHolderUserId:member.khan_holder_user_id})),
     warCalls:calls.map((call)=>({id:call.id,targetLabel:call.target_label,reason:call.reason,openedTurn:Number(call.opened_turn),status:call.status,
       responses:responses.filter((response)=>response.war_call_id===call.id).map((response)=>({
         warCallId:response.war_call_id,countryId:response.country_id,countryName:response.country_name,
         khanTitleName:response.khan_title_name,khanHolderName:response.khan_holder_name,khanHolderUserId:response.khan_holder_user_id,
-        response:response.response,loyaltyDelta:Number(response.loyalty_delta),relationDelta:Number(response.relation_delta),
-        authorityDelta:Number(response.authority_delta),channelId:response.channel_id,messageId:response.message_id
+        response:response.response,authorityDelta:Number(response.authority_delta),channelId:response.channel_id,messageId:response.message_id
       }))})),
     events:events.map((event)=>({turn:Number(event.game_turn),type:event.event_type,description:event.description,
-      countryName:event.country_name,loyaltyDelta:Number(event.loyalty_delta),relationDelta:Number(event.relation_delta),
-      authorityDelta:Number(event.authority_delta)}))
+      countryName:event.country_name,authorityDelta:Number(event.authority_delta)}))
   };
 }
 
 async function addHegemonyEvent(client:DbClient,input:{guildId:string;turn:number;type:string;countryId?:string|null;actorId:string;
-  loyaltyDelta?:number;relationDelta?:number;authorityDelta?:number;description:string;details?:unknown}){
+  authorityDelta?:number;description:string;details?:unknown}){
   await client.query(`INSERT INTO steppe_hegemony_events(
     guild_id,game_turn,event_type,country_id,actor_user_id,loyalty_delta,relation_delta,authority_delta,description,details
   ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)`,[input.guildId,input.turn,input.type,input.countryId??null,input.actorId,
-    input.loyaltyDelta??0,input.relationDelta??0,input.authorityDelta??0,input.description,JSON.stringify(input.details??{})]);
+    0,0,input.authorityDelta??0,input.description,JSON.stringify(input.details??{})]);
 }
 
 export const steppeHegemonyService={
   async view(guildId:string):Promise<SteppeGreatKhanateView|null>{
     const client=await pool.connect();try{return await greatKhanateViewWithClient(client,guildId);}finally{client.release();}
+  },
+
+  async setAuthority(input:{guildId:string;actorId:string;hegemonCountryId:string;authority:number;reason:string}){
+    return withTransaction(async(client)=>{
+      const row=(await client.query<{hegemon_country_id:string;authority:number;current_turn:number}>(`
+        SELECT hegemony.hegemon_country_id,hegemony.authority,guild.current_turn
+          FROM steppe_hegemonies hegemony JOIN guilds guild ON guild.discord_id=hegemony.guild_id
+         WHERE hegemony.guild_id=$1 FOR UPDATE OF hegemony`,[input.guildId])).rows[0];
+      if(!row)throw new GameError("Hanlar Hanlığı kurulmamış.");
+      if(row.hegemon_country_id!==input.hegemonCountryId)throw new GameError("Seçilen devlet mevcut Hanlar Hanı devleti değil.");
+      const next=clampSteppeMeter(input.authority),authorityDelta=next-Number(row.authority);
+      await client.query("UPDATE steppe_hegemonies SET authority=$2,updated_at=NOW() WHERE guild_id=$1",[input.guildId,next]);
+      await addHegemonyEvent(client,{guildId:input.guildId,turn:Number(row.current_turn),type:"MANUAL_AUTHORITY_ADJUSTMENT",
+        actorId:input.actorId,authorityDelta,description:input.reason});
+      await audit(client,input.guildId,input.actorId,"STEPPE_HEGEMONY_AUTHORITY_ADJUST",null,input,"steppe_hegemony");
+      return (await greatKhanateViewWithClient(client,input.guildId))!;
+    });
   },
 
   async openWarCall(input:{guildId:string;actorId:string;hegemonCountryId:string;targetLabel:string;reason:string;gameMaster:boolean}){
@@ -314,17 +329,17 @@ export const steppeHegemonyService={
     const view=(await pool.query<{
       war_call_id:string;country_id:string;country_name:string;khan_title_name:string|null;khan_holder_name:string|null;
       khan_holder_user_id:string|null;response:"PENDING"|SteppeWarCallResponse|"UNANSWERED";
-      loyalty_delta:number;relation_delta:number;authority_delta:number;channel_id:string|null;message_id:string|null;
+      authority_delta:number;channel_id:string|null;message_id:string|null;
     }>(`SELECT response.war_call_id,response.country_id,country.name AS country_name,
              khan.title_name AS khan_title_name,khan.holder_name AS khan_holder_name,khan.holder_user_id AS khan_holder_user_id,
-             response.response,response.loyalty_delta,response.relation_delta,response.authority_delta,response.channel_id,response.message_id
+             response.response,response.authority_delta,response.channel_id,response.message_id
         FROM steppe_hegemony_war_call_responses response JOIN countries country ON country.id=response.country_id
         LEFT JOIN steppe_confederations confederation ON confederation.country_id=country.id AND confederation.status='ACTIVE'
         LEFT JOIN steppe_internal_titles khan ON khan.confederation_id=confederation.id AND khan.tier='KHAN' AND khan.status='ACTIVE'
        WHERE response.war_call_id=$1 AND response.country_id=$2`,[warCallId,countryId])).rows[0];
     return view?{warCallId:view.war_call_id,countryId:view.country_id,countryName:view.country_name,khanTitleName:view.khan_title_name,
       khanHolderName:view.khan_holder_name,khanHolderUserId:view.khan_holder_user_id,response:view.response,
-      loyaltyDelta:Number(view.loyalty_delta),relationDelta:Number(view.relation_delta),authorityDelta:Number(view.authority_delta),
+      authorityDelta:Number(view.authority_delta),
       channelId:view.channel_id,messageId:view.message_id}:null;
   },
 
@@ -332,9 +347,9 @@ export const steppeHegemonyService={
     return withTransaction(async(client)=>{
       const row=(await client.query<{
         current_turn:number;call_status:string;response_status:string;country_name:string;holder_user_id:string|null;
-        loyalty:number;relation_score:number;authority:number;
+        authority:number;
       }>(`SELECT guild.current_turn,call.status AS call_status,response.response AS response_status,
-                country.name AS country_name,khan.holder_user_id,relation.loyalty,relation.relation_score,hegemony.authority
+                country.name AS country_name,khan.holder_user_id,hegemony.authority
            FROM steppe_hegemony_war_call_responses response
            JOIN steppe_hegemony_war_calls call ON call.id=response.war_call_id
            JOIN steppe_hegemonies hegemony ON hegemony.guild_id=call.guild_id
@@ -350,17 +365,14 @@ export const steppeHegemonyService={
       const isMember=Boolean((await client.query("SELECT 1 FROM country_members WHERE country_id=$1 AND discord_user_id=$2",[input.countryId,input.actorId])).rowCount);
       if(!input.gameMaster&&row.holder_user_id!==input.actorId&&!isMember)throw new GameError("Bu çağrıyı yalnızca ilgili bağlı Han veya oyun yöneticisi yanıtlayabilir.");
       const effect=STEPPE_WAR_CALL_RESPONSES[input.response];if(!effect)throw new GameError("Geçersiz savaş çağrısı yanıtı.");
-      await client.query(`UPDATE steppe_tributaries SET loyalty=$3,relation_score=$4,updated_at=NOW()
-        WHERE guild_id=$1 AND country_id=$2`,[input.guildId,input.countryId,
-        clampSteppeMeter(Number(row.loyalty)+effect.loyaltyDelta),clampSteppeRelation(Number(row.relation_score)+effect.relationDelta)]);
       await client.query("UPDATE steppe_hegemonies SET authority=$2,updated_at=NOW() WHERE guild_id=$1",
         [input.guildId,clampSteppeMeter(Number(row.authority)+effect.authorityDelta)]);
       await client.query(`UPDATE steppe_hegemony_war_call_responses SET response=$3,loyalty_delta=$4,relation_delta=$5,
         authority_delta=$6,responded_by=$7,responded_at=NOW() WHERE war_call_id=$1 AND country_id=$2`,
-      [input.warCallId,input.countryId,input.response,effect.loyaltyDelta,effect.relationDelta,effect.authorityDelta,input.actorId]);
+      [input.warCallId,input.countryId,input.response,0,0,effect.authorityDelta,input.actorId]);
       await addHegemonyEvent(client,{guildId:input.guildId,turn:Number(row.current_turn),type:"GREAT_KHAN_WAR_CALL_RESPONSE",
-        countryId:input.countryId,actorId:input.actorId,loyaltyDelta:effect.loyaltyDelta,relationDelta:effect.relationDelta,
-        authorityDelta:effect.authorityDelta,description:`${row.country_name} Hanı savaş çağrısına ${effect.label} yanıtını verdi.`,
+        countryId:input.countryId,actorId:input.actorId,authorityDelta:effect.authorityDelta,
+        description:`${row.country_name} Hanı savaş çağrısına ${effect.label} yanıtını verdi.`,
         details:{warCallId:input.warCallId,response:input.response}});
       await audit(client,input.guildId,input.actorId,"STEPPE_HEGEMONY_WAR_CALL_RESPONSE",input.warCallId,input,"steppe_hegemony_war_call");
       return{effect,countryName:row.country_name};
@@ -376,8 +388,8 @@ export const steppeHegemonyService={
       const call=(await client.query<{id:string}>(
         "SELECT id FROM steppe_hegemony_war_calls WHERE id=$1 AND guild_id=$2 AND status='OPEN' FOR UPDATE",[input.warCallId,input.guildId]
       )).rows[0];if(!call)throw new GameError("Açık Hanlar Hanı savaş çağrısı bulunamadı.");
-      const pending=(await client.query<{country_id:string;country_name:string;loyalty:number;relation_score:number}>(`
-        SELECT relation.country_id,country.name AS country_name,relation.loyalty,relation.relation_score
+      const pending=(await client.query<{country_id:string;country_name:string}>(`
+        SELECT relation.country_id,country.name AS country_name
           FROM steppe_hegemony_war_call_responses response
           JOIN steppe_tributaries relation ON relation.guild_id=$2 AND relation.country_id=response.country_id
           JOIN countries country ON country.id=relation.country_id
@@ -385,12 +397,9 @@ export const steppeHegemonyService={
       let authority=Number(state.authority);
       for(const member of pending){
         const effect=STEPPE_UNANSWERED_WAR_CALL;authority=clampSteppeMeter(authority+effect.authorityDelta);
-        await client.query(`UPDATE steppe_tributaries SET loyalty=$3,relation_score=$4,updated_at=NOW()
-          WHERE guild_id=$1 AND country_id=$2`,[input.guildId,member.country_id,
-          clampSteppeMeter(Number(member.loyalty)+effect.loyaltyDelta),clampSteppeRelation(Number(member.relation_score)+effect.relationDelta)]);
         await client.query(`UPDATE steppe_hegemony_war_call_responses SET response='UNANSWERED',loyalty_delta=$3,
           relation_delta=$4,authority_delta=$5,responded_by=$6,responded_at=NOW() WHERE war_call_id=$1 AND country_id=$2`,
-        [call.id,member.country_id,effect.loyaltyDelta,effect.relationDelta,effect.authorityDelta,input.actorId]);
+        [call.id,member.country_id,0,0,effect.authorityDelta,input.actorId]);
         await addHegemonyEvent(client,{guildId:input.guildId,turn:Number(state.current_turn),type:"GREAT_KHAN_WAR_CALL_UNANSWERED",
           countryId:member.country_id,actorId:input.actorId,...effect,description:`${member.country_name} Hanı savaş çağrısını cevapsız bıraktı.`,
           details:{warCallId:call.id}});
@@ -479,15 +488,6 @@ export const steppeHegemonyService={
         `UPDATE steppe_tribute_offers SET response=$2,paid_amount=$3,responded_by=$4,responded_at=NOW()
           WHERE id=$1`,[input.offerId,input.response,paid,input.actorId]
       );
-      await client.query(
-        `UPDATE steppe_tributaries SET loyalty=$3,updated_at=NOW()
-          WHERE guild_id=$1 AND country_id=$2 AND status='ACTIVE'`,
-        [input.guildId,normalized.tributary_country_id,
-          clampSteppeMeter(Number((await client.query<{loyalty:number}>(
-            "SELECT loyalty FROM steppe_tributaries WHERE guild_id=$1 AND country_id=$2 FOR UPDATE",
-            [input.guildId,normalized.tributary_country_id]
-          )).rows[0]?.loyalty??0)+terms.loyaltyChange)]
-      );
       const currentAuthority=Number((await client.query<{authority:number}>(
         "SELECT authority FROM steppe_hegemonies WHERE guild_id=$1 FOR UPDATE",[input.guildId]
       )).rows[0]?.authority??0);
@@ -495,6 +495,10 @@ export const steppeHegemonyService={
         "UPDATE steppe_hegemonies SET authority=$2,updated_at=NOW() WHERE guild_id=$1",
         [input.guildId,clampSteppeMeter(currentAuthority+terms.authorityChange)]
       );
+      await addHegemonyEvent(client,{guildId:input.guildId,turn:Number(normalized.turn),type:"TRIBUTE_RESPONSE",
+        countryId:normalized.tributary_country_id,actorId:input.actorId,authorityDelta:terms.authorityChange,
+        description:`${normalized.tributary_country_name} haraç talebine ${terms.label} yanıtını verdi.`,
+        details:{offerId:normalized.id,response:input.response}});
       if(paid>0){
         await client.query(
           `INSERT INTO transactions(country_id,turn,kind,amount,description,details)
@@ -508,7 +512,7 @@ export const steppeHegemonyService={
       await audit(client,input.guildId,input.actorId,"STEPPE_TRIBUTE_RESPONSE",input.offerId,{
         response:input.response,requestedAmount:requested,paidAmount:paid,
         hegemonCountryId:normalized.hegemon_country_id,tributaryCountryId:normalized.tributary_country_id,
-        loyaltyChange:terms.loyaltyChange,authorityChange:terms.authorityChange
+        authorityChange:terms.authorityChange
       });
       const result=(await client.query<InternalSteppeTributeOffer>(`${offerViewSql} WHERE offer.id=$1`,[input.offerId])).rows[0]!;
       return normalizeOffer(result);

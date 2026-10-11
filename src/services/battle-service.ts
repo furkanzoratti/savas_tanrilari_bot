@@ -90,6 +90,7 @@ export interface BattleParticipantChoice {
 export interface BattleSideRow {
   battle_id: string; side_key: BattleSideKey; country_id: string; country_name: string; controller: BattleController;
   rebel_faction_id: string | null; rebel_army_name: string | null; rebel_leader_name: string | null;
+  steppe_title_id:string|null;
   rebel_leader_skill_bonus: number | null;
   country_ids: string[]; country_names: string[]; participants: BattleParticipantRow[];
   initial_total: number; current_total: number; total_losses: number; pressure: number;
@@ -145,14 +146,17 @@ export interface BattleRoundSummary {
 export interface BattleStartTargetChoice {
   value: string;
   label: string;
-  kind: "COUNTRY" | "REBEL";
+  kind: "COUNTRY" | "REBEL" | "STEPPE_TITLE";
 }
 
 interface ResolvedBattleTarget {
   id: string;
   name: string;
-  kind: "COUNTRY" | "REBEL";
+  kind: "COUNTRY" | "REBEL" | "STEPPE_TITLE";
   rebelFactionId: string | null;
+  steppeTitleId:string|null;
+  steppeCountryId:string|null;
+  steppeSettlementIds:string[];
   composition: BattleComposition;
   armyName: string | null;
   leaderName: string | null;
@@ -240,18 +244,20 @@ function mergeComposition(target: BattleComposition, source: BattleComposition):
 
 async function resolveParticipant(client: DbClient, battleId: string, side: BattleSideKey | null, countryName?: string | null): Promise<BattleParticipantRow> {
   const rows = (await client.query<BattleParticipantRow>(
-    `SELECT bsp.*,c.name AS country_name,source.name AS source_settlement_name,
+    `SELECT bsp.*,COALESCE(title.title_name,c.name) AS country_name,source.name AS source_settlement_name,
             embarked_army.name AS embarked_army_name
        FROM battle_side_participants bsp
        JOIN countries c ON c.id=bsp.country_id
+       JOIN battle_sides side_record ON side_record.battle_id=bsp.battle_id AND side_record.side_key=bsp.side_key
+       LEFT JOIN steppe_internal_titles title ON title.id=side_record.steppe_title_id
        LEFT JOIN settlements source ON source.id=bsp.source_settlement_id
        LEFT JOIN armies embarked_army ON embarked_army.id=bsp.embarked_army_id
       WHERE bsp.battle_id=$1 AND ($2::text IS NULL OR bsp.side_key=$2)
-      ORDER BY bsp.is_primary DESC,c.name FOR UPDATE OF bsp`,
+      ORDER BY bsp.is_primary DESC,COALESCE(title.title_name,c.name) FOR UPDATE OF bsp`,
     [battleId, side]
   )).rows;
   const participant = countryName?.trim()
-    ? rows.find((row) => row.country_name.toLocaleLowerCase("tr-TR") === countryName.trim().toLocaleLowerCase("tr-TR"))
+    ? rows.find((row) => row.country_id===countryName.trim()||row.country_name.toLocaleLowerCase("tr-TR") === countryName.trim().toLocaleLowerCase("tr-TR"))
     : rows.find((row) => row.is_primary);
   if (!participant) throw new GameError(countryName?.trim() ? `${countryName.trim()} bu savaş tarafına ekli değil.` : "Savaş tarafının ana ülkesi bulunamadı.");
   return participant;
@@ -486,8 +492,11 @@ async function participantUsesFleets(client: DbClient, battleId: string, country
 
 async function isSideMember(client: DbClient, battleId: string, side: BattleSideKey, discordUserId: string): Promise<boolean> {
   return Boolean((await client.query(
-    `SELECT 1 FROM country_members cm JOIN battle_side_participants bsp ON bsp.country_id=cm.country_id
-      WHERE bsp.battle_id=$1 AND bsp.side_key=$2 AND cm.discord_user_id=$3 LIMIT 1`,
+    `SELECT 1 FROM battle_sides side_record
+      LEFT JOIN battle_side_participants participant ON participant.battle_id=side_record.battle_id AND participant.side_key=side_record.side_key
+      LEFT JOIN country_members member ON member.country_id=participant.country_id AND member.discord_user_id=$3
+      LEFT JOIN steppe_internal_titles title ON title.id=side_record.steppe_title_id AND title.holder_user_id=$3
+      WHERE side_record.battle_id=$1 AND side_record.side_key=$2 AND (member.discord_user_id IS NOT NULL OR title.holder_user_id IS NOT NULL) LIMIT 1`,
     [battleId, side, discordUserId]
   )).rowCount);
 }
@@ -499,14 +508,18 @@ async function battleSideCompositionProfile(
 ): Promise<ArmyCompositionProfile> {
   const row = (await client.query<{ total: string; steppe: string }>(`
     WITH side_countries AS (
-      SELECT country_id FROM battle_sides WHERE battle_id=$1 AND side_key=$2 AND country_id IS NOT NULL
+      SELECT country_id,steppe_title_id FROM battle_sides WHERE battle_id=$1 AND side_key=$2 AND country_id IS NOT NULL
       UNION
-      SELECT country_id FROM battle_side_participants WHERE battle_id=$1 AND side_key=$2
+      SELECT participant.country_id,side_record.steppe_title_id FROM battle_side_participants participant
+      JOIN battle_sides side_record ON side_record.battle_id=participant.battle_id AND side_record.side_key=participant.side_key
+      WHERE participant.battle_id=$1 AND participant.side_key=$2
     )
-    SELECT COUNT(*)::text AS total,COUNT(confederation.id)::text AS steppe
+    SELECT COUNT(*)::text AS total,COUNT(COALESCE(confederation.id,title_confederation.id))::text AS steppe
       FROM side_countries side_country
       LEFT JOIN steppe_confederations confederation
-        ON confederation.country_id=side_country.country_id AND confederation.status='ACTIVE'`, [battleId, side])).rows[0];
+        ON confederation.country_id=side_country.country_id AND confederation.status='ACTIVE'
+      LEFT JOIN steppe_internal_titles title ON title.id=side_country.steppe_title_id
+      LEFT JOIN steppe_confederations title_confederation ON title_confederation.id=title.confederation_id AND title_confederation.status='ACTIVE'`, [battleId, side])).rows[0];
   const total = Number(row?.total ?? 0);
   return total > 0 && Number(row?.steppe ?? 0) === total ? "STEPPE" : "STANDARD";
 }
@@ -515,23 +528,25 @@ async function loadView(client: DbClient, battleId: string, lock = false): Promi
   const battle = (await client.query<BattleRow>(`SELECT * FROM battles WHERE id=$1${lock ? " FOR UPDATE" : ""}`, [battleId])).rows[0];
   if (!battle) throw new GameError("Savaş bulunamadı.");
   const rows = (await client.query<BattleSideRow>(
-    `SELECT bs.*,COALESCE(rebel.display_name,c.name) AS country_name,
+    `SELECT bs.*,COALESCE(rebel.display_name,steppe_title.title_name,c.name) AS country_name,
             rebel.army_name AS rebel_army_name,rebel.leader_name AS rebel_leader_name,
             rebel.leader_skill_bonus AS rebel_leader_skill_bonus
        FROM battle_sides bs JOIN countries c ON c.id=bs.country_id
        LEFT JOIN rebel_factions rebel ON rebel.id=bs.rebel_faction_id
+       LEFT JOIN steppe_internal_titles steppe_title ON steppe_title.id=bs.steppe_title_id
       WHERE bs.battle_id=$1 ORDER BY side_key${lock ? " FOR UPDATE OF bs" : ""}`,
     [battleId]
   )).rows;
   if (rows.length !== 2) throw new GameError("Savaş tarafları eksik.");
   const participants = (await client.query<BattleParticipantRow>(
-    `SELECT bsp.*,COALESCE(rebel.display_name,c.name) AS country_name,source.name AS source_settlement_name,
+    `SELECT bsp.*,COALESCE(rebel.display_name,steppe_title.title_name,c.name) AS country_name,source.name AS source_settlement_name,
             embarked_army.name AS embarked_army_name,
             EXISTS(SELECT 1 FROM steppe_confederations confederation
-              WHERE confederation.country_id=bsp.country_id AND confederation.status='ACTIVE') AS is_steppe_confederation
+              WHERE (confederation.country_id=bsp.country_id OR confederation.id=steppe_title.confederation_id) AND confederation.status='ACTIVE') AS is_steppe_confederation
        FROM battle_side_participants bsp JOIN countries c ON c.id=bsp.country_id
       JOIN battle_sides side_record ON side_record.battle_id=bsp.battle_id AND side_record.side_key=bsp.side_key
       LEFT JOIN rebel_factions rebel ON rebel.id=side_record.rebel_faction_id AND bsp.country_id=side_record.country_id
+      LEFT JOIN steppe_internal_titles steppe_title ON steppe_title.id=side_record.steppe_title_id
       LEFT JOIN settlements source ON source.id=bsp.source_settlement_id
       LEFT JOIN armies embarked_army ON embarked_army.id=bsp.embarked_army_id
       WHERE bsp.battle_id=$1 ORDER BY bsp.side_key,bsp.is_primary DESC,COALESCE(rebel.display_name,c.name)${lock ? " FOR UPDATE OF bsp" : ""}`,
@@ -634,14 +649,39 @@ async function resolveBattleTarget(client: DbClient, guildId: string, rawValue: 
   const value=rawValue.trim();
   const countryToken=value.startsWith("country:")?value.slice(8):null;
   const rebelToken=value.startsWith("rebel:")?value.slice(6):null;
-  if(!rebelToken){
+  const steppeToken=value.startsWith("steppe:")?value.slice(7):null;
+  if(!rebelToken&&!steppeToken){
     const country=(await client.query<{id:string;name:string}>(
       `SELECT id,name FROM countries
         WHERE guild_id=$1 AND status='ACTIVE' AND is_system_faction=FALSE
           AND (${countryToken?"id::text=$2":"LOWER(name)=LOWER($2)"}) LIMIT 1`,[guildId,countryToken??value]
     )).rows[0];
-    if(country)return {id:country.id,name:country.name,kind:"COUNTRY",rebelFactionId:null,composition:{},armyName:null,leaderName:null,
-      leaderSkillBonus:0,rebelSettlementId:null,rebelSettlementName:null,siegeAssets:{}};
+    if(country)return {id:country.id,name:country.name,kind:"COUNTRY",rebelFactionId:null,steppeTitleId:null,steppeCountryId:null,
+      steppeSettlementIds:[],composition:{},armyName:null,leaderName:null,leaderSkillBonus:0,rebelSettlementId:null,rebelSettlementName:null,siegeAssets:{}};
+  }
+  if(!rebelToken){
+    const title=(await client.query<{
+      id:string;title_name:string;holder_name:string;country_id:string;culture_group:string;settlement_ids:string[];
+    }>(`SELECT title.id,title.title_name,title.holder_name,confederation.country_id,country.primary_culture_group AS culture_group,
+               COALESCE(array_agg(holding.settlement_id::text) FILTER(WHERE holding.settlement_id IS NOT NULL),'{}') AS settlement_ids
+          FROM steppe_internal_titles title
+          JOIN steppe_confederations confederation ON confederation.id=title.confederation_id
+          JOIN countries country ON country.id=confederation.country_id
+          LEFT JOIN steppe_title_holdings holding ON holding.title_id=title.id
+         WHERE confederation.guild_id=$1 AND confederation.status='ACTIVE' AND title.status='ACTIVE'
+           AND (${steppeToken?"title.id::text=$2":"(lower(title.title_name)=lower($2) OR lower(title.holder_name)=lower($2))"})
+         GROUP BY title.id,title.title_name,title.holder_name,confederation.country_id,country.primary_culture_group
+         LIMIT 1`,[guildId,steppeToken??value])).rows[0];
+    if(title){
+      const proxyName=`__STEPPE_TITLE__${title.id}`;
+      const proxy=(await client.query<{id:string}>(`
+        INSERT INTO countries(guild_id,name,status,destroyed_reason,is_system_faction,primary_culture_group)
+        VALUES($1,$2,'YOK_EDİLDİ','SYSTEM_STEPPE_TITLE_PROXY',TRUE,$3)
+        ON CONFLICT(guild_id,name) DO UPDATE SET is_system_faction=TRUE RETURNING id`,[guildId,proxyName,title.culture_group])).rows[0]!;
+      return{id:proxy.id,name:title.title_name,kind:"STEPPE_TITLE",rebelFactionId:null,steppeTitleId:title.id,
+        steppeCountryId:title.country_id,steppeSettlementIds:title.settlement_ids??[],composition:{},armyName:`${title.title_name} Kuvvetleri`,
+        leaderName:title.holder_name,leaderSkillBonus:0,rebelSettlementId:null,rebelSettlementName:null,siegeAssets:{}};
+    }
   }
   const faction=(await client.query<{
     id:string;display_name:string;composition:BattleComposition;army_name:string;leader_name:string;
@@ -669,7 +709,7 @@ async function resolveBattleTarget(client: DbClient, guildId: string, rawValue: 
      ON CONFLICT(guild_id,name) DO UPDATE SET is_system_faction=TRUE
      RETURNING id`,[guildId,proxyName,faction.culture_group]
   )).rows[0]!;
-  return {id:proxy.id,name:faction.display_name,kind:"REBEL",rebelFactionId:faction.id,
+  return {id:proxy.id,name:faction.display_name,kind:"REBEL",rebelFactionId:faction.id,steppeTitleId:null,steppeCountryId:null,steppeSettlementIds:[],
     composition:faction.composition??{},armyName:faction.army_name,leaderName:faction.leader_name,
     leaderSkillBonus:Number(faction.leader_skill_bonus),rebelSettlementId:faction.settlement_id,
     rebelSettlementName:faction.settlement_name,siegeAssets:faction.siege_assets??{}};
@@ -1004,6 +1044,10 @@ async function applyLossesToDocuments(client: DbClient, battleId: string, guildI
   for (const side of sides) {
     const sideParticipants = participants.filter((participant) => participant.side_key === side.side_key);
     const primaryParticipant = sideParticipants.find((participant) => participant.is_primary);
+    const steppeOriginCountryId=side.steppe_title_id?(await client.query<{country_id:string}>(`
+      SELECT confederation.country_id FROM steppe_internal_titles title
+      JOIN steppe_confederations confederation ON confederation.id=title.confederation_id
+      WHERE title.id=$1`,[side.steppe_title_id])).rows[0]?.country_id??null:null;
     const keys = new Set([...Object.keys(side.initial_composition ?? {}), ...Object.keys(side.composition ?? {})]);
     if(side.rebel_faction_id){
       for(const forceType of keys){
@@ -1172,7 +1216,7 @@ async function applyLossesToDocuments(client: DbClient, battleId: string, guildI
             for (const sourceShare of sourceShares) {
               const allocation = allocations.find((row) => row.settlement_id === sourceShare.contractId);
               if (!allocation) continue;
-              if (allocation.origin_country_id !== participant.country_id) {
+              if (allocation.origin_country_id !== (steppeOriginCountryId??participant.country_id)) {
                 const sourceApplied=Math.min(Number(allocation.quantity),sourceShare.loss);
                 if (!sourceApplied) continue;
                 const nextAllocation=Number(allocation.quantity)-sourceApplied;
@@ -1350,7 +1394,7 @@ export const battleService = {
   async listStartTargets(guildId:string,rawQuery=""):Promise<BattleStartTargetChoice[]>{
     const query=rawQuery.trim();
     const result=await pool.query<{
-      id:string;kind:"COUNTRY"|"REBEL";display_name:string;army_name:string|null;
+      id:string;kind:"COUNTRY"|"REBEL"|"STEPPE_TITLE";display_name:string;army_name:string|null;
       settlement_name:string|null;owner_country_name:string|null;personnel:number|null;
     }>(
       `WITH targets AS (
@@ -1373,6 +1417,22 @@ export const battleService = {
          SELECT country.id,'COUNTRY'::text,country.name,NULL,NULL,NULL,NULL,NULL,1,country.name
            FROM countries country
           WHERE country.guild_id=$1 AND country.status='ACTIVE' AND country.is_system_faction=FALSE
+         UNION ALL
+         SELECT title.id,'STEPPE_TITLE'::text,title.title_name,
+                title.title_name||' Kuvvetleri',NULL,country.name,
+                COALESCE((SELECT SUM(unit.quantity) FROM armies army JOIN army_units unit ON unit.army_id=army.id
+                  WHERE army.steppe_title_id=title.id),0)::integer,
+                (SELECT MAX(conflict.updated_at) FROM steppe_internal_conflicts conflict
+                  WHERE conflict.guild_id=$1 AND conflict.status='ACTIVE' AND conflict.battle_id IS NULL
+                    AND title.id IN (conflict.attacker_title_id,conflict.defender_title_id)),1,
+                CONCAT_WS(' ',title.title_name,title.holder_name,country.name)
+           FROM steppe_internal_titles title
+           JOIN steppe_confederations confederation ON confederation.id=title.confederation_id AND confederation.status='ACTIVE'
+           JOIN countries country ON country.id=confederation.country_id
+          WHERE title.status='ACTIVE'
+            AND EXISTS(SELECT 1 FROM steppe_internal_conflicts conflict
+              WHERE conflict.guild_id=$1 AND conflict.status='ACTIVE' AND conflict.battle_id IS NULL
+                AND title.id IN (conflict.attacker_title_id,conflict.defender_title_id))
        )
        SELECT id,kind,display_name,army_name,settlement_name,owner_country_name,personnel
          FROM targets
@@ -1383,7 +1443,9 @@ export const battleService = {
     return result.rows.map((target)=>target.kind==="REBEL"
       ? {value:`rebel:${target.id}`,
           label:`🔥 ${target.display_name} • ${target.army_name} • ${target.settlement_name} / ${target.owner_country_name} (${Number(target.personnel).toLocaleString("tr-TR")})`,kind:"REBEL"}
-      : {value:`country:${target.id}`,label:target.display_name,kind:"COUNTRY"});
+      :target.kind==="STEPPE_TITLE"
+        ?{value:`steppe:${target.id}`,label:`⚔️ ${target.display_name} • ${target.owner_country_name} (${Number(target.personnel??0).toLocaleString("tr-TR")})`,kind:"STEPPE_TITLE"}
+        : {value:`country:${target.id}`,label:target.display_name,kind:"COUNTRY"});
   },
 
   async playerFleetStatus(input: { guildId: string; battleId: string; actorId: string }): Promise<PlayerBattleFleetStatus> {
@@ -1490,12 +1552,25 @@ export const battleService = {
       const a=await resolveBattleTarget(client,input.guildId,input.countryAName);
       const b=await resolveBattleTarget(client,input.guildId,input.countryBName);
       if (a.id === b.id || (a.rebelFactionId&&a.rebelFactionId===b.rebelFactionId)) throw new GameError("Bir taraf kendisiyle savaşamaz.");
-      if (input.terrain==="NAVAL"&&(a.kind==="REBEL"||b.kind==="REBEL"))
-        throw new GameError("İsyancı ordular deniz savaşı tarafı olarak kullanılamaz.");
+      if((a.kind==="STEPPE_TITLE")!==(b.kind==="STEPPE_TITLE"))throw new GameError("Bozkır iç savaşı tarafı yalnızca ilan edilmiş karşı bozkır unvanıyla savaştırılabilir.");
+      let steppeConflictId:string|null=null;
+      if(a.kind==="STEPPE_TITLE"&&b.kind==="STEPPE_TITLE"){
+        const conflict=(await client.query<{id:string}>(`
+          SELECT id FROM steppe_internal_conflicts
+           WHERE guild_id=$1 AND status='ACTIVE'
+             AND ((attacker_title_id=$2 AND defender_title_id=$3) OR (attacker_title_id=$3 AND defender_title_id=$2))
+           FOR UPDATE`,[input.guildId,a.steppeTitleId,b.steppeTitleId])).rows[0];
+        if(!conflict)throw new GameError("Bu iki bozkır unvanı arasında etkin bir iç savaş ilanı bulunmuyor. Önce /bozkir ic-savas-ac kullanın.");
+        if((await client.query("SELECT 1 FROM steppe_internal_conflicts WHERE id=$1 AND battle_id IS NOT NULL",[conflict.id])).rowCount)
+          throw new GameError("Bu bozkır iç savaşı zaten bir savaş dosyasına bağlanmış.");
+        steppeConflictId=conflict.id;
+      }
+      if (input.terrain==="NAVAL"&&(a.kind!=="COUNTRY"||b.kind!=="COUNTRY"))
+        throw new GameError("İsyancı ve bozkır iç savaş kuvvetleri deniz savaşı tarafı olarak kullanılamaz.");
       let encounterArmies: Array<{armyId:string;countryId:string}> = [];
       let linkedEncounterId: string | null = null;
       if (input.encounterId?.trim()) {
-        if(a.kind==="REBEL"||b.kind==="REBEL")throw new GameError("Hex karşılaşması isyancı gruba bağlanamaz; isyan savaşını karşılaşma ID'si olmadan başlatın.");
+        if(a.kind!=="COUNTRY"||b.kind!=="COUNTRY")throw new GameError("Hex karşılaşması isyancı veya bozkır iç savaş grubuna bağlanamaz; bu savaşı karşılaşma ID'si olmadan başlatın.");
         const encounterId=input.encounterId.trim().toLowerCase();
         if(!/^[0-9a-f-]{8,36}$/.test(encounterId))
           throw new GameError("En az 8 karakterlik geçerli karşılaşma ID'si girin.");
@@ -1535,6 +1610,13 @@ export const battleService = {
         if(b.kind==="REBEL"){
           settlement=rebelSiegeSettlement({settlementId:b.rebelSettlementId,settlementName:b.rebelSettlementName,
             requested:input.defenderSettlementName});
+        }else if(b.kind==="STEPPE_TITLE"){
+          if(!input.defenderSettlementName?.trim())throw new GameError("Kuşatma savaşı için savunulan yerleşke yazılmalıdır.");
+          settlement=(await client.query<{id:string}>(`
+            SELECT settlement.id FROM steppe_title_holdings holding JOIN settlements settlement ON settlement.id=holding.settlement_id
+             WHERE holding.title_id=$1 AND (settlement.id::text=$2 OR lower(settlement.name)=lower($2))`,
+          [b.steppeTitleId,input.defenderSettlementName.trim()])).rows[0];
+          if(!settlement)throw new GameError("Savunulan yerleşke B tarafındaki bozkır unvanına bağlı değil.");
         }else{
           if (!input.defenderSettlementName?.trim()) throw new GameError("Kuşatma savaşı için savunulan yerleşke yazılmalıdır.");
           settlement = (await client.query<{ id: string }>(
@@ -1608,19 +1690,20 @@ export const battleService = {
       const targetsA=rebelSiegeTargets(supportA),targetsB=rebelSiegeTargets(supportB);
       await client.query(
         `INSERT INTO battle_sides(battle_id,side_key,country_id,controller,composition,initial_composition,initial_total,current_total,
-           seal,rebel_faction_id,support_assets,support_targets)
-         VALUES($1,'A',$2,$3,$4::jsonb,$4::jsonb,$5,$5,$6,$7,$8::jsonb,$9::jsonb),
-               ($1,'B',$10,$11,$12::jsonb,$12::jsonb,$13,$13,$14,$15,$16::jsonb,$17::jsonb)`,
+           seal,rebel_faction_id,steppe_title_id,support_assets,support_targets)
+         VALUES($1,'A',$2,$3,$4::jsonb,$4::jsonb,$5,$5,$6,$7,$8,$9::jsonb,$10::jsonb),
+               ($1,'B',$11,$12,$13::jsonb,$13::jsonb,$14,$14,$15,$16,$17,$18::jsonb,$19::jsonb)`,
         [id,a.id,a.kind==="REBEL"?"GM":input.controllerA,JSON.stringify(compositionA),totalA,
-          sealFor({...compositionA,...supportA}),a.rebelFactionId,JSON.stringify(supportA),JSON.stringify(targetsA),
+          sealFor({...compositionA,...supportA}),a.rebelFactionId,a.steppeTitleId,JSON.stringify(supportA),JSON.stringify(targetsA),
           b.id,b.kind==="REBEL"?"GM":input.controllerB,JSON.stringify(compositionB),totalB,
-          sealFor({...compositionB,...supportB}),b.rebelFactionId,JSON.stringify(supportB),JSON.stringify(targetsB)]
+          sealFor({...compositionB,...supportB}),b.rebelFactionId,b.steppeTitleId,JSON.stringify(supportB),JSON.stringify(targetsB)]
       );
       await client.query(
         `INSERT INTO battle_side_participants(battle_id,side_key,country_id,is_primary,composition,initial_composition)
          VALUES($1,'A',$2,TRUE,$3::jsonb,$3::jsonb),($1,'B',$4,TRUE,$5::jsonb,$5::jsonb)`,
         [id,a.id,JSON.stringify(compositionA),b.id,JSON.stringify(compositionB)]
       );
+      if(steppeConflictId)await client.query("UPDATE steppe_internal_conflicts SET battle_id=$2,updated_at=NOW() WHERE id=$1",[steppeConflictId,id]);
       if (defenderSettlementId&&b.kind!=="REBEL") {
         const garrisonComposition = Object.fromEntries((await client.query<{ unit_type: string; quantity: number }>(
           "SELECT unit_type,COALESCE(SUM(quantity),0)::integer AS quantity FROM unit_stacks WHERE settlement_id=$1 AND force_type='GARRISON' GROUP BY unit_type HAVING SUM(quantity)>0",
@@ -1710,10 +1793,12 @@ export const battleService = {
     )).rows[0];
     if (!battle) return [];
     return (await pool.query<BattleParticipantChoice>(
-      `SELECT bsp.country_id,c.name AS country_name,bsp.side_key,bsp.is_primary
+      `SELECT bsp.country_id,COALESCE(title.title_name,c.name) AS country_name,bsp.side_key,bsp.is_primary
          FROM battle_side_participants bsp JOIN countries c ON c.id=bsp.country_id
-        WHERE bsp.battle_id=$1 AND c.is_system_faction=FALSE
-        ORDER BY bsp.side_key,bsp.is_primary DESC,c.name`, [battle.id]
+         JOIN battle_sides side_record ON side_record.battle_id=bsp.battle_id AND side_record.side_key=bsp.side_key
+         LEFT JOIN steppe_internal_titles title ON title.id=side_record.steppe_title_id
+        WHERE bsp.battle_id=$1 AND (c.is_system_faction=FALSE OR title.id IS NOT NULL)
+        ORDER BY bsp.side_key,bsp.is_primary DESC,COALESCE(title.title_name,c.name)`, [battle.id]
     )).rows;
   },
 
@@ -1741,11 +1826,18 @@ export const battleService = {
       row.country_name.toLocaleLowerCase("tr-TR")===countryValue.toLocaleLowerCase("tr-TR"));
     if(!participant)return [];
     return (await pool.query<BattleArmyChoice>(
-      `SELECT a.id,a.name,a.country_id,c.name AS country_name,COALESCE(SUM(au.quantity),0)::integer AS total,
+      `SELECT a.id,a.name,a.country_id,COALESCE(title.title_name,c.name) AS country_name,COALESCE(SUM(au.quantity),0)::integer AS total,
               EXISTS(SELECT 1 FROM battle_army_assignments own WHERE own.battle_id=$1 AND own.army_id=a.id) AS assigned
-         FROM armies a JOIN countries c ON c.id=a.country_id LEFT JOIN army_units au ON au.army_id=a.id
-        WHERE a.guild_id=$2 AND a.country_id=$3
-        GROUP BY a.id,a.name,a.country_id,c.name ORDER BY c.name,a.name`, [battle.id,input.guildId,participant.country_id]
+         FROM battle_side_participants participant
+         JOIN battle_sides side_record ON side_record.battle_id=participant.battle_id AND side_record.side_key=participant.side_key
+         JOIN armies a ON (side_record.steppe_title_id IS NOT NULL AND a.steppe_title_id=side_record.steppe_title_id)
+           OR (side_record.steppe_title_id IS NULL AND a.country_id=participant.country_id)
+         JOIN countries c ON c.id=a.country_id
+         LEFT JOIN steppe_internal_titles title ON title.id=side_record.steppe_title_id
+         LEFT JOIN army_units au ON au.army_id=a.id
+        WHERE participant.battle_id=$1 AND a.guild_id=$2 AND participant.country_id=$3
+          AND (side_record.steppe_title_id IS NOT NULL OR a.country_id=$3)
+        GROUP BY a.id,a.name,a.country_id,title.title_name,c.name ORDER BY COALESCE(title.title_name,c.name),a.name`, [battle.id,input.guildId,participant.country_id]
     )).rows.map((row) => ({ ...row, total: Number(row.total) }));
   },
 
@@ -1835,10 +1927,15 @@ export const battleService = {
       const battle = await activeInChannel(client, input.guildId, input.channelId);
       if (!battle || battle.status !== "DRAFT") throw new GameError("Bu kanalda düzenlenebilir bir savaş taslağı yok.");
       if (battle.terrain === "NAVAL") throw new GameError("Kalıcı kara orduları deniz savaşı kadrosuna eklenemez.");
-      const army = (await client.query<{ id: string; name: string; country_id: string; country_name: string }>(
-        `SELECT a.id,a.name,a.country_id,c.name AS country_name FROM armies a JOIN countries c ON c.id=a.country_id
-          JOIN battle_side_participants bsp ON bsp.country_id=a.country_id
-         WHERE a.id=$1 AND a.guild_id=$2 AND bsp.battle_id=$3 AND bsp.side_key=$4 FOR UPDATE OF a`,
+      const army = (await client.query<{ id: string; name: string; country_id: string; country_name: string; battle_country_id:string }>(
+        `SELECT a.id,a.name,a.country_id,COALESCE(title.title_name,c.name) AS country_name,bsp.country_id AS battle_country_id
+           FROM armies a JOIN countries c ON c.id=a.country_id
+           JOIN battle_sides side_record ON side_record.battle_id=$3 AND side_record.side_key=$4
+           JOIN battle_side_participants bsp ON bsp.battle_id=side_record.battle_id AND bsp.side_key=side_record.side_key AND bsp.is_primary=TRUE
+           LEFT JOIN steppe_internal_titles title ON title.id=side_record.steppe_title_id
+          WHERE a.id=$1 AND a.guild_id=$2
+            AND ((side_record.steppe_title_id IS NOT NULL AND a.steppe_title_id=side_record.steppe_title_id)
+              OR (side_record.steppe_title_id IS NULL AND bsp.country_id=a.country_id)) FOR UPDATE OF a`,
         [input.armyId, input.guildId, battle.id, input.side]
       )).rows[0];
       if (!army) throw new GameError("Ordu bulunamadı veya seçilen savaş tarafındaki bir devlete ait değil.");
@@ -1874,7 +1971,7 @@ export const battleService = {
           "UPDATE battle_sides SET support_assets=$1::jsonb,support_enhanced=$2::jsonb,support_targets=$3::jsonb WHERE battle_id=$4 AND side_key=$5",
           [JSON.stringify(support), JSON.stringify(enhanced), JSON.stringify(targets), battle.id, input.side]
         );
-        await rebuildParticipantFromArmies(client, battle.id, army.country_id);
+        await rebuildParticipantFromArmies(client, battle.id, army.battle_country_id);
         await rebuildDraftSide(client, battle.id, input.side);
         const view = await loadView(client, battle.id);
         await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'battle.army.remove','battle',$3,$4::jsonb)", [input.guildId,input.actorId,battle.id,JSON.stringify({ side: input.side, armyId: army.id, armyName: army.name })]);
@@ -1888,8 +1985,8 @@ export const battleService = {
       if ((await client.query("SELECT 1 FROM battle_army_assignments WHERE battle_id=$1 AND army_id=$2", [battle.id,army.id])).rowCount) throw new GameError("Bu ordu zaten savaş taslağına ekli.");
       if (await armyEmbarkationBlocksBattle(client,input.guildId,army.id))
         throw new GameError("Gemide taşınan ordu karaya çıkmadan kara veya kuşatma savaşına eklenemez.");
-      const participant = await resolveParticipant(client,battle.id,input.side,army.country_name);
-      const existingArmyUse = await participantUsesArmies(client,battle.id,army.country_id);
+      const participant = await resolveParticipant(client,battle.id,input.side,army.battle_country_id);
+      const existingArmyUse = await participantUsesArmies(client,battle.id,army.battle_country_id);
       if (!existingArmyUse && compositionTotal(participant.composition) > 0) throw new GameError("Bu ülkenin manuel savaş kadrosu zaten girilmiş. Kalıcı ordu kullanmak için önce manuel kadroyu temizleyin.");
       const composition = Object.fromEntries((await client.query<{ unit_type: string; quantity: number }>(
         "SELECT unit_type,COALESCE(SUM(quantity),0)::integer AS quantity FROM army_units WHERE army_id=$1 GROUP BY unit_type HAVING SUM(quantity)>0",
@@ -1923,13 +2020,13 @@ export const battleService = {
       await client.query(
         `INSERT INTO battle_army_assignments(battle_id,side_key,army_id,country_id,initial_composition,initial_assets,initial_enhanced)
          VALUES($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb)`,
-        [battle.id,input.side,army.id,army.country_id,JSON.stringify(composition),JSON.stringify(assets),JSON.stringify(armyEnhanced)]
+        [battle.id,input.side,army.id,army.battle_country_id,JSON.stringify(composition),JSON.stringify(assets),JSON.stringify(armyEnhanced)]
       );
       await client.query(
         "UPDATE battle_sides SET support_assets=$1::jsonb,support_enhanced=$2::jsonb,support_targets=$3::jsonb WHERE battle_id=$4 AND side_key=$5",
         [JSON.stringify(support),JSON.stringify(enhanced),JSON.stringify(targets),battle.id,input.side]
       );
-      await rebuildParticipantFromArmies(client,battle.id,army.country_id);
+      await rebuildParticipantFromArmies(client,battle.id,army.battle_country_id);
       await rebuildDraftSide(client,battle.id,input.side);
       const view = await loadView(client,battle.id);
       await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'battle.army.add','battle',$3,$4::jsonb)", [input.guildId,input.actorId,battle.id,JSON.stringify({ side: input.side, armyId: army.id, armyName: army.name, total })]);
@@ -3180,6 +3277,7 @@ export const battleService = {
       const active = await activeInChannel(client, input.guildId, input.channelId);
       if (!active) throw new GameError("Bu kanalda etkin savaş yok.");
       await client.query("UPDATE battles SET status='CANCELLED',finish_reason='Yönetici tarafından iptal edildi.',updated_at=NOW() WHERE id=$1", [active.id]);
+      await client.query("UPDATE steppe_internal_conflicts SET battle_id=NULL,updated_at=NOW() WHERE battle_id=$1 AND status='ACTIVE'",[active.id]);
       await settleLinkedEncounter(client,active.id,true);
       return loadView(client, active.id);
     });

@@ -30,6 +30,7 @@ import {
   collectAuditUuids
 } from "./audit-presenter.js";
 import { resolveArmyUnitTargetQuantity } from "./army-unit-update.js";
+import {steppeKurultayService} from "../services/steppe-kurultay-service.js";
 
 const usableUnitTypes = (Object.keys(BATTLE_UNIT_STATS) as BattleUnitType[]).filter((unitType) => unitType !== "militia");
 const usableUnitTypeSet = new Set<string>(usableUnitTypes);
@@ -1231,7 +1232,7 @@ export const adminPanelService = {
     let hegemony=null;
     if(hegemonyRow){
       const members=(await adminPool.query(`
-        SELECT relation.country_id,country.name AS country_name,relation.loyalty,relation.relation_score,
+        SELECT relation.country_id,country.name AS country_name,
                khan.title_name AS khan_title_name,khan.holder_name AS khan_holder_name,khan.holder_user_id AS khan_holder_user_id
           FROM steppe_tributaries relation JOIN countries country ON country.id=relation.country_id
           LEFT JOIN steppe_confederations confederation ON confederation.country_id=country.id AND confederation.status='ACTIVE'
@@ -1241,8 +1242,7 @@ export const adminPanelService = {
         SELECT call.id,call.target_label,call.reason,call.opened_turn,call.status,
                COALESCE((SELECT jsonb_agg(jsonb_build_object(
                  'countryId',response.country_id,'countryName',country.name,'khanTitleName',khan.title_name,
-                 'khanHolderName',khan.holder_name,'response',response.response,'loyaltyDelta',response.loyalty_delta,
-                 'relationDelta',response.relation_delta,'authorityDelta',response.authority_delta
+                 'khanHolderName',khan.holder_name,'response',response.response,'authorityDelta',response.authority_delta
                ) ORDER BY country.name)
                  FROM steppe_hegemony_war_call_responses response
                  JOIN countries country ON country.id=response.country_id
@@ -1252,8 +1252,7 @@ export const adminPanelService = {
           FROM steppe_hegemony_war_calls call WHERE call.guild_id=$1
          ORDER BY CASE call.status WHEN 'OPEN' THEN 0 ELSE 1 END,call.created_at DESC LIMIT 10`,[adminConfig.guildId])).rows;
       const events=(await adminPool.query(`
-        SELECT event.id,event.game_turn,event.event_type,event.description,event.loyalty_delta,event.relation_delta,
-               event.authority_delta,country.name AS country_name
+        SELECT event.id,event.game_turn,event.event_type,event.description,event.authority_delta,country.name AS country_name
           FROM steppe_hegemony_events event LEFT JOIN countries country ON country.id=event.country_id
          WHERE event.guild_id=$1 ORDER BY event.created_at DESC LIMIT 20`,[adminConfig.guildId])).rows;
       hegemony={...hegemonyRow,members,calls,events};
@@ -1267,7 +1266,7 @@ export const adminPanelService = {
     for(const confederation of confederations){
       const titles=(await adminPool.query(`
         SELECT title.id,title.tier,title.title_name,title.holder_name,title.holder_user_id,title.liege_title_id,
-               liege.title_name AS liege_title_name,title.loyalty,title.relation_score,
+               liege.title_name AS liege_title_name,
                COALESCE((SELECT jsonb_agg(jsonb_build_object('id',settlement.id,'name',settlement.name) ORDER BY settlement.name)
                            FROM steppe_title_holdings holding JOIN settlements settlement ON settlement.id=holding.settlement_id
                           WHERE holding.title_id=title.id),'[]'::jsonb) AS holdings
@@ -1277,19 +1276,25 @@ export const adminPanelService = {
       const calls=(await adminPool.query(`
         SELECT call.id,call.target_label,call.reason,call.opened_turn,call.status,
                COALESCE((SELECT jsonb_agg(jsonb_build_object('titleName',title.title_name,'holderName',title.holder_name,
-                 'response',response.response,'loyaltyDelta',response.loyalty_delta,'relationDelta',response.relation_delta,
-                 'authorityDelta',response.authority_delta) ORDER BY title.title_name)
+                 'response',response.response,'authorityDelta',response.authority_delta) ORDER BY title.title_name)
                  FROM steppe_war_call_responses response JOIN steppe_internal_titles title ON title.id=response.title_id
                 WHERE response.war_call_id=call.id),'[]'::jsonb) AS responses
           FROM steppe_war_calls call WHERE call.confederation_id=$1
          ORDER BY CASE call.status WHEN 'OPEN' THEN 0 ELSE 1 END,call.created_at DESC LIMIT 10`,[confederation.id])).rows;
       const events=(await adminPool.query(`
-        SELECT event.id,event.game_turn,event.event_type,event.description,event.loyalty_delta,event.relation_delta,event.authority_delta,
+        SELECT event.id,event.game_turn,event.event_type,event.description,event.authority_delta,
                title.title_name FROM steppe_political_events event LEFT JOIN steppe_internal_titles title ON title.id=event.title_id
          WHERE event.confederation_id=$1 ORDER BY event.created_at DESC LIMIT 20`,[confederation.id])).rows;
       result.push({...confederation,titles,calls,events});
     }
-    return{currentTurn:Number(guild.current_turn),hegemony,confederations:result};
+    const kurultay=await steppeKurultayService.view(adminConfig.guildId);
+    return{currentTurn:Number(guild.current_turn),hegemony,confederations:result,kurultay};
+  },
+
+  async voteSteppeKurultayNpc(actorId:string,electionId:string,rawInput:unknown){
+    const input=z.object({voterTitleId:z.string().uuid(),candidateTitleId:z.string().uuid()}).parse(rawInput);
+    return steppeKurultayService.voteNpc({guildId:adminConfig.guildId,actorId,electionId,
+      voterTitleId:input.voterTitleId,candidateTitleId:input.candidateTitleId});
   },
 
   async updateSteppeHegemony(actorId:string,rawInput:unknown){
@@ -1305,30 +1310,6 @@ export const adminPanelService = {
       await client.query(`INSERT INTO steppe_hegemony_events(guild_id,game_turn,event_type,actor_user_id,authority_delta,description)
         VALUES($1,$2,'ADMIN_ADJUSTMENT',$3,$4,$5)`,[adminConfig.guildId,row.current_turn,actorId,authorityDelta,input.reason]);
       await writeAdminAudit(client,actorId,"admin.panel.steppe.hegemony.update","steppe_hegemony",row.hegemon_country_id,{previous:Number(row.authority),...input});
-      return{ok:true};
-    });
-  },
-
-  async updateSteppeTributary(actorId:string,countryId:string,rawInput:unknown){
-    const input=z.object({loyalty:z.number().int().min(0).max(100),relationScore:z.number().int().min(-100).max(100),
-      reason:z.string().trim().min(2).max(300)}).parse(rawInput);
-    return withAdminTransaction(async(client)=>{
-      const row=(await client.query<{loyalty:number;relation_score:number;current_turn:number;country_name:string}>(`
-        SELECT relation.loyalty,relation.relation_score,guild.current_turn,country.name AS country_name
-          FROM steppe_tributaries relation JOIN guilds guild ON guild.discord_id=relation.guild_id
-          JOIN countries country ON country.id=relation.country_id
-         WHERE relation.guild_id=$1 AND relation.country_id=$2 AND relation.status='ACTIVE' FOR UPDATE OF relation`,
-      [adminConfig.guildId,countryId])).rows[0];
-      if(!row)throw new Error("Bağlı bozkır Hanı bulunamadı.");
-      const loyaltyDelta=input.loyalty-Number(row.loyalty),relationDelta=input.relationScore-Number(row.relation_score);
-      await client.query(`UPDATE steppe_tributaries SET loyalty=$3,relation_score=$4,updated_at=NOW()
-        WHERE guild_id=$1 AND country_id=$2`,[adminConfig.guildId,countryId,input.loyalty,input.relationScore]);
-      await client.query(`INSERT INTO steppe_hegemony_events(
-        guild_id,game_turn,event_type,country_id,actor_user_id,loyalty_delta,relation_delta,description
-      ) VALUES($1,$2,'ADMIN_ADJUSTMENT',$3,$4,$5,$6,$7)`,
-      [adminConfig.guildId,row.current_turn,countryId,actorId,loyaltyDelta,relationDelta,input.reason]);
-      await writeAdminAudit(client,actorId,"admin.panel.steppe.tributary.update","steppe_tributary",countryId,
-        {countryName:row.country_name,previous:{loyalty:row.loyalty,relationScore:row.relation_score},...input});
       return{ok:true};
     });
   },
@@ -1352,21 +1333,21 @@ export const adminPanelService = {
   },
 
   async updateSteppeTitle(actorId:string,titleId:string,rawInput:unknown){
-    const input=z.object({loyalty:z.number().int().min(0).max(100),relationScore:z.number().int().min(-100).max(100),
-      holderName:z.string().trim().min(2).max(100),holderUserId:z.string().trim().nullable(),reason:z.string().trim().min(2).max(300)}).parse(rawInput);
+    const input=z.object({holderName:z.string().trim().min(2).max(100),holderUserId:z.string().trim().nullable(),
+      reason:z.string().trim().min(2).max(300)}).parse(rawInput);
     return withAdminTransaction(async(client)=>{
-      const row=(await client.query<{id:string;confederation_id:string;loyalty:number;relation_score:number;current_turn:number}>(`
-        SELECT title.id,title.confederation_id,title.loyalty,title.relation_score,guild.current_turn
+      const row=(await client.query<{id:string;confederation_id:string;holder_name:string;holder_user_id:string|null;current_turn:number}>(`
+        SELECT title.id,title.confederation_id,title.holder_name,title.holder_user_id,guild.current_turn
           FROM steppe_internal_titles title JOIN steppe_confederations confederation ON confederation.id=title.confederation_id
           JOIN guilds guild ON guild.discord_id=confederation.guild_id
          WHERE title.id=$1 AND confederation.guild_id=$2 AND title.status='ACTIVE' FOR UPDATE OF title`,[titleId,adminConfig.guildId])).rows[0];
       if(!row)throw new Error("Bozkır unvanı bulunamadı.");
-      const loyaltyDelta=input.loyalty-Number(row.loyalty),relationDelta=input.relationScore-Number(row.relation_score);
-      await client.query(`UPDATE steppe_internal_titles SET loyalty=$2,relation_score=$3,holder_name=$4,holder_user_id=$5,updated_at=NOW() WHERE id=$1`,
-        [row.id,input.loyalty,input.relationScore,input.holderName,input.holderUserId||null]);
-      await client.query(`INSERT INTO steppe_political_events(confederation_id,game_turn,event_type,title_id,actor_user_id,loyalty_delta,relation_delta,description)
-        VALUES($1,$2,'ADMIN_ADJUSTMENT',$3,$4,$5,$6,$7)`,[row.confederation_id,row.current_turn,row.id,actorId,loyaltyDelta,relationDelta,input.reason]);
-      await writeAdminAudit(client,actorId,"admin.panel.steppe.title.update","steppe_internal_title",row.id,{previous:{loyalty:row.loyalty,relationScore:row.relation_score},...input});
+      await client.query(`UPDATE steppe_internal_titles SET holder_name=$2,holder_user_id=$3,updated_at=NOW() WHERE id=$1`,
+        [row.id,input.holderName,input.holderUserId||null]);
+      await client.query(`INSERT INTO steppe_political_events(confederation_id,game_turn,event_type,title_id,actor_user_id,description)
+        VALUES($1,$2,'ADMIN_TITLE_HOLDER_UPDATE',$3,$4,$5)`,[row.confederation_id,row.current_turn,row.id,actorId,input.reason]);
+      await writeAdminAudit(client,actorId,"admin.panel.steppe.title.update","steppe_internal_title",row.id,
+        {previous:{holderName:row.holder_name,holderUserId:row.holder_user_id},...input});
       return{ok:true};
     });
   },
