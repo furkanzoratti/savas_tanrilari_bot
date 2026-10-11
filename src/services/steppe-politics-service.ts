@@ -289,6 +289,14 @@ export const steppePoliticsService={
     return{tier:title.tier,titleName:title.title_name,holderName:title.holder_name,settlementIds:holdings.map((row)=>row.settlement_id)};
   },
 
+  async isActiveSteppeCountry(guildId:string,countryId:string):Promise<boolean>{
+    return Boolean((await pool.query(`
+      SELECT 1
+        FROM steppe_confederations
+       WHERE guild_id=$1 AND country_id=$2 AND status='ACTIVE'
+       LIMIT 1`,[guildId,countryId])).rowCount);
+  },
+
   async setup(input:{guildId:string;countryId:string;actorId:string;holderName:string;holderUserId?:string|null;authority?:number}){
     return withTransaction(async(client)=>{
       const country=(await client.query<{id:string;name:string;current_turn:number}>(`

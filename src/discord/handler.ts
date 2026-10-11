@@ -235,9 +235,7 @@ async function sendDocument(interaction: ChatInputCommandInteraction, countryId:
   if (!interaction.deferred && !interaction.replied) await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const [document,steppeAccess]=await Promise.all([
     gameService.document(countryId,{includeArmies:false}),
-    interaction.guildId&&!isGameMaster(interaction)
-      ?steppePoliticsService.settlementDocumentAccess(interaction.guildId,countryId,interaction.user.id)
-      :Promise.resolve(null)
+    resolveSteppeDocumentAccess(interaction,countryId)
   ]);
   const embeds=renderDocument(document,steppeAccess?{
     visibleSettlementIds:steppeAccess.settlementIds,
@@ -246,6 +244,20 @@ async function sendDocument(interaction: ChatInputCommandInteraction, countryId:
   const batches = batchDocumentEmbeds(embeds);
   await interaction.editReply({ embeds: batches[0] ?? [], files: [new AttachmentBuilder(TEMPLE_BANNER_PATH, { name: TEMPLE_BANNER_NAME })] });
   for (const batch of batches.slice(1)) await interaction.followUp({ embeds: batch, files: [new AttachmentBuilder(TEMPLE_BANNER_PATH, { name: TEMPLE_BANNER_NAME })], flags: MessageFlags.Ephemeral });
+}
+
+async function resolveSteppeDocumentAccess(
+  interaction:ChatInputCommandInteraction,countryId:string
+):Promise<Awaited<ReturnType<typeof steppePoliticsService.settlementDocumentAccess>>>{
+  if(!interaction.guildId||isGameMaster(interaction))return null;
+  const access=await steppePoliticsService.settlementDocumentAccess(interaction.guildId,countryId,interaction.user.id);
+  if(access)return access;
+  if(await steppePoliticsService.isActiveSteppeCountry(interaction.guildId,countryId)){
+    throw new GameError(
+      "Bu bozkır devletinin belgesi yalnızca oyuncuya atanmış Han veya Toprak Ağası makamıyla görüntülenebilir. Yönetim panelindeki Bozkır Siyaseti bölümünden oyuncuyu ilgili makama atayın."
+    );
+  }
+  return null;
 }
 
 async function resolveDocumentCountry(interaction:ChatInputCommandInteraction){
@@ -1518,7 +1530,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     const country=await resolveDocumentCountry(interaction);
     const [document,steppeAccess]=await Promise.all([
       gameService.document(country.id,{includeArmies:false}),
-      isGameMaster(interaction)?Promise.resolve(null):steppePoliticsService.settlementDocumentAccess(interaction.guildId,country.id,interaction.user.id)
+      resolveSteppeDocumentAccess(interaction,country.id)
     ]);
     const embeds=renderSettlementsOverview(document,steppeAccess?{
       visibleSettlementIds:steppeAccess.settlementIds,
