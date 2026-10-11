@@ -40,6 +40,7 @@ import {
 import type {RomanPoliticalTurnResult} from "./roman-politics-service.js";
 import { prosperityTier } from "../domain/stability.js";
 import { settlementTransferPolicy, type SettlementTransferType } from "../domain/settlement-transfer.js";
+import { evacuateSettlementShips } from "./naval-evacuation-service.js";
 import {
   CHRISTIAN_BORDER_TARGET_PERCENT,
   christianCatholicPercent,
@@ -1654,7 +1655,7 @@ export const gameService = {
     });
   },
 
-  async transferSettlement(input: { guildId: string; actorId: string; sourceCountryId: string; targetCountryId: string; settlementId: string; transferType?: SettlementTransferType; transferTurn?: number | null }): Promise<{ settlementName: string; sourceName: string; targetName: string; transferType: SettlementTransferType; transferLabel: string; transferTurn: number; cancelledRecruitmentOrders: number; endedTrades: number; enslavedGarrison: number; removedArmyPersonnel: number; preservedArmyPersonnel: number; evacuatedArmyPopulation: number; removedShips: number; removedSiegeAssets: number; destroyedMercenaryContracts: number; newGarrisonPersonnel: number; newGarrisonCost: number; newGarrisonCompletionTurn: number | null; lastStandDetails: LastStandEvent[] }> {
+  async transferSettlement(input: { guildId: string; actorId: string; sourceCountryId: string; targetCountryId: string; settlementId: string; transferType?: SettlementTransferType; transferTurn?: number | null }): Promise<{ settlementName: string; sourceName: string; targetName: string; transferType: SettlementTransferType; transferLabel: string; transferTurn: number; cancelledRecruitmentOrders: number; endedTrades: number; enslavedGarrison: number; removedArmyPersonnel: number; preservedArmyPersonnel: number; evacuatedArmyPopulation: number; transferredShips: number; shipTransferDestination: string | null; relocatedFleets: number; cancelledOwnRepairShips:number; cancelledForeignRepairShips:number; removedShips: number; removedSiegeAssets: number; destroyedMercenaryContracts: number; newGarrisonPersonnel: number; newGarrisonCost: number; newGarrisonCompletionTurn: number | null; lastStandDetails: LastStandEvent[] }> {
     return withTransaction(async (client) => {
       const transferType = input.transferType ?? "CONQUEST";
       const transferPolicy = settlementTransferPolicy(transferType);
@@ -1724,7 +1725,6 @@ export const gameService = {
       const enslavedGarrison = transferPolicy.conquered ? enslavedExistingGarrison + cancelledGarrisonTrainees : 0;
       if (remainingSourceSettlements > 0) {
         await client.query("DELETE FROM army_siege_assets WHERE settlement_id=$1", [settlement.id]);
-        await client.query("DELETE FROM fleet_ships WHERE settlement_id=$1", [settlement.id]);
       }
       const removedStacks = (await client.query<{ quantity: number; force_type: "ARMY" | "GARRISON" }>(
         "DELETE FROM unit_stacks WHERE settlement_id=$1 RETURNING quantity,force_type", [settlement.id]
@@ -1737,9 +1737,10 @@ export const gameService = {
       const evacuatedArmyPopulation = conquestArmyPopulationDeparture(
         settlement.population,enslavedExistingGarrison,preservedArmyPersonnel
       );
-      const removedShips = (await client.query<{ quantity: number }>(
-        "DELETE FROM naval_units WHERE settlement_id=$1 RETURNING quantity", [settlement.id]
-      )).rows.reduce((sum, row) => sum + Number(row.quantity), 0);
+      const navalEvacuation = await evacuateSettlementShips(client,{
+        countryId:source.id,settlementId:settlement.id,currentTurn:transferTurn
+      });
+      const removedShips = navalEvacuation.scuttledShips;
       const removedSiegeAssets = (await client.query<{ quantity: number }>(
         "DELETE FROM siege_assets WHERE settlement_id=$1 RETURNING quantity", [settlement.id]
       )).rows.reduce((sum, row) => sum + Number(row.quantity), 0);
@@ -1791,14 +1792,24 @@ export const gameService = {
       }
       await audit(client, input.guildId, input.actorId, "SETTLEMENT_TRANSFER", "settlement", settlement.id, {
         fromCountryId: source.id, toCountryId: target.id, transferType, transferTurn, conqueredTurn: transferPolicy.conquered ? transferTurn : null, cancelledRecruitmentOrders: activeOrders.rows.length, cancelledNavalOrders: cancelledNaval.rowCount ?? 0, cancelledSiegeOrders: cancelledSiege.rowCount ?? 0, endedTrades: trades.rowCount ?? 0,
-        enslavedGarrison, removedArmyPersonnel, preservedArmyPersonnel, evacuatedArmyPopulation, remainingSourceSettlements, removedShips, removedSiegeAssets, destroyedMercenaryContracts: mercenaryContracts.length,
+        enslavedGarrison, removedArmyPersonnel, preservedArmyPersonnel, evacuatedArmyPopulation, remainingSourceSettlements,
+        transferredShips:navalEvacuation.transferredShips,shipTransferDestinationId:navalEvacuation.destinationSettlementId,
+        shipTransferDestinationName:navalEvacuation.destinationSettlementName,relocatedFleets:navalEvacuation.relocatedFleets,
+        cancelledOwnRepairShips:navalEvacuation.cancelledOwnRepairShips,
+        cancelledForeignRepairShips:navalEvacuation.cancelledForeignRepairShips,
+        removedShips, removedSiegeAssets, destroyedMercenaryContracts: mercenaryContracts.length,
         newGarrisonPersonnel: newGarrison?.personnel ?? 0, newGarrisonCost: newGarrison?.cost ?? 0, newGarrisonCompletionTurn: newGarrison?.completionTurn ?? null
       });
       return {
         settlementName: settlement.name, sourceName: source.name, targetName: target.name,
         cancelledRecruitmentOrders: activeOrders.rows.length, endedTrades: trades.rowCount ?? 0, enslavedGarrison,
         transferType, transferLabel: transferPolicy.label, transferTurn,
-        removedArmyPersonnel, preservedArmyPersonnel, evacuatedArmyPopulation, removedShips, removedSiegeAssets, destroyedMercenaryContracts: mercenaryContracts.length,
+        removedArmyPersonnel, preservedArmyPersonnel, evacuatedArmyPopulation,
+        transferredShips:navalEvacuation.transferredShips,shipTransferDestination:navalEvacuation.destinationSettlementName,
+        relocatedFleets:navalEvacuation.relocatedFleets,
+        cancelledOwnRepairShips:navalEvacuation.cancelledOwnRepairShips,
+        cancelledForeignRepairShips:navalEvacuation.cancelledForeignRepairShips,
+        removedShips, removedSiegeAssets, destroyedMercenaryContracts: mercenaryContracts.length,
         newGarrisonPersonnel: newGarrison?.personnel ?? 0, newGarrisonCost: newGarrison?.cost ?? 0,
         newGarrisonCompletionTurn: newGarrison?.completionTurn ?? null,lastStandDetails
       };

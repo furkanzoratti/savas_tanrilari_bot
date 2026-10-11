@@ -105,6 +105,7 @@ import { centralAsianStatesMigration } from "./central-asian-states-migration.js
 import { centralAsianQiangCorrectionMigration } from "./central-asian-qiang-correction-migration.js";
 import { langkasukaStateMigration } from "./langkasuka-state-migration.js";
 import { activeRebelFactionRepairMigration } from "./active-rebel-faction-repair-migration.js";
+import { navalCaptureEvacuationMigration } from "./naval-capture-evacuation-migration.js";
 
 export const migrations = [
   {
@@ -2427,5 +2428,6 @@ export const migrations = [
   centralAsianStatesMigration,
   centralAsianQiangCorrectionMigration,
   langkasukaStateMigration,
-  activeRebelFactionRepairMigration
+  activeRebelFactionRepairMigration,
+  navalCaptureEvacuationMigration
 ] as const;
