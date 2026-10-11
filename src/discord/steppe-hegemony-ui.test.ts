@@ -19,38 +19,16 @@ const offer={
 };
 
 describe("bozkır haraç teklif arayüzü",()=>{
-  it("hegemonun kullanacağı bozkir harac komutunu kaydeder",()=>{
+  it("yalnız ülke seviyesindeki Hanlar Hanlığı komutlarını kaydeder",()=>{
     const command=commandBuilders.find((item)=>item.name==="bozkir");
     expect(command?.options?.map((option)=>option.name)).toEqual([
-      "harac","durum","hiyerarsi","hanlar-hanligi","kurultay","savas-cagrisi","hanlar-hani-cagrisi","cagrilar","hanlar-hani-cagrilari",
-      "ic-savas-ac","ic-savaslar","ordu-bagla"
+      "durum","harac","hanlar-hanligi","kurultay","hanlar-hani-cagrisi","hanlar-hani-cagrilari"
     ]);
-    expect(command?.options?.[0]?.options?.find((option)=>option.name==="ulke")?.required).toBe(false);
-    for(const subcommand of (command?.options??[]).filter((option)=>["harac","durum","hiyerarsi","hanlar-hanligi","kurultay","savas-cagrisi","hanlar-hani-cagrisi","cagrilar","hanlar-hani-cagrilari"].includes(option.name))){
-      expect(subcommand.options?.find((option)=>option.name==="ulke")).toMatchObject({autocomplete:true});
-    }
     const management=commandBuilders.find((item)=>item.name==="bozkir-yonetim");
     expect(management?.options?.map((option)=>option.name)).toEqual([
-      "kur","unvan-ekle","toprak-bagla","deger-ayarla","ust-otorite-ayarla","kurultay-baslat","kurultay-bitir",
-      "cagri-kapat","ust-cagri-kapat","ic-savas-sonuclandir"
+      "ust-otorite-ayarla","kurultay-baslat","kurultay-bitir","ust-cagri-kapat"
     ]);
-    const setup=management?.options?.find((option)=>option.name==="kur");
-    expect(setup?.options?.map((option)=>option.name)).toContain("han");
-    expect(setup?.options?.map((option)=>option.name)).not.toContain("hanlar-hani");
-    const addTitle=management?.options?.find((option)=>option.name==="unvan-ekle");
-    expect(addTitle?.options?.map((option)=>option.name)).not.toContain("seviye");
-    expect(addTitle?.options?.map((option)=>option.name)).not.toContain("sadakat");
-    expect(addTitle?.options?.map((option)=>option.name)).not.toContain("iliski");
-    for(const subcommand of management?.options??[]){
-      expect(subcommand.options?.find((option)=>option.name==="ulke")).toMatchObject({autocomplete:true});
-    }
-    const holding=management?.options?.find((option)=>option.name==="toprak-bagla");
-    expect(holding?.options?.find((option)=>option.name==="unvan")).toMatchObject({autocomplete:true});
-    expect(holding?.options?.find((option)=>option.name==="yerleske")).toMatchObject({autocomplete:true});
-    for(const action of ["cagri-kapat","ust-cagri-kapat"]){
-      expect(management?.options?.find((option)=>option.name===action)?.options?.find((option)=>option.name==="cagri"))
-        .toMatchObject({autocomplete:true});
-    }
+    expect(JSON.stringify([command,management])).not.toMatch(/unvan-ekle|toprak-bagla|ic-savas|ordu-bagla/);
   });
 
   it("Kurultayda yalnız Hanları seçtirir ve makam ağırlıklarını açıkça gösterir",()=>{
@@ -64,13 +42,13 @@ describe("bozkır haraç teklif arayüzü",()=>{
       ],
       voters:[
         {titleId:"33333333-3333-4333-8333-333333333333",titleName:"Xiongnu Hanı",holderName:"Modu Chanyu",holderUserId:"player",countryName:"Xiongnu Konfederasyonu",tier:"KHAN" as const,weight:2,candidateTitleId:"33333333-3333-4333-8333-333333333333",candidateTitleName:"Xiongnu Hanı"},
-        {titleId:"55555555-5555-4555-8555-555555555555",titleName:"Kuzey Toprak Ağası",holderName:"Boro",holderUserId:null,countryName:"Dingling Konfederasyonu",tier:"LANDHOLDER" as const,weight:1,candidateTitleId:"44444444-4444-4444-8444-444444444444",candidateTitleName:"Dingling Hanı"}
+        {titleId:"55555555-5555-4555-8555-555555555555",titleName:"Xianbei Hanı",holderName:"Tanshihuai",holderUserId:null,countryName:"Xianbei Konfederasyonu",tier:"KHAN" as const,weight:2,candidateTitleId:"44444444-4444-4444-8444-444444444444",candidateTitleName:"Dingling Hanı"}
       ]
     };
     const text=JSON.stringify(steppeKurultayEmbed(view).toJSON());
     const components=steppeKurultayComponents(view).map((row)=>row.toJSON());
-    expect(text).toContain("Han 2 puan");
-    expect(text).toContain("Toprak Ağası 1 puan");
+    expect(text).toContain("Her etkin Han 2 puan");
+    expect(text).not.toContain("Toprak Ağası 1 puan");
     expect(components[0]?.components[0]).toMatchObject({type:3,custom_id:`steppe_kurultay_vote|${view.id}`});
     expect(components[0]?.components[0]?.options).toHaveLength(2);
   });

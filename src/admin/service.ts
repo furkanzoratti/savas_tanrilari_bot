@@ -1271,8 +1271,17 @@ export const adminPanelService = {
                            FROM steppe_title_holdings holding JOIN settlements settlement ON settlement.id=holding.settlement_id
                           WHERE holding.title_id=title.id),'[]'::jsonb) AS holdings
           FROM steppe_internal_titles title LEFT JOIN steppe_internal_titles liege ON liege.id=title.liege_title_id
-         WHERE title.confederation_id=$1 AND title.status='ACTIVE'
+         WHERE title.confederation_id=$1 AND title.status='ACTIVE' AND title.tier='KHAN'
          ORDER BY CASE title.tier WHEN 'KHAN' THEN 0 ELSE 1 END,title.title_name`,[confederation.id])).rows;
+      const directSettlements=(await adminPool.query(`
+        SELECT settlement.id,settlement.name,settlement.population,settlement.land_trade_income
+          FROM settlements settlement
+         WHERE settlement.country_id=$1 ORDER BY settlement.name`,[confederation.country_id])).rows;
+      const vassals=(await adminPool.query(`
+        SELECT vassal.id,vassal.name,relation.started_turn
+          FROM country_vassalages relation JOIN countries vassal ON vassal.id=relation.vassal_country_id
+         WHERE relation.overlord_country_id=$1 AND relation.status='ACTIVE' AND vassal.status='ACTIVE'
+         ORDER BY vassal.name`,[confederation.country_id])).rows;
       const calls=(await adminPool.query(`
         SELECT call.id,call.target_label,call.reason,call.opened_turn,call.status,
                COALESCE((SELECT jsonb_agg(jsonb_build_object('titleName',title.title_name,'holderName',title.holder_name,
@@ -1285,7 +1294,8 @@ export const adminPanelService = {
         SELECT event.id,event.game_turn,event.event_type,event.description,event.authority_delta,
                title.title_name FROM steppe_political_events event LEFT JOIN steppe_internal_titles title ON title.id=event.title_id
          WHERE event.confederation_id=$1 ORDER BY event.created_at DESC LIMIT 20`,[confederation.id])).rows;
-      result.push({...confederation,titles,calls,events});
+      result.push({...confederation,titles,directSettlements,vassals,calls,events,
+        isHegemon:hegemonyRow?.hegemon_country_id===confederation.country_id});
     }
     const kurultay=await steppeKurultayService.view(adminConfig.guildId);
     return{currentTurn:Number(guild.current_turn),hegemony,confederations:result,kurultay};

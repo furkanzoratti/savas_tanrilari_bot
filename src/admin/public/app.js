@@ -362,7 +362,6 @@ function openRomanFamilyMemberRemovalEditor(republic, family, member) {
   });
 }
 
-const steppeTierLabels = { KHAN: "Han", LANDHOLDER: "Toprak Ağası" };
 const steppeResponseLabels = { PENDING: "Bekliyor", FULL: "Tam Katılım", LIMITED: "Sınırlı Katılım", NEUTRAL: "Tarafsız", REFUSE: "Reddetti", UNANSWERED: "Cevapsız" };
 
 function steppeDelta(value) {
@@ -389,19 +388,20 @@ function steppeHegemonyPanel(hegemony, currentTurn) {
 }
 
 function steppeConfederationPanel(confederation, currentTurn) {
-  const openCalls = confederation.calls.filter((call) => call.status === "OPEN");
   const titleCards = confederation.titles.map((title) => `<article class="card dynasty-card">
-    <div class="card-head"><div><h3>${escapeHtml(title.title_name)}</h3><p>${escapeHtml(steppeTierLabels[title.tier] || title.tier)}${title.liege_title_name ? ` · ${escapeHtml(title.liege_title_name)} makamına bağlı` : ""}</p></div><button class="button compact" data-edit-steppe-title="${title.id}">Düzenle</button></div>
-    <section class="detail-grid"><div class="detail-cell"><span>Makam sahibi</span><strong>${escapeHtml(title.holder_name)}</strong><small>${title.holder_user_id ? `Discord: ${escapeHtml(title.holder_user_id)}` : "Oyuncu atanmamış"}</small></div><div class="detail-cell"><span>Topraklar</span><strong>${title.holdings.length ? title.holdings.map((holding) => escapeHtml(holding.name)).join(", ") : "Bağlı yerleşke yok"}</strong></div></section>
+    <div class="card-head"><div><h3>👑 ${escapeHtml(title.title_name)}</h3><p>${confederation.isHegemon ? "Hanlar Hanı makamı" : "Hanlık kademesi"}</p></div><button class="button compact" data-edit-steppe-title="${title.id}">Hanı düzenle</button></div>
+    <section class="detail-grid"><div class="detail-cell"><span>Han</span><strong>${escapeHtml(title.holder_name)}</strong><small>${title.holder_user_id ? `Discord: ${escapeHtml(title.holder_user_id)}` : "Oyuncu atanmamış"}</small></div><div class="detail-cell"><span>Kurultay</span><strong>2 oy puanı</strong><small>Aday olabilen tek kademe</small></div></section>
   </article>`).join("");
-  const callCards = confederation.calls.map((call) => `<article class="card"><div class="card-head"><div><h3>${escapeHtml(call.target_label)}</h3><p>Tur ${number(call.opened_turn)} · ${escapeHtml(call.reason)}</p></div><span class="pill ${call.status === "OPEN" ? "warning" : "neutral"}">${call.status === "OPEN" ? "Yanıt bekliyor" : "Kapandı"}</span></div>${call.responses.map((response) => `<div class="data-row"><div><strong>${escapeHtml(response.titleName)}</strong><small>${escapeHtml(response.holderName)}</small></div><span>${escapeHtml(steppeResponseLabels[response.response] || response.response)}</span><small>Otorite ${steppeDelta(response.authorityDelta)}</small></div>`).join("") || '<div class="empty compact-empty">Çağrıya bağlı Toprak Ağası bulunmuyor.</div>'}</article>`).join("");
+  const settlementRows = (confederation.directSettlements || []).map((settlement) => `<div class="data-row"><div><strong>${escapeHtml(settlement.name)}</strong><small>Nüfus ${number(settlement.population)}</small></div><span>${number(settlement.land_trade_income)} kara ticareti</span></div>`).join("");
+  const vassalCards = (confederation.vassals || []).map((vassal) => `<article class="card dynasty-card"><div class="card-head"><div><h3>♞ ${escapeHtml(vassal.name)}</h3><p>Normal devlet vassallığı · Tur ${number(vassal.started_turn)}</p></div><span class="pill neutral">Vassal</span></div><p class="muted">Bu devlet bozkır makamı değildir; kendi ülke, hanedan, ordu ve yerleşke kayıtlarını kullanır.</p></article>`).join("");
   const eventRows = confederation.events.map((event) => `<div class="data-row"><div><strong>Tur ${number(event.game_turn)} · ${escapeHtml(event.title_name || "Konfederasyon")}</strong><small>${escapeHtml(event.description)}</small></div><span>Otorite ${steppeDelta(event.authority_delta)}</span></div>`).join("");
   return `<section class="roman-republic-section">
-    <div class="page-head"><div><h1>🐎 ${escapeHtml(confederation.country_name)} · Bozkır Siyaseti</h1><p>Ülkenin Hanı, doğrudan Han toprakları ve devletsiz Toprak Ağaları</p></div><div class="actions"><span class="pill">Tur ${number(currentTurn)}</span><button class="button primary" data-edit-steppe-confederation="${confederation.id}">Otoriteyi düzenle</button></div></div>
-    <section class="detail-grid"><div class="detail-cell"><span>Han otoritesi</span><strong>${number(confederation.authority)} / 100</strong></div><div class="detail-cell"><span>Aktif makamlar</span><strong>${number(confederation.titles.length)}</strong></div><div class="detail-cell"><span>Açık savaş çağrısı</span><strong>${number(openCalls.length)}</strong></div><div class="detail-cell"><span>Üst bağlılık</span><strong>Hanlar Hanlığı haraç sistemi</strong><small>Ayrı bir ilişki puanı kullanılmaz.</small></div></section>
-    <div class="section-title"><h2>Ülke içi yapı</h2><span>Toprak Ağaları → Ülkenin Hanı</span></div><section class="dynasty-grid">${titleCards || '<div class="card empty">Henüz makam oluşturulmamış.</div>'}</section>
-    <div class="section-title"><h2>Savaş çağrıları</h2><span>Han yanıtları ve siyasi sonuçları</span></div><section class="content-grid">${callCards || '<div class="card empty">Henüz savaş çağrısı bulunmuyor.</div>'}</section>
-    <section class="card"><div class="card-head"><div><h2>Son siyasi kayıtlar</h2><p>Yönetici düzenlemeleri ve çağrı sonuçları</p></div></div>${eventRows || '<div class="empty compact-empty">Henüz siyasi kayıt yok.</div>'}</section>
+    <div class="page-head"><div><h1>🐎 ${escapeHtml(confederation.country_name)} · ${confederation.isHegemon ? "Hanlar Hanı Devleti" : "Hanlık"}</h1><p>Bağımsız devlet yapısı, Han makamı ve normal vassalları</p></div><div class="actions"><span class="pill">Tur ${number(currentTurn)}</span><span class="pill ${confederation.isHegemon ? "warning" : "neutral"}">${confederation.isHegemon ? "Hanlar Hanı" : "Bağlı Han"}</span></div></div>
+    <section class="detail-grid"><div class="detail-cell"><span>Siyasi kademe</span><strong>${confederation.isHegemon ? "Hanlar Hanı" : "Han"}</strong></div><div class="detail-cell"><span>Doğrudan yerleşke</span><strong>${number((confederation.directSettlements || []).length)}</strong></div><div class="detail-cell"><span>Normal vassal</span><strong>${number((confederation.vassals || []).length)}</strong></div><div class="detail-cell"><span>Ordu doktrini</span><strong>Bozkır özel kompozisyonu</strong><small>Yalnız üç konfederasyonda aktiftir.</small></div></section>
+    <div class="section-title"><h2>Han makamı</h2><span>Toprak Ağası kademesi kullanılmaz</span></div><section class="dynasty-grid">${titleCards || '<div class="card empty">Etkin Han makamı bulunmuyor.</div>'}</section>
+    <div class="section-title"><h2>Doğrudan yerleşkeler</h2><span>Yalnız bu devletin kendi mülkleri</span></div><section class="card">${settlementRows || '<div class="empty compact-empty">Doğrudan yerleşke bulunmuyor.</div>'}</section>
+    <div class="section-title"><h2>Bağlı normal devletler</h2><span>Vassallık sistemi üzerinden yönetilir; bozkır makamı sayılmazlar</span></div><section class="dynasty-grid">${vassalCards || '<div class="card empty">Henüz normal vassal bağlanmamış.</div>'}</section>
+    <section class="card"><div class="card-head"><div><h2>Son siyasi kayıtlar</h2><p>Han makamı ve yönetici işlemleri</p></div></div>${eventRows || '<div class="empty compact-empty">Henüz siyasi kayıt yok.</div>'}</section>
   </section>`;
 }
 
@@ -412,9 +412,9 @@ function steppeKurultayPanel(kurultay) {
   const candidateRows = kurultay.candidates.map((candidate) => `<div class="data-row"><div><strong>👑 ${escapeHtml(candidate.holderName)}</strong><small>${escapeHtml(candidate.titleName)} · ${escapeHtml(candidate.countryName)}</small></div><span>${number(candidate.points)} puan</span><small>${number(candidate.ballotCount)} makam oyu</small></div>`).join("");
   const voterRows = kurultay.voters.map((voter) => `<div class="data-row"><div><strong>${voter.tier === "KHAN" ? "👑" : "🌾"} ${escapeHtml(voter.titleName)}</strong><small>${escapeHtml(voter.holderName)} · ${escapeHtml(voter.countryName)}${voter.holderUserId ? " · Oyuncu" : " · NPC"}</small></div><span>${number(voter.weight)} puan</span><small>${voter.candidateTitleName ? `Oy: ${escapeHtml(voter.candidateTitleName)}` : "Henüz oy yok"}</small></div>`).join("");
   return `<section class="roman-republic-section">
-    <div class="page-head"><div><h1>🏕️ ${number(kurultay.sequence)}. Büyük Bozkır Kurultayı</h1><p>Hanlar Hanı seçimi · Han 2 puan, Toprak Ağası 1 puan</p></div><div class="actions"><span class="pill ${kurultay.status === "OPEN" ? "warning" : "neutral"}">${kurultay.status === "OPEN" ? "Oy kullanımı açık" : kurultay.status === "COMPLETED" ? "Sonuçlandı" : "İptal"}</span>${kurultay.status === "OPEN" ? '<button class="button primary" data-steppe-kurultay-npc-vote>NPC oyu kullan</button>' : ""}</div></div>
+    <div class="page-head"><div><h1>🏕️ ${number(kurultay.sequence)}. Büyük Bozkır Kurultayı</h1><p>Hanlar Hanı seçimi · Her etkin Han 2 oy puanı kullanır</p></div><div class="actions"><span class="pill ${kurultay.status === "OPEN" ? "warning" : "neutral"}">${kurultay.status === "OPEN" ? "Oy kullanımı açık" : kurultay.status === "COMPLETED" ? "Sonuçlandı" : "İptal"}</span>${kurultay.status === "OPEN" ? '<button class="button primary" data-steppe-kurultay-npc-vote>NPC oyu kullan</button>' : ""}</div></div>
     <section class="detail-grid"><div class="detail-cell"><span>Açılış turu</span><strong>Tur ${number(kurultay.startedTurn)}</strong></div><div class="detail-cell"><span>Mevcut Hanlar Hanı</span><strong>${escapeHtml(kurultay.incumbentCountryName)}</strong></div><div class="detail-cell"><span>Katılım</span><strong>${number(castPoints)} / ${number(totalPoints)} puan</strong></div><div class="detail-cell"><span>Sonraki Kurultay</span><strong>Tur ${number(kurultay.nextKurultayTurn)}</strong></div></section>
-    <div class="section-title"><h2>Han adayları</h2><span>Yalnız etkin konfederasyon Hanları adaydır</span></div><section class="card">${candidateRows || '<div class="empty compact-empty">Han adayı bulunmuyor.</div>'}</section>
+    <div class="section-title"><h2>Han adayları</h2><span>Yalnız Hanlık kademesindeki Xiongnu, Dingling ve Xianbei makamları aday olabilir</span></div><section class="card">${candidateRows || '<div class="empty compact-empty">Han adayı bulunmuyor.</div>'}</section>
     <div class="section-title"><h2>Makam oyları</h2><span>Oyuncu makamları Discord formundan, NPC makamları bu panelden oy kullanır</span></div><section class="card">${voterRows || '<div class="empty compact-empty">Oy kullanabilecek makam bulunmuyor.</div>'}</section>
   </section>`;
 }
@@ -425,8 +425,7 @@ async function steppePoliticsPage() {
   const sections = [steppeHegemonyPanel(data.hegemony, data.currentTurn), steppeKurultayPanel(data.kurultay), ...data.confederations.map((confederation) => steppeConfederationPanel(confederation, data.currentTurn))].filter(Boolean);
   page.innerHTML = sections.length
     ? sections.join("")
-    : '<div class="page-head"><div><h1>Bozkır Siyaseti</h1><p>Konfederasyon iç hiyerarşisi</p></div></div><div class="card empty">Henüz bozkır konfederasyonu kurulmamış. Discord’da /bozkir-yonetim kur komutunu kullanın.</div>';
-  const confederations = new Map(data.confederations.map((confederation) => [confederation.id, confederation]));
+    : '<div class="page-head"><div><h1>Bozkır Siyaseti</h1><p>Üç konfederasyonlu Hanlar Hanlığı</p></div></div><div class="card empty">Xiongnu, Dingling ve Xianbei bozkır kayıtları bulunamadı.</div>';
   const titles = new Map(data.confederations.flatMap((confederation) => confederation.titles).map((title) => [title.id, title]));
   document.querySelector("[data-steppe-kurultay-npc-vote]")?.addEventListener("click", () => {
     const kurultay = data.kurultay;
@@ -435,7 +434,7 @@ async function steppePoliticsPage() {
     if (!voters.length) return toast("Oy kullanmamış NPC bozkır makamı bulunmuyor.", "error");
     const voterOptions = voters.map((voter) => `<option value="${voter.titleId}">${escapeHtml(voter.titleName)} · ${escapeHtml(voter.holderName)} · ${number(voter.weight)} puan</option>`).join("");
     const candidateOptions = kurultay.candidates.map((candidate) => `<option value="${candidate.titleId}">${escapeHtml(candidate.holderName)} · ${escapeHtml(candidate.titleName)} · ${escapeHtml(candidate.countryName)}</option>`).join("");
-    openEditor("NPC Kurultay oyu", `${number(kurultay.sequence)}. Büyük Bozkır Kurultayı`, `<div class="preview-warning"><strong>Oy kesindir ve değiştirilemez.</strong><span>Yalnız oyuncuya atanmamış Han ve Toprak Ağası makamları panelden oy kullanabilir.</span></div><div class="form-grid"><label>Oy kullanacak NPC makam<select id="steppe-kurultay-voter" required>${voterOptions}</select></label><label>Han adayı<select id="steppe-kurultay-candidate" required>${candidateOptions}</select></label></div>`, async () => {
+    openEditor("NPC Kurultay oyu", `${number(kurultay.sequence)}. Büyük Bozkır Kurultayı`, `<div class="preview-warning"><strong>Oy kesindir ve değiştirilemez.</strong><span>Yalnız oyuncuya atanmamış Han makamları panelden oy kullanabilir.</span></div><div class="form-grid"><label>Oy kullanacak NPC Han<select id="steppe-kurultay-voter" required>${voterOptions}</select></label><label>Han adayı<select id="steppe-kurultay-candidate" required>${candidateOptions}</select></label></div>`, async () => {
       await api(`/api/admin/steppe-kurultay/${kurultay.id}/vote`, { method: "POST", body: JSON.stringify({ voterTitleId: document.getElementById("steppe-kurultay-voter").value, candidateTitleId: document.getElementById("steppe-kurultay-candidate").value }) });
       closeEditor(); toast("NPC Kurultay oyu kaydedildi."); await steppePoliticsPage();
     });
@@ -447,14 +446,6 @@ async function steppePoliticsPage() {
       closeEditor(); toast("Hanlar Hanı otoritesi güncellendi."); await steppePoliticsPage();
     });
   });
-  document.querySelectorAll("[data-edit-steppe-confederation]").forEach((button) => button.addEventListener("click", () => {
-    const confederation = confederations.get(button.dataset.editSteppeConfederation);
-    if (!confederation) return;
-    openEditor("Han otoritesi", confederation.country_name, `<div class="form-grid"><label>Otorite<input id="edit-steppe-authority" type="number" min="0" max="100" step="1" value="${number(confederation.authority)}" required></label><label class="full">Düzenleme gerekçesi<textarea id="edit-steppe-reason" maxlength="300" required></textarea></label></div>`, async () => {
-      await api(`/api/admin/steppe-confederations/${confederation.id}`, { method: "PATCH", body: JSON.stringify({ authority: Number(document.getElementById("edit-steppe-authority").value), reason: document.getElementById("edit-steppe-reason").value }) });
-      closeEditor(); toast("Konfederasyon otoritesi güncellendi."); await steppePoliticsPage();
-    });
-  }));
   document.querySelectorAll("[data-edit-steppe-title]").forEach((button) => button.addEventListener("click", () => {
     const title = titles.get(button.dataset.editSteppeTitle);
     if (!title) return;

@@ -187,13 +187,14 @@ async function viewWithClient(client:DbClient,guildId:string,countryId:string):P
              liege.title_name AS liege_title_name
         FROM steppe_internal_titles title
         LEFT JOIN steppe_internal_titles liege ON liege.id=title.liege_title_id
-       WHERE title.confederation_id=$1 AND title.status='ACTIVE'
+       WHERE title.confederation_id=$1 AND title.status='ACTIVE' AND title.tier='KHAN'
        ORDER BY CASE title.tier WHEN 'KHAN' THEN 0 ELSE 1 END,title.title_name`,[confed.id])).rows;
   const holdings=(await client.query<{title_id:string;id:string;name:string}>(`
-    SELECT holding.title_id,settlement.id,settlement.name
-      FROM steppe_title_holdings holding JOIN settlements settlement ON settlement.id=holding.settlement_id
-      JOIN steppe_internal_titles title ON title.id=holding.title_id
-     WHERE title.confederation_id=$1 ORDER BY settlement.name`,[confed.id])).rows;
+    SELECT title.id AS title_id,settlement.id,settlement.name
+      FROM steppe_internal_titles title
+      JOIN settlements settlement ON settlement.country_id=$2
+     WHERE title.confederation_id=$1 AND title.status='ACTIVE' AND title.tier='KHAN'
+     ORDER BY settlement.name`,[confed.id,countryId])).rows;
   const calls=(await client.query<{id:string;target_label:string;reason:string;opened_turn:number;status:"OPEN"|"CLOSED"|"CANCELLED"}>(`
     SELECT id,target_label,reason,opened_turn,status FROM steppe_war_calls
      WHERE confederation_id=$1 ORDER BY CASE status WHEN 'OPEN' THEN 0 ELSE 1 END,created_at DESC LIMIT 10`,[confed.id])).rows;
@@ -283,6 +284,12 @@ export const steppePoliticsService={
          ORDER BY CASE title.tier WHEN 'KHAN' THEN 0 ELSE 1 END,title.created_at LIMIT 1`,
       [guildId,countryId,userId])).rows[0];
     if(!title)return null;
+    if(title.tier==="KHAN"){
+      const settlements=(await pool.query<{id:string}>(
+        "SELECT id FROM settlements WHERE country_id=$1 ORDER BY name",[countryId]
+      )).rows;
+      return{tier:title.tier,titleName:title.title_name,holderName:title.holder_name,settlementIds:settlements.map((row)=>row.id)};
+    }
     const holdings=(await pool.query<{settlement_id:string}>(
       "SELECT settlement_id FROM steppe_title_holdings WHERE title_id=$1 ORDER BY created_at",[title.id]
     )).rows;
@@ -299,10 +306,11 @@ export const steppePoliticsService={
 
   async setup(input:{guildId:string;countryId:string;actorId:string;holderName:string;holderUserId?:string|null;authority?:number}){
     return withTransaction(async(client)=>{
-      const country=(await client.query<{id:string;name:string;current_turn:number}>(`
-        SELECT country.id,country.name,guild.current_turn FROM countries country JOIN guilds guild ON guild.discord_id=country.guild_id
+      const country=(await client.query<{id:string;name:string;current_turn:number;is_steppe_state:boolean}>(`
+        SELECT country.id,country.name,country.is_steppe_state,guild.current_turn FROM countries country JOIN guilds guild ON guild.discord_id=country.guild_id
          WHERE country.id=$1 AND country.guild_id=$2 AND country.status='ACTIVE' FOR UPDATE OF country`,[input.countryId,input.guildId])).rows[0];
       if(!country)throw new GameError("Etkin bozkır devleti bulunamadı.");
+      if(!country.is_steppe_state)throw new GameError("Bozkır siyaseti yalnızca Xiongnu, Dingling ve Xianbei konfederasyonlarında kullanılabilir.");
       if((await confederation(client,input.guildId,input.countryId)))throw new GameError("Bu devletin bozkır iç siyaseti zaten kurulu.");
       const confed=(await client.query<{id:string}>(`
         INSERT INTO steppe_confederations(guild_id,country_id,authority,created_turn,created_by)

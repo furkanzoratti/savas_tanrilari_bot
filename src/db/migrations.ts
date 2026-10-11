@@ -110,6 +110,8 @@ import { steppeInternalConflictsMigration } from "./steppe-internal-conflicts-mi
 import { steppeKurultayMigration } from "./steppe-kurultay-migration.js";
 import { steppeTitleDynastiesMigration } from "./steppe-title-dynasties-migration.js";
 import { steppeTitleFamilyRostersMigration } from "./steppe-title-family-rosters-migration.js";
+import { steppeSovereignStatesMigration } from "./steppe-sovereign-states-migration.js";
+import { steppeKhanateRestorationMigration } from "./steppe-khanate-restoration-migration.js";
 
 export const migrations = [
   {
@@ -2437,5 +2439,7 @@ export const migrations = [
   steppeInternalConflictsMigration,
   steppeKurultayMigration,
   steppeTitleDynastiesMigration,
-  steppeTitleFamilyRostersMigration
+  steppeTitleFamilyRostersMigration,
+  steppeSovereignStatesMigration,
+  steppeKhanateRestorationMigration
 ] as const;

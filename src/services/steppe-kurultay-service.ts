@@ -57,7 +57,7 @@ async function viewWithClient(client:DbClient,guildId:string):Promise<SteppeKuru
         JOIN countries country ON country.id=confederation.country_id AND country.status='ACTIVE'
         LEFT JOIN steppe_kurultay_ballots ballot ON ballot.election_id=$2 AND ballot.voter_title_id=title.id
         LEFT JOIN steppe_internal_titles candidate ON candidate.id=ballot.candidate_title_id
-       WHERE confederation.guild_id=$1 AND title.status='ACTIVE'
+       WHERE confederation.guild_id=$1 AND title.status='ACTIVE' AND title.tier='KHAN'
        ORDER BY CASE title.tier WHEN 'KHAN' THEN 0 ELSE 1 END,country.name,title.title_name`,[guildId,election.id])).rows;
   return{id:election.id,sequence:Number(election.sequence),scheduledTurn:Number(election.scheduled_turn),startedTurn:Number(election.started_turn),
     status:election.status,currentTurn:Number(election.current_turn),incumbentCountryId:election.incumbent_country_id,
@@ -124,10 +124,10 @@ export const steppeKurultayService={
       const voter=(await client.query<{id:string;tier:"KHAN"|"LANDHOLDER";title_name:string}>(`
         SELECT title.id,title.tier,title.title_name FROM steppe_internal_titles title
         JOIN steppe_confederations confederation ON confederation.id=title.confederation_id
-        WHERE confederation.guild_id=$1 AND title.status='ACTIVE' AND title.holder_user_id=$2
+        WHERE confederation.guild_id=$1 AND title.status='ACTIVE' AND title.tier='KHAN' AND title.holder_user_id=$2
         ORDER BY CASE title.tier WHEN 'KHAN' THEN 0 ELSE 1 END LIMIT 1 FOR UPDATE OF title`,
       [input.guildId,input.actorId])).rows[0];
-      if(!voter)throw new GameError("Oy kullanabileceğiniz etkin bir Han veya Toprak Ağası makamı bulunmuyor.");
+      if(!voter)throw new GameError("Oy kullanabileceğiniz etkin bir Han makamı bulunmuyor.");
       if(!(await client.query("SELECT 1 FROM steppe_kurultay_candidates WHERE election_id=$1 AND title_id=$2",[election.id,input.candidateTitleId])).rowCount)
         throw new GameError("Seçilen Han bu Kurultayda aday değil.");
       if((await client.query("SELECT 1 FROM steppe_kurultay_ballots WHERE election_id=$1 AND voter_title_id=$2",[election.id,voter.id])).rowCount)
@@ -150,7 +150,7 @@ export const steppeKurultayService={
       const voter=(await client.query<{tier:"KHAN"|"LANDHOLDER";holder_user_id:string|null;title_name:string}>(`
         SELECT title.tier,title.holder_user_id,title.title_name FROM steppe_internal_titles title
         JOIN steppe_confederations confederation ON confederation.id=title.confederation_id
-        WHERE title.id=$1 AND confederation.guild_id=$2 AND title.status='ACTIVE' FOR UPDATE OF title`,
+        WHERE title.id=$1 AND confederation.guild_id=$2 AND title.status='ACTIVE' AND title.tier='KHAN' FOR UPDATE OF title`,
       [input.voterTitleId,input.guildId])).rows[0];if(!voter)throw new GameError("Oy verecek bozkır makamı bulunamadı.");
       if(voter.holder_user_id)throw new GameError("Oyuncuya atanmış makamın oyu panelden kullanılamaz.");
       if(!(await client.query("SELECT 1 FROM steppe_kurultay_candidates WHERE election_id=$1 AND title_id=$2",[election.id,input.candidateTitleId])).rowCount)

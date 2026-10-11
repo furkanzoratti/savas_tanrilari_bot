@@ -69,8 +69,7 @@ async function loadArmy(client: DbClient, armyId: string, countryId?: string): P
     `SELECT a.id,a.guild_id,a.country_id,c.name AS country_name,a.name,a.commander_character_id,
             cc.name AS commander_name,COALESCE(cc.skill_bonus,0)::integer AS commander_skill_bonus,
             a.created_turn,g.current_turn,g.army_composition_activation_turn,
-            EXISTS(SELECT 1 FROM steppe_confederations confederation
-              WHERE confederation.country_id=a.country_id AND confederation.status='ACTIVE') AS is_steppe_confederation,
+            c.is_steppe_state AS is_steppe_confederation,
             COALESCE(hex.coordinate,CASE WHEN cargo.army_id IS NOT NULL THEN
               CONCAT('Gemide: ',cargo_fleet.name,' • ',COALESCE(fleet_hex.coordinate,'Filo konumu yok')) END) AS current_hex,
             (SELECT b.id FROM battle_army_assignments baa JOIN battles b ON b.id=baa.battle_id

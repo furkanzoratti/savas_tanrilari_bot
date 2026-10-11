@@ -15,7 +15,7 @@ import { cancelActiveGarrisonReplenishment, completeDueGarrisonReplenishments, s
 import { isSpecialUnitType, type SpecialUnitType } from "../domain/special-units.js";
 import { applyFormableShipUpkeepDiscount, FORMABLE_COUNTRIES, formableBuildingDiscount, formableEffectLines, formableModifiers, formableTier, formableUnitDiscount, isFormableCountryKey, missingFormableTerritories, type FormableCountryDefinition, type FormableCountryKey, type FormableTier } from "../domain/formable-countries.js";
 import { assessArmyComposition, type BattleComposition, type BattleUnitType } from "../domain/battle.js";
-import { isSteppeArmyUnitType } from "../domain/steppe-army.js";
+import { isSteppeArmyUnitType, STEPPE_ARMY_UNIT_TYPES } from "../domain/steppe-army.js";
 import { calculateTreasuryTransferQuota } from "../domain/treasury-transfer.js";
 import { assimilationCompletionTurn } from "../domain/assimilation.js";
 import type { ArmyView } from "./army-service.js";
@@ -52,7 +52,7 @@ import {
 export class GameError extends Error {}
 
 interface GuildRow { discord_id: string; current_turn: number; turn_phase: string; acquisition_interval: number; army_composition_activation_turn: number | null; culture_military_penalty_enabled: boolean }
-interface CountryRow { id: string; guild_id: string; name: string; treasury: number; mobilization: Mobilization; mobilization_started_turn: number | null; manpower_over_limit_since_turn: number | null; manpower_penalty_active: boolean; discord_role_id: string | null; status: "ACTIVE" | "YOK_EDİLDİ"; destroyed_turn: number | null; destroyed_reason: string | null; active_formable_key: FormableCountryKey | null; primary_culture_group: CultureGroup; war_exhaustion: number }
+interface CountryRow { id: string; guild_id: string; name: string; treasury: number; mobilization: Mobilization; mobilization_started_turn: number | null; manpower_over_limit_since_turn: number | null; manpower_penalty_active: boolean; discord_role_id: string | null; status: "ACTIVE" | "YOK_EDİLDİ"; destroyed_turn: number | null; destroyed_reason: string | null; active_formable_key: FormableCountryKey | null; primary_culture_group: CultureGroup; war_exhaustion: number; is_steppe_state: boolean }
 interface SettlementRow {
   id: string; country_id: string; name: string; population: number; slave_population: number;
   base_income: number; tax_income: number; land_trade_income: number; sea_trade_income: number;
@@ -1105,8 +1105,12 @@ export const gameService = {
   },
   async specialUnitUnlocks(countryId: string): Promise<SpecialUnitType[]> {
     const result = await pool.query<{ unit_type: SpecialUnitType }>(
-      "SELECT unit_type FROM country_special_unit_unlocks WHERE country_id=$1 ORDER BY unit_type",
-      [countryId]
+      `SELECT unlock.unit_type FROM country_special_unit_unlocks unlock
+        JOIN countries country ON country.id=unlock.country_id
+       WHERE unlock.country_id=$1
+         AND (country.is_steppe_state=TRUE OR unlock.unit_type<>ALL($2::text[]))
+       ORDER BY unlock.unit_type`,
+      [countryId, STEPPE_ARMY_UNIT_TYPES]
     );
     return result.rows.map((row) => row.unit_type);
   },
@@ -1116,6 +1120,9 @@ export const gameService = {
     await withTransaction(async (client) => {
       const country = await getCountry(client, input.countryId);
       if (country.guild_id !== input.guildId) throw new GameError("Ülke bu sunucuya ait değil.");
+      if (input.enabled && isSteppeArmyUnitType(input.unitType) && !country.is_steppe_state) {
+        throw new GameError("Bozkır özel birlikleri yalnızca Xiongnu, Dingling ve Xianbei konfederasyonlarına açılabilir.");
+      }
       if (input.enabled) {
         await client.query(
           "INSERT INTO country_special_unit_unlocks(country_id,unit_type,granted_by) VALUES($1,$2,$3) ON CONFLICT DO NOTHING",
@@ -1826,10 +1833,10 @@ export const gameService = {
       )).rows[0]??null;
       const lastStand=lastStandRow?{startedTurn:Number(lastStandRow.started_turn),deadlineTurn:Number(lastStandRow.deadline_turn),status:lastStandRow.status}:null;
       const playerIds = (await client.query<{ discord_user_id: string }>("SELECT discord_user_id FROM country_members WHERE country_id=$1 ORDER BY discord_user_id", [countryId])).rows.map((row) => row.discord_user_id);
-      const specialUnitUnlocks = (await client.query<{ unit_type: SpecialUnitType }>("SELECT unit_type FROM country_special_unit_unlocks WHERE country_id=$1 ORDER BY unit_type", [countryId])).rows.map((row) => row.unit_type);
-      const isSteppeConfederation = Boolean((await client.query(
-        "SELECT 1 FROM steppe_confederations WHERE country_id=$1 AND status='ACTIVE' LIMIT 1", [countryId]
-      )).rowCount);
+      const specialUnitUnlocks = (await client.query<{ unit_type: SpecialUnitType }>("SELECT unit_type FROM country_special_unit_unlocks WHERE country_id=$1 ORDER BY unit_type", [countryId])).rows
+        .map((row) => row.unit_type)
+        .filter((unitType) => country.is_steppe_state || !isSteppeArmyUnitType(unitType));
+      const isSteppeConfederation = Boolean(country.is_steppe_state);
       const settlements = (await client.query<SettlementRow>("SELECT * FROM settlements WHERE country_id = $1 ORDER BY name", [countryId])).rows;
       const religionDistributions=await loadReligionDistributions(client,settlements.map((settlement)=>settlement.id));
       const dominantReligionProfile=dominantReligionFromDistributions(settlements.map((settlement)=>({
@@ -2691,11 +2698,12 @@ export const gameService = {
       if (await countryHasMaintenanceDebt(client, country.id)) throw new GameError("Ödenmemiş bakım açığı giderilmeden yeni asker emri verilemez.");
       const unit = UNITS[input.unitType];
       if (!unit) throw new GameError("Birim türü bulunamadı.");
-      const steppeConfederation = Boolean((await client.query(
-        "SELECT 1 FROM steppe_confederations WHERE country_id=$1 AND status='ACTIVE' LIMIT 1", [country.id]
-      )).rowCount);
+      const steppeConfederation = Boolean(country.is_steppe_state);
+      if (!steppeConfederation && isSteppeArmyUnitType(input.unitType)) {
+        throw new GameError("Bu birlik yalnızca Xiongnu, Dingling ve Xianbei konfederasyonları tarafından yetiştirilebilir.");
+      }
       if (steppeConfederation && !isSteppeArmyUnitType(input.unitType)) {
-        throw new GameError("Bozkır konfederasyonları yalnızca Bozkır Atlı Okçu, Bozkır Süvarisi, Kurgan Kalkanlıları ve Oba Yaycıları yetiştirebilir.");
+        throw new GameError("Bozkır devletleri yalnızca Bozkır Atlı Okçu, Bozkır Süvarisi, Kurgan Kalkanlıları ve Oba Yaycıları yetiştirebilir.");
       }
       if (isSpecialUnitType(input.unitType)) {
         const unlocked = await client.query(

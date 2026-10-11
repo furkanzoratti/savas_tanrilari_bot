@@ -514,12 +514,10 @@ async function battleSideCompositionProfile(
       JOIN battle_sides side_record ON side_record.battle_id=participant.battle_id AND side_record.side_key=participant.side_key
       WHERE participant.battle_id=$1 AND participant.side_key=$2
     )
-    SELECT COUNT(*)::text AS total,COUNT(COALESCE(confederation.id,title_confederation.id))::text AS steppe
+    SELECT COUNT(*)::text AS total,COUNT(*) FILTER(WHERE country.is_steppe_state)::text AS steppe
       FROM side_countries side_country
-      LEFT JOIN steppe_confederations confederation
-        ON confederation.country_id=side_country.country_id AND confederation.status='ACTIVE'
-      LEFT JOIN steppe_internal_titles title ON title.id=side_country.steppe_title_id
-      LEFT JOIN steppe_confederations title_confederation ON title_confederation.id=title.confederation_id AND title_confederation.status='ACTIVE'`, [battleId, side])).rows[0];
+      JOIN countries country ON country.id=side_country.country_id
+      `, [battleId, side])).rows[0];
   const total = Number(row?.total ?? 0);
   return total > 0 && Number(row?.steppe ?? 0) === total ? "STEPPE" : "STANDARD";
 }
@@ -541,8 +539,7 @@ async function loadView(client: DbClient, battleId: string, lock = false): Promi
   const participants = (await client.query<BattleParticipantRow>(
     `SELECT bsp.*,COALESCE(rebel.display_name,steppe_title.title_name,c.name) AS country_name,source.name AS source_settlement_name,
             embarked_army.name AS embarked_army_name,
-            EXISTS(SELECT 1 FROM steppe_confederations confederation
-              WHERE (confederation.country_id=bsp.country_id OR confederation.id=steppe_title.confederation_id) AND confederation.status='ACTIVE') AS is_steppe_confederation
+            c.is_steppe_state AS is_steppe_confederation
        FROM battle_side_participants bsp JOIN countries c ON c.id=bsp.country_id
       JOIN battle_sides side_record ON side_record.battle_id=bsp.battle_id AND side_record.side_key=bsp.side_key
       LEFT JOIN rebel_factions rebel ON rebel.id=side_record.rebel_faction_id AND bsp.country_id=side_record.country_id

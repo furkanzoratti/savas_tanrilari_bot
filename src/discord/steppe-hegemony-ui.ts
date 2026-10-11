@@ -39,7 +39,7 @@ export function steppeKurultayEmbed(view:SteppeKurultayView):EmbedBuilder{
       candidateLines.join("\n\n")||"Etkin Han adayı bulunmuyor.",
       "",
       `**Katılım:** ${view.voters.filter((voter)=>voter.candidateTitleId).length}/${view.voters.length} makam • ${castPoints}/${totalPoints} oy puanı`,
-      "**Oy Ağırlığı:** Han 2 puan • Toprak Ağası 1 puan"
+      "**Oy Ağırlığı:** Her etkin Han 2 puan • Yalnız Hanlık kademesi aday olabilir"
     ].filter(Boolean).join("\n").slice(0,4000))
     .setFooter({text:view.status==="OPEN"?"Aşağıdaki menüden bir Han seçin. Her makam yalnız bir kez oy kullanabilir.":`Sonraki Kurultay: Tur ${view.nextKurultayTurn}`});
 }
@@ -103,25 +103,19 @@ function greatKhanateWarCallButtons(callId:string,countryId:string):ActionRowBui
 
 function steppeHierarchyEmbed(view:SteppePoliticsView):EmbedBuilder{
   const khan=view.titles.find((title)=>title.tier==="KHAN");
-  const landholders=view.titles.filter((title)=>title.tier==="LANDHOLDER");
   const lines:string[]=[];
   if(khan){
     const direct=khan.holdings.map((holding)=>holding.name).join(", ")||"Doğrudan toprak bağlanmadı";
     lines.push(`👑 **${khan.titleName}** — ${khan.holderName}${khan.holderUserId?` • <@${khan.holderUserId}>`:""}`);
-    lines.push(`↳ Hanın doğrudan toprakları: **${direct}**`);
+    lines.push(`↳ Devletin doğrudan yerleşkeleri: **${direct}**`);
   }
-  for(const lord of landholders){
-    const lands=lord.holdings.map((holding)=>holding.name).join(", ")||"Toprak bağlanmadı";
-    lines.push(`\n├─ 🌾 **${lord.titleName}** — ${lord.holderName}${lord.holderUserId?` • <@${lord.holderUserId}>`:""}`);
-    lines.push(`│  Topraklar: **${lands}**`);
-  }
-  return new EmbedBuilder().setColor(0x9b6b30).setTitle(`🐎 ${view.countryName} • Bozkır Hiyerarşisi`)
-    .setDescription(lines.join("\n")||"Henüz unvan kaydı bulunmuyor.")
+  return new EmbedBuilder().setColor(0x9b6b30).setTitle(`🐎 ${view.countryName} • Han Makamı`)
+    .setDescription(lines.join("\n")||"Etkin Han kaydı bulunmuyor.")
     .addFields(
-      {name:"👑 Han Otoritesi",value:`**${view.authority}/100**`,inline:true},
-      {name:"🏹 Han",value:khan?"1":"0",inline:true},
-      {name:"🌾 Toprak Ağası",value:String(landholders.length),inline:true}
-    ).setFooter({text:`Tur ${view.currentTurn} • Bot karar vermez; siyasi sonuçları kaydeder.`});
+      {name:"🏹 Siyasi Kademe",value:"**Han**",inline:true},
+      {name:"🏕️ Kurultay Oyu",value:"**2 puan**",inline:true},
+      {name:"⚔️ Ordu Doktrini",value:"**Bozkır**",inline:true}
+    ).setFooter({text:`Tur ${view.currentTurn} • Normal vassallar ayrı devlet kayıtlarıyla yönetilir.`});
 }
 
 function steppeConflictsEmbed(view:SteppePoliticsView):EmbedBuilder{
