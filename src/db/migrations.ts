@@ -115,6 +115,7 @@ import { steppeKhanateRestorationMigration } from "./steppe-khanate-restoration-
 import { steppePoliticsSimplificationMigration } from "./steppe-politics-simplification-migration.js";
 import { steppeVassalDoctrineMigration } from "./steppe-vassal-doctrine-migration.js";
 import { steppeVassalKurultayVotesMigration } from "./steppe-vassal-kurultay-votes-migration.js";
+import { steppeTributeLedgerMigration } from "./steppe-tribute-ledger-migration.js";
 
 export const migrations = [
   {
@@ -2447,5 +2448,6 @@ export const migrations = [
   steppeKhanateRestorationMigration,
   steppePoliticsSimplificationMigration,
   steppeVassalDoctrineMigration,
-  steppeVassalKurultayVotesMigration
+  steppeVassalKurultayVotesMigration,
+  steppeTributeLedgerMigration
 ] as const;

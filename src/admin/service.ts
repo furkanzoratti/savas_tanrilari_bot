@@ -1227,7 +1227,9 @@ export const adminPanelService = {
             JOIN countries country ON country.id=hegemony.hegemon_country_id
            WHERE hegemony.guild_id=$1`,[adminConfig.guildId])).rows[0]??null;
       const tributeOffers=(await adminPool.query(`
-        SELECT offer.id,offer.turn,offer.response,offer.created_at,offer.responded_at,
+        SELECT offer.id,offer.turn,offer.response,offer.full_due,offer.paid_amount,
+               offer.acquisition_income,offer.treasury_before,offer.treasury_after,
+               offer.created_at,offer.responded_at,
                hegemon.name AS hegemon_country_name,tributary.name AS tributary_country_name
           FROM steppe_tribute_offers offer
           JOIN countries hegemon ON hegemon.id=offer.hegemon_country_id

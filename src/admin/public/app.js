@@ -421,11 +421,24 @@ function steppeKurultayPanel(kurultay) {
 
 function steppeTributePanel(hegemony, offers, currentTurn) {
   const responseLabels = { PENDING: "Yanıt bekliyor", FULL: "Tam ödeme", HALF: "Yarım ödeme", NONE: "Ödeme yok", CANCELLED: "İptal" };
-  const rows = (offers || []).map((offer) => `<div class="data-row"><div><strong>${escapeHtml(offer.hegemon_country_name)} → ${escapeHtml(offer.tributary_country_name)}</strong><small>Tur ${number(offer.turn)}</small></div><span>${escapeHtml(responseLabels[offer.response] || offer.response)}</span></div>`).join("");
+  const snapshotMoney = (value) => value === null || value === undefined ? "—" : money(value);
+  const signedMoney = (value) => value === null || value === undefined ? "—" : `${Number(value) > 0 ? "+" : ""}${money(value)}`;
+  const rows = (offers || []).map((offer) => {
+    const paid = offer.paid_amount === null || offer.paid_amount === undefined ? null : Number(offer.paid_amount);
+    return `<article class="card">
+      <div class="card-head"><div><h2>${escapeHtml(offer.hegemon_country_name)} → ${escapeHtml(offer.tributary_country_name)}</h2><p>Tur ${number(offer.turn)} · ${date(offer.created_at)}</p></div><span class="pill ${offer.response === "PENDING" ? "warning" : offer.response === "CANCELLED" ? "neutral" : "success"}">${escapeHtml(responseLabels[offer.response] || offer.response)}</span></div>
+      <section class="detail-grid">
+        <div class="detail-cell"><span>Haraç Öncesi Hazine</span><strong>${snapshotMoney(offer.treasury_before)}</strong></div>
+        <div class="detail-cell"><span>Alım Turu Geliri</span><strong>${signedMoney(offer.acquisition_income)}</strong><small>Haraç hesabına esas net gelir</small></div>
+        <div class="detail-cell"><span>Haraç Tutarı</span><strong>${paid === null ? "Henüz ödenmedi" : money(paid)}</strong><small>Tam talep: ${money(offer.full_due)}</small></div>
+        <div class="detail-cell"><span>Ödeme Sonrası Kalan Hazine</span><strong>${snapshotMoney(offer.treasury_after)}</strong></div>
+      </section>
+    </article>`;
+  }).join("");
   return `<section class="roman-republic-section">
-    <div class="page-head"><div><h1>🐎 Bozkır Haracı</h1><p>Yalnız Alım Turlarında: Hanlar Hanı → Hanlar, Han → kendi vassalları</p></div><div class="actions"><span class="pill">Tur ${number(currentTurn)}</span></div></div>
+    <div class="page-head"><div><h1>🐎 Bozkır Haracı</h1><p>Yalnız Alım Turlarında: Hanlar Hanı → Hanlar ve kendi vassalları, Han → kendi vassalları</p></div><div class="actions"><span class="pill">Tur ${number(currentTurn)}</span></div></div>
     <section class="detail-grid"><div class="detail-cell"><span>Mevcut Hanlar Hanı devleti</span><strong>${escapeHtml(hegemony?.hegemon_country_name || "Henüz belirlenmedi")}</strong></div><div class="detail-cell"><span>Haraç oranı</span><strong>Tam %10 · Yarım %5</strong><small>Hedef devletin son Alım Turu net geliri üzerinden</small></div><div class="detail-cell"><span>Yanıtlar</span><strong>Tam · Yarım · Yok</strong><small>Otorite veya bağlılık puanı uygulanmaz</small></div></section>
-    <section class="card"><div class="card-head"><div><h2>Son haraç teklifleri</h2><p>Otorite, bağlılık ve savaş çağrısı sistemi kullanılmaz.</p></div></div>${rows || '<div class="empty compact-empty">Henüz haraç teklifi bulunmuyor.</div>'}</section>
+    <div class="section-title"><h2>Geçmiş Haraç İşlemleri</h2><span>Son 30 teklif ve ayrıntılı hazine hareketi</span></div><section class="dynasty-grid">${rows || '<div class="card empty">Henüz haraç teklifi bulunmuyor.</div>'}</section>
   </section>`;
 }
 
