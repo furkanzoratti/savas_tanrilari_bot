@@ -707,7 +707,7 @@ export const commandBuilders = [
       .addStringOption(countryOption)),
   new SlashCommandBuilder()
     .setName("bozkir").setDescription("Bozkır haracı ve Hanlar Hanı Kurultayı işlemleri")
-    .addSubcommand((sub)=>sub.setName("harac").setDescription("Hanlar Hanı olarak Dingling ve Xianbei Hanlarına haraç teklifi gönderir")
+    .addSubcommand((sub)=>sub.setName("harac").setDescription("Alım Turunda Hanlara veya kendi vassallarına haraç teklifi gönderir")
       .addStringOption(steppeCountryOption))
     .addSubcommand((sub)=>sub.setName("kurultay").setDescription("Açık Hanlar Hanı Kurultayını görüntüler ve oy formunu açar")
       .addStringOption(steppeCountryOption)),

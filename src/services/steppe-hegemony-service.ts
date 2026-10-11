@@ -410,22 +410,44 @@ export const steppeHegemonyService={
       return (await greatKhanateViewWithClient(client,input.guildId))!;
     });
   },
-  async offerTributes(input:{guildId:string;actorId:string;hegemonCountryId:string}):Promise<SteppeTributeOfferView[]>{
+  async offerTributes(input:{guildId:string;actorId:string;requesterCountryId:string}):Promise<SteppeTributeOfferView[]>{
     return withTransaction(async(client)=>{
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1))",[`steppe-tribute:${input.guildId}`]);
       const state=await ensureDefaultHegemony(client,input.guildId,input.actorId);
-      if(state.hegemonCountryId!==input.hegemonCountryId)throw new GameError("Haraç tekliflerini yalnızca mevcut bozkır hegemonu gönderebilir.");
       if(!isAcquisitionTurn(state.currentTurn,state.acquisitionInterval))throw new GameError("Bozkır haracı yalnızca Alım Turlarında talep edilebilir.");
-      if(!state.tributaries.length)throw new GameError("Haraç talebi gönderilebilecek etkin bozkır devleti bulunmuyor.");
+      const requester=(await client.query<{id:string;name:string}>(`
+        SELECT country.id,country.name
+          FROM countries country
+          JOIN steppe_confederations confederation
+            ON confederation.country_id=country.id AND confederation.status='ACTIVE'
+          JOIN steppe_internal_titles khan
+            ON khan.confederation_id=confederation.id AND khan.tier='KHAN' AND khan.status='ACTIVE'
+         WHERE country.id=$1 AND country.guild_id=$2 AND country.status='ACTIVE'
+         LIMIT 1`,[input.requesterCountryId,input.guildId])).rows[0];
+      if(!requester)throw new GameError("Bozkır haracını yalnızca etkin Han devleti talep edebilir.");
+
+      const isGreatKhan=requester.id===state.hegemonCountryId;
+      const targets=isGreatKhan?state.tributaries:(await client.query<{country_id:string;country_name:string}>(`
+        SELECT relation.vassal_country_id AS country_id,vassal.name AS country_name
+          FROM country_vassalages relation
+          JOIN countries vassal ON vassal.id=relation.vassal_country_id
+         WHERE relation.guild_id=$1 AND relation.overlord_country_id=$2
+           AND relation.status='ACTIVE' AND vassal.status='ACTIVE'
+         ORDER BY vassal.name`,[input.guildId,requester.id])).rows.map((row)=>({
+           countryId:row.country_id,countryName:row.country_name
+         }));
+      if(!targets.length)throw new GameError(isGreatKhan
+        ?"Haraç talebi gönderilebilecek etkin Han bulunmuyor."
+        :"Bu Han devletine bağlı etkin vassal bulunmuyor.");
       const existing=await client.query(
         `SELECT 1 FROM steppe_tribute_offers
           WHERE guild_id=$1 AND turn=$2 AND tributary_country_id=ANY($3::uuid[]) AND response<>'CANCELLED' LIMIT 1`,
-        [input.guildId,state.currentTurn,state.tributaries.map((item)=>item.countryId)]
+        [input.guildId,state.currentTurn,targets.map((item)=>item.countryId)]
       );
-      if(existing.rowCount)throw new GameError("Bu Alım Turu için bozkır haraç teklifleri daha önce gönderilmiş.");
+      if(existing.rowCount)throw new GameError("Bu Alım Turunda hedef devletlerden en az birine haraç teklifi daha önce gönderilmiş.");
 
       const created:InternalSteppeTributeOffer[]=[];
-      for(const tributary of state.tributaries){
+      for(const tributary of targets){
         const latestNet=Number((await client.query<{amount:number}>(
           `SELECT amount FROM transactions
             WHERE country_id=$1 AND kind='ACQUISITION_TURN'
@@ -436,12 +458,13 @@ export const steppeHegemonyService={
           `INSERT INTO steppe_tribute_offers(
              guild_id,hegemon_country_id,tributary_country_id,turn,full_due,offered_by
            ) VALUES($1,$2,$3,$4,$5,$6) RETURNING id`,
-          [input.guildId,state.hegemonCountryId,tributary.countryId,state.currentTurn,fullDue,input.actorId]
+          [input.guildId,requester.id,tributary.countryId,state.currentTurn,fullDue,input.actorId]
         )).rows[0]!.id;
         const offer=(await client.query<InternalSteppeTributeOffer>(`${offerViewSql} WHERE offer.id=$1`,[id])).rows[0]!;
         created.push(normalizeOffer(offer));
         await audit(client,input.guildId,input.actorId,"STEPPE_TRIBUTE_OFFER",id,{
-          hegemonCountryId:state.hegemonCountryId,tributaryCountryId:tributary.countryId,turn:state.currentTurn,fullDue
+          requesterCountryId:requester.id,targetCountryId:tributary.countryId,turn:state.currentTurn,fullDue,
+          requestLevel:isGreatKhan?"GREAT_KHAN_TO_KHAN":"KHAN_TO_VASSAL"
         });
       }
       return created;

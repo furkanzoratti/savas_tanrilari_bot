@@ -11,11 +11,10 @@ export type SteppeTributeResponse = "FULL" | "HALF" | "NONE";
 
 export const STEPPE_TRIBUTE_RESPONSES: Record<SteppeTributeResponse, {
   label: string;
-  authorityChange: number;
 }> = {
-  FULL: { label: "Tam Ödeme", authorityChange: 0 },
-  HALF: { label: "Yarım Ödeme", authorityChange: -2 },
-  NONE: { label: "Ödeme Yok", authorityChange: -5 }
+  FULL: { label: "Tam Ödeme" },
+  HALF: { label: "Yarım Ödeme" },
+  NONE: { label: "Ödeme Yok" }
 };
 
 export function fullSteppeTributeDue(latestNetAcquisitionIncome: number): number {

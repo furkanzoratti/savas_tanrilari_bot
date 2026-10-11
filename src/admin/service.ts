@@ -1320,9 +1320,9 @@ export const adminPanelService = {
   },
 
   async voteSteppeKurultayNpc(actorId:string,electionId:string,rawInput:unknown){
-    const input=z.object({voterTitleId:z.string().uuid(),candidateTitleId:z.string().uuid()}).parse(rawInput);
+    const input=z.object({voterId:z.string().uuid(),candidateTitleId:z.string().uuid()}).parse(rawInput);
     return steppeKurultayService.voteNpc({guildId:adminConfig.guildId,actorId,electionId,
-      voterTitleId:input.voterTitleId,candidateTitleId:input.candidateTitleId});
+      voterId:input.voterId,candidateTitleId:input.candidateTitleId});
   },
 
   async updateSteppeHegemony(actorId:string,rawInput:unknown){

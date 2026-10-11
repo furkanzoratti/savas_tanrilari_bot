@@ -11,6 +11,8 @@ describe("bozkır siyaseti yönetim paneli",()=>{
     expect(html).toContain("Bozkır Kurultayı");
     expect(app).toContain('api("/api/steppe-politics")');
     expect(app).toContain("Bozkır Kurultayı ve Haraç");
+    expect(app).toContain("Hanlar 2, vassal devletler 1 oy puanı kullanır");
+    expect(app).toContain("Oy kullanmamış NPC Han veya vassal bulunmuyor.");
     expect(app).toContain("Son haraç teklifleri");
     expect(app).toContain("Otorite, bağlılık ve savaş çağrısı sistemi kullanılmaz.");
   });

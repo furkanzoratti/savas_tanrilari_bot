@@ -14,9 +14,9 @@ describe("bozkır haraç kuralları",()=>{
     expect(steppeTributePayment(1_001,"HALF")).toBe(501);
     expect(steppeTributePayment(1_001,"NONE")).toBe(0);
     expect(Object.keys(STEPPE_TRIBUTE_RESPONSES)).toEqual(["FULL","HALF","NONE"]);
-    expect(STEPPE_TRIBUTE_RESPONSES.FULL.authorityChange).toBe(0);
-    expect(STEPPE_TRIBUTE_RESPONSES.HALF.authorityChange).toBeLessThan(0);
-    expect(STEPPE_TRIBUTE_RESPONSES.NONE.authorityChange).toBeLessThan(0);
+    expect(STEPPE_TRIBUTE_RESPONSES.FULL.label).toBe("Tam Ödeme");
+    expect(STEPPE_TRIBUTE_RESPONSES.HALF.label).toBe("Yarım Ödeme");
+    expect(STEPPE_TRIBUTE_RESPONSES.NONE.label).toBe("Ödeme Yok");
   });
 
   it("otoriteyi 0–100 arasında tutar",()=>{

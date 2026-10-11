@@ -24,7 +24,7 @@ export function steppeKurultayEmbed(view:SteppeKurultayView):EmbedBuilder{
   const totalPoints=view.voters.reduce((sum,voter)=>sum+voter.weight,0);
   const candidateLines=view.candidates.map((candidate,index)=>
     `${index+1}. 👑 **${candidate.holderName}** — ${candidate.titleName}\n`+
-    `↳ ${candidate.countryName} • **${candidate.points} puan** • ${candidate.ballotCount} makam oyu`
+    `↳ ${candidate.countryName} • **${candidate.points} puan** • ${candidate.ballotCount} seçmen oyu`
   );
   const status=view.status==="OPEN"?"Oy kullanımı açık":view.status==="COMPLETED"?"Sonuçlandı":"İptal edildi";
   return new EmbedBuilder().setColor(view.status==="OPEN"?0xd4a72c:0x3f7f5f)
@@ -38,10 +38,10 @@ export function steppeKurultayEmbed(view:SteppeKurultayView):EmbedBuilder{
       "### Han Adayları",
       candidateLines.join("\n\n")||"Etkin Han adayı bulunmuyor.",
       "",
-      `**Katılım:** ${view.voters.filter((voter)=>voter.candidateTitleId).length}/${view.voters.length} makam • ${castPoints}/${totalPoints} oy puanı`,
-      "**Oy Ağırlığı:** Her etkin Han 2 puan • Yalnız Hanlık kademesi aday olabilir"
+      `**Katılım:** ${view.voters.filter((voter)=>voter.candidateTitleId).length}/${view.voters.length} seçmen • ${castPoints}/${totalPoints} oy puanı`,
+      "**Oy Ağırlığı:** Han 2 puan • Vassal devlet 1 puan • Yalnız Hanlar aday olabilir"
     ].filter(Boolean).join("\n").slice(0,4000))
-    .setFooter({text:view.status==="OPEN"?"Aşağıdaki menüden bir Han seçin. Her makam yalnız bir kez oy kullanabilir.":`Sonraki Kurultay: Tur ${view.nextKurultayTurn}`});
+    .setFooter({text:view.status==="OPEN"?"Aşağıdaki menüden bir Han seçin. Her Han ve vassal devlet yalnız bir kez oy kullanabilir.":`Sonraki Kurultay: Tur ${view.nextKurultayTurn}`});
 }
 
 export function steppeKurultayComponents(view:SteppeKurultayView):ActionRowBuilder<StringSelectMenuBuilder>[] {
@@ -165,10 +165,10 @@ export function steppeTributeOfferEmbed(offer:SteppeTributeOfferView):EmbedBuild
   return new EmbedBuilder()
     .setColor(0x9b6b30)
     .setTitle("🐎 Bozkır Haraç Talebi")
-    .setDescription(`**${offer.hegemon_country_name}**, **${offer.tributary_country_name}** devletinden hegemonluk haracını talep ediyor.`)
+    .setDescription(`**${offer.hegemon_country_name}**, **${offer.tributary_country_name}** devletinden bozkır haracı talep ediyor.`)
     .addFields(
-      {name:"👑 Hegemon Devlet",value:offer.hegemon_country_name,inline:true},
-      {name:"🏹 Teklif Edilen Devlet",value:offer.tributary_country_name,inline:true},
+      {name:"👑 Haraç Talep Eden",value:offer.hegemon_country_name,inline:true},
+      {name:"🏹 Yanıtlayacak Devlet",value:offer.tributary_country_name,inline:true},
       {name:"📜 Verilecek Yanıt",value:"Aşağıdaki seçimden **Tam Ödeme**, **Yarım Ödeme** veya **Ödeme Yok** kararını seçip **Teklifi Cevapla** düğmesine basın."}
     )
     .setFooter({text:"Yalnızca teklif edilen devletin oyuncuları veya oyun yöneticisi yanıtlayabilir."});
@@ -357,7 +357,7 @@ export async function handleSteppeHegemonyCommand(interaction:ChatInputCommandIn
       const channel=await requireDiplomacyChannel(interaction);
       const kurultay=await steppeKurultayService.start({guildId:interaction.guildId,actorId:interaction.user.id,hegemonCountryId:country.id});
       const notification=playerMentionPayload(kurultay.voters.map((voter)=>voter.holderUserId).filter((id):id is string=>Boolean(id)),
-        "Bozkır makamlarına oyuncu atanmamış; NPC oyları yönetim panelinden kullanılabilir.");
+        "Han ve vassal seçmenlerine oyuncu atanmamış; NPC oyları yönetim panelinden kullanılabilir.");
       const message=await channel.send({content:notification.content,allowedMentions:notification.allowedMentions,
         embeds:[steppeKurultayEmbed(kurultay)],components:steppeKurultayComponents(kurultay)});
       await steppeKurultayService.attachMessage(kurultay.id,channel.id,message.id);
@@ -481,7 +481,7 @@ export async function handleSteppeHegemonyCommand(interaction:ChatInputCommandIn
   await interaction.deferReply({flags:MessageFlags.Ephemeral});
   const channel=await requireDiplomacyChannel(interaction);
   const offers=await steppeHegemonyService.offerTributes({
-    guildId:interaction.guildId,actorId:interaction.user.id,hegemonCountryId:country.id
+    guildId:interaction.guildId,actorId:interaction.user.id,requesterCountryId:country.id
   });
   let published=0;
   const failed:string[]=[];
@@ -502,7 +502,7 @@ export async function handleSteppeHegemonyCommand(interaction:ChatInputCommandIn
   }
   if(!published)throw new GameError("Haraç teklifleri oluşturuldu fakat Discord kanalına gönderilemedi; teklifler güvenle iptal edildi.");
   await interaction.editReply(
-    `✅ **${country.name}** adına ${published} bozkır devletine ayrı haraç teklifi gönderildi.`+
+    `✅ **${country.name}** adına ${published} hedef devlete ayrı haraç teklifi gönderildi.`+
     (failed.length?`\n⚠️ Gönderilemeyen ve iptal edilen teklifler: ${failed.join(", ")}. Komut yeniden kullanılabilir.`:"")
   );
   return true;
@@ -519,7 +519,7 @@ export async function handleSteppeHegemonySelect(interaction:StringSelectMenuInt
       electionId:kurultayMatch[1]!,candidateTitleId});
     const candidate=result.view.candidates.find((item)=>item.titleId===candidateTitleId);
     await interaction.message.edit({embeds:[steppeKurultayEmbed(result.view)],components:steppeKurultayComponents(result.view)}).catch(()=>undefined);
-    await interaction.editReply(`✅ **${result.voterTitleName}** adına **${candidate?.holderName??"seçilen Han"}** için **${result.weight} puanlık** Kurultay oyun kaydedildi. Oy değiştirilemez.`);
+    await interaction.editReply(`✅ **${result.voterName}** adına **${candidate?.holderName??"seçilen Han"}** için **${result.weight} puanlık** Kurultay oyun kaydedildi. Oy değiştirilemez.`);
     return true;
   }
   const match=/^steppe_tribute_choice\|([0-9a-f-]+)$/i.exec(interaction.customId);
@@ -601,7 +601,7 @@ export async function handleSteppeHegemonyButton(interaction:ButtonInteraction):
     .setTitle("🐎 Bozkır Haraç Teklifi Sonuçlandı")
     .setDescription(`**${result.tributary_country_name}**, **${result.hegemon_country_name}** devletinin haraç talebine yanıt verdi.`)
     .setFields(
-      {name:"👑 Hegemon Devlet",value:result.hegemon_country_name,inline:true},
+      {name:"👑 Haraç Talep Eden",value:result.hegemon_country_name,inline:true},
       {name:"🏹 Yanıtlayan Devlet",value:result.tributary_country_name,inline:true},
       {name:"📜 Karar",value:`**${label}**`,inline:true}
     )
