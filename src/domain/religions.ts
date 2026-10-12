@@ -293,9 +293,9 @@ export function dominantReligionFromDistributions(
 }
 
 export function religionConversionPercent(successMargin:number):number {
-  if (successMargin>=9) return 12;
-  if (successMargin>=5) return 8;
-  if (successMargin>=1) return 4;
+  if (successMargin>=8) return 15;
+  if (successMargin>=4) return 10;
+  if (successMargin>=1) return 5;
   return 0;
 }
 

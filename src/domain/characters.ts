@@ -138,8 +138,8 @@ export function culturePopulationResistance(population: number): number {
 }
 
 export function cultureProgressDelta(margin: number): number {
-  if (margin >= 9) return 3;
-  if (margin >= 5) return 2;
+  if (margin >= 8) return 3;
+  if (margin >= 4) return 2;
   if (margin >= 1) return 1;
   if (margin <= -9) return -2;
   if (margin <= -5) return -1;

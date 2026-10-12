@@ -7,8 +7,8 @@ import { unitCostMultiplier } from "./resources.js";
 
 describe("kurulabilir ülkeler", () => {
   it("bütün kurulabilir kimlikleri ve yönetici komutunu sunar", () => {
-    expect(formableKeysForTier(1)).toHaveLength(39);
-    expect(formableKeysForTier(2)).toHaveLength(16);
+    expect(formableKeysForTier(1)).toHaveLength(48);
+    expect(formableKeysForTier(2)).toHaveLength(18);
     expect(formableKeysForTier(3)).toHaveLength(0);
     const command = commandBuilders.find((item) => item.name === "ulke-formla");
     expect(command?.options?.find((option) => option.name === "tier")?.required).toBe(true);
@@ -23,6 +23,46 @@ describe("kurulabilir ülkeler", () => {
       expect(definition.requiredActiveFormables, key).toBeTruthy();
       expect(formableTier(key)).toBe(2);
     }
+  });
+
+  it("Orta Asya ve Hindistan kimliklerini toprak şartı olmadan doğru Tier yollarıyla sunar", () => {
+    const tierOneKeys = [
+      "WESTERN_HUN_STATE", "EASTERN_HUN_STATE", "GANDHARA_KINGDOM", "ARYAVARTA_UNION",
+      "MAGADHA_KINGDOM", "KALINGA_KINGDOM", "DAKSHINAPATHA", "TAMILAKAM", "AYUTTHAYA_EMPIRE"
+    ] as const;
+    for (const key of tierOneKeys) {
+      expect(formableTier(key), key).toBe(1);
+      expect(FORMABLE_COUNTRIES[key].requiredTerritories, key).toBeUndefined();
+      expect(FORMABLE_COUNTRIES[key].requiredActiveFormables, key).toBeUndefined();
+    }
+
+    expect(FORMABLE_COUNTRIES.HUN_EMPIRE.requiredTerritories).toBeUndefined();
+    expect(FORMABLE_COUNTRIES.HUN_EMPIRE.requiredActiveFormables).toEqual(["WESTERN_HUN_STATE", "EASTERN_HUN_STATE"]);
+    expect(FORMABLE_COUNTRIES.MAURYAN_EMPIRE.requiredTerritories).toBeUndefined();
+    expect(FORMABLE_COUNTRIES.MAURYAN_EMPIRE.requiredActiveFormables).toEqual([
+      "GANDHARA_KINGDOM", "ARYAVARTA_UNION", "MAGADHA_KINGDOM", "KALINGA_KINGDOM"
+    ]);
+    expect(FORMABLE_COUNTRIES.INDOCHINA.requiredTerritories).toBeUndefined();
+    expect(FORMABLE_COUNTRIES.INDOCHINA.requiredActiveFormables).toEqual(["AYUTTHAYA_EMPIRE", "MAGADHA_KINGDOM"]);
+  });
+
+  it("yeni kurulabilir devlet etkilerini mevcut modifier sistemiyle uygular", () => {
+    expect(formableUnitDiscount("WESTERN_HUN_STATE", "horse_archer")).toBe(0.10);
+    expect(formableUnitDiscount("HUN_EMPIRE", "steppe_cavalry")).toBe(0.15);
+    expect(FORMABLE_COUNTRIES.EASTERN_HUN_STATE.modifiers.buildingIncomePercent).toEqual({ trade_guild: 0.05 });
+    expect(FORMABLE_COUNTRIES.GANDHARA_KINGDOM.modifiers.buildingIncomePercent).toEqual({ agora: 0.05, trade_guild: 0.05 });
+    expect(formableUnitDiscount("ARYAVARTA_UNION", "heavy_infantry")).toBe(0.05);
+    expect(FORMABLE_COUNTRIES.MAGADHA_KINGDOM.modifiers.populationGainPercent).toBe(0.10);
+    expect(FORMABLE_COUNTRIES.KALINGA_KINGDOM.modifiers.shipDiscount).toBe(0.10);
+    expect(FORMABLE_COUNTRIES.DAKSHINAPATHA.modifiers.buildingDiscountTypes).toEqual(["aqueduct"]);
+    expect(applyFormableShipUpkeepDiscount(1_000, "TAMILAKAM")).toBe(900);
+    expect(formableUnitDiscount("MAURYAN_EMPIRE", "mauryan_war_elephant")).toBe(0.10);
+    expect(formableUnitDiscount("AYUTTHAYA_EMPIRE", "mauryan_war_elephant")).toBe(0.05);
+    expect(formableUnitDiscount("INDOCHINA", "mauryan_war_elephant")).toBe(0.15);
+    expect(FORMABLE_COUNTRIES.INDOCHINA.modifiers.buildingIncomePercent).toEqual({
+      port: 0.15, trade_guild: 0.15, farm: 0.15
+    });
+    expect("GRECO_BACTRIAN_KINGDOM" in FORMABLE_COUNTRIES).toBe(false);
   });
 
   it("At hammaddesini ve ülke süvari indirimini Atlı Okçuya birlikte uygular", () => {
@@ -152,5 +192,12 @@ describe("kurulabilir ülkeler", () => {
     expect(migration?.name).toBe("formable_country_identities");
     expect(migration?.sql).toContain("active_formable_key");
     expect(migration?.sql).toContain("UNIQUE(country_id, formable_key)");
+  });
+
+  it("ana listeden çıkarılan Greko-Baktriya kimliğini kalıcı veriden temizler", () => {
+    const migration = migrations.find((item) => item.version === 190);
+    expect(migration?.name).toBe("formable_country_catalog_sync");
+    expect(migration?.sql).toContain("active_formable_key = 'GRECO_BACTRIAN_KINGDOM'");
+    expect(migration?.sql).toContain("formable_key = 'GRECO_BACTRIAN_KINGDOM'");
   });
 });

@@ -77,12 +77,12 @@ describe("din sistemi",()=>{
     ]}])).toBeNull();
   });
   it("başarı farkını yüzde puanına çevirip ana inanç ve mezhebe 75/25 dağıtır",()=>{
-    expect([0,1,5,9].map(religionConversionPercent)).toEqual([0,4,8,12]);
+    expect([0,1,3,4,7,8].map(religionConversionPercent)).toEqual([0,5,5,10,10,15]);
     expect(convertReligionDistribution([
       {religionKey:"HELLENIC_FAITH",primaryPercent:75,secondaryPercent:25}
     ],"ROMAN_FAITH",5)).toEqual([
-      {religionKey:"HELLENIC_FAITH",primaryPercent:69,secondaryPercent:23},
-      {religionKey:"ROMAN_FAITH",primaryPercent:6,secondaryPercent:2}
+      {religionKey:"HELLENIC_FAITH",primaryPercent:67.5,secondaryPercent:22.5},
+      {religionKey:"ROMAN_FAITH",primaryPercent:7.5,secondaryPercent:2.5}
     ]);
   });
   it("Hristiyanlık ve Katoliklik nihai etkilerini uygular",()=>{
@@ -102,12 +102,12 @@ describe("din sistemi",()=>{
     });
     expect(income.gross.building+income.gross.tax+income.gross.landTrade).toBe(2_100);
   });
-  it("pasif yayılımın iki puanını Hristiyanlık ve Katolikliğe 75/25 dağıtır",()=>{
+  it("pasif yayılımın on puanını Hristiyanlık ve Katolikliğe 75/25 dağıtır",()=>{
     expect(convertReligionDistributionByPercent([
       {religionKey:"HELLENIC_FAITH",primaryPercent:75,secondaryPercent:25}
-    ],"CHRISTIANITY",2)).toEqual([
-      {religionKey:"HELLENIC_FAITH",primaryPercent:73.5,secondaryPercent:24.5},
-      {religionKey:"CHRISTIANITY",primaryPercent:1.5,secondaryPercent:.5}
+    ],"CHRISTIANITY",10)).toEqual([
+      {religionKey:"HELLENIC_FAITH",primaryPercent:67.5,secondaryPercent:22.5},
+      {religionKey:"CHRISTIANITY",primaryPercent:7.5,secondaryPercent:2.5}
     ]);
   });
 });

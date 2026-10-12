@@ -6,9 +6,16 @@ vi.hoisted(()=>{
   process.env.DATABASE_URL="postgresql://test:test@localhost:5432/test";
 });
 
-import { merchantTradeIncomeBase } from "./character-service.js";
+import { MERCHANT_TASK_INCOME_MULTIPLIER, MISSIONARY_LIMIT_PER_COUNTRY, merchantTradeIncomeBase } from "./character-service.js";
 
 describe("tüccar ticaret geliri tabanı",()=>{
+  it("bütün doğrudan tüccar gelirlerine yüzde 10 çarpanı uygular",()=>{
+    expect(MERCHANT_TASK_INCOME_MULTIPLIER).toBe(1.10);
+  });
+
+  it("devlet başına beş etkin misyonere izin verir",()=>{
+    expect(MISSIONARY_LIMIT_PER_COUNTRY).toBe(5);
+  });
   it("güncel alım turundaki ticaret kırılımını kullanır",()=>{
     expect(merchantTradeIncomeBase({
       acquisitionLandTradeIncome:8_000,

@@ -116,6 +116,10 @@ import { steppePoliticsSimplificationMigration } from "./steppe-politics-simplif
 import { steppeVassalDoctrineMigration } from "./steppe-vassal-doctrine-migration.js";
 import { steppeVassalKurultayVotesMigration } from "./steppe-vassal-kurultay-votes-migration.js";
 import { steppeTributeLedgerMigration } from "./steppe-tribute-ledger-migration.js";
+import { espionageNobleTargetsMigration } from "./espionage-noble-targets-migration.js";
+import { diplomatTaskRemovalMigration } from "./diplomat-task-removal-migration.js";
+import { countryMarshalsMigration } from "./country-marshals-migration.js";
+import { formableCountryCatalogSyncMigration } from "./formable-country-catalog-sync-migration.js";
 
 export const migrations = [
   {
@@ -2449,5 +2453,9 @@ export const migrations = [
   steppePoliticsSimplificationMigration,
   steppeVassalDoctrineMigration,
   steppeVassalKurultayVotesMigration,
-  steppeTributeLedgerMigration
+  steppeTributeLedgerMigration,
+  espionageNobleTargetsMigration,
+  diplomatTaskRemovalMigration,
+  countryMarshalsMigration,
+  formableCountryCatalogSyncMigration
 ] as const;

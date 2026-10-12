@@ -3,26 +3,38 @@ export const ESPIONAGE_TARGETS = {
   MILITARY: { label: "Bina Sabotajı • Askerî", buildingTypes: ["engineering"], group: "SABOTEUR" },
   PUBLIC: { label: "Bina Sabotajı • Kamu ve Altyapı", buildingTypes: ["healer", "academy", "curia", "pantheon", "aqueduct"], group: "SABOTEUR" },
   NAVAL: { label: "Bina Sabotajı • Denizcilik", buildingTypes: ["port", "shipyard"], group: "SABOTEUR" },
-  CONSTRUCTION: { label: "İnşaat Sabotajı", buildingTypes: [], group: "SABOTEUR" },
+  CONSTRUCTION: { label: "Bina İnşa Sabotajı", buildingTypes: [], group: "SABOTEUR" },
   RECRUITMENT_SABOTAGE: { label: "Asker Alımı Sabotajı", buildingTypes: [], group: "SABOTEUR" },
-  PRODUCTION_SABOTAGE: { label: "Gemi ve Kuşatma Üretimi Sabotajı", buildingTypes: [], group: "SABOTEUR" },
-  INCOME_SABOTAGE: { label: "Gelir Sabotajı", buildingTypes: [], group: "FINANCIAL_SPY" },
-  TREASURY_INFILTRATION: { label: "Hazine Sızdırma", buildingTypes: [], group: "FINANCIAL_SPY" },
+  PRODUCTION_SABOTAGE: { label: "Kuşatma Aleti Üretimi Sabotajı", buildingTypes: [], group: "SABOTEUR" },
+  INCOME_SABOTAGE: { label: "Gelir Düşürme", buildingTypes: [], group: "FINANCIAL_SPY" },
+  TREASURY_INFILTRATION: { label: "Hazine Çalma", buildingTypes: [], group: "FINANCIAL_SPY" },
   TRADE_COLLAPSE: { label: "Ticaret Ağını Çökertme", buildingTypes: [], group: "FINANCIAL_SPY" },
   INCITE_PUBLIC: { label: "Halkı Kışkırtma • Huzursuzluk", buildingTypes: [], group: "PROVOCATEUR" },
   PARALYZE_GOVERNMENT: { label: "Yönetimi Felç Etme", buildingTypes: [], group: "PROVOCATEUR" },
   AGGRAVATE_EVENT: { label: "Olayı Körükleme", buildingTypes: [], group: "PROVOCATEUR" },
   SUPPLY_COLLAPSE: { label: "Ordu İkmalini Çökertme", buildingTypes: [], group: "MILITARY_AGENT" },
-  DESERTION: { label: "Firarı Teşvik Etme", buildingTypes: [], group: "MILITARY_AGENT" },
-  POISON_GARRISON: { label: "Garnizonu Zehirleme", buildingTypes: [], group: "MILITARY_AGENT" },
-  DESTROY_SIEGE_SUPPLIES: { label: "Kuşatma Erzağını Yok Etme", buildingTypes: [], group: "MILITARY_AGENT" },
+  DESERTION: { label: "Ordu Firarı", buildingTypes: [], group: "MILITARY_AGENT" },
+  POISON_GARRISON: { label: "Garnizon Zehirleme", buildingTypes: [], group: "MILITARY_AGENT" },
+  DESTROY_SIEGE_SUPPLIES: { label: "Kuşatma Erzağı Yakma", buildingTypes: [], group: "MILITARY_AGENT" },
   SABOTAGE_FLEET: { label: "Filoyu Sabote Etme", buildingTypes: [], group: "MILITARY_AGENT" },
   DISCREDIT: { label: "Karakteri İtibarsızlaştırma", buildingTypes: [], group: "ASSASSIN" },
   KIDNAP: { label: "Karakter Kaçırma", buildingTypes: [], group: "ASSASSIN" },
-  ASSASSINATE: { label: "Suikast", buildingTypes: [], group: "ASSASSIN" }
+  ASSASSINATE: { label: "Karakter veya Soylu Suikasti", buildingTypes: [], group: "ASSASSIN" }
 } as const;
 
 export type EspionageTarget = keyof typeof ESPIONAGE_TARGETS;
+
+/** Yeni oyuncu operasyonlarında açılan görevler. Eski anahtarlar devam eden kayıtları çözebilmek için katalogda tutulur. */
+export const PLAYER_ESPIONAGE_TARGETS = [
+  "RECRUITMENT_SABOTAGE","CONSTRUCTION","PRODUCTION_SABOTAGE",
+  "INCOME_SABOTAGE","TREASURY_INFILTRATION",
+  "INCITE_PUBLIC","AGGRAVATE_EVENT",
+  "DESERTION","POISON_GARRISON","DESTROY_SIEGE_SUPPLIES","ASSASSINATE"
+] as const satisfies readonly EspionageTarget[];
+
+export function isPlayerEspionageTarget(target:string):target is typeof PLAYER_ESPIONAGE_TARGETS[number]{
+  return (PLAYER_ESPIONAGE_TARGETS as readonly string[]).includes(target);
+}
 export type EspionagePreparation = "NONE" | "CAREFUL" | "EXTENSIVE" | "AGGRESSIVE";
 
 export const ESPIONAGE_PREPARATIONS: Record<EspionagePreparation, {

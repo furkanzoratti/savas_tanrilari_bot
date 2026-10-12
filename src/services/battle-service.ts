@@ -28,6 +28,7 @@ import {
 import { deductPopulationForCasualties } from "./population-loss.js";
 import { applyBattleHullDamage,applyBattleRetreatLoss,battleHullComposition,battleHullMetrics,initializeBattleShipHulls,persistBattleHullDamage } from "./naval-battle-hull-service.js";
 import { siegeStarvationBonus } from "../domain/siege-starvation.js";
+import { ensureCountryMarshal } from "./marshal-service.js";
 import type { ReligionKey } from "../domain/religions.js";
 import { loadSettlementReligionModifiers } from "./religion-service.js";
 import { applyBattleNavalCargoLosses } from "./naval-cargo-loss-service.js";
@@ -825,6 +826,8 @@ interface BattleCommanderProfile {
   id: string;
   skill_bonus: number;
   is_admiral: boolean;
+  commander_victories: number;
+  admiral_victories: number;
   doctrine: CommanderDoctrine | null;
   specialization: CharacterSpecialization | null;
   specialization_level: number;
@@ -838,7 +841,7 @@ async function battleCommander(
   battleId: string,
   side: BattleSideKey
 ): Promise<BattleCommanderProfile | null> {
-  return (await client.query<BattleCommanderProfile>(
+  const commander=(await client.query<BattleCommanderProfile>(
     `WITH assigned AS (
        SELECT assignment.battle_id,assignment.side_key,army.commander_character_id AS commander_id
          FROM battle_army_assignments assignment JOIN armies army ON army.id=assignment.army_id
@@ -847,16 +850,25 @@ async function battleCommander(
          FROM battle_fleet_assignments assignment JOIN fleets fleet ON fleet.id=assignment.fleet_id
      )
      SELECT commander.id,commander.skill_bonus,commander.is_admiral,
+            commander.commander_victories,commander.admiral_victories,
             commander.doctrine,commander.specialization,commander.specialization_level,
             commander.admiral_doctrine,commander.admiral_specialization,commander.admiral_specialization_level
        FROM assigned assignment JOIN country_characters commander ON commander.id=assignment.commander_id
-       LEFT JOIN battle_sides side_record ON side_record.battle_id=assignment.battle_id AND side_record.side_key=assignment.side_key
+       JOIN battles battle ON battle.id=assignment.battle_id
       WHERE assignment.battle_id=$1 AND assignment.side_key=$2 AND commander.character_status='ACTIVE'
-      ORDER BY (commander.id=side_record.chief_commander_character_id) DESC,
-               commander.skill_bonus DESC,commander.name
+        AND commander.is_admiral=(battle.terrain='NAVAL')
+      ORDER BY commander.skill_bonus DESC,
+               CASE WHEN commander.is_admiral THEN commander.admiral_specialization_level ELSE commander.specialization_level END DESC,
+               CASE WHEN commander.is_admiral THEN commander.admiral_victories ELSE commander.commander_victories END DESC,
+               commander.name
       LIMIT 1`,
     [battleId,side]
   )).rows[0]??null;
+  if(commander)await client.query(
+    "UPDATE battle_sides SET chief_commander_character_id=$1 WHERE battle_id=$2 AND side_key=$3",
+    [commander.id,battleId,side]
+  );
+  return commander;
 }
 
 async function recordCommanderVictory(
@@ -873,7 +885,7 @@ async function recordCommanderVictory(
   )).rows[0];
   if(!battleMeta)return;
   const naval=battleMeta.terrain==="NAVAL";
-  const commanders = (await client.query<{ id: string; name: string; country_name: string; is_admiral:boolean }>(
+  const commanders = (await client.query<{ id: string; name: string; country_id:string; country_name: string; is_admiral:boolean }>(
     `WITH assigned AS (
        SELECT assignment.battle_id,assignment.side_key,army.commander_character_id AS commander_id
          FROM battle_army_assignments assignment JOIN armies army ON army.id=assignment.army_id
@@ -881,12 +893,19 @@ async function recordCommanderVictory(
        SELECT assignment.battle_id,assignment.side_key,fleet.commander_character_id AS commander_id
          FROM battle_fleet_assignments assignment JOIN fleets fleet ON fleet.id=assignment.fleet_id
      )
-     SELECT DISTINCT commander.id,commander.name,country.name AS country_name,commander.is_admiral
-       FROM assigned assignment JOIN country_characters commander ON commander.id=assignment.commander_id
+     SELECT commander.id,commander.name,country.id AS country_id,country.name AS country_name,commander.is_admiral,
+            commander.skill_bonus,commander.specialization_level,commander.admiral_specialization_level,
+            commander.commander_victories,commander.admiral_victories
+       FROM (SELECT DISTINCT commander_id FROM assigned WHERE battle_id=$1 AND side_key=$2) assignment
+       JOIN country_characters commander ON commander.id=assignment.commander_id
        JOIN countries country ON country.id=commander.country_id
-      WHERE assignment.battle_id=$1 AND assignment.side_key=$2
-        AND commander.role='COMMANDER' AND commander.character_status='ACTIVE'
-        AND commander.is_admiral=$3`,
+      WHERE commander.role='COMMANDER' AND commander.character_status='ACTIVE'
+        AND commander.is_admiral=$3
+      ORDER BY commander.skill_bonus DESC,
+               CASE WHEN commander.is_admiral THEN commander.admiral_specialization_level ELSE commander.specialization_level END DESC,
+               CASE WHEN commander.is_admiral THEN commander.admiral_victories ELSE commander.commander_victories END DESC,
+               commander.name
+      LIMIT 1`,
     [battleId,winner,naval]
   )).rows;
   for (const commander of commanders) {
@@ -917,6 +936,7 @@ async function recordCommanderVictory(
     const victoryCount="admiral_victories" in updated?updated.admiral_victories:updated.commander_victories;
     const progressionLevel="admiral_specialization_level" in updated
       ?updated.admiral_specialization_level:updated.specialization_level;
+    if(!naval&&victoryCount>=9)await ensureCountryMarshal(client,commander.country_id);
     if (battleMeta.guild_id) await client.query(
       `INSERT INTO character_turn_log_batches(guild_id,game_turn,entries,source,title,dedupe_key)
        VALUES($1,$2,$3::jsonb,'COMMANDER_RESULT',$4,$5)

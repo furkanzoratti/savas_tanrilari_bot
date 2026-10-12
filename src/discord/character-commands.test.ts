@@ -57,8 +57,6 @@ describe("Akademi karakter komutları", () => {
   it("aynı turda yeniden görevlendirilebilen Diplomat ve Tüccarı doğru filtreler", () => {
     expect(characterAvailableForCommand(availableCharacter,"diplomat","vassal-entegre-et")).toBe(true);
     expect(characterAvailableForCommand(availableCharacter,"diplomat","asimilasyon")).toBe(true);
-    expect(characterAvailableForCommand({...availableCharacter,assignment:"DIPLOMAT_DEFENSE"},"diplomat","gorev-bitir")).toBe(true);
-    expect(characterAvailableForCommand({...availableCharacter,assignment:"DIPLOMAT_DEFENSE"},"diplomat","vassal-entegre-et")).toBe(false);
     expect(characterAvailableForCommand({...availableCharacter,role:"MERCHANT",assignment:"MERCHANT_DOMESTIC"},"tuccar","gorev-bitir")).toBe(true);
     expect(characterAvailableForCommand({...availableCharacter,character_status:"DEAD"},"diplomat","gorev-baslat")).toBe(false);
   });
@@ -66,7 +64,7 @@ describe("Akademi karakter komutları", () => {
   it("Diplomat görevlerinde yalnızca göreve ait seçenekleri gösterir", () => {
     const command = commandBuilders.find((item) => item.name === "diplomat");
     expect(command?.options?.map((item) => item.name)).toEqual([
-      "halkla-uzlas","kultur-degistir","asimilasyon","vassal-entegre-et","savunma-ata","uzmanlik-sec","gorev-bitir"
+      "halkla-uzlas","kultur-degistir","asimilasyon","vassal-entegre-et","uzmanlik-sec","gorev-bitir"
     ]);
     const reconciliation = command?.options?.find((item) => item.name === "halkla-uzlas");
     const culture = command?.options?.find((item) => item.name === "kultur-degistir");
@@ -77,6 +75,7 @@ describe("Akademi karakter komutları", () => {
     ]);
     expect(culture?.options?.map((item) => item.name)).toEqual(["diplomat","kultur","hedef-sehir"]);
     expect(command?.options?.find((item) => item.name === "vassallastir")).toBeUndefined();
+    expect(command?.options?.find((item) => item.name === "savunma-ata")).toBeUndefined();
     expect(integration?.options?.map((item) => item.name)).toEqual(["diplomat","hedef-ulke"]);
     expect(command?.options?.find((item) => item.name === "asimilasyon")?.options?.map((item) => item.name)).toEqual(["diplomat","hedef-sehir"]);
   });
@@ -179,6 +178,20 @@ describe("Akademi karakter komutları", () => {
     expect(embed.description).toContain("Deniz Akıncısı Sv2");
     expect(embed.description).not.toContain("Saldırı Doktrini");
     expect(embed.description).not.toContain("Meydan Taktisyeni");
+  });
+
+  it("ülkenin tek Mareşalini Komutan yerine Mareşal olarak gösterir",()=>{
+    const embed=charactersEmbed("Roma",[{
+      id:"00000000-0000-4000-8000-000000000023",country_id:"00000000-0000-4000-8000-000000000024",
+      name:"Marcus",role:"COMMANDER",skill_bonus:3,assignment:"ARMY",assignment_ready_turn:null,
+      doctrine:"OFFENSIVE",commander_victories:9,specialization:"FIELD_TACTICIAN",specialization_progress:9,
+      specialization_level:3,character_status:"ACTIVE",is_admiral:false,is_marshal:true,
+      unavailable_until_turn:null,trained_settlement_name:"Roma",assigned_settlement_name:null,
+      assigned_country_name:null,assigned_army_name:"I. Lejyon",assigned_fleet_name:null,operation_type:null,
+      operation_status:null,operation_progress:null,operation_goal:null,target_country_name:null,target_settlement_name:null
+    }]).toJSON();
+    expect(embed.description).toContain("**Marcus** — Mareşal (+3)");
+    expect(embed.description).not.toContain("**Marcus** — Komutan");
   });
 
   it("tutsak casusun tutulduğu şehri açıkça gösterir",()=>{

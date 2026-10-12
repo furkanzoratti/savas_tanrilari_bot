@@ -3,7 +3,7 @@ import type { DbClient } from "../db/pool.js";
 import { pool, withTransaction } from "../db/pool.js";
 import { BUILDINGS } from "../domain/catalog.js";
 import {
-  ESPIONAGE_PREPARATIONS, ESPIONAGE_TARGETS, espionageSeverity, espionageSpecialization,
+  ESPIONAGE_PREPARATIONS, ESPIONAGE_TARGETS, isPlayerEspionageTarget, espionageSeverity, espionageSpecialization,
   type EspionagePreparation, type EspionageSeverity, type EspionageTarget
 } from "../domain/espionage.js";
 import { applyEspionageEffect, espionageTargetExists, type EspionageEffectOperation } from "./espionage-effects.js";
@@ -37,6 +37,9 @@ export interface EspionageOperationView {
   target_settlement_name: string;
   target_character_id: string | null;
   target_character_name: string | null;
+  target_noble_type: "DYNASTY"|"ROMAN_FAMILY"|null;
+  target_noble_id: string | null;
+  target_noble_family_id: string | null;
   target_army_id: string | null;
   target_army_name: string | null;
   spy_character_id: string;
@@ -144,7 +147,8 @@ function requireUuid(value: string | null | undefined, label: string): void {
 const operationViewSql = `
   SELECT operation.*,attacker.name AS attacker_country_name,target.name AS target_country_name,
          settlement.name AS target_settlement_name,spy.name AS spy_name,spy.skill_bonus AS spy_skill_bonus,
-         target_character.name AS target_character_name,target_army.name AS target_army_name,
+         COALESCE(target_character.name,target_dynasty_member.name,target_roman_member.name) AS target_character_name,
+         target_army.name AS target_army_name,
          CASE WHEN operation.target_building_type IS NULL THEN NULL ELSE COALESCE(definition.name,operation.target_building_type) END AS target_building_name
     FROM espionage_operations operation
     JOIN countries attacker ON attacker.id=operation.attacker_country_id
@@ -152,6 +156,10 @@ const operationViewSql = `
     JOIN settlements settlement ON settlement.id=operation.target_settlement_id
     JOIN country_characters spy ON spy.id=operation.spy_character_id
     LEFT JOIN country_characters target_character ON target_character.id=operation.target_character_id
+    LEFT JOIN dynasty_members target_dynasty_member
+      ON operation.target_noble_type='DYNASTY' AND target_dynasty_member.id=operation.target_noble_id
+    LEFT JOIN roman_family_members target_roman_member
+      ON operation.target_noble_type='ROMAN_FAMILY' AND target_roman_member.id=operation.target_noble_id
     LEFT JOIN armies target_army ON target_army.id=operation.target_army_id
     LEFT JOIN (VALUES
       ${Object.entries(BUILDINGS).map(([key, value]) => `('${key.replaceAll("'", "''")}','${value.name.replaceAll("'", "''")}')`).join(",")}
@@ -261,10 +269,15 @@ async function prepareEspionageResolution(
       WHERE country_id=$1 AND role='SPY' AND character_status='ACTIVE' AND (
         assignment='COUNTERINTELLIGENCE_COUNTRY' OR
         (assignment='COUNTERINTELLIGENCE_SETTLEMENT' AND assigned_settlement_id=$2) OR
-        (assignment='PERSONAL_GUARD' AND protected_character_id=$3)
+        (assignment='PERSONAL_GUARD' AND (
+          protected_character_id=$3 OR
+          (protected_noble_type=$5 AND protected_noble_id=$6) OR
+          (protected_family_type=$5 AND protected_family_id=$7)
+        ))
       ) AND (assignment_ready_turn IS NULL OR assignment_ready_turn<=$4)
       ORDER BY skill_bonus + CASE WHEN assignment='PERSONAL_GUARD' THEN 4 WHEN assignment='COUNTERINTELLIGENCE_SETTLEMENT' THEN 3 ELSE 1 END DESC LIMIT 1`,
-    [operation.target_country_id, operation.target_settlement_id,operation.target_character_id,turn]
+    [operation.target_country_id,operation.target_settlement_id,operation.target_character_id,turn,
+      operation.target_noble_type,operation.target_noble_id,operation.target_noble_family_id]
   )).rows[0];
   const preparation = ESPIONAGE_PREPARATIONS[operation.preparation];
   const attackRoll = randomInt(1, 21);
@@ -320,7 +333,7 @@ async function finalizeEspionageResolution(
       prepared.detectionLevel, prepared.captured, effectText]
   );
   if (severity !== "NONE") await awardCharacterSpecializationProgress(client,operation.spy_character_id,prepared.specialization);
-  if (prepared.counterId && (severity === "NONE" || prepared.detectionLevel > 0)) {
+  if (prepared.counterId && severity === "NONE") {
     await awardCharacterSpecializationProgress(client,prepared.counterId,"COUNTER_SPY");
   }
   if (prepared.captured && operation.target_type === "ASSASSINATE") {
@@ -362,7 +375,8 @@ export async function resolveDueEspionageOperations(guildId: string, turn: numbe
       `SELECT operation.id,operation.attacker_country_id,operation.target_country_id,operation.target_settlement_id,
               operation.spy_character_id,spy.skill_bonus AS spy_skill_bonus,spy.specialization AS spy_specialization,
               spy.specialization_level AS spy_specialization_level,operation.target_type,operation.preparation,
-              operation.target_character_id,operation.target_army_id,operation.created_at
+              operation.target_character_id,operation.target_noble_type,operation.target_noble_id,
+              operation.target_noble_family_id,operation.target_army_id,operation.created_at
          FROM espionage_operations operation JOIN country_characters spy ON spy.id=operation.spy_character_id
         WHERE operation.guild_id=$1 AND operation.status='TRAVELING' AND operation.resolve_turn<=$2
           AND spy.character_status='ACTIVE'
@@ -456,12 +470,15 @@ export const espionageService = {
     guildId: string; actorId: string; attackerCountryId: string; spyCharacterId: string;
     targetCountryId: string; targetSettlementId: string; targetType: EspionageTarget; preparation: EspionagePreparation;
     targetCharacterId?: string | null; targetArmyId?: string | null;
+    targetNobleType?: "DYNASTY"|"ROMAN_FAMILY"|null; targetNobleId?:string|null; targetNobleFamilyId?:string|null;
   }): Promise<EspionageOperationView> {
     requireUuid(input.attackerCountryId, "Saldıran ülke");
     requireUuid(input.targetCountryId, "Hedef ülke");
     requireUuid(input.targetSettlementId, "Hedef şehir");
     requireUuid(input.spyCharacterId, "Casus");
     if (input.targetCharacterId) requireUuid(input.targetCharacterId, "Hedef karakter");
+    if (input.targetNobleId) requireUuid(input.targetNobleId,"Hedef soylu");
+    if (input.targetNobleFamilyId) requireUuid(input.targetNobleFamilyId,"Hedef aile");
     if (input.targetArmyId) requireUuid(input.targetArmyId, "Hedef ordu");
     return withTransaction(async (client) => {
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`espionage-spy:${input.spyCharacterId}`]);
@@ -476,19 +493,28 @@ export const espionageService = {
       if (!spy) throw new GameError("Seçilen karakter bu devlete ait bir casus değil.");
       if (await isActivelyCaptured(client,input.spyCharacterId,input.guildId)) throw new GameError("Bu casus tutsak olduğu için kullanılamaz.");
       if (spy.assignment !== "NONE") throw new GameError("Bu casus şu anda başka bir görevde.");
-      if (!(input.targetType in ESPIONAGE_TARGETS)) throw new GameError("Geçersiz sabotaj hedefi.");
-      if (["DISCREDIT","KIDNAP","ASSASSINATE"].includes(input.targetType) && !input.targetCharacterId) throw new GameError("Bu görev için hedef karakter seçmelisiniz.");
-      if (["SUPPLY_COLLAPSE","DESERTION"].includes(input.targetType) && !input.targetArmyId) throw new GameError("Bu görev için hedef ordu seçmelisiniz.");
+      if (!isPlayerEspionageTarget(input.targetType)) throw new GameError("Bu casusluk görevi artık yeni operasyonlara kapalı.");
+      if (input.targetType === "ASSASSINATE" && !input.targetCharacterId && !input.targetNobleId) throw new GameError("Suikast için hedef karakter veya soylu seçmelisiniz.");
+      if(input.targetNobleId){
+        const valid=input.targetNobleType==="DYNASTY"
+          ?await client.query(`SELECT dynasty.id FROM dynasty_members member JOIN dynasties dynasty ON dynasty.id=member.dynasty_id WHERE member.id=$1 AND dynasty.country_id=$2 AND member.status='ALIVE'`,[input.targetNobleId,input.targetCountryId])
+          :input.targetNobleType==="ROMAN_FAMILY"
+            ?await client.query(`SELECT family.id FROM roman_family_members member JOIN roman_families family ON family.id=member.family_id JOIN roman_republics republic ON republic.id=family.republic_id WHERE member.id=$1 AND republic.country_id=$2 AND member.status='ALIVE'`,[input.targetNobleId,input.targetCountryId])
+            :{rowCount:0,rows:[]};
+        if(!valid.rowCount)throw new GameError("Seçilen soylu hedef ülkeye ait veya hayatta değil.");
+      }
       const preparation = ESPIONAGE_PREPARATIONS[input.preparation];
       if (!preparation) throw new GameError("Geçersiz hazırlık seviyesi.");
       const totalCost = preparation.cost + (input.targetType === "ASSASSINATE" ? 2_000 : 0);
       await spendPreparation(client, input.attackerCountryId, totalCost);
       const operation = (await client.query<{ id: string }>(
         `INSERT INTO espionage_operations(guild_id,attacker_country_id,target_country_id,target_settlement_id,spy_character_id,target_type,
-          preparation,preparation_cost,started_turn,resolve_turn,return_turn,created_by,target_character_id,target_army_id)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
+          preparation,preparation_cost,started_turn,resolve_turn,return_turn,created_by,target_character_id,target_army_id,
+          target_noble_type,target_noble_id,target_noble_family_id)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id`,
         [input.guildId,input.attackerCountryId,input.targetCountryId,input.targetSettlementId,input.spyCharacterId,input.targetType,
-          input.preparation,totalCost,state.current_turn,state.current_turn+1,state.current_turn+2,input.actorId,input.targetCharacterId??null,input.targetArmyId??null]
+          input.preparation,totalCost,state.current_turn,state.current_turn+1,state.current_turn+2,input.actorId,input.targetCharacterId??null,input.targetArmyId??null,
+          input.targetNobleType??null,input.targetNobleId??null,input.targetNobleFamilyId??null]
       )).rows[0]!;
       await client.query("UPDATE country_characters SET assignment='ESPIONAGE',assigned_settlement_id=$1 WHERE id=$2", [input.targetSettlementId, input.spyCharacterId]);
       await client.query("INSERT INTO transactions(country_id,turn,kind,amount,description) VALUES($1,$2,'ESPIONAGE',$3,$4)", [input.attackerCountryId,state.current_turn,-totalCost,"Casusluk hazırlık gideri"]);
@@ -543,6 +569,53 @@ export const espionageService = {
     return (await pool.query<{id:string;name:string}>("SELECT id,name FROM armies WHERE country_id=$1 AND status='ACTIVE' ORDER BY name",[countryId])).rows;
   },
 
+  async assassinationTargets(countryId:string):Promise<Array<{id:string;name:string}>>{
+    return (await pool.query<{id:string;name:string}>(
+      `SELECT 'ACADEMY:'||character.id::text AS id,character.name||' • Akademi karakteri' AS name
+         FROM country_characters character WHERE character.country_id=$1 AND character.character_status='ACTIVE'
+       UNION ALL
+       SELECT 'DYNASTY:'||member.id::text,member.name||' • '||dynasty.name
+         FROM dynasty_members member JOIN dynasties dynasty ON dynasty.id=member.dynasty_id
+        WHERE dynasty.country_id=$1 AND member.status='ALIVE'
+       UNION ALL
+       SELECT 'ROMAN:'||member.id::text,member.name||' • '||family.name
+         FROM roman_family_members member JOIN roman_families family ON family.id=member.family_id
+         JOIN roman_republics republic ON republic.id=family.republic_id
+        WHERE republic.country_id=$1 AND member.status='ALIVE'
+       ORDER BY name`,[countryId]
+    )).rows;
+  },
+
+  async nobleFamily(type:"DYNASTY"|"ROMAN_FAMILY",memberId:string):Promise<string|null>{
+    requireUuid(memberId,"Soylu");
+    if(type==="DYNASTY")return (await pool.query<{id:string}>(
+      "SELECT dynasty_id AS id FROM dynasty_members WHERE id=$1",[memberId]
+    )).rows[0]?.id??null;
+    return (await pool.query<{id:string}>(
+      "SELECT family_id AS id FROM roman_family_members WHERE id=$1",[memberId]
+    )).rows[0]?.id??null;
+  },
+
+  async defenseTargets(countryId:string):Promise<Array<{id:string;name:string}>>{
+    return (await pool.query<{id:string;name:string}>(
+      `SELECT 'ACADEMY:'||character.id::text AS id,character.name||' • Karakter' AS name
+         FROM country_characters character WHERE character.country_id=$1 AND character.character_status='ACTIVE'
+       UNION ALL
+       SELECT 'DYNASTY:'||member.id::text,member.name||' • Soylu' FROM dynasty_members member
+         JOIN dynasties dynasty ON dynasty.id=member.dynasty_id WHERE dynasty.country_id=$1 AND member.status='ALIVE'
+       UNION ALL
+       SELECT 'ROMAN:'||member.id::text,member.name||' • Roma soylusu' FROM roman_family_members member
+         JOIN roman_families family ON family.id=member.family_id JOIN roman_republics republic ON republic.id=family.republic_id
+        WHERE republic.country_id=$1 AND member.status='ALIVE'
+       UNION ALL
+       SELECT 'DYNASTY_FAMILY:'||dynasty.id::text,dynasty.name||' • Aile koruması' FROM dynasties dynasty WHERE dynasty.country_id=$1
+       UNION ALL
+       SELECT 'ROMAN_FAMILY:'||family.id::text,family.name||' • Aile koruması' FROM roman_families family
+         JOIN roman_republics republic ON republic.id=family.republic_id WHERE republic.country_id=$1 AND family.status='ACTIVE'
+       ORDER BY name`,[countryId]
+    )).rows;
+  },
+
   async damagedBuildings(countryId:string,settlementId?:string|null): Promise<Array<{key:string;name:string;cost:number;settlement_name:string}>> {
     return (await pool.query<{key:string;name:string;cost:number;settlement_name:string}>(
       `SELECT building.building_type AS key,COALESCE(definition.name,building.building_type) AS name,
@@ -580,7 +653,7 @@ export const espionageService = {
     });
   },
 
-  async assignDefense(input: { guildId: string; countryId: string; spyCharacterId: string; scope: "COUNTRY" | "SETTLEMENT" | "CHARACTER"; settlementId?: string | null; characterId?:string|null }): Promise<void> {
+  async assignDefense(input: { guildId: string; countryId: string; spyCharacterId: string; scope: "COUNTRY" | "SETTLEMENT" | "CHARACTER"; settlementId?: string | null; characterId?:string|null; protectionTarget?:string|null }): Promise<void> {
     await withTransaction(async (client) => {
       await country(client,input.guildId,input.countryId);
       const state = await guild(client,input.guildId);
@@ -593,13 +666,33 @@ export const espionageService = {
         if (!valid.rowCount) throw new GameError("Savunulacak şehir bu devlete ait değil.");
       }
       if (input.scope === "CHARACTER") {
-        if (input.characterId === input.spyCharacterId) throw new GameError("Casus kendi şahsi koruması olarak atanamaz.");
-        const valid = await client.query("SELECT 1 FROM country_characters WHERE id=$1 AND country_id=$2 AND character_status='ACTIVE'",[input.characterId,input.countryId]);
-        if (!valid.rowCount) throw new GameError("Korunacak karakter bu devlete ait değil.");
+        const key=input.protectionTarget??(input.characterId?"ACADEMY:"+input.characterId:null);
+        if(!key)throw new GameError("Şahsi koruma için bir karakter veya aile seçmelisiniz.");
+        const [kind,id]=key.split(":",2);
+        if(!id)throw new GameError("Koruma hedefi seçimi geçersiz.");
+        requireUuid(id,"Koruma hedefi");
+        if(kind==="ACADEMY"&&id===input.spyCharacterId)throw new GameError("Casus kendi şahsi koruması olarak atanamaz.");
+        const valid=kind==="ACADEMY"?await client.query("SELECT 1 FROM country_characters WHERE id=$1 AND country_id=$2 AND character_status='ACTIVE'",[id,input.countryId])
+          :kind==="DYNASTY"?await client.query("SELECT 1 FROM dynasty_members member JOIN dynasties dynasty ON dynasty.id=member.dynasty_id WHERE member.id=$1 AND dynasty.country_id=$2 AND member.status='ALIVE'",[id,input.countryId])
+          :kind==="ROMAN"?await client.query("SELECT 1 FROM roman_family_members member JOIN roman_families family ON family.id=member.family_id JOIN roman_republics republic ON republic.id=family.republic_id WHERE member.id=$1 AND republic.country_id=$2 AND member.status='ALIVE'",[id,input.countryId])
+          :kind==="DYNASTY_FAMILY"?await client.query("SELECT 1 FROM dynasties WHERE id=$1 AND country_id=$2",[id,input.countryId])
+          :kind==="ROMAN_FAMILY"?await client.query("SELECT 1 FROM roman_families family JOIN roman_republics republic ON republic.id=family.republic_id WHERE family.id=$1 AND republic.country_id=$2 AND family.status='ACTIVE'",[id,input.countryId])
+          :{rowCount:0,rows:[]};
+        if(!valid.rowCount)throw new GameError("Korunacak karakter veya aile bu devlete ait değil.");
+        await client.query(
+          `UPDATE country_characters SET assignment='PERSONAL_GUARD',assigned_settlement_id=NULL,
+             protected_character_id=$1,protected_noble_type=$2,protected_noble_id=$3,
+             protected_family_type=$4,protected_family_id=$5,assignment_ready_turn=$6 WHERE id=$7`,
+          [kind==="ACADEMY"?id:null,kind==="DYNASTY"?"DYNASTY":kind==="ROMAN"?"ROMAN_FAMILY":null,
+            ["DYNASTY","ROMAN"].includes(kind??"")?id:null,
+            kind==="DYNASTY_FAMILY"?"DYNASTY":kind==="ROMAN_FAMILY"?"ROMAN_FAMILY":null,
+            ["DYNASTY_FAMILY","ROMAN_FAMILY"].includes(kind??"")?id:null,state.current_turn+1,input.spyCharacterId]
+        );
+        return;
       }
-      await client.query("UPDATE country_characters SET assignment=$1,assigned_settlement_id=$2,protected_character_id=$3,assignment_ready_turn=$4 WHERE id=$5", [
+      await client.query("UPDATE country_characters SET assignment=$1,assigned_settlement_id=$2,protected_character_id=NULL,protected_noble_type=NULL,protected_noble_id=NULL,protected_family_type=NULL,protected_family_id=NULL,assignment_ready_turn=$3 WHERE id=$4", [
         input.scope === "COUNTRY" ? "COUNTERINTELLIGENCE_TRAVELING_COUNTRY" : input.scope === "SETTLEMENT" ? "COUNTERINTELLIGENCE_TRAVELING_SETTLEMENT" : "PERSONAL_GUARD",
-        input.scope === "SETTLEMENT" ? input.settlementId : null,input.scope === "CHARACTER" ? input.characterId : null,state.current_turn+1,input.spyCharacterId
+        input.scope === "SETTLEMENT" ? input.settlementId : null,state.current_turn+1,input.spyCharacterId
       ]);
     });
   },
@@ -616,7 +709,7 @@ export const espionageService = {
       if (spy.assignment === "NONE") return false;
       if (!isSpyDefenseAssignment(spy.assignment)) throw new GameError("Bu casus karşı casuslukta değil; devam eden farklı görevi bu komutla iptal edilemez.");
       await client.query(
-        "UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL,protected_character_id=NULL,assignment_ready_turn=NULL WHERE id=$1",
+        "UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL,protected_character_id=NULL,protected_noble_type=NULL,protected_noble_id=NULL,protected_family_type=NULL,protected_family_id=NULL,assignment_ready_turn=NULL WHERE id=$1",
         [input.spyCharacterId]
       );
       return true;

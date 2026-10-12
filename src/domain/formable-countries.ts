@@ -347,17 +347,140 @@ export const FORMABLE_COUNTRIES = {
     modifiers: { cavalryDiscount: 0.15, buildingDiscount: 0.10, curiaFlatIncome: 150, stabilityRiskReduction: 5 },
     requiredActiveFormables: ["PARTHIAN_KINGDOM", "MEDIA", "PERSIS", "GEDROSIA_CARMANIA"]
   },
-  GRECO_BACTRIAN_KINGDOM: {
-    name: "Greko-Baktriya Krallığı", emoji: "🐫", tier: 2,
+  HUN_EMPIRE: {
+    name: "Hun İmparatorluğu", emoji: "🐺", tier: 2,
     buffs: [
-      "Doğu Orduları: Süvari, Okçu ve Sapancı alımları %10 ucuzdur.",
-      "İpek Yolu Merkezleri: Agora ve Ticaret Loncası gelirleri %15 artar.",
-      "Tüccar Okulları: Akademide yetişen Tüccarlar +1 ek özellik puanı kazanır.",
-      "Helen-İran Akademileri: Akademi bakım maliyeti 400 Altın olur."
+      "Büyük Bozkır Ordusu: Bütün süvari alımları %15 ucuzdur.",
+      "İmparatorluk Pazarları: Agora gelirleri %10 artar.",
+      "İmparatorluk Kervan Ağı: Ticaret Loncası gelirleri %10 artar.",
+      "Hanlık Düzeni: Huzursuzluk ve isyan ihtimali 5 puan azalır."
     ],
     effectScales: ["MAJOR", "MAJOR", "MEDIUM", "MINOR"],
-    modifiers: { cavalryDiscount: 0.10, archerSlingerDiscount: 0.10, buildingIncomePercent: { agora: 0.15, trade_guild: 0.15 }, academyRoleSkillBonus: { MERCHANT: 1 }, academyUpkeep: 400 },
-    requiredActiveFormables: ["BACTRIA", "SOGDIANA", "CHORASMIA", "ARYANA"]
+    modifiers: {
+      cavalryDiscount: 0.15,
+      buildingIncomePercent: { agora: 0.10, trade_guild: 0.10 },
+      stabilityRiskReduction: 5
+    },
+    requiredActiveFormables: ["WESTERN_HUN_STATE", "EASTERN_HUN_STATE"]
+  },
+  MAURYAN_EMPIRE: {
+    name: "Maurya İmparatorluğu", emoji: "🦚", tier: 2,
+    buffs: [
+      "İmparatorluk Orduları: Bütün asker alımları %10 ucuzdur.",
+      "Büyük Hint Ekonomisi: Çiftlik ve Ticaret Loncası gelirleri %15 artar.",
+      "İmparatorluk Nüfusu: Bina ve doğal yollarla kazanılan nüfus %15 artar.",
+      "Maurya İdaresi: Huzursuzluk ve isyan ihtimali 5 puan azalır."
+    ],
+    effectScales: ["MAJOR", "MAJOR", "MEDIUM", "MINOR"],
+    modifiers: {
+      unitDiscount: 0.10,
+      buildingIncomePercent: { farm: 0.15, trade_guild: 0.15 },
+      populationGainPercent: 0.15,
+      stabilityRiskReduction: 5
+    },
+    requiredActiveFormables: [
+      "GANDHARA_KINGDOM",
+      "ARYAVARTA_UNION",
+      "MAGADHA_KINGDOM",
+      "KALINGA_KINGDOM"
+    ]
+  },
+  WESTERN_HUN_STATE: {
+    name: "Batı Hun Devleti", emoji: "🐎",
+    buffs: [
+      "Batı Hun Süvarileri: Bütün süvari alımları %10 ucuzdur.",
+      "Otlak Ekonomisi: Çiftlik gelirleri %5 artar."
+    ],
+    modifiers: { cavalryDiscount: 0.10, buildingIncomePercent: { farm: 0.05 } }
+  },
+  EASTERN_HUN_STATE: {
+    name: "Doğu Hun Devleti", emoji: "🏹",
+    buffs: [
+      "Doğu Hun Süvarileri: Bütün süvari alımları %10 ucuzdur.",
+      "Doğu Kervanları: Ticaret Loncası gelirleri %5 artar."
+    ],
+    modifiers: { cavalryDiscount: 0.10, buildingIncomePercent: { trade_guild: 0.05 } }
+  },
+  GANDHARA_KINGDOM: {
+    name: "Gandhara Krallığı", emoji: "🪷",
+    buffs: [
+      "Gandhara Süvarileri: Bütün süvari alımları %5 ucuzdur.",
+      "İndus Ticaret Yolları: Agora ve Ticaret Loncası gelirleri %5 artar."
+    ],
+    modifiers: { cavalryDiscount: 0.05, buildingIncomePercent: { agora: 0.05, trade_guild: 0.05 } }
+  },
+  ARYAVARTA_UNION: {
+    name: "Aryavarta Birliği", emoji: "☸️",
+    buffs: [
+      "Ganj Orduları: Bütün piyade alımları %5 ucuzdur.",
+      "Aryavarta İdaresi: Her aktif Curia +100 Altın gelir sağlar.",
+      "Bereketli Ova: Çiftlik gelirleri %5 artar."
+    ],
+    modifiers: { infantryDiscount: 0.05, curiaFlatIncome: 100, buildingIncomePercent: { farm: 0.05 } }
+  },
+  MAGADHA_KINGDOM: {
+    name: "Magadha Krallığı", emoji: "🐘",
+    buffs: [
+      "Ganj Nüfusu: Bina ve doğal yollarla kazanılan nüfus %10 artar.",
+      "Magadha Tarımı: Çiftlik gelirleri %10 artar.",
+      "Kraliyet Ambarları: Yerleşkeler açlığa 1 tur daha fazla dayanır."
+    ],
+    modifiers: { populationGainPercent: 0.10, buildingIncomePercent: { farm: 0.10 }, starvationBonus: 1 }
+  },
+  KALINGA_KINGDOM: {
+    name: "Kalinga Krallığı", emoji: "⛵",
+    buffs: [
+      "Kalinga Tersaneleri: Gemi alımları %10 ucuzdur.",
+      "Doğu Limanları: Her aktif Liman +100 Altın gelir sağlar.",
+      "Kıyı Ustaları: Tersane inşası %5 ucuzdur."
+    ],
+    modifiers: { shipDiscount: 0.10, portFlatIncome: 100, buildingDiscount: 0.05, buildingDiscountTypes: ["shipyard"] }
+  },
+  DAKSHINAPATHA: {
+    name: "Dakshinapatha", emoji: "🛕",
+    buffs: [
+      "Dekken Süvarileri: Bütün süvari alımları %5 ucuzdur.",
+      "Güney Yolu: Agora ve Ticaret Loncası gelirleri %10 artar.",
+      "Plato Su İşleri: Su Kemeri %10 ucuzdur."
+    ],
+    modifiers: { cavalryDiscount: 0.05, buildingIncomePercent: { agora: 0.10, trade_guild: 0.10 }, buildingDiscount: 0.10, buildingDiscountTypes: ["aqueduct"] }
+  },
+  TAMILAKAM: {
+    name: "Tamilakam", emoji: "🌊",
+    buffs: [
+      "Tamil Deniz Ticareti: Deniz ticareti gelirleri %10 artar.",
+      "Tamil Filoları: Gemi bakım maliyeti %10 azalır.",
+      "Kıyı Nakliyesi: Gemilerin asker taşıma kapasitesi %10 artar."
+    ],
+    modifiers: { seaTradeIncomePercent: 0.10, shipUpkeepDiscount: 0.10, shipTransportMultiplier: 1.10 }
+  },
+  AYUTTHAYA_EMPIRE: {
+    name: "Ayutthaya İmparatorluğu", emoji: "🐘",
+    buffs: [
+      "Savaş Filleri: Süvari ve savaş fili alımları %5 ucuzdur.",
+      "Çao Phraya Ovası: Çiftlik gelirleri %10 artar.",
+      "Nehir ve Deniz Ticareti: Liman ve Ticaret Loncası gelirleri %10 artar."
+    ],
+    modifiers: {
+      cavalryDiscount: 0.05,
+      buildingIncomePercent: { farm: 0.10, port: 0.10, trade_guild: 0.10 }
+    }
+  },
+  INDOCHINA: {
+    name: "Hindiçin", emoji: "🐉", tier: 2,
+    buffs: [
+      "Büyük Fil Orduları: Süvari ve savaş fili alımları %15 ucuzdur.",
+      "Muson Ticaret Ağı: Liman ve Ticaret Loncası gelirleri %15 artar.",
+      "Bereketli Irmak Havzaları: Çiftlik gelirleri %15 artar.",
+      "Irmak Yerleşimleri: Bina ve doğal yollarla kazanılan nüfus %10 artar."
+    ],
+    effectScales: ["MAJOR", "MAJOR", "MEDIUM", "MINOR"],
+    modifiers: {
+      cavalryDiscount: 0.15,
+      buildingIncomePercent: { port: 0.15, trade_guild: 0.15, farm: 0.15 },
+      populationGainPercent: 0.10
+    },
+    requiredActiveFormables: ["AYUTTHAYA_EMPIRE", "MAGADHA_KINGDOM"]
   },
   ARABIAN_CONFEDERATION: { name: "Arabistan Konfederasyonu", emoji: "🐪", buffs: ["Agora, Liman ve Ticaret Loncası gelirleri %10 artar.", "Çöl hareketi %25 hızlıdır.", "Yağma ve köle taşıma kapasitesi %30 artar.", "Su Kemeri %10 ucuzdur ve açlığa +1 tur verir."], modifiers: { buildingIncomePercent: { agora: 0.10, port: 0.10, trade_guild: 0.10 }, buildingDiscount: 0.10, buildingDiscountTypes: ["aqueduct"], starvationBonus: 1 } },
   PHOENICIA_ARAM: { name: "Fenike-Aram", emoji: "⛵", buffs: ["Her Liman +100 Altın verir.", "Tersane inşası %5 ucuzdur."], modifiers: { portFlatIncome: 100, buildingDiscount: 0.05, buildingDiscountTypes: ["shipyard"] } },
@@ -430,7 +553,7 @@ export function applyFormableShipUpkeepDiscount(baseUpkeep: number, key: Formabl
 }
 
 const infantry = new Set(["light_infantry", "slinger", "spear", "archer", "heavy_infantry", "legionary", "hoplite", "briton_longbow", "persian_immortal", "iberian_caetrati", "germanic_shock_warrior", "anatolian_thureophoroi", "triarii_veteran", "punic_veteran", "gaesatae", "peltast", "silver_shield", "machimoi_phalangitai", "balearic_slinger", "sarmatian_longswordsmen", "briton_noble_spearmen"]);
-const cavalry = new Set(["light_cavalry", "heavy_cavalry", "horse_archer", "camel_cavalry", "carthaginian_war_elephant", "mauryan_war_elephant", "desert_raider", "egyptian_war_chariot", "germanic_companion_cavalry"]);
+const cavalry = new Set(["light_cavalry", "heavy_cavalry", "horse_archer", "steppe_cavalry", "camel_cavalry", "carthaginian_war_elephant", "mauryan_war_elephant", "desert_raider", "egyptian_war_chariot", "germanic_companion_cavalry"]);
 const archerSlinger = new Set(["archer", "slinger", "briton_longbow", "balearic_slinger"]);
 const archerSlingerLight = new Set([...archerSlinger, "light_infantry"]);
 

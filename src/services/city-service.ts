@@ -9,6 +9,7 @@ import type { CharacterRole } from "../domain/types.js";
 import { formableModifiers, type FormableCountryKey } from "../domain/formable-countries.js";
 import { settlementResourceAccess } from "./resource-service.js";
 import { GameError, type AcademyTrainingSession, type CountryCharacter, type SettlementPolicyRow } from "./game-service.js";
+import { ensureCountryMarshal } from "./marshal-service.js";
 
 interface CountryRow { id: string; guild_id: string; name: string; active_formable_key: FormableCountryKey | null }
 interface GuildRow { current_turn: number; acquisition_interval: number; turn_phase: string }
@@ -351,6 +352,7 @@ export const cityService = {
           RETURNING *,NULL::text AS assigned_settlement_name,NULL::text AS trained_settlement_name`,
         [input.actorId,character.id]
       )).rows[0]!;
+      if(character.is_marshal)await ensureCountryMarshal(client,input.countryId,{allowAnyCommander:true});
       await audit(client,input.guildId,input.actorId,"ACADEMY_CHARACTER_DISMISS","character",character.id,{name:character.name,role:character.role});
       return result;
     });

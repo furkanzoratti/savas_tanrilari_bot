@@ -31,6 +31,7 @@ import {
 } from "./audit-presenter.js";
 import { resolveArmyUnitTargetQuantity } from "./army-unit-update.js";
 import {steppeKurultayService} from "../services/steppe-kurultay-service.js";
+import {ensureCountryMarshal} from "../services/marshal-service.js";
 
 const usableUnitTypes = (Object.keys(BATTLE_UNIT_STATS) as BattleUnitType[]).filter((unitType) => unitType !== "militia");
 const usableUnitTypeSet = new Set<string>(usableUnitTypes);
@@ -933,7 +934,7 @@ export const adminPanelService = {
               character.commander_victories,
               character.admiral_specialization,character.admiral_specialization_level,character.admiral_doctrine,
               character.admiral_victories,
-              character.character_status,character.is_admiral,character.unavailable_until_turn,
+              character.character_status,character.is_admiral,character.is_marshal,character.unavailable_until_turn,
               trained.name AS trained_settlement_name,assigned.name AS assigned_settlement_name,
               death_place.name AS death_settlement_name
          FROM country_characters character
@@ -1762,7 +1763,7 @@ export const adminPanelService = {
     const characters = (await adminPool.query(
       `SELECT character.id,character.name,character.role,character.skill_bonus,
               character.specialization_level AS level,character.character_status AS status,
-              character.assignment,character.specialization,character.doctrine,character.is_admiral,
+              character.assignment,character.specialization,character.doctrine,character.is_admiral,character.is_marshal,
               character.commander_victories,character.admiral_specialization,
               character.admiral_specialization_level,character.admiral_doctrine,character.admiral_victories,
               character.unavailable_until_turn,trained.name AS trained_settlement_name,
@@ -2874,7 +2875,7 @@ export const adminPanelService = {
                 admiral_doctrine=$10,admiral_victories=$11
           WHERE id=$12
           RETURNING id,country_id,name,role,skill_bonus,specialization,specialization_level,doctrine,
-                    commander_victories,is_admiral,admiral_specialization,admiral_specialization_level,
+                    commander_victories,is_admiral,is_marshal,admiral_specialization,admiral_specialization_level,
                     admiral_doctrine,admiral_victories`,
         [input.name, input.skillBonus, input.specialization, input.specializationLevel,
           input.specialization ? input.specializationLevel * 3 : 0, role === "COMMANDER" ? input.doctrine : null,
@@ -2884,6 +2885,9 @@ export const adminPanelService = {
           isAdmiral ? input.admiralDoctrine : null,
           isAdmiral ? input.admiralVictories : 0, characterId]
       )).rows[0];
+      if(role==="COMMANDER"&&!isAdmiral&&Number(input.commanderVictories)>=9){
+        await ensureCountryMarshal(client,String(updated.country_id));
+      }
       await writeAdminAudit(client, actorId, "admin.panel.character.update", "character", characterId, { previous, updated });
       return updated;
     });

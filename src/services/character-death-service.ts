@@ -1,4 +1,5 @@
 import type { DbClient } from "../db/pool.js";
+import { ensureCountryMarshal } from "./marshal-service.js";
 
 export async function markCharacterDead(input: {
   client: DbClient;
@@ -20,13 +21,17 @@ export async function markCharacterDead(input: {
       WHERE missionary_character_id=$1 AND status IN ('TRAVELING','ACTIVE')`,
     [characterId]
   );
-  await client.query(
+  const deceased=(await client.query<{country_id:string;is_marshal:boolean}>(
     `UPDATE country_characters
         SET character_status='DEAD',died_at=COALESCE(died_at,NOW()),
             death_settlement_id=COALESCE(death_settlement_id,$2),
             assignment='NONE',assigned_settlement_id=NULL,protected_character_id=NULL,
             assignment_ready_turn=NULL,unavailable_until_turn=NULL
-      WHERE id=$1`,
+      WHERE id=$1
+      RETURNING country_id,is_marshal`,
     [characterId,deathSettlementId]
-  );
+  )).rows[0];
+  if(deceased?.is_marshal){
+    await ensureCountryMarshal(client,deceased.country_id,{allowAnyCommander:true});
+  }
 }

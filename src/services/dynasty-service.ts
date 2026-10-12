@@ -352,6 +352,22 @@ async function killMember(
   if(member.is_monarch||member.is_heir)await reconcileSuccession(client,dynastyId,turn,countryName,eventTexts);
 }
 
+export async function killDynastyMemberFromEspionage(client:DbClient,memberId:string,turn:number):Promise<void>{
+  const row=(await client.query<DynastyMemberView&{dynasty_id:string;country_name:string}>(
+    `SELECT member.*,dynasty.id AS dynasty_id,country.name AS country_name,
+            spouse.name AS spouse_name,mother.name AS mother_name,father.name AS father_name
+       FROM dynasty_members member
+       JOIN dynasties dynasty ON dynasty.id=member.dynasty_id
+       JOIN countries country ON country.id=dynasty.country_id
+       LEFT JOIN dynasty_members spouse ON spouse.id=member.spouse_id
+       LEFT JOIN dynasty_members mother ON mother.id=member.mother_id
+       LEFT JOIN dynasty_members father ON father.id=member.father_id
+      WHERE member.id=$1 FOR UPDATE OF member`,[memberId]
+  )).rows[0];
+  if(!row||row.status!=="ALIVE")return;
+  await killMember(client,row.dynasty_id,row,turn,"Suikast",row.country_name,[]);
+}
+
 interface NpcDynastyCountry{
   country_id:string;country_name:string;dynasty_id:string;culture_group:CultureGroup;
 }

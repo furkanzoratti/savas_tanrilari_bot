@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ESPIONAGE_PREPARATIONS, ESPIONAGE_TARGETS, espionageSeverity, sabotageDuration } from "./espionage.js";
+import { ESPIONAGE_PREPARATIONS, ESPIONAGE_TARGETS, PLAYER_ESPIONAGE_TARGETS, espionageSeverity, sabotageDuration } from "./espionage.js";
 
 describe("casusluk kuralları", () => {
   it("başarı farkını hafif, orta ve ağır sonuçlara ayırır", () => {
@@ -16,5 +16,15 @@ describe("casusluk kuralları", () => {
     expect(sabotageDuration("LIGHT")).toBe(2);
     expect(sabotageDuration("MEDIUM")).toBe(3);
     expect(sabotageDuration("HEAVY")).toBe(0);
+  });
+
+  it("oyuncuya yalnız yeni görev listesini açar",()=>{
+    expect(PLAYER_ESPIONAGE_TARGETS).toEqual([
+      "RECRUITMENT_SABOTAGE","CONSTRUCTION","PRODUCTION_SABOTAGE",
+      "INCOME_SABOTAGE","TREASURY_INFILTRATION","INCITE_PUBLIC","AGGRAVATE_EVENT",
+      "DESERTION","POISON_GARRISON","DESTROY_SIEGE_SUPPLIES","ASSASSINATE"
+    ]);
+    expect(PLAYER_ESPIONAGE_TARGETS).not.toContain("SABOTAGE_FLEET");
+    expect(PLAYER_ESPIONAGE_TARGETS).not.toContain("TRADE_COLLAPSE");
   });
 });

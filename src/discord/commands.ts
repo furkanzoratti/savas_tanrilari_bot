@@ -5,7 +5,7 @@ import { SETTLEMENT_EVENT_TYPES } from "../domain/events.js";
 import { BATTLE_TERRAINS, BATTLE_UNIT_STATS, NAVAL_UNIT_STATS, SIEGE_ASSET_BATTLE_STATS } from "../domain/battle.js";
 import { NPC_AUTO_PURCHASE_DOCTRINES } from "../domain/npc-auto-purchase.js";
 import { SPECIAL_UNITS } from "../domain/special-units.js";
-import { ESPIONAGE_PREPARATIONS, ESPIONAGE_TARGETS } from "../domain/espionage.js";
+import { ESPIONAGE_PREPARATIONS, ESPIONAGE_TARGETS, PLAYER_ESPIONAGE_TARGETS } from "../domain/espionage.js";
 import { ADMIRAL_DOCTRINES, ADMIRAL_SPECIALIZATIONS, CHARACTER_SPECIALIZATIONS, COMMANDER_DOCTRINES } from "../domain/characters.js";
 import { ACADEMY_ROLE_ORDER } from "../domain/academy.js";
 import { ROMAN_OFFICES,ROMAN_RELATION_ACTIONS,ROMAN_SENATE_PROPOSALS,romanBusinessChoices } from "../domain/roman-republic.js";
@@ -187,10 +187,7 @@ export const commandBuilders = [
           .filter(([, item]) => item.role === "COMMANDER")
           .map(([value, item]) => ({ name: item.label, value })))))
     .addSubcommand((sub) => sub.setName("amirale-donustur").setDescription("Müsait bir Komutanı kalıcı olarak Amirale dönüştürür")
-      .addStringOption((o) => o.setName("komutan").setDescription("Amirale dönüştürülecek müsait Komutan").setRequired(true).setAutocomplete(true)))
-    .addSubcommand((sub) => sub.setName("baskomutan-sec").setDescription("Etkin bir savaşta taraf bonuslarını uygulayacak Başkomutanı seçer")
-      .addStringOption((o) => o.setName("savas").setDescription("Başkomutan atanacak etkin savaş").setRequired(true).setAutocomplete(true))
-      .addStringOption((o) => o.setName("komutan").setDescription("Ordusuyla bu savaşa katılan Komutan").setRequired(true).setAutocomplete(true))),
+      .addStringOption((o) => o.setName("komutan").setDescription("Amirale dönüştürülecek müsait Komutan").setRequired(true).setAutocomplete(true))),
   new SlashCommandBuilder()
     .setName("amiral").setDescription("Amiralin kalıcı deniz doktrini ve uzmanlığını yönetir")
     .addSubcommand((sub)=>sub.setName("doktrin-sec").setDescription("Amiral için bir kez seçilebilen kalıcı deniz doktrinini belirler")
@@ -274,7 +271,7 @@ export const commandBuilders = [
     .addSubcommand((sub) => sub.setName("gorev-bitir").setDescription("Etkin Tüccar görevini sona erdirir")
       .addStringOption((o) => o.setName("tuccar").setDescription("Görevi bitecek Tüccar").setRequired(true).setAutocomplete(true))),
   new SlashCommandBuilder()
-    .setName("diplomat").setDescription("Diplomat görevlerini ve diplomatik savunmayı yönetir")
+    .setName("diplomat").setDescription("Diplomat görevlerini yönetir")
     .addSubcommand((sub) => sub.setName("halkla-uzlas").setDescription("Diplomatı yerleşkedeki etkin bir olayı sona erdirmeye gönderir")
       .addStringOption((o) => o.setName("diplomat").setDescription("Müsait Diplomat").setRequired(true).setAutocomplete(true))
       .addStringOption((o) => o.setName("olay").setDescription("Sona erdirilecek etkin olay").setRequired(true).addChoices(
@@ -292,9 +289,6 @@ export const commandBuilders = [
     .addSubcommand((sub) => sub.setName("vassal-entegre-et").setDescription("Etkin bir vassalın bağlılığını ilhak için ilerletir")
       .addStringOption((o) => o.setName("diplomat").setDescription("Müsait Diplomat").setRequired(true).setAutocomplete(true))
       .addStringOption((o) => o.setName("hedef-ulke").setDescription("Entegre edilecek etkin vassal devlet").setRequired(true).setAutocomplete(true)))
-    .addSubcommand((sub) => sub.setName("savunma-ata").setDescription("Diplomatı devlet veya yerleşke diplomatik savunmasına atar")
-      .addStringOption((o) => o.setName("diplomat").setDescription("Atanacak Diplomat").setRequired(true).setAutocomplete(true))
-      .addStringOption((o) => o.setName("sehir").setDescription("Boş bırakılırsa ülke çapında savunma").setAutocomplete(true)))
     .addSubcommand((sub) => sub.setName("uzmanlik-sec").setDescription("En az 3 başarısı olan Diplomatın kalıcı uzmanlığını seçer")
       .addStringOption((o) => o.setName("diplomat").setDescription("Uzmanlaşacak Diplomat").setRequired(true).setAutocomplete(true))
       .addStringOption((o) => o.setName("uzmanlik").setDescription("Kilidi açılmış uzmanlık dalı").setRequired(true).setAutocomplete(true)))
@@ -1293,7 +1287,7 @@ export const commandBuilders = [
       .addStringOption((o) => o.setName("hedef-ulke").setDescription("Hedef devlet").setRequired(true).setAutocomplete(true))
       .addStringOption((o) => o.setName("hedef-sehir").setDescription("Hedef devletin şehri").setRequired(true).setAutocomplete(true))
       .addStringOption((o) => o.setName("hedef").setDescription("Sabotaj hedef kategorisi").setRequired(true)
-        .addChoices(...Object.entries(ESPIONAGE_TARGETS).map(([value, target]) => ({ name: target.label, value }))))
+        .addChoices(...PLAYER_ESPIONAGE_TARGETS.map((value) => ({ name: ESPIONAGE_TARGETS[value].label, value }))))
       .addStringOption((o) => o.setName("hazirlik").setDescription("Operasyon hazırlığı ve masrafı").setRequired(true)
         .addChoices(...Object.entries(ESPIONAGE_PREPARATIONS).map(([value, preparation]) => ({ name: `${preparation.label} — ${preparation.cost.toLocaleString("tr-TR")} Altın`, value }))))
       .addStringOption((o) => o.setName("ozel-hedef").setDescription("Görev gerektiriyorsa hedef karakter veya ordu").setAutocomplete(true)))
@@ -1310,7 +1304,7 @@ export const commandBuilders = [
         { name: "Şahsi koruma — +4 ve casus yeteneği", value: "CHARACTER" }
       ))
       .addStringOption((o) => o.setName("sehir").setDescription("Tek şehir kapsamı seçildiyse savunulacak şehir").setAutocomplete(true))
-      .addStringOption((o) => o.setName("korunan-karakter").setDescription("Şahsi koruma seçildiyse korunacak karakter").setAutocomplete(true)))
+      .addStringOption((o) => o.setName("korunan-hedef").setDescription("Şahsi koruma: korunacak karakter, soylu veya aile").setAutocomplete(true)))
     .addSubcommand((sub) => sub.setName("savunma-kaldir").setDescription("Casusun karşı casusluk görevini kaldırır")
       .addStringOption((o) => o.setName("casus").setDescription("Görevi kaldırılacak casus").setRequired(true).setAutocomplete(true)))
     .addSubcommand((sub) => sub.setName("bina-onar").setDescription("Casuslukta ağır hasar alan bir binayı bedelini ödeyerek onarır")

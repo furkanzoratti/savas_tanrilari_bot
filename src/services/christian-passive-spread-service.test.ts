@@ -7,9 +7,9 @@ import {
 } from "./christian-passive-spread-service.js";
 
 describe("elle belirlenen Hristiyan sınır yayılımı",()=>{
-  it("her tur en fazla 2 puanlık dönüşüm uygular",()=>{
-    expect(christianBorderConversionPercent(10)).toBe(2);
-    expect(christianBorderConversionPercent(68)).toBe(2);
+  it("her tur en fazla 10 puanlık dönüşüm uygular",()=>{
+    expect(christianBorderConversionPercent(10)).toBe(10);
+    expect(christianBorderConversionPercent(68)).toBe(2.67);
   });
 
   it("ana Hristiyanlık oranını yüzde 70 üzerinde taşımaz",()=>{

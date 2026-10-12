@@ -1323,7 +1323,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     await interaction.editReply(
       `✅ **${result.countryName} / ${result.settlementName}** için Hristiyan sınır yayılımı başlatıldı.\n`+
       `Mevcut: **Hristiyanlık %${detailPercent(result.christianPercent)} • Katoliklik %${detailPercent(result.catholicPercent)}**\n`+
-      "Her tur toplam **2 yüzde puanı** dönüştürülür; standart dağılımla Hristiyanlığa 1,5 ve Katolikliğe 0,5 puan eklenir. Ana Hristiyanlık oranı **%70** olduğunda süreç otomatik tamamlanır."
+      "Her tur toplam **10 yüzde puanı** dönüştürülür; standart dağılımla Hristiyanlığa 7,5 ve Katolikliğe 2,5 puan eklenir. Ana Hristiyanlık oranı **%70** olduğunda süreç otomatik tamamlanır."
     );
     return;
   }

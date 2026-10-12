@@ -20,7 +20,8 @@ describe("casusluk etki hedefleri", () => {
     const client={query:async(sql:string)=>{queries.push(sql);return{rows:[],rowCount:1};}} as unknown as DbClient;
     const result=await applyEspionageEffect(client,{
       attacker_country_id:"attacker",target_country_id:"target",target_settlement_id:"settlement",
-      target_character_id:null,target_army_id:null,spy_character_id:"spy",target_type:targetType
+      target_character_id:null,target_noble_type:null,target_noble_id:null,target_noble_family_id:null,
+      target_army_id:null,spy_character_id:"spy",target_type:targetType
     },"HEAVY",20);
     expect(queries).toEqual(["UPDATE settlements SET unrest_active=TRUE WHERE id=$1"]);
     expect(queries.join(" ")).not.toContain("rebellion_active");
@@ -32,7 +33,8 @@ describe("casusluk etki hedefleri", () => {
     const client={query:async(sql:string)=>{queries.push(sql);return{rows:[{exists:true}],rowCount:1};}} as unknown as DbClient;
     await espionageTargetExists(client,{
       attacker_country_id:"attacker",target_country_id:"target",target_settlement_id:"settlement",
-      target_character_id:null,target_army_id:null,spy_character_id:"spy",target_type:"AGGRAVATE_EVENT"
+      target_character_id:null,target_noble_type:null,target_noble_id:null,target_noble_family_id:null,
+      target_army_id:null,spy_character_id:"spy",target_type:"AGGRAVATE_EVENT"
     });
     expect(queries[0]).toContain("black_market_active OR epidemic_active OR unrest_active");
     expect(queries[0]).not.toContain("rebellion_active");

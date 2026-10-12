@@ -122,12 +122,10 @@ export async function handleEspionageCommand(interaction: ChatInputCommandIntera
         "Hedef şehir"
       );
       const targetType = interaction.options.getString("hedef", true) as EspionageTarget;
-      const specialTargetKind = ["DISCREDIT","KIDNAP","ASSASSINATE"].includes(targetType) ? "CHARACTER"
-        : ["SUPPLY_COLLAPSE","DESERTION"].includes(targetType) ? "ARMY" : null;
       const rawSpecialTarget = interaction.options.getString("ozel-hedef");
-      const specialTarget = specialTargetKind && rawSpecialTarget
-        ? resolveEspionageChoice(await espionageService.targets(targetCountry.id, specialTargetKind), rawSpecialTarget, "Özel hedef")
-        : null;
+      const assassinationTarget=targetType==="ASSASSINATE"&&rawSpecialTarget
+        ?resolveEspionageChoice(await espionageService.assassinationTargets(targetCountry.id),rawSpecialTarget,"Suikast hedefi"):null;
+      const [targetKind,targetId]=assassinationTarget?.id.split(":",2)??[null,null];
       const operation = await espionageService.startOperation({
         guildId: interaction.guildId,
         actorId: interaction.user.id,
@@ -137,8 +135,13 @@ export async function handleEspionageCommand(interaction: ChatInputCommandIntera
         targetSettlementId: targetSettlement.id,
         targetType,
         preparation: interaction.options.getString("hazirlik", true) as EspionagePreparation,
-        targetCharacterId: specialTargetKind === "CHARACTER" ? specialTarget?.id ?? null : null,
-        targetArmyId: specialTargetKind === "ARMY" ? specialTarget?.id ?? null : null
+        targetCharacterId: targetKind === "ACADEMY" ? targetId??null : null,
+        targetNobleType:targetKind==="DYNASTY"?"DYNASTY":targetKind==="ROMAN"?"ROMAN_FAMILY":null,
+        targetNobleId:["DYNASTY","ROMAN"].includes(targetKind??"")?targetId??null:null,
+        targetNobleFamilyId:targetKind==="DYNASTY"&&targetId
+          ?(await espionageService.nobleFamily("DYNASTY",targetId)):targetKind==="ROMAN"&&targetId
+            ?(await espionageService.nobleFamily("ROMAN_FAMILY",targetId)):null,
+        targetArmyId: null
       });
       await interaction.editReply([
         `🕵️ **${operation.spy_name}**, **${operation.target_country_name} / ${operation.target_settlement_name}** hedefine gönderildi.`,
@@ -175,9 +178,9 @@ export async function handleEspionageCommand(interaction: ChatInputCommandIntera
       const scope = interaction.options.getString("kapsam", true) as "COUNTRY" | "SETTLEMENT" | "CHARACTER";
       const settlementId = interaction.options.getString("sehir");
       if (scope === "SETTLEMENT" && !settlementId) throw new GameError("Şehir karşı casusluğu için bir şehir seçmelisiniz.");
-      const protectedCharacterId = interaction.options.getString("korunan-karakter");
-      if (scope === "CHARACTER" && !protectedCharacterId) throw new GameError("Şahsi koruma için korunacak karakteri seçmelisiniz.");
-      await espionageService.assignDefense({ guildId: interaction.guildId, countryId: country.id, spyCharacterId: interaction.options.getString("casus", true), scope, settlementId,characterId:protectedCharacterId });
+      const protectionTarget = interaction.options.getString("korunan-hedef");
+      if (scope === "CHARACTER" && !protectionTarget) throw new GameError("Şahsi koruma için korunacak karakteri veya aileyi seçmelisiniz.");
+      await espionageService.assignDefense({ guildId: interaction.guildId, countryId: country.id, spyCharacterId: interaction.options.getString("casus", true), scope, settlementId,protectionTarget });
       await interaction.editReply({ content: `🛡️ Casus karşı casusluk görevine gönderildi; **bir sonraki tur başında** göreve başlayacak: **${scope === "COUNTRY" ? `${country.name} geneli` : scope === "SETTLEMENT" ? "seçilen şehir" : "seçilen karakter"}**.` });
       await logEspionageCommand(interaction,country.name,"Casus karşı casusluk görevine atandı • **"+scope+"**.");
       return true;
@@ -307,15 +310,13 @@ export async function handleEspionageAutocomplete(interaction: AutocompleteInter
     const name = interaction.options.getString("hedef-ulke");
     const target = name ? await gameService.countryByName(interaction.guildId,name) : null;
     if (!target || !targetType) { await interaction.respond([]); return true; }
-    const kind = ["DISCREDIT","KIDNAP","ASSASSINATE"].includes(targetType) ? "CHARACTER"
-      : ["SUPPLY_COLLAPSE","DESERTION"].includes(targetType) ? "ARMY" : null;
-    const rows = kind ? await espionageService.targets(target.id,kind) : [];
+    const rows = targetType==="ASSASSINATE"?await espionageService.assassinationTargets(target.id):[];
     await interaction.respond(rows.filter((item)=>!query||item.name.toLocaleLowerCase("tr-TR").includes(query)).slice(0,25).map((item)=>({name:item.name.slice(0,100),value:item.id})));
     return true;
   }
-  if (focused.name === "korunan-karakter") {
-    const rows = (await gameService.document(own.id)).characters.filter((item)=>item.id !== interaction.options.getString("casus"));
-    await interaction.respond(rows.filter((item)=>!query||item.name.toLocaleLowerCase("tr-TR").includes(query)).slice(0,25).map((item)=>({name:`${item.name} • ${item.role}`.slice(0,100),value:item.id})));
+  if (focused.name === "korunan-hedef") {
+    const rows=(await espionageService.defenseTargets(own.id)).filter((item)=>item.id!=="ACADEMY:"+interaction.options.getString("casus"));
+    await interaction.respond(rows.filter((item)=>!query||item.name.toLocaleLowerCase("tr-TR").includes(query)).slice(0,25).map((item)=>({name:item.name.slice(0,100),value:item.id})));
     return true;
   }
   if (focused.name === "sehir") {

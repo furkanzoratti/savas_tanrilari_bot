@@ -54,7 +54,7 @@ const MERCHANT_TASK_BY_SUBCOMMAND: Partial<Record<string,MerchantTask>> = {
 };
 
 export function characterAvailableForCommand(
-  character: Pick<CharacterView,"role"|"assignment"|"operation_status"|"character_status"|"doctrine"|"commander_victories"|"specialization"|"specialization_progress"|"is_admiral"|"admiral_doctrine"|"admiral_specialization"|"admiral_victories">,
+  character: Pick<CharacterView,"role"|"assignment"|"operation_status"|"character_status"|"doctrine"|"commander_victories"|"specialization"|"specialization_progress"|"is_admiral"|"is_marshal"|"admiral_doctrine"|"admiral_specialization"|"admiral_victories">,
   commandName: string,
   subcommand: string
 ): boolean {
@@ -63,8 +63,8 @@ export function characterAvailableForCommand(
     if (character.role !== "COMMANDER" || character.is_admiral) return false;
     if (subcommand === "doktrin-sec") return character.doctrine === null;
     if (subcommand === "uzmanlik-sec") return character.specialization === null && character.commander_victories >= 3;
-    if (subcommand === "amirale-donustur") return !character.is_admiral && character.assignment === "NONE";
-    return subcommand !== "baskomutan-sec" || character.assignment === "ARMY";
+    if (subcommand === "amirale-donustur") return !character.is_admiral && !character.is_marshal && character.assignment === "NONE";
+    return false;
   }
   if (commandName === "amiral") {
     if (character.role !== "COMMANDER" || !character.is_admiral) return false;
@@ -83,7 +83,6 @@ export function characterAvailableForCommand(
     if (character.role !== "DIPLOMAT") return false;
     if (subcommand === "uzmanlik-sec") return character.specialization === null && character.specialization_progress >= 3;
     if (DIPLOMAT_TASK_BY_SUBCOMMAND[subcommand] || subcommand === "asimilasyon") return character.assignment === "NONE" && !character.operation_status;
-    if (subcommand === "savunma-ata") return ["NONE","DIPLOMAT_DEFENSE"].includes(character.assignment) && !character.operation_status;
     if (subcommand === "gorev-bitir") return character.assignment.startsWith("DIPLOMAT_") || Boolean(character.operation_status);
   }
   if(commandName==="misyoner"){
@@ -115,8 +114,10 @@ function characterLocation(character: CharacterView): string | null {
 
 function characterLine(character: CharacterView): string {
   const role = CHARACTER_ROLES[character.role];
-  const roleLabel = character.role === "COMMANDER" && character.is_admiral ? "Amiral" : role.label;
-  const roleEmoji = character.role === "COMMANDER" && character.is_admiral ? "⚓" : role.emoji;
+  const roleLabel = character.role === "COMMANDER" && character.is_admiral ? "Amiral"
+    : character.role === "COMMANDER" && character.is_marshal ? "Mareşal" : role.label;
+  const roleEmoji = character.role === "COMMANDER" && character.is_admiral ? "⚓"
+    : character.role === "COMMANDER" && character.is_marshal ? "🎖️" : role.emoji;
   const operationLabel = character.role === "MERCHANT"
     ? MERCHANT_TASK_LABELS[character.operation_type as MerchantTask]
     : character.role === "DIPLOMAT"
@@ -164,7 +165,8 @@ function characterLine(character: CharacterView): string {
 
 function deadCharacterLine(character: CharacterView): string {
   const role = CHARACTER_ROLES[character.role];
-  const roleLabel = character.role === "COMMANDER" && character.is_admiral ? "Amiral" : role.label;
+  const roleLabel = character.role === "COMMANDER" && character.is_admiral ? "Amiral"
+    : character.role === "COMMANDER" && character.is_marshal ? "Mareşal" : role.label;
   const deathPlace = character.death_settlement_name ?? "Bilinmiyor";
   return "💀 **" + character.name + "** — " + roleLabel + " (+" + character.skill_bonus + ")\n↳ Öldüğü şehir: **" + deathPlace + "**";
 }
@@ -182,11 +184,15 @@ export function charactersEmbed(
   capacity?: CharacterCapacitySummary
 ): EmbedBuilder {
   const livingCharacters = characters.filter((character) => character.character_status !== "DEAD");
+  const marshalRows=livingCharacters.filter((character)=>character.role==="COMMANDER"&&character.is_marshal).map(characterLine);
   const sections = (Object.keys(CHARACTER_ROLES) as Array<keyof typeof CHARACTER_ROLES>)
     .map((role) => {
-      const rows = livingCharacters.filter((character) => character.role === role).map(characterLine);
+      const rows = livingCharacters
+        .filter((character) => character.role === role && (role!=="COMMANDER"||!character.is_marshal))
+        .map(characterLine);
       return rows.length ? "**" + CHARACTER_ROLES[role].emoji + " " + CHARACTER_ROLES[role].label + "ler**\n" + rows.join("\n\n") : null;
     }).filter((item): item is string => Boolean(item));
+  if(marshalRows.length)sections.unshift("**🎖️ Mareşal**\n"+marshalRows.join("\n\n"));
   const deadCharacters = characters
     .filter((character) => character.character_status === "DEAD")
     .sort((left,right) => {
@@ -472,16 +478,7 @@ export async function handleCharacterCommand(interaction: ChatInputCommandIntera
         "⚓ **"+result.name+"** kalıcı olarak Amirale dönüştürüldü.\n↳ Artık yalnızca filolara komuta edebilir; bu işlem geri alınamaz."
       );
     } else {
-      const battleId = interaction.options.getString("savas",true);
-      const battle = (await characterService.activeBattlesForCountry(interaction.guildId,country.id)).find((item)=>item.id===battleId);
-      await characterService.setBattleChief({
-        guildId:interaction.guildId,countryId:country.id,characterId,
-        battleId
-      });
-      await interaction.editReply("✅ Seçilen Komutan bu savaşta tarafın **Başkomutanı** oldu.");
-      await logCharacterCommand(interaction,country.name,
-        commanderText+"\n↳ İşlem: Etkin savaşın Başkomutanı olarak atandı.\n↳ Savaş: **"+(battle?.label??battleId)+"**"
-      );
+      throw new GameError("Başkomutan artık elle seçilmez; savaş tarafındaki en yüksek özellik puanlı uygun Komutan veya Amiral otomatik olarak Başkomutan olur.");
     }
     return true;
   }
@@ -588,19 +585,6 @@ export async function handleCharacterCommand(interaction: ChatInputCommandIntera
     );
     return true;
   }
-  if (sub === "savunma-ata") {
-    const characterId = interaction.options.getString("diplomat",true);
-    const settlementId = interaction.options.getString("sehir");
-    const diplomat = await characterForLog(country.id,characterId);
-    const settlementName = await settlementNameForLog(country.id,settlementId);
-    await characterService.assignDiplomatDefense({countryId:country.id,characterId,settlementId:settlementId??undefined});
-    await interaction.editReply("🛡️ Diplomat diplomatik savunmaya atandı.");
-    await logCharacterCommand(interaction,country.name,
-      "🤝 Diplomat: **"+(diplomat?.name??"Bilinmeyen Diplomat")+"** (+"+(diplomat?.skill_bonus??0)+") • Devlet: **"+country.name+"**\n"+
-      "↳ Görev: **Diplomatik Savunma** • Kapsam: **"+(settlementName?country.name+" / "+settlementName:country.name+" geneli")+"**"
-    );
-    return true;
-  }
   if (sub === "asimilasyon") {
     const characterId = interaction.options.getString("diplomat",true);
     const diplomat = await characterForLog(country.id,characterId);
@@ -668,6 +652,7 @@ export async function handleCharacterAutocomplete(interaction: AutocompleteInter
         ? (Object.keys(CHARACTER_SPECIALIZATIONS) as CharacterSpecialization[]).filter((key)=>CHARACTER_SPECIALIZATIONS[key].role===character.role)
         : [];
     await interaction.respond(unlocked
+      .filter((key)=>key!=="HEGEMON_ENVOY")
       .filter((key)=>!query||CHARACTER_SPECIALIZATIONS[key].label.toLocaleLowerCase("tr-TR").includes(query))
       .slice(0,25).map((key)=>({name:CHARACTER_SPECIALIZATIONS[key].label,value:key})));
     return true;
@@ -723,7 +708,7 @@ export async function handleCharacterAutocomplete(interaction: AutocompleteInter
       .slice(0,25).map(([value,item]) => ({name:item.label,value})));
     return true;
   }
-  if (["hedef-sehir","gelir-sehri","sehir"].includes(focused.name)) {
+  if (["hedef-sehir","gelir-sehri"].includes(focused.name)) {
     const targetName = focused.name === "hedef-sehir" ? interaction.options.getString("hedef-ulke") : null;
     const target = targetName ? await gameService.countryByName(interaction.guildId,targetName) : country;
     let settlements = target ? await gameService.listSettlements(target.id) : [];

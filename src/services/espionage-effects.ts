@@ -5,12 +5,16 @@ import type { NavalUnitType } from "../domain/battle.js";
 import { NAVAL_HULL_STATS } from "../domain/naval-hulls.js";
 import type { EspionageSeverity, EspionageTarget } from "../domain/espionage.js";
 import { markCharacterDead } from "./character-death-service.js";
+import { killDynastyMemberFromEspionage } from "./dynasty-service.js";
 
 export interface EspionageEffectOperation {
   attacker_country_id: string;
   target_country_id: string;
   target_settlement_id: string;
   target_character_id: string | null;
+  target_noble_type: "DYNASTY"|"ROMAN_FAMILY"|null;
+  target_noble_id: string | null;
+  target_noble_family_id: string | null;
   target_army_id: string | null;
   spy_character_id: string;
   target_type: EspionageTarget;
@@ -66,7 +70,7 @@ export async function espionageTargetExists(client: DbClient, operation: Espiona
   const queries: Partial<Record<EspionageTarget,string>> = {
     CONSTRUCTION: "SELECT 1 FROM buildings WHERE settlement_id=$1 AND status='BUILDING' LIMIT 1",
     RECRUITMENT_SABOTAGE: "SELECT 1 FROM recruitment_orders recruit JOIN recruitment_waves wave ON wave.order_id=recruit.id WHERE recruit.settlement_id=$1 AND recruit.status='TRAINING' AND wave.processed_at IS NULL LIMIT 1",
-    PRODUCTION_SABOTAGE: "SELECT 1 FROM naval_orders WHERE settlement_id=$1 AND status='BUILDING' UNION ALL SELECT 1 FROM siege_orders WHERE settlement_id=$1 AND status='BUILDING' LIMIT 1",
+    PRODUCTION_SABOTAGE: "SELECT 1 FROM siege_orders WHERE settlement_id=$1 AND status='BUILDING' LIMIT 1",
     TRADE_COLLAPSE: "SELECT 1 FROM trade_agreements WHERE status='ACTIVE' AND (proposer_settlement_id=$1 OR receiver_settlement_id=$1) LIMIT 1",
     PARALYZE_GOVERNMENT: "SELECT 1 FROM settlement_policies WHERE settlement_id=$1 AND status='ACTIVE' LIMIT 1",
     AGGRAVATE_EVENT: "SELECT 1 FROM settlements WHERE id=$1 AND (black_market_active OR epidemic_active OR unrest_active)",
@@ -74,19 +78,42 @@ export async function espionageTargetExists(client: DbClient, operation: Espiona
     DESTROY_SIEGE_SUPPLIES: "SELECT 1 FROM battles WHERE defender_settlement_id=$1 AND terrain='SIEGE' AND status NOT IN ('FINISHED','CANCELLED') LIMIT 1",
     SABOTAGE_FLEET: "SELECT 1 FROM naval_units WHERE settlement_id=$1 AND quantity>0 LIMIT 1"
   };
-  if (["SUPPLY_COLLAPSE","DESERTION"].includes(operation.target_type)) {
+  if (operation.target_type === "SUPPLY_COLLAPSE") {
     if (!operation.target_army_id) return false;
     return Boolean((await client.query(
       "SELECT 1 FROM armies WHERE id=$1 AND country_id=$2",
       [operation.target_army_id,operation.target_country_id]
     )).rowCount);
   }
-  if (["DISCREDIT","KIDNAP","ASSASSINATE"].includes(operation.target_type)) {
+  if (operation.target_type === "DESERTION") return Boolean((await client.query(
+    `SELECT 1 FROM armies army JOIN army_units unit ON unit.army_id=army.id
+      WHERE army.country_id=$1 AND army.status='ACTIVE' AND unit.quantity>0 LIMIT 1`,
+    [operation.target_country_id]
+  )).rowCount);
+  if (["DISCREDIT","KIDNAP"].includes(operation.target_type)) {
     if (!operation.target_character_id) return false;
     return Boolean((await client.query(
       "SELECT 1 FROM country_characters WHERE id=$1 AND country_id=$2 AND character_status='ACTIVE'",
       [operation.target_character_id,operation.target_country_id]
     )).rowCount);
+  }
+  if(operation.target_type==="ASSASSINATE"){
+    if(operation.target_character_id)return Boolean((await client.query(
+      "SELECT 1 FROM country_characters WHERE id=$1 AND country_id=$2 AND character_status='ACTIVE'",
+      [operation.target_character_id,operation.target_country_id]
+    )).rowCount);
+    if(operation.target_noble_type==="DYNASTY"&&operation.target_noble_id)return Boolean((await client.query(
+      `SELECT 1 FROM dynasty_members member JOIN dynasties dynasty ON dynasty.id=member.dynasty_id
+        WHERE member.id=$1 AND dynasty.country_id=$2 AND member.status='ALIVE'`,
+      [operation.target_noble_id,operation.target_country_id]
+    )).rowCount);
+    if(operation.target_noble_type==="ROMAN_FAMILY"&&operation.target_noble_id)return Boolean((await client.query(
+      `SELECT 1 FROM roman_family_members member JOIN roman_families family ON family.id=member.family_id
+        JOIN roman_republics republic ON republic.id=family.republic_id
+        WHERE member.id=$1 AND republic.country_id=$2 AND member.status='ALIVE'`,
+      [operation.target_noble_id,operation.target_country_id]
+    )).rowCount);
+    return false;
   }
   const query = queries[operation.target_type];
   if (query) return Boolean((await client.query(query,[operation.target_settlement_id])).rowCount);
@@ -183,23 +210,19 @@ export async function applyEspionageEffect(
   }
   if (operation.target_type === "PRODUCTION_SABOTAGE") {
     const orders = (await client.query<ProductionOrderTarget>(
-      `SELECT 'SHIP'::text AS kind,id,ship_type AS item_type,quantity,completion_turn
-         FROM naval_orders WHERE settlement_id=$1 AND status='BUILDING'
-       UNION ALL
-       SELECT 'SIEGE'::text AS kind,id,asset_type AS item_type,quantity,completion_turn
+      `SELECT 'SIEGE'::text AS kind,id,asset_type AS item_type,quantity,completion_turn
          FROM siege_orders WHERE settlement_id=$1 AND status='BUILDING'
        ORDER BY completion_turn,id`,
       [operation.target_settlement_id]
     )).rows;
-    if (!orders.length) return "Uygun gemi veya kuşatma üretimi bulunamadı; mekanik etki oluşmadı.";
+    if (!orders.length) return "Uygun kuşatma aleti üretimi bulunamadı; mekanik etki oluşmadı.";
     const chosen = orders[randomInt(0,orders.length)];
     if (severity === "LIGHT" && chosen) {
-      await client.query("UPDATE "+(chosen.kind==="SHIP"?"naval_orders":"siege_orders")+" SET completion_turn=completion_turn+2 WHERE id=$1", [chosen.id]);
+      await client.query("UPDATE siege_orders SET completion_turn=completion_turn+2 WHERE id=$1", [chosen.id]);
       return `Etkilenen üretim: ${productionOrderLabel(chosen)} → tamamlanma Tur ${chosen.completion_turn + 2}.`;
     }
     if (severity === "HEAVY" && chosen) {
-      await client.query("UPDATE "+(chosen.kind==="SHIP"?"naval_orders":"siege_orders")+" SET status='CANCELLED' WHERE id=$1", [chosen.id]);
-      await client.query("UPDATE naval_orders SET completion_turn=completion_turn+2 WHERE settlement_id=$1 AND status='BUILDING'", [operation.target_settlement_id]);
+      await client.query("UPDATE siege_orders SET status='CANCELLED' WHERE id=$1", [chosen.id]);
       await client.query("UPDATE siege_orders SET completion_turn=completion_turn+2 WHERE settlement_id=$1 AND status='BUILDING'", [operation.target_settlement_id]);
       const delayed = orders.filter((order) => order.id !== chosen.id);
       const delayedText = delayed.length
@@ -207,7 +230,6 @@ export async function applyEspionageEffect(
         : "başka aktif üretim emri yok";
       return `İadesiz yok edilen üretim: ${productionOrderLabel(chosen)}. Geciktirilen üretimler: ${delayedText}.`;
     }
-    await client.query("UPDATE naval_orders SET completion_turn=completion_turn+2 WHERE settlement_id=$1 AND status='BUILDING'", [operation.target_settlement_id]);
     await client.query("UPDATE siege_orders SET completion_turn=completion_turn+2 WHERE settlement_id=$1 AND status='BUILDING'", [operation.target_settlement_id]);
     return `Etkilenen üretimler: ${limitedDetails(orders.map((order) => `${productionOrderLabel(order)}→Tur ${order.completion_turn + 2}`))}.`;
   }
@@ -285,16 +307,27 @@ export async function applyEspionageEffect(
     await client.query("INSERT INTO army_temporary_effects(army_id,effect_type,clash_multiplier,damage_multiplier,rounds_remaining,disable_doctrine_first_round,created_turn) VALUES($1,'SUPPLY_COLLAPSE',$2,$2,$3,$4,$5)",[operation.target_army_id,multiplier,rounds,severity==="HEAVY",turn]);
     return "Hedef ordunun ilk "+rounds+" savaş turunda çarpışma ve hasarı ×"+multiplier.toFixed(2)+" olacak.";
   }
-  if (operation.target_type === "DESERTION" && operation.target_army_id) {
+  if (operation.target_type === "DESERTION") {
     const rate = percent(severity,3,7,15);
-    const units = (await client.query<{ settlement_id: string; unit_type: string; quantity: number }>("SELECT settlement_id,unit_type,quantity FROM army_units WHERE army_id=$1 FOR UPDATE",[operation.target_army_id])).rows;
+    const targetArmy=(await client.query<{id:string;name:string}>(
+      `SELECT army.id,army.name FROM armies army
+        WHERE army.country_id=$1 AND army.status='ACTIVE'
+          AND EXISTS(SELECT 1 FROM army_units unit WHERE unit.army_id=army.id AND unit.quantity>0)
+        ORDER BY random() LIMIT 1 FOR UPDATE OF army`,[operation.target_country_id]
+    )).rows[0];
+    if(!targetArmy)return "Hedef ülkede firar ettirilebilecek etkin ordu kalmadı.";
+    const units = (await client.query<{ settlement_id: string; unit_type: string; quantity: number }>("SELECT settlement_id,unit_type,quantity FROM army_units WHERE army_id=$1 FOR UPDATE",[targetArmy.id])).rows;
     let total = 0;
     for (const unit of units) {
       const lost = Math.floor(Number(unit.quantity)*rate/100); if (!lost) continue; total += lost;
-      await client.query("UPDATE army_units SET quantity=quantity-$1 WHERE army_id=$2 AND settlement_id=$3 AND unit_type=$4",[lost,operation.target_army_id,unit.settlement_id,unit.unit_type]);
-      await client.query("DELETE FROM army_units WHERE army_id=$1 AND settlement_id=$2 AND unit_type=$3 AND quantity<=0",[operation.target_army_id,unit.settlement_id,unit.unit_type]);
+      await client.query("UPDATE army_units SET quantity=quantity-$1 WHERE army_id=$2 AND settlement_id=$3 AND unit_type=$4",[lost,targetArmy.id,unit.settlement_id,unit.unit_type]);
+      await client.query("DELETE FROM army_units WHERE army_id=$1 AND settlement_id=$2 AND unit_type=$3 AND quantity<=0",[targetArmy.id,unit.settlement_id,unit.unit_type]);
+      await client.query(
+        "UPDATE unit_stacks SET quantity=GREATEST(0,quantity-$1) WHERE settlement_id=$2 AND unit_type=$3",
+        [lost,unit.settlement_id,unit.unit_type]
+      );
     }
-    return "Ordunun %"+rate+"'i firar etti; "+total.toLocaleString("tr-TR")+" asker saha ordusundan ayrıldı.";
+    return "Rastgele seçilen **"+targetArmy.name+"** ordusunun %"+rate+"'i firar etti; "+total.toLocaleString("tr-TR")+" asker hem ordu hem kaynak yerleşke kayıtlarından silindi.";
   }
   if (operation.target_type === "POISON_GARRISON") {
     const rate = percent(severity,5,10,20);
@@ -427,6 +460,24 @@ export async function applyEspionageEffect(
     await client.query("UPDATE country_characters SET assignment='CAPTURED',assigned_settlement_id=$1,unavailable_until_turn=$2,specialization_progress=CASE WHEN $3 THEN 0 ELSE specialization_progress END WHERE id=$4",[operation.target_settlement_id,duration>0?turn+duration:null,operation.target_type==="DISCREDIT"&&severity==="HEAVY",operation.target_character_id]);
     if (operation.target_type === "KIDNAP" && severity === "HEAVY") return "Hedef karakter süresiz esir alındı.";
     return "Hedef karakter "+duration+" tur kullanılamayacak.";
+  }
+  if(operation.target_type==="ASSASSINATE"&&operation.target_noble_id&&operation.target_noble_type){
+    const duration=severity==="LIGHT"?3:severity==="MEDIUM"?6:0;
+    if(severity==="HEAVY"){
+      if(operation.target_noble_type==="DYNASTY"){
+        await killDynastyMemberFromEspionage(client,operation.target_noble_id,turn);
+      }else{
+        await client.query(
+          `UPDATE roman_family_members SET status='DEAD',health='HEALTHY',sick_until_turn=NULL,
+                  died_turn=$2,death_reason='Suikast',updated_at=NOW()
+            WHERE id=$1 AND status='ALIVE'`,[operation.target_noble_id,turn]
+        );
+      }
+      return "Hedef soylu suikast sonucunda kalıcı olarak öldürüldü.";
+    }
+    const table=operation.target_noble_type==="DYNASTY"?"dynasty_members":"roman_family_members";
+    await client.query("UPDATE "+table+" SET health='SICK',sick_until_turn=$2,updated_at=NOW() WHERE id=$1 AND status='ALIVE'",[operation.target_noble_id,turn+duration]);
+    return "Hedef soylu yaralandı ve "+duration+" tur boyunca sağlıksız sayılacak.";
   }
   return "Operasyon başarıyla sonuçlandı.";
 }

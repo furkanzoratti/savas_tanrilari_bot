@@ -100,6 +100,7 @@ export interface CountryCharacter {
   id: string; country_id: string; name: string; role: CharacterRole; skill_bonus: number;
   character_status: "ACTIVE" | "DEAD" | "DISMISSED";
   is_admiral: boolean;
+  is_marshal?: boolean;
   specialization: string | null; specialization_progress: number; specialization_level: number;
   assignment: "NONE" | "CURIA" | "AGORA" | "ARMY" | "FLEET" | "ESPIONAGE" | "ESPIONAGE_RETURNING" | "CAPTURED" | "COUNTERINTELLIGENCE_TRAVELING_COUNTRY" | "COUNTERINTELLIGENCE_TRAVELING_SETTLEMENT" | "COUNTERINTELLIGENCE_COUNTRY" | "COUNTERINTELLIGENCE_SETTLEMENT" | "ASSIMILATION"; assignment_ready_turn: number | null; trained_settlement_id: string | null;
   assigned_settlement_id: string | null; assigned_settlement_name: string | null; assigned_country_name: string | null; assigned_army_name: string | null; assigned_fleet_name: string | null;
@@ -171,7 +172,8 @@ async function hasActiveMarshalPartialMobilization(
          FROM country_characters character
         WHERE character.country_id=$1
           AND character.role='COMMANDER'
-          AND character.commander_victories>=9
+          AND character.is_marshal=TRUE
+          AND character.is_admiral=FALSE
           AND character.character_status='ACTIVE'
           AND EXISTS (
             SELECT 1

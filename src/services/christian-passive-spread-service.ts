@@ -2,7 +2,7 @@ import type { DbClient } from "../db/pool.js";
 import { convertReligionDistributionByPercent, type ReligionFamilyShare, type ReligionKey } from "../domain/religions.js";
 import { fallbackReligionDistribution, loadReligionDistributions, replaceSettlementReligionDistribution } from "./religion-service.js";
 
-export const CHRISTIAN_BORDER_SPREAD_PERCENT = 2;
+export const CHRISTIAN_BORDER_SPREAD_PERCENT = 10;
 export const CHRISTIAN_BORDER_TARGET_PERCENT = 70;
 
 interface SettlementSnapshot {

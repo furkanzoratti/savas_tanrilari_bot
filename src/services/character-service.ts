@@ -1,7 +1,7 @@
 import { randomInt } from "node:crypto";
 import { pool, withTransaction, type DbClient } from "../db/pool.js";
 import {
-  ADMIRAL_DOCTRINES, ADMIRAL_SPECIALIZATIONS, CHARACTER_SPECIALIZATIONS, COMMANDER_DOCTRINES, DIPLOMAT_TASK_LABELS, DIPLOMAT_VASSALIZATION_GOAL, MERCHANT_TASK_LABELS, culturePopulationResistance,
+  ADMIRAL_DOCTRINES, ADMIRAL_SPECIALIZATIONS, CHARACTER_SPECIALIZATIONS, COMMANDER_DOCTRINES, DIPLOMAT_TASK_LABELS, MERCHANT_TASK_LABELS, culturePopulationResistance,
   cultureProgressDelta, diplomaticPowerBonus, integrationProgressDelta,
   merchantBaseDiscount, specializationLevel, vassalizationProgressDelta,
   type AdmiralDoctrine, type AdmiralSpecialization, type CharacterSpecialization, type CommanderDoctrine, type DiplomatTask, type MerchantTask
@@ -17,7 +17,8 @@ import { isAcquisitionTurn } from "../domain/mobilization.js";
 import { syncCountryPrimaryCulture } from "./culture-service.js";
 
 export const MISSIONARY_PURCHASE_COST = 2_000;
-export const MISSIONARY_LIMIT_PER_COUNTRY = 2;
+export const MISSIONARY_LIMIT_PER_COUNTRY = 5;
+export const MERCHANT_TASK_INCOME_MULTIPLIER = 1.10;
 export const MISSIONARY_TASK_BONUS = 1;
 
 export interface CharacterView {
@@ -37,6 +38,7 @@ export interface CharacterView {
   specialization_tracks?: Record<string, number>;
   character_status: "ACTIVE" | "DEAD" | "DISMISSED";
   is_admiral: boolean;
+  is_marshal?: boolean;
   admiral_doctrine?: AdmiralDoctrine | null;
   admiral_specialization?: AdmiralSpecialization | null;
   admiral_victories?: number;
@@ -204,22 +206,6 @@ async function curiaBonus(client: DbClient, settlementId: string | null): Promis
   return Math.max(0, Math.min(3, level));
 }
 
-async function diplomaticDefenseBonus(
-  client: DbClient,
-  countryId: string,
-  settlementId: string | null
-): Promise<number> {
-  const row = (await client.query<{ bonus: number }>(
-    `SELECT COALESCE(MAX(skill_bonus),0)::integer AS bonus
-       FROM country_characters
-      WHERE country_id=$1 AND role='DIPLOMAT' AND assignment='DIPLOMAT_DEFENSE'
-        AND character_status='ACTIVE'
-        AND (assigned_settlement_id IS NULL OR assigned_settlement_id=$2)`,
-    [countryId,settlementId]
-  )).rows[0];
-  return Number(row?.bonus??0);
-}
-
 async function countryCuriaBonus(client: DbClient, countryId: string): Promise<number> {
   return Number((await client.query<{ level: number }>(
     `SELECT COALESCE(MAX(building.level),0)::integer AS level
@@ -325,7 +311,7 @@ export const characterService = {
         "SELECT COUNT(*)::integer AS count FROM country_characters WHERE country_id=$1 AND role='MISSIONARY' AND character_status='ACTIVE'",
         [input.countryId]
       )).rows[0]?.count??0);
-      if(existing>=MISSIONARY_LIMIT_PER_COUNTRY)throw new GameError("Bir devlet aynı anda en fazla 2 etkin Misyonere sahip olabilir.");
+      if(existing>=MISSIONARY_LIMIT_PER_COUNTRY)throw new GameError("Bir devlet aynı anda en fazla 5 etkin Misyonere sahip olabilir.");
       const duplicate=await client.query("SELECT 1 FROM country_characters WHERE country_id=$1 AND lower(name)=lower($2)",[input.countryId,name]);
       if(duplicate.rowCount)throw new GameError("Bu ülkede aynı adlı başka bir karakter var.");
       if(Number(source.local_treasury)<MISSIONARY_PURCHASE_COST)throw new GameError("Seçilen yerleşkenin hazinesinde 2.000 Altın bulunmuyor.");
@@ -459,7 +445,7 @@ export const characterService = {
               character.assignment_ready_turn,character.doctrine,
               character.commander_victories,character.specialization,character.specialization_progress,
               character.specialization_level,character.specialization_choice_credit,
-              character.character_status,character.is_admiral,character.unavailable_until_turn,
+              character.character_status,character.is_admiral,character.is_marshal,character.unavailable_until_turn,
               missionary.religion_key AS missionary_operation_religion_key,
               character.admiral_doctrine,character.admiral_specialization,
               character.admiral_victories,character.admiral_specialization_level,
@@ -601,10 +587,11 @@ export const characterService = {
   async promoteCommanderToAdmiral(input: { guildId: string; actorId: string; countryId: string; characterId: string }): Promise<{ name:string }> {
     return withTransaction(async(client)=>{
       const character=await activeCharacter(client,input.countryId,input.characterId,"COMMANDER");
-      const state=(await client.query<{is_admiral:boolean;assignment:string}>(
-        "SELECT is_admiral,assignment FROM country_characters WHERE id=$1 FOR UPDATE",[character.id]
+      const state=(await client.query<{is_admiral:boolean;is_marshal:boolean;assignment:string}>(
+        "SELECT is_admiral,is_marshal,assignment FROM country_characters WHERE id=$1 FOR UPDATE",[character.id]
       )).rows[0]!;
       if(state.is_admiral)throw new GameError("Bu karakter zaten Amiraldir.");
+      if(state.is_marshal)throw new GameError("Mareşal, Amirale dönüştürülemez.");
       if(state.assignment==="ARMY" || (await client.query("SELECT 1 FROM armies WHERE commander_character_id=$1",[character.id])).rowCount) {
         throw new GameError("Ordu başındaki Komutan önce ordu görevinden alınmalıdır.");
       }
@@ -834,13 +821,12 @@ export const characterService = {
     targetCountryId?: string | undefined; targetSettlementId?: string | undefined;
     targetEventType?: string | undefined; targetCultureGroup?: string | undefined;
   }): Promise<{ arrivalTurn: number; goal: number }> {
+    if (input.task === "VASSALIZE") {
+      throw new GameError("Diplomatik vassallaştırma görevi kaldırıldı.");
+    }
     if (input.task === "RECONCILIATION" && !["BLACK_MARKET","EPIDEMIC","UNREST","REBELLION"].includes(input.targetEventType??"")) {
       throw new GameError("Halkla Uzlaşma için hedef olay seçilmelidir.");
     }
-    const ranking = input.task === "VASSALIZE"
-      ? await greatPowerService.calculateRanking(input.guildId)
-      : [];
-    const powers = new Map(ranking.map((row) => [row.countryId,row.score]));
     return withTransaction(async (client) => {
       const state = await guildState(client,input.guildId);
       if (state.turn_phase !== "OPEN") throw new GameError("Diplomat görevi yalnızca hareketler açıkken başlatılabilir.");
@@ -864,7 +850,6 @@ export const characterService = {
         ? await settlement(client,input.targetSettlementId,input.targetCountryId??input.countryId)
         : null;
       const goal = input.task === "CULTURE_CHANGE" ? 8
-        : input.task === "VASSALIZE" ? DIPLOMAT_VASSALIZATION_GOAL
         : input.task === "VASSAL_INTEGRATION" ? 18
         : 1;
       if (input.task === "RECONCILIATION") {
@@ -903,7 +888,7 @@ export const characterService = {
           throw new GameError("Hedef kültür devletin ana kültürü veya tamamen asimile edilmiş bir yerleşkesinin kültürü olmalıdır.");
         }
       }
-      if (["VASSALIZE","VASSAL_INTEGRATION"].includes(input.task)
+      if (input.task === "VASSAL_INTEGRATION"
         && (!input.targetCountryId || input.targetCountryId === input.countryId)) {
         throw new GameError("Bu görev için başka bir hedef devlet seçilmelidir.");
       }
@@ -914,24 +899,9 @@ export const characterService = {
         );
         if (!relation.rowCount) throw new GameError("Seçilen devlet bu ülkenin etkin vassalı değil.");
       }
-      if (input.task === "VASSALIZE") {
-        const ownPower = powers.get(input.countryId);
-        const targetPower = powers.get(input.targetCountryId!);
-        if (!ownPower || !targetPower || diplomaticPowerBonus(ownPower/targetPower) === null) {
-          throw new GameError("Gizli güç oranı bu devlete karşı diplomatik vassallaştırma görevi başlatmaya yeterli değil.");
-        }
-        const cooldown = await client.query(
-          `SELECT 1 FROM diplomat_operations
-            WHERE country_id=$1 AND target_country_id=$2 AND task_type='VASSALIZE' AND status='FAILED'
-              AND COALESCE(last_resolved_turn,started_turn)+6>$3 LIMIT 1`,
-          [input.countryId,input.targetCountryId,state.current_turn]
-        );
-        if (cooldown.rowCount) throw new GameError("Bu devlet başarısız kampanyanın ardından henüz yeniden hedeflenemez.");
-      }
       const arrivalTurn = state.current_turn + 1;
       const assignment = input.task === "RECONCILIATION" ? "DIPLOMAT_RECONCILIATION"
         : input.task === "CULTURE_CHANGE" ? "DIPLOMAT_CULTURE"
-        : input.task === "VASSALIZE" ? "DIPLOMAT_VASSALIZE"
         : "DIPLOMAT_INTEGRATE";
       await client.query(
         `INSERT INTO diplomat_operations(
@@ -946,23 +916,6 @@ export const characterService = {
         [target?.id??null,arrivalTurn,diplomat.id]
       );
       return { arrivalTurn, goal };
-    });
-  },
-
-  async assignDiplomatDefense(input: { countryId: string; characterId: string; settlementId?: string | undefined }): Promise<void> {
-    await withTransaction(async (client) => {
-      const diplomat = await activeCharacter(client,input.countryId,input.characterId,"DIPLOMAT");
-      if (diplomat.assignment !== "NONE" && diplomat.assignment !== "DIPLOMAT_DEFENSE") throw new GameError("Bu Diplomat başka bir görevde.");
-      const operation = await client.query(
-        "SELECT 1 FROM diplomat_operations WHERE diplomat_character_id=$1 AND status IN ('TRAVELING','ACTIVE','PAUSED') LIMIT 1 FOR UPDATE",
-        [diplomat.id]
-      );
-      if (operation.rowCount) throw new GameError("Bu Diplomatın kayıtlı görevi devam ediyor. Önce /diplomat gorev-bitir komutunu kullanın.");
-      if (input.settlementId) await settlement(client,input.settlementId,input.countryId);
-      await client.query(
-        "UPDATE country_characters SET assignment='DIPLOMAT_DEFENSE',assigned_settlement_id=$1,assignment_ready_turn=NULL WHERE id=$2",
-        [input.settlementId??null,diplomat.id]
-      );
     });
   },
 
@@ -1280,7 +1233,7 @@ export async function processCharacterTurn(
         const concessionBonus = operation.task_type === "FOREIGN_CONCESSION"
           ? caravanseraiForeignConcessionBonus(Number(operation.home_caravanserai_level))
           : 0;
-        const amount = Math.floor(baseAmount * (1 + concessionBonus));
+        const amount = Math.floor(baseAmount * (1 + concessionBonus) * MERCHANT_TASK_INCOME_MULTIPLIER);
         const destination = operation.home_settlement_id??operation.target_settlement_id;
         const inserted = await client.query(
           `INSERT INTO merchant_income_results(operation_id,acquisition_turn,roll,effective_percent,amount)
@@ -1301,7 +1254,7 @@ export async function processCharacterTurn(
             `INSERT INTO transactions(country_id,settlement_id,turn,kind,amount,description,balance_after,details)
              VALUES($1,$2,$3,'MERCHANT_INCOME',$4,$5,$6,$7::jsonb)`,
             [operation.country_id,destination,turn,amount,operation.merchant_name+" Tüccar görevi geliri",
-              Number(destinationBalance??0),JSON.stringify({roll,effectivePercent,task:operation.task_type,targetSettlementId:operation.target_settlement_id,baseAmount,concessionBonus})]
+              Number(destinationBalance??0),JSON.stringify({roll,effectivePercent,task:operation.task_type,targetSettlementId:operation.target_settlement_id,baseAmount,concessionBonus,taskIncomeMultiplier:MERCHANT_TASK_INCOME_MULTIPLIER})]
           );
         }
         await client.query("UPDATE merchant_operations SET last_processed_turn=$1,updated_at=NOW() WHERE id=$2", [turn,operation.id]);
@@ -1315,6 +1268,7 @@ export async function processCharacterTurn(
           "↳ Görev yeri: **"+operation.target_country_name+" / "+operation.target_name+"** • Gelir merkezi: **"+(operation.home_name??operation.target_name)+"**\n"+
           "↳ Zar hesabı: 1d10 **"+roll+"** + yetenek **"+skillBonus+"** + uzmanlık **"+specializationBonus+"** = etkin oran **%"+effectivePercent+"**\n"+
           "↳ Ticaret geliri tabanı: "+tradeIncome.toLocaleString("tr-TR")+" Altın • Kazanç: **"+amount.toLocaleString("tr-TR")+" Altın**"+
+          " • Genel görev getirisi: **+%10**"+
           (concessionBonus > 0 ? " • Kervansaray: **+%"+Math.round(concessionBonus*100)+"**" : "")+
           (operation.besieged?" • Kuşatma nedeniyle gelir sıfırlandı.":"")
         );
@@ -1391,8 +1345,7 @@ export async function processCharacterTurn(
       if (operation.task_type === "CULTURE_CHANGE") {
         const target = await settlement(client,operation.target_settlement_id!);
         defenseBonus = culturePopulationResistance(Number(target.population))
-          + await curiaBonus(client,target.id)
-          + await diplomaticDefenseBonus(client,target.country_id,target.id);
+          + await curiaBonus(client,target.id);
         delta = cultureProgressDelta(attackRoll+attackBonus-defenseRoll-defenseBonus);
       } else if (operation.task_type === "VASSALIZE") {
         const ownPower = powers.get(operation.country_id);
@@ -1415,14 +1368,12 @@ export async function processCharacterTurn(
           continue;
         }
         attackBonus += powerBonus;
-        defenseBonus = await countryCuriaBonus(client,operation.target_country_id!)
-          + await diplomaticDefenseBonus(client,operation.target_country_id!,null);
+        defenseBonus = await countryCuriaBonus(client,operation.target_country_id!);
         const outcome = vassalizationProgressDelta(attackRoll+attackBonus-defenseRoll-defenseBonus);
         if (outcome === "FAILED") failed=true;
         else delta=outcome;
       } else {
-        defenseBonus = await countryCuriaBonus(client,operation.target_country_id!)
-          + await diplomaticDefenseBonus(client,operation.target_country_id!,null);
+        defenseBonus = await countryCuriaBonus(client,operation.target_country_id!);
         delta = integrationProgressDelta(attackRoll+attackBonus-defenseRoll-defenseBonus);
       }
       await client.query(
@@ -1483,7 +1434,8 @@ export async function processCharacterTurn(
           [operation.diplomat_character_id]
         );
       }
-      if (delta>0) await progressSpecialization(client,character,expectedSpecialization);
+      // Diplomat uzmanlığı tur içindeki kısmi ilerlemeden değil, görevin tamamlanmasından kazanılır.
+      if (complete) await progressSpecialization(client,character,expectedSpecialization);
       logs.push(
         "🤝 **"+operation.name+"** • **"+DIPLOMAT_TASK_LABELS[operation.task_type]+"**\n"+
         "↳ Ülke: **"+operation.country_name+"**\n"+

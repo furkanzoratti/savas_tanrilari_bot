@@ -38,7 +38,7 @@ Görevdeki bir karakter kalıcı olarak görevden alınmadan önce mevcut görev
 
 Komutanlar kara ordularına atanır. Özellik puanları savaş zarlarına eklenir; doktrinleri ve uzmanlıkları ise ordunun savaş tarzını belirler.
 
-Bir savaş tarafında birden fazla Komutan bulunabilir. Ancak taraf çapındaki Komutan etkilerini yalnızca seçilen **Başkomutan** uygular. Diğer Komutanlar ordularıyla savaşa katılır, geçerli zafer kazanır ve gelişmeye devam eder.
+Bir savaş tarafında birden fazla Komutan bulunabilir. Bot, tarafın **özellik puanı en yüksek** uygun Komutanını otomatik olarak Başkomutan yapar. Eşitlikte uzmanlık seviyesi, zafer sayısı ve ardından ad sırası kullanılır. Taraf çapındaki doktrin ve uzmanlık etkilerini yalnız bu Başkomutan uygular; Başkomutan elle seçilmez.
 
 ## 📜 Komutan doktrinleri
 
@@ -78,7 +78,7 @@ Doktrin `/komutan doktrin-sec` ile bir kez seçilir ve sonradan değiştirilemez
 - **6–8 zafer:** Sv2
 - **9 zafer:** Sv3 — Mareşal
 
-Zaferin sayılması için savaş bot üzerinde kesin bir kazananla sonuçlanmalı, en az bir savaş turu çözülmüş olmalı ve Komutanın ordusu savaş kadrosuna önceden eklenmiş olmalıdır. Beyaz barış, iptal veya çatışma yaşanmadan biten savaşlar zafer sayılmaz. Aynı savaş aynı Komutana yalnızca bir zafer kazandırır.
+Zaferin sayılması için savaş bot üzerinde kesin bir kazananla sonuçlanmalı, en az bir savaş turu çözülmüş olmalı ve Komutanın ordusu savaş kadrosuna önceden eklenmiş olmalıdır. Beyaz barış, iptal veya çatışma yaşanmadan biten savaşlar zafer sayılmaz. Kazanan tarafta yalnızca otomatik seçilen Başkomutan 1 zafer puanı alır; aynı taraftaki diğer Komutanlar puan kazanmaz.
 
 ## ⚔️ Komutan uzmanlıkları
 
@@ -172,6 +172,8 @@ Doktrin `/amiral doktrin-sec` ile bir kez seçilir ve sonradan değiştirilemez.
 
 Deniz zaferinin sayılması için savaş botta **Deniz Savaşı** olarak sonuçlandırılmalı, en az bir tur çözülmüş olmalı, kesin kazanan bulunmalı ve Amiralin filosu savaş kadrosuna önceden eklenmiş olmalıdır.
 
+Bir tarafta birden fazla Amiral varsa bot özellik puanı en yüksek Amirali otomatik olarak ana Amiral yapar. Eşitlikte uzmanlık seviyesi, deniz zaferi ve ad sırası kullanılır. Yalnız bu Amiralin etkileri çalışır ve kazanan tarafta yalnız bu Amiral 1 deniz zaferi kazanır.
+
 ## ⭐ Amiral uzmanlıkları
 
 Uzmanlık 3 deniz zaferinden sonra oyuncu tarafından seçilir, kalıcıdır ve değiştirilemez.
@@ -210,11 +212,13 @@ Abluka ve deniz yağması formlarını yönetici açar. Deniz yağmasında oyunc
 
 Tüccarlar Agora/Forum yönetimi, yerel ticaret, yabancı ticari imtiyaz, satın alma temsilciliği ve karaborsa tasfiyesi görevlerinde kullanılır. Aynı anda yalnızca bir görev yapabilirler. Yolculuk gerektiren görevlerde hedefe ulaşmaları 1 tur sürer.
 
+Tüccarların doğrudan Altın üreten bütün görev kazançları hesaplamanın sonunda **×1,10** ile artırılır. Agora/Forum yöneticiliğinin temel +%10 gelir etkisi de %10 güçlendirilerek **+%11** olur.
+
 ## 🏛️ Agora/Forum yöneticiliği
 
 Tüccar en az Sv2 Agora/Forum bulunan bir yerleşkeye `/akademi ata` ile atanabilir.
 
-- Temel yerleşke gelir bonusu: +%10
+- Temel yerleşke gelir bonusu: +%11
 - Her özellik puanı: ilave +%2
 - Agora Ustası uzmanlığı: ilave +%2
 - Karaborsa ihtimali %60 azalır.
@@ -227,7 +231,7 @@ Tüccar en az Sv2 Agora/Forum bulunan bir yerleşkeye `/akademi ata` ile atanabi
 - Etkin oran = 1d10 + özellik puanı + varsa Kervanbaşı bonusu
 - Etkin oran en fazla %10'dur.
 - Kazanç, Tüccar etkileri uygulanmadan önceki kara ve deniz ticareti üzerinden hesaplanır.
-- Bir Tüccar bir Alım Turunda en fazla 1.000 Altın kazanabilir.
+- %10 genel görev artışıyla bir Tüccar bir Alım Turunda en fazla 1.100 Altın kazanabilir; yabancı imtiyazdaki Kervansaray bonusu bunun üzerine uygulanır.
 - Kuşatma altındaki yerleşke gelir üretemez.
 - Bir yerleşkede aynı anda yalnızca bir yerel Tüccar çalışabilir.
 
@@ -239,7 +243,7 @@ Tüccar en az Sv2 Agora/Forum bulunan bir yerleşkeye `/akademi ata` ile atanabi
 - Hedef hazineden para eksiltmez.
 - Yalnızca Tüccarı gönderen ülkeye gelir sağlar.
 - Taraflardan biri feshedebilir; savaş veya hedef şehrin el değiştirmesi görevi bitirir.
-- Gelir 1d10 + özellik puanı üzerinden hesaplanır ve Alım Turu başına en fazla 1.000 Altındır.
+- Gelir 1d10 + özellik puanı üzerinden hesaplanır; %10 genel görev artışından sonra taban üst sınır 1.100 Altındır ve varsa Kervansaray bonusu ayrıca uygulanır.
 - Kazanç, görev başında seçilen kendi yerleşkenize yatırılır; bu hedef sonradan değiştirilemez.
 
 Devletin yabancı ülkelerdeki imtiyaz sınırı normalde 2, Mor Boya erişimiyle 3'tür. Bir hedef şehir Agora seviyesine göre 1/2/3 yabancı Tüccar kabul edebilir.
@@ -308,12 +312,28 @@ Başarı ve tespit ayrı hesaplanır; başarılı Casus yine de yakalanabilir.
 
 ## 🧨 Operasyon grupları
 
-- **Sabotajcı:** Ekonomik/askerî/kamu/denizcilik binaları, inşaat, asker alımı, gemi ve kuşatma üretimi sabotajları
-- **Mali Casus:** Gelir sabotajı, hazine sızdırma, ticaret ağını çökertme
-- **Provokatör:** Halkı kışkırtma, yönetimi felç etme, olayı körükleme
-- **Askerî Ajan:** Ordu ikmali, firar, garnizon zehirleme, kuşatma erzağı ve filo sabotajı
-- **Suikastçı:** İtibarsızlaştırma, kaçırma ve suikast
-- **Karşı Casus:** Ülke, şehir ve şahsi koruma görevleri
+- **Sabotajcı:** Asker alımı sabotajı, bina inşa sabotajı, kuşatma aleti üretimi sabotajı
+- **Mali Casus:** Gelir düşürme, hazine çalma
+- **Provokatör:** Halkı kışkırtma, olayı körükleme
+- **Askerî Ajan:** Ordu firarı, garnizon zehirleme, kuşatma erzağı yakma
+- **Suikastçı:** Akademi karakteri veya hanedan/Roma ailesi soylusuna suikast; sonuç hedefi yaralayabilir veya doğrudan öldürebilir
+- **Karşı Casus:** Ülke, şehir, tek karakter/soylu veya bütün aile koruması
+
+Yeni operasyonlarda yalnız bu görevler açılır. Eski kaldırılmış görevlerin devam eden kayıtları kaybolmaz ve çözüm turunda sonuçlandırılır.
+
+### Askerî Ajan ayrıntıları
+
+- **Ordu firarı** başlatılırken düşman ordusu seçilmez.
+- Operasyon başarılı olursa bot hedef ülkenin asker taşıyan etkin ordularından birini rastgele seçer.
+- Firar eden askerler hem seçilen ordudan hem de bağlı kaynak yerleşkelerin asker stokundan silinir.
+- **Garnizon zehirleme** yalnız hedef şehrin garnizonunu etkiler.
+- **Kuşatma erzağı yakma** yalnız etkin kuşatmada çalışır ve hedefin açlık dayanıklılığını düşürür.
+
+### Suikast ayrıntıları
+
+- Görev açılırken hedef olarak Akademi karakteri, normal hanedan soylusu veya Roma siyasi ailesi üyesi seçilebilir.
+- Hafif ve orta başarı hedefi sırasıyla 3 veya 6 tur yaralar/kullanılamaz hâle getirir.
+- Ağır başarı hedefi kalıcı olarak öldürür. Hanedan hükümdarı veya varisi ölürse veraset sistemi çalışır.
 
 ## 🛡️ Karşı casusluk
 
@@ -323,6 +343,12 @@ Başarı ve tespit ayrı hesaplanır; başarılı Casus yine de yakalanabilir.
 
 Göreve ulaşmak 1 tur sürer. Birden fazla savunma bonusu birikmez; en yüksek uygun savunma kullanılır.
 
+- Ülke savunmasındaki Karşı Casus yalnız ülkeye yönelen ve başarısız olan operasyondan 1 puan alır.
+- Şehir savunmasındaki Karşı Casus yalnız kendi koruduğu şehre yönelen ve başarısız olan operasyondan 1 puan alır.
+- Tek karaktere/soyluya atanan Karşı Casus yalnız o kişiye yapılan başarısız saldırıdan 1 puan alır; aynı aileye yapılan başka saldırıdan puan alamaz.
+- Aileye atanan Karşı Casus yalnız o ailenin üyelerine yapılan başarısız saldırılardan 1 puan alır; aile dışındaki kişisel saldırılardan puan alamaz.
+- Savunmada beklemek veya yalnızca saldırganı tespit etmek tur başına puan vermez.
+
 ## ⭐ Casus uzmanlıkları
 
 Her görev başarısı ilgili dalda ilerleme sağlar. Bir dalda 3 başarıya ulaşıldığında oyuncu `/casusluk uzmanlik-sec` ile açılmış uzmanlıklardan birini seçer. Seçim otomatik değildir ve kalıcıdır.
@@ -331,7 +357,7 @@ Her görev başarısı ilgili dalda ilerleme sağlar. Bir dalda 3 başarıya ula
 - **6 başarı:** Sv2, ilgili operasyonlara +2
 - **9 başarı:** Sv3, ilgili operasyonlara +3
 
-Karşı Casus yalnızca bir düşman operasyonunun başarısız olmasına, tespit edilmesine veya Casusun yakalanmasına katkı sağladığında ilerleme kazanır.
+Karşı Casus yalnızca kendi koruma kapsamındaki bir düşman operasyonu tamamen başarısız olduğunda 1 ilerleme kazanır. Sadece tespit veya yakalama, operasyon başarılıysa puan vermez.
 
 ## ⛓️ Yakalanma ve ölüm
 
@@ -343,6 +369,24 @@ Karşı Casus yalnızca bir düşman operasyonunun başarısız olmasına, tespi
 Operasyonun gizli zarları, gerçek hedef ayrıntıları ve mekanik sonucu yalnızca yönetici kayıtlarında görünür.
 
 ---
+
+# 🕯️ MİSYONER
+
+Misyonerler Akademi kapasitesinden bağımsız olarak `/misyoner al` ile yalnız Alım Turunda alınır. Her devlet aynı anda en fazla **5 etkin Misyonere** sahip olabilir. Misyonerler kendi devletlerinin tamamen asimile edilmiş yerleşkelerinde din değiştirme görevi yürütür.
+
+- Alım bedeli: 2.000 Altın
+- Görev yolculuğu: 1 tur
+- Aynı yerleşkede aynı anda yalnız bir Misyoner görevi yürür.
+- Görev, hedef din yerleşkede %100 olduğunda otomatik tamamlanır.
+
+Misyoner ile yürütülen din değiştirme görevinde Misyonerin toplam zarı ile yerleşkenin toplam savunma zarı arasındaki fark kullanılır:
+
+- Fark 1–3: Yerleşke nüfusunun %5'i dönüştürülür.
+- Fark 4–7: Yerleşke nüfusunun %10'u dönüştürülür.
+- Fark 8 veya üzeri: Yerleşke nüfusunun %15'i dönüştürülür.
+- Fark 0 veya daha düşük: O tur din değişimi gerçekleşmez.
+
+Hristiyanlığın komşu yerleşkelere pasif yayılım oranı uygun sınır koşullarında **%10** olarak uygulanır.
 
 # 🤝 DİPLOMAT
 
@@ -364,6 +408,7 @@ Diplomatlar asimilasyon, toplumsal olayların çözümü, kültür değişimi, d
 - Bir yerleşkeye en fazla bir Diplomat atanır.
 - Asimilasyon süresi 2 turun altına inmez.
 - Tamamlanınca Diplomat otomatik serbest kalır.
+- Asimilasyon tamamen bittiğinde görevli Diplomat **1 Eyalet Valisi uzmanlık puanı** kazanır; beklediği her tur için puan kazanmaz.
 
 ## 🕊️ Halkla uzlaşma
 
@@ -375,14 +420,14 @@ Diplomatlar asimilasyon, toplumsal olayların çözümü, kültür değişimi, d
 
 Görev için **8 Kültürel Etki** gerekir:
 
-- Diplomat 1–4 farkla kazanır: +1
-- 5–8 farkla kazanır: +2
-- 9+ farkla kazanır: +3
+- Diplomat 1–3 farkla kazanır: +1
+- 4–7 farkla kazanır: +2
+- 8+ farkla kazanır: +3
 - Yerleşke 1–4 farkla kazanır: değişmez
 - 5–8 farkla kazanır: −1
 - 9+ farkla kazanır: −2
 
-Nüfus direnci 100.000/200.000/300.000 eşiklerinde sırasıyla +1/+2/+3 artar. Diplomat görevden ayrılırsa biriken etki her tur 1 azalır.
+Nüfus direnci 100.000/200.000/300.000 eşiklerinde sırasıyla +1/+2/+3 artar. Diplomat görevden ayrılırsa biriken etki her tur 1 azalır. Kültür tamamen değiştiğinde Diplomat **1 Kültür Elçisi uzmanlık puanı** kazanır; ara turlardaki olumlu ilerleme puan vermez.
 
 ## 👑 Diplomatik vassallaştırma
 
@@ -429,7 +474,7 @@ Bağlılık aşamaları:
 
 ## ⭐ Diplomat uzmanlıkları
 
-Başarılar dal bazında ayrı birikir. Bir dalda 3 başarıya ulaşıldığında oyuncu `/diplomat uzmanlik-sec` ile açılmış dallardan birini seçer. Seçim otomatik değildir ve kalıcıdır.
+Uzmanlık puanı yalnız görev tamamen sonuçlandığında verilir; kısmi tur ilerlemeleri puan değildir. Bir dalda 3 tamamlanmış görev puanına ulaşıldığında oyuncu `/diplomat uzmanlik-sec` ile açılmış dallardan birini seçer. Seçim otomatik değildir ve kalıcıdır.
 
 - **Eyalet Valisi:** Asimilasyon ve Halkla Uzlaşma
 - **Kültür Elçisi:** Kültür değiştirme
@@ -450,7 +495,6 @@ Seçilen dalda 3/6/9 başarı sırasıyla ilgili görevlere +1/+2/+3 verir.
 - `/komutan doktrin-sec` — kalıcı kara doktrini seç
 - `/komutan uzmanlik-sec` — 3 kara zaferinden sonra uzmanlık seç
 - `/komutan amirale-donustur` — boşta Komutanı kalıcı Amirale dönüştür
-- `/komutan baskomutan-sec` — savaş tarafının Başkomutanını belirle
 - `/amiral doktrin-sec` — kalıcı deniz doktrini seç
 - `/amiral uzmanlik-sec` — 3 deniz zaferinden sonra uzmanlık seç
 - `/tuccar ...` — ticaret görevleri, uzmanlık ve görev bitirme

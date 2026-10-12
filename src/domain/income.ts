@@ -116,7 +116,7 @@ export function calculateCategorizedIncome(input: {
     }
     if (building.buildingType === "agora" && building.level >= 2 && input.assignedMerchant) {
       const skillIncomePercent = Math.max(0, Math.floor(input.merchantSkillBonus ?? 0)) * 0.02;
-      globalIncomePercent += (formable.academyMerchantAgoraBonus ?? 0.10) + skillIncomePercent
+      globalIncomePercent += (formable.academyMerchantAgoraBonus ?? 0.10) * 1.10 + skillIncomePercent
         + (input.merchantAgoraMaster ? 0.02 : 0);
     }
     if (building.buildingType === "artisans_quarter") {

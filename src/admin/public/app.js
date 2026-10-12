@@ -100,7 +100,7 @@ const romanFamilyColorKeys = {
   "licinius ailesi": "licinius", "junius ailesi": "junius", "servilius ailesi": "servilius", "caecilius ailesi": "caecilius"
 };
 const romanFamilyColorKey = (name, index = 0) => romanFamilyColorKeys[String(name || "").toLocaleLowerCase("tr-TR")] || `fallback-${index % 8}`;
-const roleLabel = (row) => row.is_admiral ? "Amiral" : (roleLabels[row.role] || row.role);
+const roleLabel = (row) => row.is_admiral ? "Amiral" : row.is_marshal ? "Mareşal" : (roleLabels[row.role] || row.role);
 const characterStatusLabel = (value) => characterStatusLabels[value] || value;
 const developmentLabel = (value) => {
   if (!value) return "—";
