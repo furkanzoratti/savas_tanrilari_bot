@@ -72,7 +72,9 @@ export async function handleFleetCommand(interaction: ChatInputCommandInteractio
     });
     const target=await fleetService.get(country.id,result.targetFleetId);
     await interaction.editReply({
-      content:`✅ Tamir iptal edildi; **${result.transferred} geminin tamamı** mevcut canları korunarak **${result.targetFleetName}** filosuna aktarıldı.`,
+      content:result.repairWasReady
+        ?`✅ Tamamlanmış **${result.transferred} geminin tamamı** **${result.targetFleetName}** filosuna aktarıldı.`
+        :`✅ Tamir iptal edildi; **${result.transferred} geminin tamamı** mevcut canları korunarak **${result.targetFleetName}** filosuna aktarıldı.`,
       embeds:[renderFleetEmbed(target)]
     });
     return;

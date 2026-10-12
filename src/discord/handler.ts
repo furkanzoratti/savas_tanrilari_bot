@@ -2130,7 +2130,7 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
     if(focused.name==="tamir-filosu"){
       const sub=interaction.options.getSubcommand(false)??"";
       const repairs=(await navalRepairService.listCountry(country.id)).filter((repair)=>
-        sub==="tamirden-cikar"?repair.status==="REPAIRING":sub==="tamirden-ekle"?repair.status==="READY":true
+        sub==="tamirden-cikar"?["REPAIRING","READY"].includes(repair.status):sub==="tamirden-ekle"?repair.status==="READY":true
       );
       await interaction.respond(repairs.filter((repair)=>!query||repair.name.toLocaleLowerCase("tr-TR").includes(query)).slice(0,25)
         .map((repair)=>({name:`${repair.name} • ${repair.totalShips} gemi • ${repair.status==="READY"?"Hazır":`Tur ${repair.completion_turn}`}`.slice(0,100),value:repair.id})));

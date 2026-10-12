@@ -84,10 +84,37 @@ describe("naval repair scope and withdrawal",()=>{
 
     await expect(navalRepairService.withdrawOperationalShips({
       guildId:"guild-1",countryId:"country-1",actorId:"player-1",repairGroupId:"repair-1",targetFleetId:"fleet-1"
-    })).resolves.toEqual({targetFleetId:"fleet-1",targetFleetName:"Royal Navy",transferred:2});
+    })).resolves.toEqual({targetFleetId:"fleet-1",targetFleetName:"Royal Navy",transferred:2,repairWasReady:false});
 
     expect(queries.some((sql)=>sql.includes("current_hp>CASE ship_type"))).toBe(false);
     expect(queries.some((sql)=>sql.includes("THEN 'DISABLED' ELSE 'DAMAGED' END"))).toBe(true);
     expect(queries.some((sql)=>sql.includes("SET status='TRANSFERRED'"))).toBe(true);
+  });
+
+  it("also transfers a completed repair fleet through tamirden-cikar",async()=>{
+    const queries:Array<{sql:string;params?:unknown[]}>=[];
+    const client={async query(sql:string,params?:unknown[]){
+      queries.push({sql,params});
+      if(sql.includes("SELECT id,status FROM fleet_repair_groups"))return {rows:[{id:"repair-ready",status:"READY"}],rowCount:1};
+      if(sql.includes("SELECT id,name FROM fleets"))return {rows:[{id:"fleet-thrace",name:"Athenos Filosu"}],rowCount:1};
+      if(unlocked(sql))return {rows:[],rowCount:0};
+      if(sql.includes("SELECT id,settlement_id,ship_type FROM naval_ship_damage"))return {
+        rows:[{id:"ready-trireme",settlement_id:"athens",ship_type:"trireme"}],rowCount:1
+      };
+      if(sql.startsWith("INSERT INTO fleet_ships")||sql.startsWith("DELETE FROM naval_ship_damage")||
+        sql.startsWith("UPDATE fleet_repair_groups")||sql.startsWith("UPDATE fleets")||
+        sql.includes("INSERT INTO audit_logs"))return {rows:[],rowCount:1};
+      throw new Error(`Unexpected query: ${sql}`);
+    }} as unknown as DbClient;
+    transaction.client=client;
+
+    await expect(navalRepairService.withdrawOperationalShips({
+      guildId:"guild-1",countryId:"thrace",actorId:"gm",repairGroupId:"repair-ready",targetFleetId:"fleet-thrace"
+    })).resolves.toEqual({targetFleetId:"fleet-thrace",targetFleetName:"Athenos Filosu",transferred:1,repairWasReady:true});
+
+    const selection=queries.find(({sql})=>sql.includes("SELECT id,settlement_id,ship_type FROM naval_ship_damage"));
+    expect(selection?.params).toEqual(["repair-ready","READY"]);
+    expect(queries.some(({sql})=>sql.startsWith("DELETE FROM naval_ship_damage"))).toBe(true);
+    expect(queries.some(({sql})=>sql.startsWith("UPDATE naval_ship_damage"))).toBe(false);
   });
 });
