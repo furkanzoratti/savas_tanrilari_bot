@@ -553,7 +553,7 @@ export function applyFormableShipUpkeepDiscount(baseUpkeep: number, key: Formabl
 }
 
 const infantry = new Set(["light_infantry", "slinger", "spear", "archer", "heavy_infantry", "legionary", "hoplite", "briton_longbow", "persian_immortal", "iberian_caetrati", "germanic_shock_warrior", "anatolian_thureophoroi", "triarii_veteran", "punic_veteran", "gaesatae", "peltast", "silver_shield", "machimoi_phalangitai", "balearic_slinger", "sarmatian_longswordsmen", "briton_noble_spearmen"]);
-const cavalry = new Set(["light_cavalry", "heavy_cavalry", "horse_archer", "steppe_cavalry", "camel_cavalry", "carthaginian_war_elephant", "mauryan_war_elephant", "desert_raider", "egyptian_war_chariot", "germanic_companion_cavalry"]);
+const cavalry = new Set(["light_cavalry", "heavy_cavalry", "horse_archer", "steppe_horse_archer", "steppe_cavalry", "camel_cavalry", "carthaginian_war_elephant", "mauryan_war_elephant", "desert_raider", "egyptian_war_chariot", "germanic_companion_cavalry"]);
 const archerSlinger = new Set(["archer", "slinger", "briton_longbow", "balearic_slinger"]);
 const archerSlingerLight = new Set([...archerSlinger, "light_infantry"]);
 

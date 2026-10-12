@@ -101,20 +101,20 @@ describe("ordu kompozisyonu ve güncel birlik dengesi", () => {
 
   it("bozkır birliklerini kendi süvari ağırlıklı doktriniyle değerlendirir", () => {
     const excellent = assessArmyComposition({
-      horse_archer: 4_000, steppe_cavalry: 2_500, kurgan_shieldbearer: 2_000, oba_archer: 1_500
+      steppe_horse_archer: 4_000, steppe_cavalry: 2_500, kurgan_shieldbearer: 2_000, oba_archer: 1_500
     }, "FIELD", "STEPPE");
     expect(excellent).toMatchObject({ tier: "EXCELLENT", label: "Büyük Bozkır Ordusu", clashMultiplier: 1.15, damageMultiplier: 1.08 });
 
     const ordinary = assessArmyComposition({
-      horse_archer: 4_000, steppe_cavalry: 2_500, kurgan_shieldbearer: 2_000, oba_archer: 1_500
+      steppe_horse_archer: 4_000, steppe_cavalry: 2_500, kurgan_shieldbearer: 2_000, oba_archer: 1_500
     });
     expect(ordinary.label).not.toBe("Büyük Bozkır Ordusu");
   });
 
   it("tek tip bozkır ordusunu ve standart birlik karışımını cezalandırır", () => {
-    expect(assessArmyComposition({ horse_archer: 10_000 }, "FIELD", "STEPPE").tier).toBe("MONOTYPE");
+    expect(assessArmyComposition({ steppe_horse_archer: 10_000 }, "FIELD", "STEPPE").tier).toBe("MONOTYPE");
     expect(assessArmyComposition({
-      horse_archer: 3_000, steppe_cavalry: 2_000, heavy_infantry: 5_000
+      steppe_horse_archer: 3_000, steppe_cavalry: 2_000, heavy_infantry: 5_000
     }, "FIELD", "STEPPE").tier).toBe("MONOTYPE");
   });
 

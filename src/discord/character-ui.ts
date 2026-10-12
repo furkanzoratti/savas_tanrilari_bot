@@ -53,6 +53,37 @@ const MERCHANT_TASK_BY_SUBCOMMAND: Partial<Record<string,MerchantTask>> = {
   "karaborsa-tasfiyesi":"BLACK_MARKET"
 };
 
+export interface CultureChangeSettlementChoice {
+  id:string;
+  name:string;
+  culture_group?:string;
+  is_conquered:boolean;
+  unrest_active:boolean;
+  rebellion_active:boolean;
+}
+
+export function cultureChangeSettlementChoices(
+  settlements:readonly CultureChangeSettlementChoice[],
+  query:string,
+  targetCulture?:string|null
+):Array<{name:string;value:string}>{
+  const normalizedQuery=query.toLocaleLowerCase("tr-TR");
+  return settlements
+    .filter((item)=>!item.is_conquered)
+    .filter((item)=>!targetCulture||item.culture_group!==targetCulture)
+    .filter((item)=>!normalizedQuery||item.name.toLocaleLowerCase("tr-TR").includes(normalizedQuery))
+    .sort((left,right)=>{
+      const leftBlocked=Number(left.unrest_active||left.rebellion_active);
+      const rightBlocked=Number(right.unrest_active||right.rebellion_active);
+      return leftBlocked-rightBlocked||left.name.localeCompare(right.name,"tr-TR");
+    })
+    .slice(0,25)
+    .map((item)=>{
+      const state=item.rebellion_active?" • İsyanda":item.unrest_active?" • Huzursuz":"";
+      return {name:(item.name+state).slice(0,100),value:item.id};
+    });
+}
+
 export function characterAvailableForCommand(
   character: Pick<CharacterView,"role"|"assignment"|"operation_status"|"character_status"|"doctrine"|"commander_victories"|"specialization"|"specialization_progress"|"is_admiral"|"is_marshal"|"admiral_doctrine"|"admiral_specialization"|"admiral_victories">,
   commandName: string,
@@ -715,7 +746,12 @@ export async function handleCharacterAutocomplete(interaction: AutocompleteInter
     if (interaction.commandName === "diplomat" && sub === "asimilasyon") {
       settlements = settlements.filter((item) => item.is_conquered);
     } else if (interaction.commandName === "diplomat" && sub === "kultur-degistir") {
-      settlements = settlements.filter((item) => !item.is_conquered && !item.unrest_active && !item.rebellion_active);
+      await interaction.respond(cultureChangeSettlementChoices(
+        settlements,
+        query,
+        interaction.options.getString("kultur")
+      ));
+      return true;
     } else if (interaction.commandName === "diplomat" && sub === "halkla-uzlas") {
       const event = interaction.options.getString("olay");
       if (event === "BLACK_MARKET") settlements = settlements.filter((item) => item.black_market_active);

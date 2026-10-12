@@ -659,8 +659,10 @@ export const movementService = {
         heavy_cavalry: Math.max(0, Math.floor(input.heavyCavalry))
       };
       const rows = (await client.query<{ unit_type: "light_cavalry" | "horse_archer" | "heavy_cavalry"; quantity: number }>(
-        `SELECT unit_type,SUM(quantity)::integer AS quantity FROM army_units
-          WHERE army_id=$1 AND unit_type IN ('light_cavalry','horse_archer','heavy_cavalry') GROUP BY unit_type`,
+        `SELECT CASE WHEN unit_type='steppe_horse_archer' THEN 'horse_archer' ELSE unit_type END AS unit_type,
+            SUM(quantity)::integer AS quantity FROM army_units
+          WHERE army_id=$1 AND unit_type IN ('light_cavalry','horse_archer','steppe_horse_archer','heavy_cavalry')
+          GROUP BY CASE WHEN unit_type='steppe_horse_archer' THEN 'horse_archer' ELSE unit_type END`,
         [army.id]
       )).rows;
       const available = new Map(rows.map((row) => [row.unit_type, Number(row.quantity)]));

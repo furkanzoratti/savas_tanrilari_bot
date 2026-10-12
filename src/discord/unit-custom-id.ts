@@ -4,6 +4,7 @@ const UNIT_TYPE_ALIASES = {
   legionary: "lg",
   hoplite: "hp",
   horse_archer: "ha",
+  steppe_horse_archer: "sha",
   steppe_cavalry: "scv",
   kurgan_shieldbearer: "ksb",
   oba_archer: "oa",

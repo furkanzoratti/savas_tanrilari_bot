@@ -1,5 +1,5 @@
 export const STEPPE_ARMY_UNIT_TYPES = [
-  "horse_archer",
+  "steppe_horse_archer",
   "steppe_cavalry",
   "kurgan_shieldbearer",
   "oba_archer"

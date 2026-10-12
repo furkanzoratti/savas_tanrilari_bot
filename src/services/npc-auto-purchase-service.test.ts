@@ -25,7 +25,7 @@ function document(input: { treasury: number; militaryUsed: number; trainingRemai
     country: { id: "country" },
     militaryLimit: 10_000,
     militaryUsed: input.militaryUsed,
-    specialUnitUnlocks: input.steppe ? ["horse_archer","steppe_cavalry","kurgan_shieldbearer","oba_archer"] : [],
+    specialUnitUnlocks: input.steppe ? ["steppe_horse_archer","steppe_cavalry","kurgan_shieldbearer","oba_archer"] : [],
     isSteppeConfederation: Boolean(input.steppe),
     settlements: [{
       id: "settlement",
@@ -121,7 +121,7 @@ describe("NPC ek alım planlaması", () => {
       document({ treasury: 30_000, militaryUsed: 0, trainingRemaining: 10_000, steppe: true }),
       { ...config, budgetPercent: 100 }, "ARMY_ONLY", 0
     );
-    const allowed = new Set(["horse_archer","steppe_cavalry","kurgan_shieldbearer","oba_archer"]);
+    const allowed = new Set(["steppe_horse_archer","steppe_cavalry","kurgan_shieldbearer","oba_archer"]);
     expect(plan.unitActions.length).toBeGreaterThan(0);
     expect(plan.unitActions.every((action) => allowed.has(action.unitType))).toBe(true);
   });

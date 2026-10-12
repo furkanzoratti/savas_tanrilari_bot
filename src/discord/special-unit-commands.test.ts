@@ -11,7 +11,7 @@ describe("özel birlik Discord komutları", () => {
 
   it("özel birlikleri asker alımına ekler ve savaş kadrosunda dinamik seçime bırakır", () => {
     expect(unitChoices.map(([key]) => key)).toEqual(expect.arrayContaining([
-      "legionary", "hoplite", "horse_archer", "camel_cavalry", "briton_longbow",
+      "legionary", "hoplite", "horse_archer", "steppe_horse_archer", "camel_cavalry", "briton_longbow",
       "steppe_cavalry", "kurgan_shieldbearer", "oba_archer",
       "persian_immortal", "carthaginian_war_elephant", "iberian_caetrati", "germanic_shock_warrior", "anatolian_thureophoroi"
       ,"triarii_veteran", "punic_veteran", "gaesatae", "peltast", "silver_shield", "machimoi_phalangitai",

@@ -7,33 +7,33 @@ describe("savaş motoru", () => {
   });
 
   it("kuşatma savunmasındaki süvarileri yalnız hesap sırasında yaya karşılıklarına dönüştürür", () => {
-    const original = { light_cavalry: 100, heavy_cavalry: 200, horse_archer: 300, camel_cavalry: 400, archer: 50 } as const;
+    const original = { light_cavalry: 100, heavy_cavalry: 200, horse_archer: 300, steppe_horse_archer: 100, camel_cavalry: 400, archer: 50 } as const;
     expect(siegeDefenderComposition(original)).toEqual({
       light_infantry: 100,
       heavy_infantry: 200,
-      archer: 50,
-      oba_archer: 300,
+      archer: 350,
+      oba_archer: 100,
       spear: 400
     });
     expect(original.light_cavalry).toBe(100);
   });
 
   it("kuşatma saldırganının seçtiği süvarileri yaya hesaplar, kayıpları özgün türlerine geri yazar", () => {
-    const original = { heavy_infantry: 1_000, heavy_cavalry: 2_000, oba_archer: 500, horse_archer: 1_000 } as const;
-    const dismounted = { heavy_cavalry: 1_000, horse_archer: 500 } as const;
+    const original = { heavy_infantry: 1_000, heavy_cavalry: 2_000, oba_archer: 500, steppe_horse_archer: 1_000 } as const;
+    const dismounted = { heavy_cavalry: 1_000, steppe_horse_archer: 500 } as const;
     expect(siegeAttackerDismountedComposition(original, dismounted)).toEqual({
-      heavy_infantry: 2_000, heavy_cavalry: 1_000, oba_archer: 1_000, horse_archer: 500
+      heavy_infantry: 2_000, heavy_cavalry: 1_000, oba_archer: 1_000, steppe_horse_archer: 500
     });
     expect(restoreSiegeAttackerCasualtyTypes(original, { heavy_infantry: 1_000, oba_archer: 500 }, dismounted)).toEqual({
-      heavy_infantry: 500, heavy_cavalry: 500, oba_archer: 250, horse_archer: 250
+      heavy_infantry: 500, heavy_cavalry: 500, oba_archer: 250, steppe_horse_archer: 250
     });
   });
 
   it("saldıran atlıları kuşatma cephesinden çıkarır, yalnız manuel indirilenleri yaya olarak dahil eder", () => {
-    const original = { heavy_infantry: 1_000, light_cavalry: 2_000, horse_archer: 2_000 } as const;
+    const original = { heavy_infantry: 1_000, light_cavalry: 2_000, steppe_horse_archer: 2_000 } as const;
     expect(siegeAssaultComposition(original, {}, 0, 0)).toEqual({ heavy_infantry: 1_000 });
 
-    const dismounted = siegeAttackerDismountedComposition(original, { light_cavalry: 1_000, horse_archer: 1_000 });
+    const dismounted = siegeAttackerDismountedComposition(original, { light_cavalry: 1_000, steppe_horse_archer: 1_000 });
     expect(siegeAssaultComposition(dismounted, {}, 0, 0)).toEqual({
       light_infantry: 1_000,
       heavy_infantry: 1_000,

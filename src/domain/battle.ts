@@ -117,7 +117,8 @@ export const BATTLE_UNIT_STATS: Record<BattleUnitType, {
   heavy_cavalry: { label: "Ağır Süvari", clashDice: 2, clashSides: 10, damageDice: 2, damageSides: 10, durability: 3 },
   legionary: { label: "Lejyoner", clashDice: 2, clashSides: 10, damageDice: 2, damageSides: 8, durability: 3 },
   hoplite: { label: "Hoplit", clashDice: 2, clashSides: 8, damageDice: 1, damageSides: 12, durability: 3 },
-  horse_archer: { label: "Bozkır Atlı Okçu", clashDice: 2, clashSides: 8, damageDice: 2, damageSides: 8, durability: 2 },
+  horse_archer: { label: "Atlı Okçu", clashDice: 2, clashSides: 8, damageDice: 2, damageSides: 8, durability: 2 },
+  steppe_horse_archer: { label: "Bozkır Atlı Okçu", clashDice: 2, clashSides: 8, damageDice: 2, damageSides: 8, durability: 2 },
   steppe_cavalry: { label: "Bozkır Süvarisi", clashDice: 2, clashSides: 10, damageDice: 2, damageSides: 8, durability: 2 },
   kurgan_shieldbearer: { label: "Kurgan Kalkanlıları", clashDice: 2, clashSides: 8, damageDice: 1, damageSides: 12, durability: 3 },
   oba_archer: { label: "Oba Yaycıları", clashDice: 1, clashSides: 10, damageDice: 1, damageSides: 12, durability: 1 },
@@ -218,7 +219,7 @@ export const ASSAULT_UNIT_TYPES = [
 ] as const satisfies readonly BattleUnitType[];
 
 export const CAVALRY_UNIT_TYPES = [
-  "light_cavalry", "heavy_cavalry", "horse_archer", "camel_cavalry", "carthaginian_war_elephant",
+  "light_cavalry", "heavy_cavalry", "horse_archer", "steppe_horse_archer", "camel_cavalry", "carthaginian_war_elephant",
   "mauryan_war_elephant", "desert_raider", "egyptian_war_chariot", "germanic_companion_cavalry", "steppe_cavalry"
 ] as const satisfies readonly BattleUnitType[];
 
@@ -230,7 +231,8 @@ export function assaultUnitTotal(composition: BattleComposition): number {
 const SIEGE_DEFENDER_DISMOUNT_MAP = {
   light_cavalry: "light_infantry",
   heavy_cavalry: "heavy_infantry",
-  horse_archer: "oba_archer",
+  horse_archer: "archer",
+  steppe_horse_archer: "oba_archer",
   steppe_cavalry: "kurgan_shieldbearer",
   camel_cavalry: "spear",
   germanic_companion_cavalry: "heavy_infantry"
@@ -239,7 +241,8 @@ const SIEGE_DEFENDER_DISMOUNT_MAP = {
 export const SIEGE_ATTACKER_DISMOUNT_MAP = {
   light_cavalry: "light_infantry",
   heavy_cavalry: "heavy_infantry",
-  horse_archer: "oba_archer",
+  horse_archer: "archer",
+  steppe_horse_archer: "oba_archer",
   steppe_cavalry: "kurgan_shieldbearer",
   camel_cavalry: "spear",
   germanic_companion_cavalry: "heavy_infantry"
@@ -328,7 +331,7 @@ export const roleWeights: Record<BattleUnitType, Partial<Record<keyof ArmyCompos
   slinger: { ranged: 1 }, archer: { ranged: 1 }, oba_archer: { ranged: 1 }, briton_longbow: { ranged: 1 }, balearic_slinger: { ranged: 1 },
   light_cavalry: { mobile: 1 }, heavy_cavalry: { mobile: 1 }, camel_cavalry: { mobile: 1 }, carthaginian_war_elephant: { mobile: 1 },
   mauryan_war_elephant: { mobile: 1 }, desert_raider: { mobile: 1 }, egyptian_war_chariot: { ranged: 0.5, mobile: 0.5 }, germanic_companion_cavalry: { mobile: 1 },
-  horse_archer: { ranged: 0.5, mobile: 0.5 }, steppe_cavalry: { spear: 0.3, mobile: 0.7 },
+  horse_archer: { ranged: 0.5, mobile: 0.5 }, steppe_horse_archer: { ranged: 0.5, mobile: 0.5 }, steppe_cavalry: { spear: 0.3, mobile: 0.7 },
   iberian_caetrati: { line: 1 }, germanic_shock_warrior: { line: 1 }, sarmatian_longswordsmen: { line: 1 },
   anatolian_thureophoroi: { line: 0.70, spear: 0.30 }
 };
@@ -348,6 +351,7 @@ const cavalryCounterWeights: Partial<Record<BattleUnitType, number>> = {
   light_cavalry: 1,
   heavy_cavalry: 1,
   horse_archer: 0.5,
+  steppe_horse_archer: 0.5,
   camel_cavalry: 1,
   carthaginian_war_elephant: 1,
   mauryan_war_elephant: 1,
@@ -417,7 +421,7 @@ function assessSteppeComposition(
     }
   }
   const shareOf = (key: BattleUnitType): number => Math.max(0, composition[key] ?? 0) / total;
-  const horseArcher = shareOf("horse_archer");
+  const horseArcher = shareOf("steppe_horse_archer");
   const cavalry = shareOf("steppe_cavalry");
   const line = shareOf("kurgan_shieldbearer");
   const archer = shareOf("oba_archer");

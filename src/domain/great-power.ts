@@ -19,6 +19,7 @@ export const UNIT_POWER: Record<keyof typeof UNITS, number> = {
   camel_cavalry: 2.80,
   legionary: 3.00,
   horse_archer: 3.20,
+  steppe_horse_archer: 3.20,
   steppe_cavalry: 3.10,
   kurgan_shieldbearer: 2.50,
   oba_archer: 2.20,

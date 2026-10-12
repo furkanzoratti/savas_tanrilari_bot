@@ -213,8 +213,10 @@ export async function resolveMovementRecon(client: DbClient, guildId: string, tu
   }
   for (const scout of scouts) {
     const available = (await client.query<{ unit_type: string; quantity: number }>(
-      `SELECT unit_type,SUM(quantity)::integer AS quantity FROM army_units
-       WHERE army_id=$1 AND unit_type IN ('light_cavalry','horse_archer','heavy_cavalry') GROUP BY unit_type`,
+      `SELECT CASE WHEN unit_type='steppe_horse_archer' THEN 'horse_archer' ELSE unit_type END AS unit_type,
+          SUM(quantity)::integer AS quantity FROM army_units
+       WHERE army_id=$1 AND unit_type IN ('light_cavalry','horse_archer','steppe_horse_archer','heavy_cavalry')
+       GROUP BY CASE WHEN unit_type='steppe_horse_archer' THEN 'horse_archer' ELSE unit_type END`,
       [scout.army_id]
     )).rows;
     const byType = new Map(available.map((unit) => [unit.unit_type,Number(unit.quantity)]));

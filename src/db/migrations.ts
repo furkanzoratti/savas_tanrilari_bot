@@ -120,6 +120,7 @@ import { espionageNobleTargetsMigration } from "./espionage-noble-targets-migrat
 import { diplomatTaskRemovalMigration } from "./diplomat-task-removal-migration.js";
 import { countryMarshalsMigration } from "./country-marshals-migration.js";
 import { formableCountryCatalogSyncMigration } from "./formable-country-catalog-sync-migration.js";
+import { mountedArcherSeparationMigration } from "./mounted-archer-separation-migration.js";
 
 export const migrations = [
   {
@@ -2457,5 +2458,6 @@ export const migrations = [
   espionageNobleTargetsMigration,
   diplomatTaskRemovalMigration,
   countryMarshalsMigration,
-  formableCountryCatalogSyncMigration
+  formableCountryCatalogSyncMigration,
+  mountedArcherSeparationMigration
 ] as const;

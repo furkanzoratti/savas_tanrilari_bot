@@ -44,11 +44,11 @@ describe("savaş komutları", () => {
     expect(target?.required).toBe(true);
     expect(target?.choices?.map((choice) => choice.value)).toEqual(expect.arrayContaining(["WALL", "GATE", "ARMY", "ASSAULT"]));
   });
-  it("kuşatan tarafa dört indirilebilir süvari türü ve sıfırlama seçeneği sunar", () => {
+  it("kuşatan tarafa beş indirilebilir süvari türü ve sıfırlama seçeneği sunar", () => {
     const battle = commandBuilders.find((command) => command.name === "savas");
     const command = battle?.options?.find((option) => option.name === "suvari-indir");
     expect(command?.options?.find((option) => option.name === "birim")?.choices?.map((choice) => choice.value)).toEqual([
-      "light_cavalry", "heavy_cavalry", "horse_archer", "camel_cavalry"
+      "light_cavalry", "heavy_cavalry", "horse_archer", "steppe_horse_archer", "camel_cavalry"
     ]);
     expect(command?.options?.find((option) => option.name === "miktar")?.min_value).toBe(0);
     expect(command?.options?.find((option) => option.name === "ulke")).toMatchObject({ required: false, autocomplete: true });

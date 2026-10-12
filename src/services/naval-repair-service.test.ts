@@ -62,7 +62,7 @@ describe("naval repair scope and withdrawal",()=>{
     expect(String(audit?.params?.[3])).toContain('"scope":"DISABLED_ONLY"');
   });
 
-  it("returns only operational damaged ships and leaves disabled ships in repair",async()=>{
+  it("cancels repair and returns damaged and disabled ships with their current hull state",async()=>{
     const queries:string[]=[];
     const client={async query(sql:string){
       queries.push(sql);
@@ -70,21 +70,24 @@ describe("naval repair scope and withdrawal",()=>{
       if(sql.includes("SELECT id,name FROM fleets"))return {rows:[{id:"fleet-1",name:"Royal Navy"}],rowCount:1};
       if(unlocked(sql))return {rows:[],rowCount:0};
       if(sql.includes("SELECT id,settlement_id,ship_type FROM naval_ship_damage"))return {
-        rows:[{id:"damage-operational",settlement_id:"port-1",ship_type:"trireme"}],rowCount:1
+        rows:[
+          {id:"damage-operational",settlement_id:"port-1",ship_type:"trireme"},
+          {id:"damage-disabled",settlement_id:"port-1",ship_type:"trireme"}
+        ],rowCount:2
       };
-      if(sql.includes("SELECT COUNT(*)::integer AS quantity FROM naval_ship_damage"))return {rows:[{quantity:2}],rowCount:1};
       if(sql.startsWith("INSERT INTO fleet_ships")||sql.startsWith("UPDATE naval_ship_damage")||
-        sql.startsWith("UPDATE fleets")||sql.includes("INSERT INTO audit_logs"))return {rows:[],rowCount:1};
+        sql.startsWith("UPDATE fleet_repair_groups")||sql.startsWith("UPDATE fleets")||
+        sql.includes("INSERT INTO audit_logs"))return {rows:[],rowCount:1};
       throw new Error(`Unexpected query: ${sql}`);
     }} as unknown as DbClient;
     transaction.client=client;
 
     await expect(navalRepairService.withdrawOperationalShips({
       guildId:"guild-1",countryId:"country-1",actorId:"player-1",repairGroupId:"repair-1",targetFleetId:"fleet-1"
-    })).resolves.toEqual({targetFleetId:"fleet-1",targetFleetName:"Royal Navy",transferred:1});
+    })).resolves.toEqual({targetFleetId:"fleet-1",targetFleetName:"Royal Navy",transferred:2});
 
-    expect(queries.some((sql)=>sql.includes("current_hp>CASE ship_type"))).toBe(true);
-    expect(queries.some((sql)=>sql.includes("status='DAMAGED'"))).toBe(true);
-    expect(queries.some((sql)=>sql.includes("SET status='TRANSFERRED'"))).toBe(false);
+    expect(queries.some((sql)=>sql.includes("current_hp>CASE ship_type"))).toBe(false);
+    expect(queries.some((sql)=>sql.includes("THEN 'DISABLED' ELSE 'DAMAGED' END"))).toBe(true);
+    expect(queries.some((sql)=>sql.includes("SET status='TRANSFERRED'"))).toBe(true);
   });
 });

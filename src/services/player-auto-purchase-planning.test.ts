@@ -85,7 +85,7 @@ describe("oyuncu otomatik alım planlaması", () => {
   });
 
   it("bozkır otomatik alımında standart birlikleri aday havuzuna sokmaz", () => {
-    const specials = ["horse_archer","steppe_cavalry","kurgan_shieldbearer","oba_archer"];
+    const specials = ["steppe_horse_archer","steppe_cavalry","kurgan_shieldbearer","oba_archer"];
     expect(playerArmyUnitCandidates("GENERAL", specials as any, true)).toEqual(specials);
     const plan = planPlayerPurchases("guild", 30, "GENERAL", documentFixture({ specialUnits: specials, steppe: true }));
     expect(plan.unitActions.length).toBeGreaterThan(0);

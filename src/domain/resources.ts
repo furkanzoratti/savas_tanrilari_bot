@@ -67,7 +67,7 @@ export function unitCostMultiplier(unitType: string, resources: readonly Resourc
     "germanic_companion_cavalry", "sarmatian_longswordsmen", "briton_noble_spearmen"
   ].includes(unitType)) discounts++;
   if (has(resources, "HORSES") && [
-    "light_cavalry", "heavy_cavalry", "horse_archer", "steppe_cavalry",
+    "light_cavalry", "heavy_cavalry", "horse_archer", "steppe_horse_archer", "steppe_cavalry",
     "mauryan_war_elephant", "desert_raider", "egyptian_war_chariot", "germanic_companion_cavalry"
   ].includes(unitType)) discounts++;
   if (has(resources, "LEATHER") && ["light_infantry", "archer", "slinger", "peltast", "balearic_slinger", "oba_archer"].includes(unitType)) discounts++;

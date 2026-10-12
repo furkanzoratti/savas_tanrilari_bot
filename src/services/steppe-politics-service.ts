@@ -326,7 +326,7 @@ export const steppePoliticsService={
         SELECT $1,unlocked.unit_type,$2
         FROM unnest($3::text[]) AS unlocked(unit_type)
         ON CONFLICT(country_id,unit_type) DO NOTHING`,
-      [country.id,input.actorId,["horse_archer","steppe_cavalry","kurgan_shieldbearer","oba_archer"]]);
+      [country.id,input.actorId,["steppe_horse_archer","steppe_cavalry","kurgan_shieldbearer","oba_archer"]]);
       await addEvent(client,{confederationId:confed.id,turn:Number(country.current_turn),type:"CONFEDERATION_FOUNDED",titleId:title.id,
         actorId:input.actorId,description:`${country.name} bozkır hiyerarşisi kuruldu.`});
       await audit(client,input.guildId,input.actorId,"STEPPE_POLITICS_SETUP","steppe_confederation",confed.id,input);

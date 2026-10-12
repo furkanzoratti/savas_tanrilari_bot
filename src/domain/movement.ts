@@ -113,7 +113,7 @@ export function isPureLightHeavyCavalry(composition: Partial<Record<BattleUnitTy
   const active = Object.entries(composition).filter(([, quantity]) => whole(quantity) > 0);
   return active.length > 0 && active.every(([unitType]) =>
     unitType === "light_cavalry" || unitType === "heavy_cavalry"
-    || unitType === "horse_archer" || unitType === "steppe_cavalry"
+    || unitType === "horse_archer" || unitType === "steppe_horse_archer" || unitType === "steppe_cavalry"
   );
 }
 

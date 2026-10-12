@@ -7,7 +7,7 @@ vi.hoisted(() => {
 });
 
 import { commandBuilders } from "./commands.js";
-import { characterAvailableForCommand, charactersEmbed } from "./character-ui.js";
+import { characterAvailableForCommand, charactersEmbed, cultureChangeSettlementChoices } from "./character-ui.js";
 
 const availableCharacter = {
   role:"DIPLOMAT", assignment:"NONE", operation_status:null, character_status:"ACTIVE",
@@ -15,6 +15,20 @@ const availableCharacter = {
 } as const;
 
 describe("Akademi karakter komutları", () => {
+  it("kültür değişiminde tüm asimile yerleşkeleri gösterip geçici engelleri etiketler",()=>{
+    const choices=cultureChangeSettlementChoices([
+      {id:"calm",name:"Amastris",culture_group:"ANATOLIAN",is_conquered:false,unrest_active:false,rebellion_active:false},
+      {id:"unrest",name:"Byzantion",culture_group:"THRACIAN",is_conquered:false,unrest_active:true,rebellion_active:false},
+      {id:"rebellion",name:"Kardia",culture_group:"THRACIAN",is_conquered:false,unrest_active:false,rebellion_active:true},
+      {id:"occupied",name:"Perinthos",culture_group:"THRACIAN",is_conquered:true,unrest_active:false,rebellion_active:false}
+    ],"",null);
+    expect(choices).toEqual([
+      {name:"Amastris",value:"calm"},
+      {name:"Byzantion • Huzursuz",value:"unrest"},
+      {name:"Kardia • İsyanda",value:"rebellion"}
+    ]);
+  });
+
   it("Akademi seçimlerinde karakter ve yerleşkeleri otomatik tamamlar", () => {
     const command = commandBuilders.find((item) => item.name === "akademi");
     for (const subcommand of ["ata"]) {

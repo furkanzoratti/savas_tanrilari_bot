@@ -28,6 +28,8 @@ describe("asker alım modalı kimlikleri", () => {
     expect(encodeUnitTypeForCustomId("sarmatian_longswordsmen")).toBe("sls");
     expect(encodeUnitTypeForCustomId("briton_noble_spearmen")).toBe("bns");
     expect(encodeUnitTypeForCustomId("steppe_cavalry")).toBe("scv");
+    expect(encodeUnitTypeForCustomId("steppe_horse_archer")).toBe("sha");
+    expect(decodeUnitTypeFromCustomId("sha")).toBe("steppe_horse_archer");
     expect(decodeUnitTypeFromCustomId("ksb")).toBe("kurgan_shieldbearer");
     expect(decodeUnitTypeFromCustomId("oa")).toBe("oba_archer");
   });

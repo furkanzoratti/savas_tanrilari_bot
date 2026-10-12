@@ -1014,7 +1014,7 @@ export const commandBuilders = [
           { name:"Yalnız iş göremez gemiler",value:"DISABLED_ONLY" },
           { name:"Bütün hasarlı ve iş göremez gemiler",value:"ALL_DAMAGED" }
         )))
-    .addSubcommand((sub) => sub.setName("tamirden-cikar").setDescription("İş göremez olmayan gemileri devam eden tamirden çıkarıp filoya aktarır")
+    .addSubcommand((sub) => sub.setName("tamirden-cikar").setDescription("Tamiri iptal edip bütün gemileri mevcut canlarıyla filoya aktarır")
       .addStringOption((o) => o.setName("tamir-filosu").setDescription("Devam eden tamir filosu").setRequired(true).setAutocomplete(true))
       .addStringOption((o) => o.setName("filo").setDescription("Gemilerin geri aktarılacağı normal filo").setRequired(true).setAutocomplete(true)))
     .addSubcommand((sub) => sub.setName("tamirden-ekle").setDescription("Tamamlanan tamir filosundaki bütün gemileri normal filoya ekler")
@@ -1103,6 +1103,7 @@ export const commandBuilders = [
         { name: "Hafif Süvari → Hafif Piyade", value: "light_cavalry" },
         { name: "Ağır Süvari → Ağır Piyade", value: "heavy_cavalry" },
         { name: "Atlı Okçu → Okçu", value: "horse_archer" },
+        { name: "Bozkır Atlı Okçu → Oba Yaycıları", value: "steppe_horse_archer" },
         { name: "Deve Süvarisi → Mızraklı Piyade", value: "camel_cavalry" }
       ))
       .addIntegerOption((o) => o.setName("miktar").setDescription("Yaya savaşacak mevcut; seçimi kaldırmak için 0").setMinValue(0).setRequired(true))

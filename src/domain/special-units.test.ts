@@ -8,7 +8,8 @@ describe("ülkeye özel birlikler", () => {
     expect(SPECIAL_UNITS).toEqual({
       legionary: { name: "Lejyoner", price: 5_000, upkeep: 500 },
       hoplite: { name: "Hoplit", price: 3_500, upkeep: 400 },
-      horse_archer: { name: "Bozkır Atlı Okçu", price: 2_500, upkeep: 250 },
+      horse_archer: { name: "Atlı Okçu", price: 2_500, upkeep: 250 },
+      steppe_horse_archer: { name: "Bozkır Atlı Okçu", price: 2_500, upkeep: 250 },
       steppe_cavalry: { name: "Bozkır Süvarisi", price: 2_250, upkeep: 225 },
       kurgan_shieldbearer: { name: "Kurgan Kalkanlıları", price: 3_000, upkeep: 300 },
       oba_archer: { name: "Oba Yaycıları", price: 1_750, upkeep: 175 },
@@ -40,6 +41,7 @@ describe("ülkeye özel birlikler", () => {
     expect(BATTLE_UNIT_STATS.legionary).toMatchObject({ clashDice: 2, clashSides: 10, damageDice: 2, damageSides: 8, durability: 3 });
     expect(BATTLE_UNIT_STATS.hoplite).toMatchObject({ clashDice: 2, clashSides: 8, damageDice: 1, damageSides: 12, durability: 3 });
     expect(BATTLE_UNIT_STATS.horse_archer).toMatchObject({ clashDice: 2, clashSides: 8, damageDice: 2, damageSides: 8, durability: 2 });
+    expect(BATTLE_UNIT_STATS.steppe_horse_archer).toMatchObject({ clashDice: 2, clashSides: 8, damageDice: 2, damageSides: 8, durability: 2 });
     expect(BATTLE_UNIT_STATS.steppe_cavalry).toMatchObject({ clashDice: 2, clashSides: 10, damageDice: 2, damageSides: 8, durability: 2 });
     expect(BATTLE_UNIT_STATS.kurgan_shieldbearer).toMatchObject({ clashDice: 2, clashSides: 8, damageDice: 1, damageSides: 12, durability: 3 });
     expect(BATTLE_UNIT_STATS.oba_archer).toMatchObject({ clashDice: 1, clashSides: 10, damageDice: 1, damageSides: 12, durability: 1 });
@@ -75,6 +77,7 @@ describe("ülkeye özel birlikler", () => {
     expect(isSpecialUnitType("sarmatian_longswordsmen")).toBe(true);
     expect(isSpecialUnitType("briton_noble_spearmen")).toBe(true);
     expect(isSpecialUnitType("steppe_cavalry")).toBe(true);
+    expect(isSpecialUnitType("steppe_horse_archer")).toBe(true);
     expect(isSpecialUnitType("kurgan_shieldbearer")).toBe(true);
     expect(isSpecialUnitType("oba_archer")).toBe(true);
     expect(isSpecialUnitType("archer")).toBe(false);

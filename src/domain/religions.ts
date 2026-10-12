@@ -56,7 +56,7 @@ const emptyModifiers = (): ReligionModifiers => ({
 
 const ALL_LAND = [
   "light_infantry","militia","slinger","spear","archer","heavy_infantry","light_cavalry","heavy_cavalry",
-  "legionary","hoplite","horse_archer","camel_cavalry","briton_longbow","persian_immortal",
+  "legionary","hoplite","horse_archer","steppe_horse_archer","camel_cavalry","briton_longbow","persian_immortal",
   "carthaginian_war_elephant","iberian_caetrati","germanic_shock_warrior","anatolian_thureophoroi",
   "triarii_veteran","punic_veteran","gaesatae","peltast","silver_shield","machimoi_phalangitai",
   "mauryan_war_elephant","desert_raider","egyptian_war_chariot","germanic_companion_cavalry",
@@ -64,8 +64,8 @@ const ALL_LAND = [
   "kurgan_shieldbearer","oba_archer"
 ] as ReligionUnitType[];
 const RANGED = ["slinger","archer","briton_longbow","balearic_slinger","oba_archer"] as ReligionUnitType[];
-const CAVALRY = ["light_cavalry","heavy_cavalry","horse_archer","camel_cavalry","carthaginian_war_elephant","mauryan_war_elephant","desert_raider","egyptian_war_chariot","germanic_companion_cavalry","steppe_cavalry"] as ReligionUnitType[];
-const LIGHT_CAVALRY = ["light_cavalry","camel_cavalry","desert_raider","horse_archer","steppe_cavalry"] as ReligionUnitType[];
+const CAVALRY = ["light_cavalry","heavy_cavalry","horse_archer","steppe_horse_archer","camel_cavalry","carthaginian_war_elephant","mauryan_war_elephant","desert_raider","egyptian_war_chariot","germanic_companion_cavalry","steppe_cavalry"] as ReligionUnitType[];
+const LIGHT_CAVALRY = ["light_cavalry","camel_cavalry","desert_raider","horse_archer","steppe_horse_archer","steppe_cavalry"] as ReligionUnitType[];
 const SPEAR_RANGED = ["spear","hoplite","triarii_veteran","silver_shield","machimoi_phalangitai","briton_noble_spearmen",...RANGED] as ReligionUnitType[];
 const HEAVY_SPEAR = ["heavy_infantry","legionary","hoplite","persian_immortal","punic_veteran","gaesatae","sarmatian_longswordsmen","spear","triarii_veteran","silver_shield","machimoi_phalangitai","briton_noble_spearmen","kurgan_shieldbearer"] as ReligionUnitType[];
 const CELTIC_UNITS = ["light_infantry","spear","peltast","iberian_caetrati","briton_noble_spearmen"] as ReligionUnitType[];
