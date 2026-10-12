@@ -21,8 +21,6 @@ import { assimilationCompletionTurn } from "../domain/assimilation.js";
 import type { ArmyView } from "./army-service.js";
 import type { FleetView } from "./fleet-service.js";
 import { completeDueFleetRepairs,loadCountryRepairFleets,type RepairFleetView } from "./naval-repair-service.js";
-import { resolveMovementStage, type MovementStageSummary } from "./movement-turn-service.js";
-import { syncObserverPosts } from "./movement-observer-service.js";
 import { awardCharacterSpecializationProgress } from "./character-specialization-progress.js";
 import { conquestArmyPopulationDeparture, loadDisplacedArmySupport, supportedPersonnel } from "./displaced-army-support.js";
 import { grantFormableFoundingReward } from "./formable-country-reward-service.js";
@@ -319,7 +317,6 @@ export interface CountryDetailView {
 export interface TurnAdvanceResult {
   turn: number;
   acquisition: boolean;
-  movement: MovementStageSummary;
   completedBuildings: number;
   recruitmentArrivals: number;
   completedShips: number;
@@ -1882,26 +1879,17 @@ export const gameService = {
       const armyRows: Array<{
         id: string; guild_id: string; country_id: string; country_name: string; name: string;
         commander_character_id: string | null; commander_name: string | null; commander_skill_bonus: number;
-        created_turn: number; active_battle_id: string | null; current_hex: string | null;
+        created_turn: number; active_battle_id: string | null;
       }> = options.includeArmies === false ? [] : (await client.query<{
         id: string; guild_id: string; country_id: string; country_name: string; name: string;
         commander_character_id: string | null; commander_name: string | null; commander_skill_bonus: number;
-        created_turn: number; active_battle_id: string | null; current_hex: string | null;
+        created_turn: number; active_battle_id: string | null;
       }>(`SELECT a.id,a.guild_id,a.country_id,c.name AS country_name,a.name,a.commander_character_id,
                   cc.name AS commander_name,COALESCE(cc.skill_bonus,0)::integer AS commander_skill_bonus,a.created_turn,
-                  COALESCE(hex.coordinate,CASE WHEN cargo.army_id IS NOT NULL THEN
-                    CONCAT('Gemide: ',cargo_fleet.name,' • ',COALESCE(fleet_hex.coordinate,'Filo konumu yok')) END) AS current_hex,
                   (SELECT b.id FROM battle_army_assignments baa JOIN battles b ON b.id=baa.battle_id
                     WHERE baa.army_id=a.id AND b.status NOT IN ('FINISHED','CANCELLED') LIMIT 1) AS active_battle_id
              FROM armies a JOIN countries c ON c.id=a.country_id
              LEFT JOIN country_characters cc ON cc.id=a.commander_character_id
-             LEFT JOIN guild_movement_settings movement_settings ON movement_settings.guild_id=a.guild_id
-             LEFT JOIN army_map_positions position ON position.army_id=a.id
-             LEFT JOIN map_hexes hex ON hex.id=position.hex_id
-             LEFT JOIN fleet_cargo_armies cargo ON cargo.army_id=a.id AND COALESCE(movement_settings.enabled,FALSE)=TRUE
-             LEFT JOIN fleets cargo_fleet ON cargo_fleet.id=cargo.fleet_id
-             LEFT JOIN fleet_map_positions cargo_position ON cargo_position.fleet_id=cargo.fleet_id
-             LEFT JOIN map_hexes fleet_hex ON fleet_hex.id=cargo_position.hex_id
             WHERE a.country_id=$1 ORDER BY a.created_at,a.name`, [countryId])).rows;
       const armyUnitRows = armyRows.length ? (await client.query<{
         army_id: string; settlement_id: string; settlement_name: string; unit_type: BattleUnitType; quantity: number;
@@ -1989,15 +1977,7 @@ export const gameService = {
       });
       const repairFleets=await loadCountryRepairFleets(client,countryId);
       const units = settlementIds.length ? (await client.query<{ settlement_id: string; unit_type: keyof typeof UNITS; quantity: number; status: UnitStatus; force_type: ForceType }>("SELECT * FROM unit_stacks WHERE settlement_id = ANY($1::uuid[]) ORDER BY force_type,unit_type", [settlementIds])).rows : [];
-      const musteringUnits = (await client.query<{ settlement_id:string; unit_type:keyof typeof UNITS; quantity:number }>(
-        `SELECT source_settlement_id AS settlement_id,unit_type,SUM(quantity)::integer AS quantity FROM army_muster_orders
-          WHERE country_id=$1 AND status IN ('SUBMITTED','IN_PROGRESS','BLOCKED','WAITING_ARMY')
-            AND EXISTS (
-              SELECT 1 FROM guild_movement_settings settings
-               WHERE settings.guild_id=army_muster_orders.guild_id AND settings.enabled=TRUE
-            )
-          GROUP BY source_settlement_id,unit_type ORDER BY source_settlement_id,unit_type`,[countryId]
-      )).rows.map((unit)=>({...unit,quantity:Number(unit.quantity)}));
+      const musteringUnits: Array<{ settlement_id:string; unit_type:keyof typeof UNITS; quantity:number }> = [];
       const ships = settlementIds.length ? (await client.query<{ settlement_id: string; ship_type: keyof typeof SHIPS; quantity: number; status: ShipStatus }>("SELECT * FROM naval_units WHERE settlement_id = ANY($1::uuid[]) ORDER BY ship_type", [settlementIds])).rows : [];
       const assets = (await client.query<{ settlement_id: string | null; asset_type: string; quantity: number; location_note: string | null }>("SELECT * FROM siege_assets WHERE country_id = $1 ORDER BY asset_type", [countryId])).rows;
       const waves = (await client.query<{ settlement_id: string; unit_type: keyof typeof UNITS; due_turn: number; quantity: number }>(
@@ -2512,7 +2492,7 @@ export const gameService = {
       if (existing?.status === "ACTIVE" && existing.level >= input.level) throw new GameError(`Bu yerleşkede ${definition.name} zaten Seviye ${existing.level}.`);
       if (!existing) {
         const slots = await client.query<{ count: number }>("SELECT COUNT(*)::integer AS count FROM buildings WHERE settlement_id=$1 AND building_type<>'lupanar' AND (level>0 OR status='BUILDING')", [settlement.id]);
-        const hasActivePort = Boolean((await client.query("SELECT 1 FROM buildings WHERE settlement_id=$1 AND building_type='port' AND status='ACTIVE' AND level>0", [settlement.id])).rowCount);
+        const hasActivePort = Boolean((await client.query("SELECT 1 FROM buildings WHERE settlement_id=$1 AND building_type='port' AND status IN ('ACTIVE','BUILDING') AND level>0", [settlement.id])).rowCount);
         if ((slots.rows[0]?.count ?? 0) >= buildingSlotLimit(settlement.population, hasActivePort)) throw new GameError("Yerleşkenin boş bina slotu yok.");
       }
       await client.query(
@@ -2638,7 +2618,7 @@ export const gameService = {
       }
       if (currentLevel === 0) {
         const slots = await client.query<{ count: number }>("SELECT COUNT(*)::integer AS count FROM buildings WHERE settlement_id=$1 AND building_type<>'lupanar' AND (level>0 OR status='BUILDING')", [settlement.id]);
-        const hasActivePort = Boolean((await client.query("SELECT 1 FROM buildings WHERE settlement_id=$1 AND building_type='port' AND status='ACTIVE' AND level>0", [settlement.id])).rowCount);
+        const hasActivePort = Boolean((await client.query("SELECT 1 FROM buildings WHERE settlement_id=$1 AND building_type='port' AND status IN ('ACTIVE','BUILDING') AND level>0", [settlement.id])).rowCount);
         if ((slots.rows[0]?.count ?? 0) >= buildingSlotLimit(settlement.population, hasActivePort)) throw new GameError("Yerleşkenin boş bina slotu yok.");
       }
       const effectiveResources = (await settlementResourceAccess(client, country.id)).get(settlement.id) ?? [];
@@ -2684,7 +2664,7 @@ export const gameService = {
   },
 
   async purchaseUnits(input: { guildId: string; actorId: string; countryId: string; settlementId: string; unitType: keyof typeof UNITS; quantity: number }): Promise<{ cost: number; waves: Array<{ dueTurn: number; quantity: number }> }> {
-    if (input.unitType === "observer") throw new GameError("Gözcü Birliği için ayrı Gözcü Alımı kullanılmalıdır.");
+    if (input.unitType === "observer") throw new GameError("Gözcü Birliği ve koordinatlı hareket sistemi kullanımdan kaldırıldı.");
     if (input.unitType === "militia") throw new GameError("Milis marketten satın alınamaz; yalnızca şehir politikalarıyla oluşturulabilir.");
     if (input.quantity < 100 || input.quantity % 100 !== 0) throw new GameError("Asker alımı en az 100 kişi ve 100'ün katları hâlinde yapılmalıdır.");
     return withTransaction(async (client) => {
@@ -2757,80 +2737,6 @@ export const gameService = {
       await client.query("INSERT INTO transactions(country_id,turn,kind,amount,description) VALUES($1,$2,'UNIT_PURCHASE',$3,$4)", [country.id, guild.current_turn, -cost, `${settlement.name}: ${input.quantity} ${unit.name}`]);
       await audit(client, input.guildId, input.actorId, "UNIT_PURCHASE", "settlement", settlement.id, { unitType: input.unitType, quantity: input.quantity, cost, waves, trainingCapacity });
       return { cost, waves };
-    });
-  },
-
-  async purchaseObserver(input: { guildId: string; actorId: string; countryId: string; settlementId: string }): Promise<{ cost: number; dueTurn: number }> {
-    return withTransaction(async (client) => {
-      const guild = await getGuild(client, input.guildId);
-      if (!isAcquisitionTurn(guild.current_turn, guild.acquisition_interval)) throw new GameError("Gözcü alımı yalnızca Alım Turunda yapılabilir.");
-      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`country:${input.countryId}`]);
-      const country = await getCountry(client, input.countryId);
-      if (country.guild_id !== input.guildId) throw new GameError("Ülke bu sunucuya ait değil.");
-      const settlement = (await client.query<SettlementRow>("SELECT * FROM settlements WHERE id=$1 AND country_id=$2 FOR UPDATE", [input.settlementId, country.id])).rows[0];
-      if (!settlement) throw new GameError("Yerleşke bulunamadı.");
-      if (settlement.is_conquered) throw new GameError("Fethedilmiş yerleşke asimile edilmeden Gözcü Birliği yetiştiremez.");
-      if (await settlementIsBesieged(client, settlement.id)) throw new GameError("Kuşatma altındaki yerleşke Gözcü Birliği yetiştiremez.");
-      if (await countryHasMaintenanceDebt(client, country.id)) throw new GameError("Ödenmemiş bakım açığı giderilmeden Gözcü Birliği alınamaz.");
-      const existing = await client.query(
-        `SELECT 1 FROM unit_stacks WHERE settlement_id=$1 AND unit_type='observer' AND quantity>0
-         UNION ALL
-         SELECT 1 FROM recruitment_orders WHERE settlement_id=$1 AND unit_type='observer' AND status='TRAINING' LIMIT 1`, [settlement.id]
-      );
-      if (existing.rowCount) throw new GameError("Bu yerleşkede zaten bir Gözcü Birliği var veya eğitiliyor.");
-      const regionalExisting = await client.query(
-        `WITH target_region AS (
-           SELECT hex.region_key FROM settlement_map_positions position
-           JOIN map_hexes hex ON hex.id=position.hex_id
-           WHERE position.settlement_id=$1 AND hex.guild_id=$3 AND hex.region_key IS NOT NULL
-         )
-         SELECT 1 FROM settlements other
-         JOIN settlement_map_positions position ON position.settlement_id=other.id
-         JOIN map_hexes hex ON hex.id=position.hex_id AND hex.guild_id=$3
-         WHERE other.country_id=$2 AND other.id<>$1
-           AND hex.region_key IN (SELECT region_key FROM target_region)
-           AND (EXISTS (SELECT 1 FROM unit_stacks stack WHERE stack.settlement_id=other.id
-                         AND stack.unit_type='observer' AND stack.quantity>0)
-             OR EXISTS (SELECT 1 FROM recruitment_orders order_record WHERE order_record.settlement_id=other.id
-                         AND order_record.unit_type='observer' AND order_record.status='TRAINING'))
-         LIMIT 1`, [settlement.id,country.id,input.guildId]
-      );
-      if (regionalExisting.rowCount) throw new GameError("Bu eyalette başka bir yerleşkenin Gözcü Birliği var veya yetiştiriliyor; eyalet başına bir gözcü sınırı geçerlidir.");
-
-      const personLoad = formableModifiers(country.active_formable_key).observerManpower ?? 200;
-      const marshalPartial = await hasActiveMarshalPartialMobilization(client, country.id, country.mobilization);
-      const localUsed = await settlementManpower(client, settlement.id);
-      const localLimit = settlementMobilizationLimit(
-        cultureMilitaryPopulation(
-          settlement.population, settlement.culture_group, country.primary_culture_group,
-          guild.culture_military_penalty_enabled
-        ), country.mobilization, marshalPartial
-      );
-      if (localUsed + personLoad > localLimit) throw new GameError("Yerleşkenin Ordu Limitinde Gözcü Birliği için yer yok.");
-      const trainingCapacity = settlementTrainingCapacity(settlement.population, country.mobilization, marshalPartial);
-      const usage = (await client.query<{ quantity: number }>("SELECT quantity FROM recruitment_usage WHERE settlement_id=$1 AND acquisition_turn=$2 FOR UPDATE", [settlement.id, guild.current_turn])).rows[0]?.quantity ?? 0;
-      if (usage + personLoad > trainingCapacity) throw new GameError("Bu Alım Turundaki Eğitim Kapasitesi Gözcü Birliği için yeterli değil.");
-      const manpower = await countryManpower(client, country.id);
-      const limit = militaryLimit(manpower.militaryPopulation, country.mobilization, marshalPartial);
-      if (manpower.used + personLoad > limit) throw new GameError("Askerî personel sınırında Gözcü Birliği için yer yok.");
-
-      const cost = await applyPurchaseAgentDiscount(client,{
-        countryId:country.id,settlementId:settlement.id,category:"UNITS",currentTurn:guild.current_turn,cost:UNITS.observer.price
-      });
-      if (settlement.local_treasury < cost) throw new GameError("Yerel hazinede yeterli altın yok.");
-      const dueTurn = guild.current_turn + 1;
-      const order = await client.query<{ id: string }>(
-        `INSERT INTO recruitment_orders(country_id,settlement_id,unit_type,total_quantity,remaining_quantity,paid_amount,ordered_turn,population_reserved)
-         VALUES($1,$2,'observer',$3,$3,$4,$5,FALSE) RETURNING id`, [country.id, settlement.id, personLoad, cost, guild.current_turn]
-      );
-      await client.query("INSERT INTO recruitment_waves(order_id,due_turn,quantity) VALUES($1,$2,$3)", [order.rows[0]!.id, dueTurn, personLoad]);
-      await client.query(`INSERT INTO recruitment_usage(settlement_id,acquisition_turn,quantity) VALUES($1,$2,$3)
-        ON CONFLICT(settlement_id,acquisition_turn) DO UPDATE SET quantity=recruitment_usage.quantity+EXCLUDED.quantity`, [settlement.id, guild.current_turn, personLoad]);
-      await client.query("UPDATE settlements SET local_treasury=local_treasury-$1 WHERE id=$2",[cost,settlement.id]);
-      await syncCountryTreasury(client, country.id);
-      await client.query("INSERT INTO transactions(country_id,turn,kind,amount,description) VALUES($1,$2,\'OBSERVER_PURCHASE\',$3,$4)", [country.id, guild.current_turn, -cost, `${settlement.name}: 1 Gözcü Birliği`]);
-      await audit(client, input.guildId, input.actorId, "OBSERVER_PURCHASE", "settlement", settlement.id, { cost, personLoad, dueTurn });
-      return { cost, dueTurn };
     });
   },
 
@@ -3221,7 +3127,6 @@ export const gameService = {
         await client.query("UPDATE recruitment_orders SET remaining_quantity=remaining_quantity-$1 WHERE id=$2", [wave.quantity, wave.order_id]);
       }
       await client.query("UPDATE recruitment_orders SET status='COMPLETED' WHERE status='TRAINING' AND remaining_quantity=0");
-      await syncObserverPosts(client, guildId, newTurn, actorId);
 
       const dueShips = await client.query<{ id: string; settlement_id: string; settlement_name: string; ship_type: keyof typeof SHIPS; quantity: number }>(
         `SELECT no.id,no.settlement_id,s.name AS settlement_name,no.ship_type,no.quantity FROM naval_orders no JOIN countries c ON c.id=no.country_id JOIN settlements s ON s.id=no.settlement_id
@@ -3514,7 +3419,6 @@ export const gameService = {
       const romanPolitics=romanRepublicTurn.politics;
       await syncGuildPrimaryCultures(client, guildId);
       await client.query("UPDATE guilds SET current_turn=$1,turn_phase='OPEN',updated_at=NOW() WHERE discord_id=$2", [newTurn, guildId]);
-      const movement = await resolveMovementStage(client, guildId, actorId, newTurn, "ADVANCE");
       await audit(client, guildId, actorId, "TURN_ADVANCE", "guild", guildId, {
         from: guild.current_turn, to: newTurn, acquisition, garrisonUpgrades, startedGarrisons: garrisonReplenishmentStartedDetails, incomePenaltyDetails,
         mercenaryArrivals: mercenaryArrivalDetails.length, mercenaryUpkeep: mercenaryUpkeepDetails,
@@ -3524,7 +3428,7 @@ export const gameService = {
         romanGovernorshipDetails,romanElectionOpenedDetails,romanFamilyLifecycleDetails,romanPolitics,countryEconomyDetails
       });
       return {
-        turn: newTurn, acquisition, movement,
+        turn: newTurn, acquisition,
         completedBuildings: completedBuildings.rowCount ?? 0,
         recruitmentArrivals: dueWaves.rows.reduce((sum, row) => sum + row.quantity, 0),
         completedShips: dueShips.rows.reduce((sum, row) => sum + row.quantity, 0),
@@ -3554,31 +3458,19 @@ export const gameService = {
     });
   },
 
-  async stopTurn(guildId: string, actorId: string): Promise<MovementStageSummary> {
-    return withTransaction(async (client) => {
+  async stopTurn(guildId: string, actorId: string): Promise<void> {
+    await withTransaction(async (client) => {
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`turn:${guildId}`]);
-      const guild = await ensureGuild(client, guildId);
+      await ensureGuild(client, guildId);
       await client.query("UPDATE guilds SET turn_phase='RESOLVING',updated_at=NOW() WHERE discord_id=$1", [guildId]);
-      const movement = await resolveMovementStage(client, guildId, actorId, guild.current_turn, "STOP");
-      await audit(client, guildId, actorId, "TURN_PHASE", "guild", guildId, { phase: "RESOLVING", movement });
-      return movement;
+      await audit(client, guildId, actorId, "TURN_PHASE", "guild", guildId, { phase: "RESOLVING" });
     });
   },
 
   async setTurnPhase(guildId: string, actorId: string, phase: "OPEN" | "CLOSED" | "RESOLVING"): Promise<void> {
     await withTransaction(async (client) => {
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`turn:${guildId}`]);
-      const guild = await ensureGuild(client, guildId);
-      if (phase === "OPEN" && guild.turn_phase !== "OPEN") {
-        const resolved = await client.query(
-          `SELECT 1 FROM movement_resolution_runs run
-             JOIN guild_movement_settings settings ON settings.guild_id=run.guild_id
-            WHERE run.guild_id=$1 AND run.game_turn=$2 AND settings.enabled
-              AND run.summary ? 'STOP' LIMIT 1`,
-          [guildId, guild.current_turn]
-        );
-        if (resolved.rowCount) throw new GameError("Hareketleri çözülmüş tur yeniden açılamaz; sonraki tura geçin.");
-      }
+      await ensureGuild(client, guildId);
       await client.query("UPDATE guilds SET turn_phase=$1,updated_at=NOW() WHERE discord_id=$2", [phase, guildId]);
       await audit(client, guildId, actorId, "TURN_PHASE", "guild", guildId, { phase });
     });

@@ -895,22 +895,21 @@ export const adminPanelService = {
   async forces() {
     const armies = (await adminPool.query(
       `SELECT army.id,army.country_id,army.name,country.name AS country_name,
-              character.name AS commander_name,army.created_turn,position.hex_id,
+              character.name AS commander_name,army.created_turn,
               COALESCE(SUM(unit.quantity),0)::integer AS total,
               COUNT(DISTINCT unit.settlement_id)::integer AS origin_count
          FROM armies army
          JOIN countries country ON country.id=army.country_id
          LEFT JOIN country_characters character ON character.id=army.commander_character_id
          LEFT JOIN army_units unit ON unit.army_id=army.id
-         LEFT JOIN army_map_positions position ON position.army_id=army.id
         WHERE army.guild_id=$1
-        GROUP BY army.id,country.name,character.name,position.hex_id
+        GROUP BY army.id,country.name,character.name
         ORDER BY country.name,army.created_at,army.name`,
       [adminConfig.guildId]
     )).rows;
     const fleets = (await adminPool.query(
       `SELECT fleet.id,fleet.country_id,fleet.name,country.name AS country_name,
-              character.name AS commander_name,fleet.created_turn,position.hex_id,
+              character.name AS commander_name,fleet.created_turn,
               COALESCE((SELECT SUM(ship.quantity) FROM fleet_ships ship WHERE ship.fleet_id=fleet.id),0)::integer AS ready_ships,
               COALESCE((SELECT COUNT(*) FROM naval_ship_damage damage WHERE damage.fleet_id=fleet.id),0)::integer AS tracked_ships,
               COALESCE((SELECT COUNT(*) FROM naval_ship_damage damage
@@ -918,7 +917,6 @@ export const adminPanelService = {
          FROM fleets fleet
          JOIN countries country ON country.id=fleet.country_id
          LEFT JOIN country_characters character ON character.id=fleet.commander_character_id
-         LEFT JOIN fleet_map_positions position ON position.fleet_id=fleet.id
         WHERE fleet.guild_id=$1
         ORDER BY country.name,fleet.created_at,fleet.name`,
       [adminConfig.guildId]
@@ -3261,13 +3259,6 @@ export const adminPanelService = {
         );
       }
 
-      await client.query(
-        `INSERT INTO army_map_positions(army_id,hex_id,arrived_turn)
-         SELECT $1,position.hex_id,$2 FROM settlement_map_positions position
-          WHERE position.settlement_id=$3
-         ON CONFLICT(army_id) DO NOTHING`,
-        [armyId, currentTurn, context.settlement.id]
-      );
       const result = {
         armyId,
         armyName: input.name,

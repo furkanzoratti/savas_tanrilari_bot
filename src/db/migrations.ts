@@ -121,6 +121,7 @@ import { diplomatTaskRemovalMigration } from "./diplomat-task-removal-migration.
 import { countryMarshalsMigration } from "./country-marshals-migration.js";
 import { formableCountryCatalogSyncMigration } from "./formable-country-catalog-sync-migration.js";
 import { mountedArcherSeparationMigration } from "./mounted-archer-separation-migration.js";
+import { movementRuntimeRetirementMigration } from "./movement-runtime-retirement-migration.js";
 
 export const migrations = [
   {
@@ -2459,5 +2460,6 @@ export const migrations = [
   diplomatTaskRemovalMigration,
   countryMarshalsMigration,
   formableCountryCatalogSyncMigration,
-  mountedArcherSeparationMigration
+  mountedArcherSeparationMigration,
+  movementRuntimeRetirementMigration
 ] as const;

@@ -11,7 +11,6 @@ import { greatPowerService } from "./services/great-power-service.js";
 import { completedRoleReportRanges, roleReportService, type RoleReportPeriod } from "./services/role-report-service.js";
 import { renderWelcomeMessage, welcomeService } from "./services/welcome-service.js";
 import { publishGreatPowerRanking } from "./discord/great-power-ui.js";
-import { movementLogService } from "./services/movement-log-service.js";
 import { refreshChangedBattleCards } from "./discord/battle-ui.js";
 import { processDueGreatGamesAuctions } from "./discord/great-games-ui-v2.js";
 
@@ -131,21 +130,12 @@ client.once("clientReady", async (readyClient) => {
   }
   await sendCompletedRoleReports();
   await sendScheduledGreatPowerRanking();
-  await publishMovementLogs();
   await publishChangedBattleCards();
   const auctionResult = await processDueGreatGamesAuctions(readyClient);
   if (auctionResult.closed || auctionResult.published || auctionResult.failed) {
     logger.info(auctionResult, "Süresi dolan Devletler Müzayedeleri işlendi");
   }
 });
-
-async function publishMovementLogs():Promise<void>{
-  if(!client.isReady())return;
-  for(const guild of client.guilds.cache.values()){
-    try{await movementLogService.publishPending(client,guild.id,50);}
-    catch(error){logger.error({error,guildId:guild.id},"Hareket logları yayımlanamadı; kayıtlar kuyrukta kalacak");}
-  }
-}
 
 let battleCardRefreshRunning=false;
 async function publishChangedBattleCards():Promise<void>{
@@ -169,10 +159,6 @@ const greatPowerTimer = setInterval(() => {
   void sendScheduledGreatPowerRanking().catch((error) => logger.error(error, "Büyük Güçler zamanlayıcısı başarısız"));
 }, 30_000);
 greatPowerTimer.unref();
-const movementLogTimer=setInterval(()=>{
-  void publishMovementLogs().catch((error)=>logger.error(error,"Hareket log yayını başarısız"));
-},10_000);
-movementLogTimer.unref();
 const battleCardRefreshTimer=setInterval(()=>{
   void publishChangedBattleCards().catch((error)=>logger.error(error,"Savaş kartı otomatik eşitlemesi başarısız"));
 },5_000);
@@ -191,7 +177,6 @@ async function shutdown(signal: string) {
   logger.info({ signal }, "Bot kapatılıyor");
   clearInterval(roleReportTimer);
   clearInterval(greatPowerTimer);
-  clearInterval(movementLogTimer);
   clearInterval(battleCardRefreshTimer);
   clearInterval(greatGamesAuctionTimer);
   healthServer.close();

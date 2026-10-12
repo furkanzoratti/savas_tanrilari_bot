@@ -15,4 +15,10 @@ describe("game service karakter şeması", () => {
     expect(source).toContain("startLastStand(client");
     expect(source).toContain("recoverLastStand(client");
   });
+
+  it("yükseltmedeki limanı dokuzuncu bina slotu için etkin sayar",()=>{
+    const source=readFileSync(new URL("./game-service.ts",import.meta.url),"utf8");
+    const portSlotQueries=source.match(/building_type='port' AND status IN \('ACTIVE','BUILDING'\) AND level>0/g)??[];
+    expect(portSlotQueries.length).toBeGreaterThanOrEqual(2);
+  });
 });

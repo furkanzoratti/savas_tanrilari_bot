@@ -12,7 +12,6 @@ function clientFor(destination: boolean): { client: DbClient; queries: Array<{sq
     if(sql.includes("SELECT GREATEST("))return {rows:[{total:7}],rowCount:1};
     if(sql.includes("SELECT fleet_id AS id FROM fleet_ships"))return {rows:[{id:"fleet-1"},{id:"fleet-1"}],rowCount:2};
     if(sql.includes("FROM fleet_repair_groups repair")&&sql.includes("JOIN naval_ship_damage"))return {rows:[],rowCount:0};
-    if(sql.includes("UPDATE fleet_map_positions"))return {rows:[{id:"fleet-1"}],rowCount:1};
     if(sql.startsWith("WITH moved AS")||sql.startsWith("UPDATE")||sql.startsWith("DELETE"))return {rows:[],rowCount:1};
     throw new Error(`Unexpected query: ${sql}`);
   }} as unknown as DbClient;
@@ -65,7 +64,6 @@ describe("naval evacuation on settlement transfer",()=>{
         {repair_group_id:"repair-foreign",country_id:"country-2",source_fleet_id:"fleet-foreign",damage_id:"damage-foreign",
           settlement_id:"foreign-port",ship_type:"kerkouros",current_hp:8,max_hp:40}
       ],rowCount:2};
-      if(sql.includes("UPDATE fleet_map_positions"))return {rows:[],rowCount:0};
       if(sql.startsWith("WITH moved AS")||sql.startsWith("UPDATE")||sql.startsWith("DELETE")||sql.startsWith("INSERT"))return {rows:[],rowCount:1};
       throw new Error(`Unexpected query: ${sql}`);
     }} as unknown as DbClient;

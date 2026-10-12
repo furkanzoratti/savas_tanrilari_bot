@@ -74,20 +74,13 @@ const ACTION_LABELS: Record<string, string> = {
   "naval.raid.resolve": "Deniz yağması sonuçlandırıldı",
   "naval.raid.cancel": "Deniz yağması iptal edildi",
   "STATE_WAR_DECLARE": "Resmî savaş ilan edildi",
-  "STATE_WAR_FORCE_END": "Resmî savaş sona erdirildi",
-  "MOVEMENT_ORDER_SUBMIT": "Hareket emri verildi",
-  "MOVEMENT_ORDER_CANCEL": "Hareket emri iptal edildi",
-  "MOVEMENT_ORDER_RESUME": "Hareket emri sürdürüldü",
-  "FORMATION_POSITION": "Birlik konumu girildi",
-  "FORMATION_POSITION_CORRECT": "Birlik konumu düzeltildi",
-  "ARMY_SCOUT_ASSIGN": "Keşif birliği atandı",
-  "ARMY_SCOUT_WITHDRAW": "Keşif birliği geri çekildi"
+  "STATE_WAR_FORCE_END": "Resmî savaş sona erdirildi"
 };
 
 const ENTITY_LABELS: Record<string, string> = {
   country: "Devlet", settlement: "Yerleşke", character: "Karakter", dynasty: "Hanedan", dynasty_member: "Hanedan üyesi", army: "Ordu", fleet: "Filo",
   battle: "Savaş", naval_operation: "Deniz operasyonu", state_war: "Savaş ilanı",
-  movement_order: "Hareket emri", map: "Harita", map_edge: "Harita geçişi", guild: "Oyun",
+  guild: "Oyun",
   steppe_confederation: "Bozkır konfederasyonu", steppe_internal_title: "Bozkır makamı",
   steppe_hegemony: "Hanlar Hanlığı", steppe_tributary: "Bağlı Han",
   steppe_hegemony_war_call: "Hanlar Hanı savaş çağrısı",

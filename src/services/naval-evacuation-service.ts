@@ -225,25 +225,9 @@ export async function evacuateSettlementShips(
     "UPDATE naval_ship_damage SET settlement_id=$1,updated_at=NOW() WHERE settlement_id=$2 AND country_id=$3",
     [destination.id,input.settlementId,input.countryId]
   );
-  let relocatedFleets = 0;
+  const relocatedFleets = affectedFleetIds.length;
   if (affectedFleetIds.length) {
     await client.query("UPDATE fleets SET updated_at=NOW() WHERE id=ANY($1::uuid[])", [affectedFleetIds]);
-    await client.query(
-      `UPDATE movement_orders SET status='CANCELLED',blocked_reason='Kaynak liman el değiştirdi; filo güvenli limana tahliye edildi.',updated_at=NOW()
-        WHERE fleet_id=ANY($1::uuid[]) AND status IN ('DRAFT','SUBMITTED','IN_PROGRESS','BLOCKED')
-          AND start_hex_id=(SELECT hex_id FROM settlement_map_positions WHERE settlement_id=$2)`,
-      [affectedFleetIds,input.settlementId]
-    );
-    relocatedFleets = Number((await client.query<{ id: string }>(
-      `UPDATE fleet_map_positions position
-          SET hex_id=destination.hex_id,arrived_turn=$3,fatigue_until_turn=NULL,
-              version=position.version+1,updated_at=NOW()
-         FROM settlement_map_positions origin,settlement_map_positions destination
-        WHERE origin.settlement_id=$1 AND destination.settlement_id=$2
-          AND position.hex_id=origin.hex_id AND position.fleet_id=ANY($4::uuid[])
-        RETURNING position.fleet_id AS id`,
-      [input.settlementId,destination.id,input.currentTurn,affectedFleetIds]
-    )).rowCount ?? 0);
   }
 
   return {

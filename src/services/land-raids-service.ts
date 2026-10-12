@@ -80,11 +80,6 @@ export const landRaidsService={
         :"Bu yerleşke aynı savaşta daha önce şehir talanı hedefi olmuş.");
       if((await client.query("SELECT 1 FROM battle_army_assignments assignment JOIN battles battle ON battle.id=assignment.battle_id WHERE assignment.army_id=$1 AND battle.status NOT IN ('FINISHED','CANCELLED') LIMIT 1",[army.id])).rowCount)
         throw new GameError("Bu ordu etkin bir savaşa bağlıyken yağma formu açılamaz.");
-      const movementEnabled=Boolean((await client.query<{enabled:boolean}>(
-        "SELECT COALESCE(enabled,FALSE) AS enabled FROM guild_movement_settings WHERE guild_id=$1",[input.guildId]
-      )).rows[0]?.enabled);
-      if(movementEnabled&&(await client.query("SELECT 1 FROM movement_orders WHERE army_id=$1 AND status IN ('SUBMITTED','IN_PROGRESS','BLOCKED') LIMIT 1",[army.id])).rowCount)
-        throw new GameError("Bu ordunun sonuçlanmamış bir hareket emri var.");
       const strength=Number(army.strength),population=Number(target.population),income=Math.max(0,Number(target.last_acquisition_income));
       const modifier=landRaidSizeModifier(strength,population,input.type);
       const created=(await client.query<{id:string}>(`INSERT INTO land_raids(guild_id,raid_type,war_id,raider_country_id,army_id,target_country_id,

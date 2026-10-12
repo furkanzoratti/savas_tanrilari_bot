@@ -78,11 +78,6 @@ async function eliminateCountry(
       )`,[input.countryId,input.reason]
   );
   await client.query(
-    `UPDATE movement_orders SET status='CANCELLED',blocked_reason=$2,updated_at=NOW()
-      WHERE status IN('DRAFT','SUBMITTED','IN_PROGRESS','BLOCKED') AND country_id=$1`,
-    [input.countryId,input.reason]
-  );
-  await client.query(
     `UPDATE peace_offers SET status='CANCELLED',resolved_turn=$2,resolved_by='SYSTEM',resolved_at=NOW()
       WHERE status='PENDING' AND (proposer_country_id=$1 OR receiver_country_id=$1)`,
     [input.countryId,input.turn]

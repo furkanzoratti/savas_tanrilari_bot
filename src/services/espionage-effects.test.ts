@@ -1,5 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type {DbClient} from "../db/pool.js";
+
+vi.hoisted(()=>{
+  process.env.DISCORD_TOKEN="test-token";
+  process.env.DISCORD_CLIENT_ID="test-client";
+  process.env.DATABASE_URL="postgresql://test:test@localhost:5432/test";
+});
+
 import { applyEspionageEffect, espionageTargetExists, productionOrderLabel, recruitmentWaveLabel } from "./espionage-effects.js";
 
 describe("casusluk etki hedefleri", () => {

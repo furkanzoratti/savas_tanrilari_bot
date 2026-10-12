@@ -490,8 +490,7 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
       countryAName: interaction.options.getString("taraf-a", true), countryBName: interaction.options.getString("taraf-b", true),
       terrain: interaction.options.getString("arazi", true) as BattleTerrain, narrative: interaction.options.getString("anlatim") ?? "",
       controllerA: interaction.options.getString("kontrol-a", true) as BattleController, controllerB: interaction.options.getString("kontrol-b", true) as BattleController,
-      defenderSettlementName: interaction.options.getString("savunulan-yerleske"),
-      encounterId: interaction.options.getString("karsilasma-id") });
+      defenderSettlementName: interaction.options.getString("savunulan-yerleske") });
     const rosterCommand = view.battle.terrain === "NAVAL" ? "/savas filo-ayarla" : "/savas kadro-ayarla";
     const supportNote = view.battle.terrain === "SIEGE" ? " Kuşatma aletlerini `/savas kusatma-aleti-ayarla` ile girin." : "";
     const rebelSides=(["A","B"] as BattleSideKey[]).filter((side)=>view.sides[side].rebel_faction_id);

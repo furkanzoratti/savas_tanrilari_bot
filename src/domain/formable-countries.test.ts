@@ -68,7 +68,6 @@ describe("kurulabilir ülkeler", () => {
   it("At hammaddesini ve ülke süvari indirimini Atlı Okçuya birlikte uygular", () => {
     expect(unitCostMultiplier("horse_archer", ["HORSES"])).toBe(0.90);
     expect(formableUnitDiscount("SARMATIA", "horse_archer" )).toBe(0.10);
-    expect(FORMABLE_COUNTRIES.SARMATIA.modifiers.observerManpower).toBe(100);
   });
 
   it("yeni özel birliklere kurulabilir ülke sınıf indirimlerini uygular", () => {

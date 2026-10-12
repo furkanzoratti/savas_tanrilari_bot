@@ -8,7 +8,7 @@ describe("ülkeye özel birlikler", () => {
     expect(SPECIAL_UNITS).toEqual({
       legionary: { name: "Lejyoner", price: 5_000, upkeep: 500 },
       hoplite: { name: "Hoplit", price: 3_500, upkeep: 400 },
-      horse_archer: { name: "Atlı Okçu", price: 2_500, upkeep: 250 },
+      horse_archer: { name: "Atlı Okçu", price: 4_500, upkeep: 450 },
       steppe_horse_archer: { name: "Bozkır Atlı Okçu", price: 2_500, upkeep: 250 },
       steppe_cavalry: { name: "Bozkır Süvarisi", price: 2_250, upkeep: 225 },
       kurgan_shieldbearer: { name: "Kurgan Kalkanlıları", price: 3_000, upkeep: 300 },

@@ -1,6 +1,15 @@
 import type { NavalUnitType } from "./battle.js";
 import { fleetTransportCapacity } from "./catalog.js";
-import { siegeLoad, type MobileSiegeLoad } from "./movement.js";
+
+export type MobileSiegeLoad = Partial<Record<"ballista" | "mantlet" | "catapult" | "siege_tower", number>>;
+
+function siegeLoad(assets:MobileSiegeLoad):number{
+  const whole=(value:number|undefined)=>Math.max(0,Math.floor(Number(value??0)));
+  return Math.ceil(whole(assets.ballista)/2)
+    +whole(assets.mantlet)
+    +whole(assets.catapult)
+    +whole(assets.siege_tower)*2;
+}
 
 export interface NavalCargoManifest {
   soldiers: number;

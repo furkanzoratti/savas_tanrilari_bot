@@ -3,7 +3,7 @@ export const RESOURCES = {
   IRON: { label: "Demir", effects: ["Mızraklı, ağır sınıf birlikler ve aynı sınıftaki özel birliklerin yetiştirme maliyeti -%10", "Koçbaşı, Katapult ve Balista üretim maliyeti -%10"] },
   TIMBER: { label: "Kereste", effects: ["Bina inşa maliyeti -%10", "Gemi üretim maliyeti -%10"] },
   MARBLE: { label: "Mermer", effects: ["Curia, Panteon, Agora, Akademi, Hanlar ve Hamamlar, Gümrükhane ile Sayım ve Vergi Dairesi inşa maliyeti -%10", "Bu binaların inşa süresi -1 Tur"] },
-  HORSES: { label: "At", effects: ["Süvari, savaş arabası ve hareketli sınıftaki özel birliklerin yetiştirme maliyeti -%10", "Ordu hareket hızı +%25"] },
+  HORSES: { label: "At", effects: ["Süvari, savaş arabası ve hareketli sınıftaki özel birliklerin yetiştirme maliyeti -%10"] },
   LEATHER: { label: "Deri", effects: ["Hafif Piyade, Okçu, Sapancı ve aynı sınıftaki özel birliklerin yetiştirme maliyeti -%10", "Mantlet, Koçbaşı ve Kuşatma Kulesi maliyeti -%10"] },
   WINE: { label: "Şarap", effects: ["Huzursuzluk ihtimali -%10; asimilasyon süresi -1 Tur", "Hanlar ve Hamamların sabit geliri bina seviyesi başına %5 artar"] },
   OLIVE: { label: "Zeytin", effects: ["Şifacı Evi nüfus getirisi +%20", "Salgın hastalık ihtimali -%10"] },
@@ -18,26 +18,10 @@ export const RESOURCES = {
 
 export type ResourceType = keyof typeof RESOURCES;
 
-const MOVEMENT_SPEED_RESOURCE_BONUSES:Record<"ARMY"|"FLEET",Partial<Record<ResourceType,number>>>={
-  ARMY:{HORSES:0.25},
-  FLEET:{}
-};
-
 export const RESOURCE_CHOICES = Object.entries(RESOURCES).map(([value, resource]) => ({ name: resource.label, value }));
 
 export function isResourceType(value: string): value is ResourceType {
   return Object.prototype.hasOwnProperty.call(RESOURCES, value);
-}
-
-export function movementSpeedResourceBonus(
-  formationKind:"ARMY"|"FLEET",resources:readonly ResourceType[]
-):{percent:number;resources:ResourceType[]} {
-  const rules=MOVEMENT_SPEED_RESOURCE_BONUSES[formationKind];
-  const active=[...new Set(resources)].filter((resource)=>Number(rules[resource]??0)>0);
-  return {
-    percent:active.reduce((sum,resource)=>sum+Number(rules[resource]??0),0),
-    resources:active
-  };
 }
 
 function has(resources: readonly ResourceType[], resource: ResourceType): boolean {

@@ -133,14 +133,11 @@ describe("ayrıntılı tur ilerletme kartı", () => {
     expect(report).not.toContain("Liste kısaltıldı");
   });
 
-  it("ekonomi, hareket ve karakter otomasyonu sonuçlarını aynı rapor zincirine alır",()=>{
+  it("ekonomi ve karakter otomasyonu sonuçlarını aynı rapor zincirine alır",()=>{
     const cards=turnAnnouncementCards({
       kind:"ADVANCE",turn:45,acquisition:true,
       countryEconomyDetails:[{countryName:"Roma",buildingIncome:4_000,taxIncome:3_000,landTradeIncome:2_000,
         seaTradeIncome:1_000,upkeep:2_500,net:7_500,populationGain:420,settlementCount:4}],
-      movement:{enabled:true,stage:"ADVANCE",turn:45,processed:8,advanced:6,completed:2,blocked:1,ongoing:5,
-        ownershipUpdates:1,alreadyProcessed:false,reconChecks:2,encounters:1,
-        muster:{processed:2,advanced:1,joined:1,blocked:0,waiting:0},disembarkations:{processed:1,completed:1,blocked:0}},
       characterAutomation:{espionageResolved:2,espionagePublished:2,characterEvents:3,characterPublished:3,
         dynastyProcessed:12,dynastyEvents:4,dynastyDeathChecks:2,dynastyDeathLogsPublished:2,
         dynastyNpcBirths:1,dynastyNpcMarriages:1,warnings:["Örnek uyarı"]}
@@ -148,7 +145,6 @@ describe("ayrıntılı tur ilerletme kartı", () => {
     const report=cards.flatMap((card)=>card.toJSON().fields??[]).map((field)=>`${field.name}\n${field.value}`).join("\n");
     expect(report).toContain("💰 Ülke Ekonomi Dökümü");
     expect(report).toContain("Net +7.500 Altın");
-    expect(report).toContain("🗺️ Hareket Çözümlemesi");
     expect(report).toContain("🧭 Karakter ve Hanedan Otomasyonu");
     expect(report).toContain("Örnek uyarı");
   });

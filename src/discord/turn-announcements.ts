@@ -59,12 +59,6 @@ export interface TurnAnnouncementInput {
     officeYields:Array<{familyName:string;characterName:string;officeLabel:string;treasury:number;influence:number;reputation:number;scandal:number;completed:boolean}>;
     lawEffects:Array<{countryName:string;lawTitle:string;summary:string}>;
   };
-  movement?:{
-    enabled:boolean;stage:string;turn:number;processed:number;advanced:number;completed:number;blocked:number;ongoing:number;
-    ownershipUpdates:number;alreadyProcessed:boolean;reconChecks:number;encounters:number;
-    muster:{processed:number;advanced:number;joined:number;blocked:number;waiting:number};
-    disembarkations:{processed:number;completed:number;blocked:number};
-  };
   characterAutomation?:{
     espionageResolved:number;espionagePublished:number;characterEvents:number;characterPublished:number;
     dynastyProcessed:number;dynastyEvents:number;dynastyDeathChecks:number;dynastyDeathLogsPublished:number;
@@ -136,9 +130,9 @@ function paginateFields(fields:TurnAnnouncementField[]):TurnAnnouncementField[][
 export function turnAnnouncement(input: TurnAnnouncementInput): EmbedBuilder {
   if (input.kind !== "ADVANCE") {
     const details = {
-      OPEN: { color: 0x3f7f5f, title: `🟢 TUR ${input.turn} HAREKETLERE AÇILDI`, description: "Oyuncular askerî hareketlerini, diplomasilerini ve diğer tur hamlelerini gönderebilir. Hamlelerin açık ve eksiksiz yazılması gerekir." },
+      OPEN: { color: 0x3f7f5f, title: `🟢 TUR ${input.turn} HAMLELERE AÇILDI`, description: "Oyuncular diplomatik girişimlerini ve diğer tur hamlelerini gönderebilir. Hamlelerin açık ve eksiksiz yazılması gerekir." },
       PAUSE: { color: 0xd28b26, title: `⏸️ TUR ${input.turn} DURDURULDU`, description: "Yeni oyuncu hamleleri durdurulmuştur. Savaşlar, isyanlar ve tur içi olaylar oyun yöneticisi tarafından çözülmektedir." },
-      CLOSE: { color: 0x8b1e1e, title: `🔴 TUR ${input.turn} KAPATILDI`, description: "Bu turun bütün hareketleri sona ermiştir. Yeni hamle gönderilemez; bir sonraki tur duyurusu beklenmelidir." }
+      CLOSE: { color: 0x8b1e1e, title: `🔴 TUR ${input.turn} KAPATILDI`, description: "Bu turun bütün hamleleri sona ermiştir. Yeni hamle gönderilemez; bir sonraki tur duyurusu beklenmelidir." }
     } as const;
     const selected = details[input.kind];
     return new EmbedBuilder().setColor(selected.color).setTitle(selected.title).setDescription(selected.description).setImage(TURN_BANNER_URL).setFooter({ text: "Antik Medeniyetler Role Play • Resmî Tur Duyurusu" }).setTimestamp();
@@ -149,7 +143,7 @@ export function turnAnnouncement(input: TurnAnnouncementInput): EmbedBuilder {
     .setColor(0xb58b32)
     .setTitle(`⚔️ TUR ${input.turn} BAŞLADI`)
     .setDescription([
-      "Yeni rol turu açılmıştır. Askerî hareketler, diplomatik girişimler ve devlet hamleleri işleme alınabilir.",
+      "Yeni rol turu açılmıştır. Diplomatik girişimler ve devlet hamleleri işleme alınabilir.",
       input.acquisition ? "🪙 **Bu tur bir Alım Turudur.** Gelir, nüfus ve bakım sonuçları işlenmiştir." : "Bu tur standart rol turudur.",
       `🏗️ Tamamlanan bina: **${input.completedBuildings ?? 0}** • ⚔️ Katılan asker: **${(input.recruitmentArrivals ?? 0).toLocaleString("tr-TR")}**`,
       `🛡️ Tamamlanan garnizon: **${input.garrisonUpgrades ?? 0}** • 🚢 Tamamlanan gemi: **${input.completedShips ?? 0}** • 🛠️ Kuşatma aleti: **${input.completedSiegeAssets ?? 0}**`
@@ -333,16 +327,6 @@ export function turnAnnouncement(input: TurnAnnouncementInput): EmbedBuilder {
     name: "\u{1F4DC} Sona Eren Paralı Asker Sözleşmeleri",
     value: fieldValue(input.mercenaryEndedDetails.map((item) => `- **${item.countryName}** - ${item.companyName} - ${item.reason}`))
   });
-  if(input.movement)embed.addFields({
-    name:"🗺️ Hareket Çözümlemesi",
-    value:fieldValue(input.movement.enabled?[
-      `• **Tur ${input.movement.turn} / ${input.movement.stage}** — Emir ${input.movement.processed} • İlerleyen ${input.movement.advanced} • Varan ${input.movement.completed} • Devam eden ${input.movement.ongoing} • Engelli ${input.movement.blocked}`,
-      `• Gizli keşif ${input.movement.reconChecks} • Karşılaşma/Hex dosyası ${input.movement.encounters} • Sahiplik güncellemesi ${input.movement.ownershipUpdates}`,
-      `• Ordu toplama: ${input.movement.muster.processed} emir • ${input.movement.muster.advanced} ilerledi • ${input.movement.muster.joined} katıldı • ${input.movement.muster.blocked} engelli • ${input.movement.muster.waiting} bekliyor`,
-      `• Çıkarma: ${input.movement.disembarkations.processed} emir • ${input.movement.disembarkations.completed} tamamlandı • ${input.movement.disembarkations.blocked} engelli`,
-      ...(input.movement.alreadyProcessed?["• Bu hareket aşaması daha önce çözülmüştü; ikinci kez uygulanmadı."]:[])
-    ]:["• Koordinatlı hareket sistemi bu tur etkin değil."])
-  });
   if(input.characterAutomation)embed.addFields({
     name:"🧭 Karakter ve Hanedan Otomasyonu",
     value:fieldValue([
@@ -384,7 +368,7 @@ export function turnAnnouncementCards(input: TurnAnnouncementInput): EmbedBuilde
       .setColor(source.color??0xb58b32)
       .setTitle(`📜 TUR ${input.turn} SONUÇLARI • ${index+2}/${total}`)
       .setDescription(index===0
-        ?"Tur ilerletilirken işlenen bütün ekonomi, toplum, askerî hareket ve otomasyon sonuçları. Hiçbir kayıt kısaltılmaz; devam sayfaları sırayla yayımlanır."
+        ?"Tur ilerletilirken işlenen bütün ekonomi, toplum ve otomasyon sonuçları. Hiçbir kayıt kısaltılmaz; devam sayfaları sırayla yayımlanır."
         :"Tur sonuçlarının devamı.")
       .setFooter({text:source.footer?.text??"Antik Medeniyetler Role Play • Resmî Tur Duyurusu"})
       .setTimestamp();

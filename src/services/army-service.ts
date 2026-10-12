@@ -23,7 +23,6 @@ export interface ArmySiegeAssetAllocation {
 }
 
 export interface ArmyView {
-  muster?: { id: string; start: string; destination: string; steps: number; allowance: number };
   id: string;
   guild_id: string;
   country_id: string;
@@ -43,7 +42,6 @@ export interface ArmyView {
   composition_active: boolean;
   composition_activation_turn: number | null;
   active_battle_id: string | null;
-  current_hex?: string | null;
 }
 
 interface ArmyBaseRow {
@@ -51,7 +49,6 @@ interface ArmyBaseRow {
   commander_character_id: string | null; commander_name: string | null; commander_skill_bonus: number;
   created_turn: number; current_turn: number; army_composition_activation_turn: number | null;
   active_battle_id: string | null;
-  current_hex: string | null;
   is_steppe_confederation: boolean;
 }
 
@@ -70,19 +67,10 @@ async function loadArmy(client: DbClient, armyId: string, countryId?: string): P
             cc.name AS commander_name,COALESCE(cc.skill_bonus,0)::integer AS commander_skill_bonus,
             a.created_turn,g.current_turn,g.army_composition_activation_turn,
             c.is_steppe_state AS is_steppe_confederation,
-            COALESCE(hex.coordinate,CASE WHEN cargo.army_id IS NOT NULL THEN
-              CONCAT('Gemide: ',cargo_fleet.name,' • ',COALESCE(fleet_hex.coordinate,'Filo konumu yok')) END) AS current_hex,
             (SELECT b.id FROM battle_army_assignments baa JOIN battles b ON b.id=baa.battle_id
               WHERE baa.army_id=a.id AND b.status NOT IN ('FINISHED','CANCELLED') LIMIT 1) AS active_battle_id
        FROM armies a JOIN countries c ON c.id=a.country_id JOIN guilds g ON g.discord_id=a.guild_id
        LEFT JOIN country_characters cc ON cc.id=a.commander_character_id
-       LEFT JOIN guild_movement_settings movement_settings ON movement_settings.guild_id=a.guild_id
-       LEFT JOIN army_map_positions position ON position.army_id=a.id
-       LEFT JOIN map_hexes hex ON hex.id=position.hex_id
-       LEFT JOIN fleet_cargo_armies cargo ON cargo.army_id=a.id AND COALESCE(movement_settings.enabled,FALSE)=TRUE
-       LEFT JOIN fleets cargo_fleet ON cargo_fleet.id=cargo.fleet_id
-       LEFT JOIN fleet_map_positions cargo_position ON cargo_position.fleet_id=cargo.fleet_id
-       LEFT JOIN map_hexes fleet_hex ON fleet_hex.id=cargo_position.hex_id
       WHERE a.id=$1${countryFilter}`,
     params
   )).rows[0];
@@ -161,7 +149,7 @@ export const armyService = {
   async availableSettlementUnits(countryId: string, settlementValue: string): Promise<Array<{ unit_type: BattleUnitType; available: number }>> {
     const rows = (await pool.query<{ unit_type: BattleUnitType; available: number }>(
       `SELECT stock.unit_type,
-              GREATEST(0,stock.quantity-COALESCE(allocated.quantity,0)-COALESCE(in_transit.quantity,0))::integer AS available
+              GREATEST(0,stock.quantity-COALESCE(allocated.quantity,0))::integer AS available
          FROM (
            SELECT u.unit_type,COALESCE(SUM(u.quantity),0)::integer AS quantity
              FROM unit_stacks u JOIN settlements s ON s.id=u.settlement_id
@@ -174,17 +162,6 @@ export const armyService = {
             WHERE s.country_id=$1 AND (s.id::text=$2 OR lower(s.name)=lower($2))
             GROUP BY au.unit_type
          ) allocated ON allocated.unit_type=stock.unit_type
-         LEFT JOIN (
-           SELECT muster.unit_type,COALESCE(SUM(muster.quantity),0)::integer AS quantity
-             FROM army_muster_orders muster JOIN settlements s ON s.id=muster.source_settlement_id
-            WHERE s.country_id=$1 AND (s.id::text=$2 OR lower(s.name)=lower($2))
-              AND muster.status IN ('SUBMITTED','IN_PROGRESS','BLOCKED','WAITING_ARMY')
-              AND EXISTS (
-                SELECT 1 FROM guild_movement_settings settings
-                 WHERE settings.guild_id=muster.guild_id AND settings.enabled=TRUE
-              )
-            GROUP BY muster.unit_type
-         ) in_transit ON in_transit.unit_type=stock.unit_type
         ORDER BY stock.unit_type`,
       [countryId, settlementValue.trim()]
     )).rows;
@@ -238,7 +215,7 @@ export const armyService = {
     } finally { client.release(); }
   },
 
-  async create(input: { guildId: string; countryId: string; actorId: string; name: string; commanderId?: string | null; rallySettlement?: string | null }): Promise<ArmyView> {
+  async create(input: { guildId: string; countryId: string; actorId: string; name: string; commanderId?: string | null }): Promise<ArmyView> {
     return withTransaction(async (client) => {
       const name = input.name.trim();
       if (name.length < 2 || name.length > 60) throw new GameError("Ordu adı 2-60 karakter arasında olmalıdır.");
@@ -256,17 +233,6 @@ export const armyService = {
         throw error;
       }
       if (input.commanderId) await this.assignCommanderInTransaction(client, input.countryId, armyId, input.commanderId);
-      if (input.rallySettlement?.trim()) {
-        const rally=(await client.query<{hex_id:string}>(
-          `SELECT position.hex_id FROM settlements settlement
-             JOIN settlement_map_positions position ON position.settlement_id=settlement.id
-            WHERE settlement.country_id=$1 AND (settlement.id::text=$2 OR lower(settlement.name)=lower($2))`,
-          [input.countryId,input.rallySettlement.trim()]
-        )).rows[0];
-        if(!rally)throw new GameError("Toplanma yerleşkesi bu devlete ait değil veya R56 haritasına bağlanmamış.");
-        await client.query("INSERT INTO army_map_positions(army_id,hex_id,arrived_turn) VALUES($1,$2,$3)",
-          [armyId,rally.hex_id,turn]);
-      }
       await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'army.create','army',$3,$4::jsonb)", [input.guildId, input.actorId, armyId, JSON.stringify({ name })]);
       return loadArmy(client, armyId, input.countryId);
     });
@@ -291,17 +257,7 @@ export const armyService = {
         "SELECT COALESCE(SUM(quantity),0)::integer AS quantity FROM army_units WHERE settlement_id=$1 AND unit_type=$2",
         [settlement.id, input.unitType]
       )).rows[0]?.quantity ?? 0);
-      const inTransit = Number((await client.query<{ quantity: number }>(
-        `SELECT COALESCE(SUM(quantity),0)::integer AS quantity FROM army_muster_orders
-          WHERE source_settlement_id=$1 AND unit_type=$2
-            AND status IN ('SUBMITTED','IN_PROGRESS','BLOCKED','WAITING_ARMY')
-            AND EXISTS (
-              SELECT 1 FROM guild_movement_settings settings
-               WHERE settings.guild_id=$3 AND settings.enabled=TRUE
-            )`,
-        [settlement.id,input.unitType,input.guildId]
-      )).rows[0]?.quantity ?? 0);
-      const available = Math.max(0, stock - allocated - inTransit);
+      const available = Math.max(0, stock - allocated);
       if (input.quantity > available) throw new GameError(`Bu yerleşkede başka ordulara ayrılmamış yalnızca ${available} ${BATTLE_UNIT_STATS[input.unitType].label} var.`);
       await client.query(
         `INSERT INTO army_units(army_id,settlement_id,origin_settlement_name,unit_type,quantity) VALUES($1,$2,$3,$4,$5)
@@ -446,17 +402,6 @@ export const armyService = {
     return withTransaction(async (client) => {
       const army = await resolveArmy(client, input.countryId, input.army, true);
       await assertMutable(client, army.id);
-      if ((await client.query(
-        `SELECT 1 FROM army_muster_orders muster
-          WHERE muster.army_id=$1
-            AND muster.status IN ('SUBMITTED','IN_PROGRESS','BLOCKED','WAITING_ARMY')
-            AND EXISTS (
-              SELECT 1 FROM guild_movement_settings settings
-               WHERE settings.guild_id=$2 AND settings.enabled=TRUE
-            )
-          LIMIT 1`,
-        [army.id,input.guildId]
-      )).rowCount) throw new GameError("Bu orduya askerler yoldayken ordu dağıtılamaz.");
       const destination = (await client.query<{ id: string }>(
         "SELECT id FROM settlements WHERE country_id=$1 ORDER BY population DESC,id LIMIT 1 FOR UPDATE",
         [input.countryId]

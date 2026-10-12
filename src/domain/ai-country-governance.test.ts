@@ -5,14 +5,14 @@ const observation: AiCountryObservation = {
   rulesVersion: 2, turn: 26, phase: "OPEN",
   country: { id: "country-1", name: "Atina", treasury: 1000, mobilization: "PEACE", activeFormable: null, freePopulation: 10_000, militaryUsed: 2_000, militaryLimit: 5_000, grossIncome: 500, payableIncome: 450, totalUpkeep: 100, netIncome: 350 },
   settlements: [], armies: [], fleets: [], characters: [], diplomacy: {}, publicCountries: [], visibleBattles: [], intelligenceReports: [],
-  decisionSupport: {}, strategicMap: {},
+  decisionSupport: {},
   referenceCatalog: { countryIds: ["country-1", "country-2"], settlementIds: ["settlement-1"], publicSettlementIds: ["settlement-1", "settlement-2"], armyIds: ["army-1"], fleetIds: [], characterIds: ["character-1"], battleIds: ["battle-1"] }
 };
 
 const validPlan = {
   summary: "Savunmayı koru.", strategicAssessment: [], risks: [], nextTurnGoals: [],
   budgetPlan: { startingTreasury: 1000, reserveAmount: 250, plannedSpending: 0, estimatedTreasuryAfter: 1000, reasoning: "Rezerv korunuyor." },
-  constructionPlan: [], recruitmentPlan: [], shipbuildingPlan: [], movementPlan: [], warPlans: [],
+  constructionPlan: [], recruitmentPlan: [], shipbuildingPlan: [], warPlans: [],
   orders: [{ category: "MILITARY", kind: "DEFEND", sourceRef: "army-1", targetRef: "settlement-1", amount: null, priority: 4, condition: null, reason: "Başkent savunması" }],
   battlePolicies: [{ battleId: "battle-1", posture: "CAUTIOUS", retreatRule: "Ağır kayıpta çekil.", preferredNavalOrder: null, reason: "Kuvveti koru" }]
 };

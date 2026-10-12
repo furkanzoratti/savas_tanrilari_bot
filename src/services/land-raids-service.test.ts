@@ -63,7 +63,6 @@ describe("regional raid settlement eligibility",()=>{
       if(sql.includes("SELECT settlement.id FROM settlements"))return {rows:[{id:"payout-settlement"}],rowCount:1};
       if(sql.includes("SELECT war.id FROM state_wars"))return {rows:[],rowCount:0};
       if(sql.includes("SELECT 1 FROM land_raids")||sql.includes("SELECT 1 FROM battle_army_assignments"))return {rows:[],rowCount:0};
-      if(sql.includes("FROM guild_movement_settings"))return {rows:[{enabled:false}],rowCount:1};
       if(sql.includes("SELECT current_turn FROM guilds"))return {rows:[{current_turn:24}],rowCount:1};
       if(sql.includes("INSERT INTO land_raids"))return {rows:[{id:"raid-1"}],rowCount:1};
       if(sql.includes("INSERT INTO audit_logs"))return {rows:[],rowCount:1};

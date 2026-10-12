@@ -12,7 +12,7 @@ export type AiCountryDoctrine = keyof typeof AI_COUNTRY_DOCTRINES;
 
 export const AI_ORDER_KINDS = [
   "HOLD_RESERVE", "CONSTRUCT", "RECRUIT", "BUILD_SHIP", "TRANSFER_TREASURY", "HIRE_MERCENARY", "REPAIR_FLEET",
-  "MOVE_ARMY", "MOVE_FLEET", "DEFEND", "REINFORCE", "BESIEGE", "BLOCKADE", "RAID", "DISEMBARK",
+  "DEFEND", "REINFORCE", "BESIEGE", "BLOCKADE", "RAID",
   "ASSIGN_CHARACTER", "PROPOSE_TRADE", "PROPOSE_ALLIANCE", "PROPOSE_PACT", "PROPOSE_PEACE", "DECLARE_WAR",
   "NO_ACTION"
 ] as const;
@@ -103,23 +103,10 @@ const shipbuildingActionSchema = z.object({
   reason: z.string().min(1).max(800)
 });
 
-const movementActionSchema = z.object({
-  formationKind: z.enum(["ARMY", "FLEET"]),
-  formationRef: z.string(),
-  startHex: z.string(),
-  destinationHex: z.string(),
-  targetSettlementRef: z.string().nullable(),
-  route: z.array(z.string()).max(160),
-  purpose: z.enum(["DEFEND", "REINFORCE", "ASSEMBLE", "ATTACK", "SIEGE", "BLOCKADE", "RAID", "RETREAT", "PATROL"]),
-  priority: z.number().int().min(1).max(5),
-  reason: z.string().min(1).max(800)
-});
-
 const warPlanSchema = z.object({
   opponentCountryRef: z.string(),
   objective: z.string().min(1).max(800),
   posture: z.enum(["OFFENSIVE", "DEFENSIVE", "LIMITED", "AVOID"]),
-  assemblyHex: z.string().nullable(),
   committedArmyRefs: z.array(z.string()).max(20),
   committedFleetRefs: z.array(z.string()).max(20),
   phases: z.array(z.string().min(1).max(500)).min(1).max(8),
@@ -135,7 +122,6 @@ export const aiCountryTurnPlanSchema = z.object({
   constructionPlan: z.array(constructionActionSchema).max(12),
   recruitmentPlan: z.array(recruitmentActionSchema).max(30),
   shipbuildingPlan: z.array(shipbuildingActionSchema).max(20),
-  movementPlan: z.array(movementActionSchema).max(30),
   warPlans: z.array(warPlanSchema).max(12),
   orders: z.array(aiOrderSchema).max(30),
   battlePolicies: z.array(battlePolicySchema).max(20),
@@ -172,7 +158,6 @@ export interface AiCountryObservation {
   visibleBattles: unknown[];
   intelligenceReports: unknown[];
   decisionSupport: unknown;
-  strategicMap: unknown;
   referenceCatalog: {
     countryIds: string[];
     settlementIds: string[];
@@ -204,7 +189,7 @@ export function assertCountryScopedObservation(value: unknown, path = "observati
 export const aiTurnPlanJsonSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["summary", "strategicAssessment", "budgetPlan", "constructionPlan", "recruitmentPlan", "shipbuildingPlan", "movementPlan", "warPlans", "orders", "battlePolicies", "risks", "nextTurnGoals"],
+  required: ["summary", "strategicAssessment", "budgetPlan", "constructionPlan", "recruitmentPlan", "shipbuildingPlan", "warPlans", "orders", "battlePolicies", "risks", "nextTurnGoals"],
   properties: {
     summary: { type: "string" },
     strategicAssessment: { type: "array", items: { type: "string" } },
@@ -249,25 +234,13 @@ export const aiTurnPlanJsonSchema = {
         }
       }
     },
-    movementPlan: {
-      type: "array", items: {
-        type: "object", additionalProperties: false,
-        required: ["formationKind", "formationRef", "startHex", "destinationHex", "targetSettlementRef", "route", "purpose", "priority", "reason"],
-        properties: {
-          formationKind: { type: "string", enum: ["ARMY", "FLEET"] }, formationRef: { type: "string" }, startHex: { type: "string" }, destinationHex: { type: "string" },
-          targetSettlementRef: { type: ["string", "null"] }, route: { type: "array", items: { type: "string" } },
-          purpose: { type: "string", enum: ["DEFEND", "REINFORCE", "ASSEMBLE", "ATTACK", "SIEGE", "BLOCKADE", "RAID", "RETREAT", "PATROL"] },
-          priority: { type: "integer", minimum: 1, maximum: 5 }, reason: { type: "string" }
-        }
-      }
-    },
     warPlans: {
       type: "array", items: {
         type: "object", additionalProperties: false,
-        required: ["opponentCountryRef", "objective", "posture", "assemblyHex", "committedArmyRefs", "committedFleetRefs", "phases", "attackCondition", "abortCondition", "reason"],
+        required: ["opponentCountryRef", "objective", "posture", "committedArmyRefs", "committedFleetRefs", "phases", "attackCondition", "abortCondition", "reason"],
         properties: {
           opponentCountryRef: { type: "string" }, objective: { type: "string" }, posture: { type: "string", enum: ["OFFENSIVE", "DEFENSIVE", "LIMITED", "AVOID"] },
-          assemblyHex: { type: ["string", "null"] }, committedArmyRefs: { type: "array", items: { type: "string" } }, committedFleetRefs: { type: "array", items: { type: "string" } },
+          committedArmyRefs: { type: "array", items: { type: "string" } }, committedFleetRefs: { type: "array", items: { type: "string" } },
           phases: { type: "array", items: { type: "string" }, minItems: 1 }, attackCondition: { type: "string" }, abortCondition: { type: "string" }, reason: { type: "string" }
         }
       }
@@ -323,16 +296,14 @@ export function validateAiPlanReferences(plan: AiCountryTurnPlan, observation: A
   const errors: string[] = [];
   plan.orders.forEach((order, index) => {
     if (order.sourceRef && !known.has(order.sourceRef)) errors.push(`Emir ${index + 1}: bilinmeyen kaynak kaydı ${order.sourceRef}.`);
-    if (order.targetRef && !known.has(order.targetRef) && !/^[A-Z]{1,3}\d{1,3}$/u.test(order.targetRef)) {
+    if (order.targetRef && !known.has(order.targetRef)) {
       errors.push(`Emir ${index + 1}: bilinmeyen hedef kaydı ${order.targetRef}.`);
     }
   });
   const settlementIds = new Set(observation.referenceCatalog.settlementIds);
-  const publicSettlementIds = new Set(observation.referenceCatalog.publicSettlementIds);
   const armyIds = new Set(observation.referenceCatalog.armyIds);
   const fleetIds = new Set(observation.referenceCatalog.fleetIds);
   const countryIds = new Set(observation.referenceCatalog.countryIds);
-  const hexPattern = /^[A-Z]{1,3}-?\d{1,3}$/u;
   plan.constructionPlan.forEach((action, index) => {
     if (!settlementIds.has(action.settlementRef)) errors.push(`İnşaat ${index + 1}: bilinmeyen yerleşke ${action.settlementRef}.`);
   });
@@ -343,17 +314,10 @@ export function validateAiPlanReferences(plan: AiCountryTurnPlan, observation: A
   plan.shipbuildingPlan.forEach((action, index) => {
     if (!settlementIds.has(action.settlementRef)) errors.push(`Gemi üretimi ${index + 1}: bilinmeyen yerleşke ${action.settlementRef}.`);
   });
-  plan.movementPlan.forEach((action, index) => {
-    const formationIds = action.formationKind === "ARMY" ? armyIds : fleetIds;
-    if (!formationIds.has(action.formationRef)) errors.push(`Hareket ${index + 1}: bilinmeyen birlik ${action.formationRef}.`);
-    if (!hexPattern.test(action.startHex) || !hexPattern.test(action.destinationHex)) errors.push(`Hareket ${index + 1}: geçersiz Hex koordinatı.`);
-    if (action.targetSettlementRef && !publicSettlementIds.has(action.targetSettlementRef)) errors.push(`Hareket ${index + 1}: bilinmeyen hedef yerleşke ${action.targetSettlementRef}.`);
-  });
   plan.warPlans.forEach((war, index) => {
     if (!countryIds.has(war.opponentCountryRef)) errors.push(`Savaş planı ${index + 1}: bilinmeyen devlet ${war.opponentCountryRef}.`);
     if (war.committedArmyRefs.some((id) => !armyIds.has(id))) errors.push(`Savaş planı ${index + 1}: bilinmeyen ordu içeriyor.`);
     if (war.committedFleetRefs.some((id) => !fleetIds.has(id))) errors.push(`Savaş planı ${index + 1}: bilinmeyen filo içeriyor.`);
-    if (war.assemblyHex && !hexPattern.test(war.assemblyHex)) errors.push(`Savaş planı ${index + 1}: geçersiz toplanma Hex'i.`);
   });
   const battleIds = new Set(observation.referenceCatalog.battleIds);
   plan.battlePolicies.forEach((policy, index) => {

@@ -54,8 +54,10 @@ describe("yönetim komutları", () => {
     expect(transfer?.options?.find((option) => option.name === "islem-turu")).toBeDefined();
   });
 
-  it("gözcü, atölye, saha aleti ve asimilasyon komutlarını kaydeder", () => {
-    expect(commandBuilders.some((command) => command.name === "gozcu-alimi")).toBe(true);
+  it("atölye, saha aleti ve asimilasyon komutlarını kaydeder", () => {
+    expect(commandBuilders.some((command) => command.name === "gozcu-alimi")).toBe(false);
+    expect(commandBuilders.some((command) => command.name === "hareket")).toBe(false);
+    expect(commandBuilders.some((command) => command.name === "harita")).toBe(false);
     expect(commandBuilders.some((command) => command.name === "kusatma-uretimi")).toBe(true);
     const battle = commandBuilders.find((command) => command.name === "savas");
     expect(battle?.options?.some((option) => option.name === "saha-aleti-al")).toBe(true);

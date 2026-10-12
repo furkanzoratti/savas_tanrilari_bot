@@ -11,7 +11,7 @@ vi.mock("./game-service.js", () => ({ GameError: class GameError extends Error {
 
 import { fleetService } from "./fleet-service.js";
 
-function fleetClient(options: { cargo?: boolean; movementEnabled?: boolean; moving?: boolean } = {}): { client: DbClient; queries: string[] } {
+function fleetClient(options: { cargo?: boolean } = {}): { client: DbClient; queries: string[] } {
   const queries: string[] = [];
   let allocation = 1;
   const client = {
@@ -30,11 +30,6 @@ function fleetClient(options: { cargo?: boolean; movementEnabled?: boolean; movi
       if(sql.includes("FROM naval_ship_damage damage JOIN settlements settlement"))return {rows:[],rowCount:0};
       if (sql.includes("FROM battle_fleet_assignments")) return { rows: [], rowCount: 0 };
       if (sql.includes("FROM naval_blockades") || sql.includes("FROM naval_raids")) return { rows: [], rowCount: 0 };
-      if (sql.includes("COALESCE(settings.enabled,FALSE)")) return {
-        rows: [{ enabled: options.movementEnabled ?? true }], rowCount: 1
-      };
-      if (sql.includes("FROM movement_encounters")) return { rows: [], rowCount: 0 };
-      if (sql.includes("FROM movement_orders")) return { rows: options.moving ? [{}] : [], rowCount: options.moving ? 1 : 0 };
       if (sql.includes("SELECT 1 FROM fleet_cargo_armies")) return { rows: options.cargo ? [{}] : [], rowCount: options.cargo ? 1 : 0 };
       if (sql.includes("SELECT id,name FROM settlements")) return { rows: [{ id: "port-1", name: "Camulodunon" }], rowCount: 1 };
       if (sql.includes("FROM naval_units")) return { rows: [{ quantity: 3 }], rowCount: 1 };
@@ -65,36 +60,6 @@ describe("fleet mutations with transported armies", () => {
     expect(mocked.queries.some((sql) => sql.includes("SELECT 1 FROM fleet_cargo_armies"))).toBe(false);
   });
 
-  it("still blocks removing a ship while an army is embarked", async () => {
-    const mocked = fleetClient({ cargo: true });
-    transaction.client = mocked.client;
-
-    await expect(fleetService.removeShips({
-      guildId: "guild-1", countryId: "country-1", actorId: "player-1", fleet: "Royal Navy",
-      settlement: "Camulodunon", shipType: "trireme", quantity: 1
-    })).rejects.toThrow("Asker taşıyan filodan gemi çıkarılamaz");
-  });
-
-  it("ignores stale movement orders after the movement system is disabled", async () => {
-    const mocked = fleetClient({ movementEnabled: false, moving: true });
-    transaction.client = mocked.client;
-
-    await expect(fleetService.addShips({
-      guildId: "guild-1", countryId: "country-1", actorId: "player-1", fleet: "Royal Navy",
-      settlement: "Camulodunon", shipType: "trireme", quantity: 1
-    })).resolves.toMatchObject({ totalShips: 2 });
-    expect(mocked.queries.some((sql) => sql.includes("FROM movement_orders"))).toBe(false);
-  });
-
-  it("keeps active movement orders locked while the movement system is enabled", async () => {
-    const mocked = fleetClient({ movementEnabled: true, moving: true });
-    transaction.client = mocked.client;
-
-    await expect(fleetService.addShips({
-      guildId: "guild-1", countryId: "country-1", actorId: "player-1", fleet: "Royal Navy",
-      settlement: "Camulodunon", shipType: "trireme", quantity: 1
-    })).rejects.toThrow("etkin hareket emri");
-  });
 });
 
 describe("fleet admiral assignments", () => {
