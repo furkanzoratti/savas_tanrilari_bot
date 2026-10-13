@@ -1277,9 +1277,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     const pool=await armyService.unallocatedPool(country.id);
     const embeds=renderArmyPool(country.name,pool);
     await interaction.editReply({embeds:[embeds[0]!]});
-    for(let index=1;index<embeds.length;index+=3){
-      await interaction.followUp({embeds:embeds.slice(index,index+3),flags:MessageFlags.Ephemeral});
-    }
+    for(const embed of embeds.slice(1))await interaction.followUp({embeds:[embed],flags:MessageFlags.Ephemeral});
   } else if (interaction.commandName === "belge") {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const country=await resolveDocumentCountry(interaction);
