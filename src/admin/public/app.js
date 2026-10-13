@@ -133,6 +133,20 @@ function toast(message, kind = "success") {
 function loading() { page.innerHTML = '<div class="skeleton"></div>'; }
 function setActiveRoute(route) { document.querySelectorAll("[data-route]").forEach((button) => button.classList.toggle("active", button.dataset.route === route)); }
 
+async function refreshKeepingScroll(loader) {
+  const scrollTop = window.scrollY;
+  const previousMinHeight = page.style.minHeight;
+  page.style.minHeight = `${Math.max(page.scrollHeight, window.innerHeight)}px`;
+  try {
+    await loader();
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  } finally {
+    page.style.minHeight = previousMinHeight;
+    const maximumScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    window.scrollTo(0, Math.min(scrollTop, maximumScroll));
+  }
+}
+
 function auditRows(rows, limit = rows.length) {
   if (!rows?.length) return '<div class="empty">Henüz işlem kaydı yok.</div>';
   return rows.slice(0, limit).map((row) => `<div class="audit-item"><span class="audit-dot"></span><div><strong>${escapeHtml(row.actionLabel)}</strong><span>${escapeHtml(row.entityLabel)} · ${date(row.created_at)} · ${escapeHtml(row.actorLabel)}</span>${row.detailSummary ? `<small>${escapeHtml(row.detailSummary)}</small>` : ""}</div></div>`).join("");
@@ -302,7 +316,7 @@ function openRomanFamilyEditor(republic, family) {
       leaderUserId: document.getElementById("roman-family-leader").value.trim() || null,
       reason: document.getElementById("roman-family-reason").value
     }) });
-    closeEditor(); toast(`${family.name} güncellendi.`); await romanPoliticsPage();
+    closeEditor(); toast(`${family.name} güncellendi.`); await refreshKeepingScroll(romanPoliticsPage);
   });
 }
 
@@ -340,14 +354,14 @@ function openRomanFamilyMemberEditor(republic, family, member = null) {
     await api(member ? `/api/admin/roman-family-members/${member.id}` : `/api/admin/roman-families/${family.id}/members`, {
       method: member ? "PATCH" : "POST", body: JSON.stringify(romanFamilyMemberInput())
     });
-    closeEditor(); toast(member ? `${member.name} güncellendi.` : `${family.name} ailesine yeni üye eklendi.`); await romanPoliticsPage();
+    closeEditor(); toast(member ? `${member.name} güncellendi.` : `${family.name} ailesine yeni üye eklendi.`); await refreshKeepingScroll(romanPoliticsPage);
   });
 }
 
 function openRomanFamilyMemberDeathEditor(republic, family, member) {
   openEditor("Roma aile üyesini öldü olarak işle", `${family.name} · ${member.name}`, `<div class="preview-warning"><strong>Ölüm kalıcı tarih kaydıdır.</strong><span>Üye ölü olarak korunur; bekleyen evlilik ve isim bekleyen doğum işlemleri iptal edilir. Aile kadrosundan tamamen silinmez.</span></div><label>Ölüm nedeni<textarea id="roman-member-death-reason" minlength="2" maxlength="200" rows="3" required placeholder="Örn. Hastalık, savaş, yaşlılık…"></textarea></label>`, async () => {
     await api(`/api/admin/roman-family-members/${member.id}/death`, { method: "POST", body: JSON.stringify({ reason: document.getElementById("roman-member-death-reason").value }) });
-    closeEditor(); toast(`${member.name} ölü olarak işlendi.`); await romanPoliticsPage();
+    closeEditor(); toast(`${member.name} ölü olarak işlendi.`); await refreshKeepingScroll(romanPoliticsPage);
   });
 }
 
@@ -357,7 +371,7 @@ function openRomanFamilyMemberRemovalEditor(republic, family, member) {
       confirmation: document.getElementById("roman-member-remove-confirmation").value.trim(),
       reason: document.getElementById("roman-member-remove-reason").value
     }) });
-    closeEditor(); toast(`${member.name} aile kaydından kaldırıldı.`); await romanPoliticsPage();
+    closeEditor(); toast(`${member.name} aile kaydından kaldırıldı.`); await refreshKeepingScroll(romanPoliticsPage);
   });
 }
 
@@ -459,7 +473,7 @@ async function steppePoliticsPage() {
       const candidateOptions = kurultay.candidates.map((candidate) => `<option value="${candidate.titleId}">${escapeHtml(candidate.holderName)} · ${escapeHtml(candidate.countryName)}</option>`).join("");
       openEditor("NPC Kurultay oyu", `${number(kurultay.sequence)}. Büyük Bozkır Kurultayı`, `<div class="preview-warning"><strong>Oy kesindir ve değiştirilemez.</strong><span>Yalnız oyuncuya atanmamış Hanlar ve vassal devletler panelden oy kullanabilir.</span></div><div class="form-grid"><label>Oy kullanacak NPC seçmen<select id="steppe-kurultay-voter" required>${voterOptions}</select></label><label>Han adayı<select id="steppe-kurultay-candidate" required>${candidateOptions}</select></label></div>`, async () => {
         await api(`/api/admin/steppe-kurultay/${kurultay.id}/vote`, { method: "POST", body: JSON.stringify({ voterId: document.getElementById("steppe-kurultay-voter").value, candidateTitleId: document.getElementById("steppe-kurultay-candidate").value }) });
-        closeEditor(); toast("NPC Kurultay oyu kaydedildi."); await steppePoliticsPage();
+        closeEditor(); toast("NPC Kurultay oyu kaydedildi."); await refreshKeepingScroll(steppePoliticsPage);
       });
     });
     return;
@@ -478,14 +492,14 @@ async function steppePoliticsPage() {
     const candidateOptions = kurultay.candidates.map((candidate) => `<option value="${candidate.titleId}">${escapeHtml(candidate.holderName)} · ${escapeHtml(candidate.titleName)} · ${escapeHtml(candidate.countryName)}</option>`).join("");
     openEditor("NPC Kurultay oyu", `${number(kurultay.sequence)}. Büyük Bozkır Kurultayı`, `<div class="preview-warning"><strong>Oy kesindir ve değiştirilemez.</strong><span>Yalnız oyuncuya atanmamış Hanlar ve vassal devletler panelden oy kullanabilir.</span></div><div class="form-grid"><label>Oy kullanacak NPC seçmen<select id="steppe-kurultay-voter" required>${voterOptions}</select></label><label>Han adayı<select id="steppe-kurultay-candidate" required>${candidateOptions}</select></label></div>`, async () => {
       await api(`/api/admin/steppe-kurultay/${kurultay.id}/vote`, { method: "POST", body: JSON.stringify({ voterId: document.getElementById("steppe-kurultay-voter").value, candidateTitleId: document.getElementById("steppe-kurultay-candidate").value }) });
-      closeEditor(); toast("NPC Kurultay oyu kaydedildi."); await steppePoliticsPage();
+      closeEditor(); toast("NPC Kurultay oyu kaydedildi."); await refreshKeepingScroll(steppePoliticsPage);
     });
   });
   document.querySelector("[data-edit-steppe-hegemony]")?.addEventListener("click", () => {
     if (!data.hegemony) return;
     openEditor("Hanlar Hanı otoritesi", data.hegemony.hegemon_country_name, `<div class="form-grid"><label>Üst otorite<input id="edit-steppe-hegemony-authority" type="number" min="0" max="100" step="1" value="${number(data.hegemony.authority)}" required></label><label class="full">Düzenleme gerekçesi<textarea id="edit-steppe-hegemony-reason" maxlength="300" required></textarea></label></div>`, async () => {
       await api("/api/admin/steppe-hegemony", { method: "PATCH", body: JSON.stringify({ authority: Number(document.getElementById("edit-steppe-hegemony-authority").value), reason: document.getElementById("edit-steppe-hegemony-reason").value }) });
-      closeEditor(); toast("Hanlar Hanı otoritesi güncellendi."); await steppePoliticsPage();
+      closeEditor(); toast("Hanlar Hanı otoritesi güncellendi."); await refreshKeepingScroll(steppePoliticsPage);
     });
   });
   document.querySelectorAll("[data-edit-steppe-title]").forEach((button) => button.addEventListener("click", () => {
@@ -493,7 +507,7 @@ async function steppePoliticsPage() {
     if (!title) return;
     openEditor("Bozkır makamını düzenle", title.title_name, `<div class="form-grid"><label>Makam sahibi<input id="edit-steppe-holder-name" maxlength="100" value="${escapeHtml(title.holder_name)}" required></label><label>Discord kullanıcı kimliği<input id="edit-steppe-holder-user" value="${escapeHtml(title.holder_user_id || "")}" placeholder="Oyuncusuz makam için boş bırak"></label><label class="full">Düzenleme gerekçesi<textarea id="edit-steppe-title-reason" maxlength="300" required></textarea></label></div>`, async () => {
       await api(`/api/admin/steppe-titles/${title.id}`, { method: "PATCH", body: JSON.stringify({ holderName: document.getElementById("edit-steppe-holder-name").value, holderUserId: document.getElementById("edit-steppe-holder-user").value || null, reason: document.getElementById("edit-steppe-title-reason").value }) });
-      closeEditor(); toast("Bozkır makamı güncellendi."); await steppePoliticsPage();
+      closeEditor(); toast("Bozkır makamı güncellendi."); await refreshKeepingScroll(steppePoliticsPage);
     });
   }));
 }
@@ -538,7 +552,7 @@ async function dynastyDetailPage(dynastyId) {
 function openDynastyEditor(dynasty) {
   openEditor("Hanedanı düzenle", dynasty.country_name, `<label>Hanedan adı<input id="edit-dynasty-name" value="${escapeHtml(dynasty.name)}" required minlength="2" maxlength="80"></label>`, async () => {
     await api(`/api/admin/dynasties/${dynasty.id}`, { method: "PATCH", body: JSON.stringify({ name: document.getElementById("edit-dynasty-name").value }) });
-    closeEditor(); toast("Hanedan bilgileri güncellendi."); await dynastyDetailPage(dynasty.id);
+    closeEditor(); toast("Hanedan bilgileri güncellendi."); await refreshKeepingScroll(() => dynastyDetailPage(dynasty.id));
   });
 }
 
@@ -560,7 +574,7 @@ function openLocalNobleMarriageEditor(dynasty) {
           age: Number(document.getElementById("local-noble-age").value)
         })
       });
-      closeEditor(); toast("Yerel soylu evliliği hanedana işlendi."); await dynastyDetailPage(dynasty.id);
+      closeEditor(); toast("Yerel soylu evliliği hanedana işlendi."); await refreshKeepingScroll(() => dynastyDetailPage(dynasty.id));
     }
   );
 }
@@ -596,7 +610,7 @@ function openDynastyMemberEditor(dynasty, member = null) {
   openEditor(member ? "Hanedan üyesini düzenle" : "Yeni hanedan üyesi / akraba", `${dynasty.country_name} · ${dynasty.name}`, `<div class="form-grid"><label>Adı<input id="dynasty-member-name" value="${escapeHtml(member?.name || "")}" minlength="2" maxlength="80" required></label><label>Cinsiyet<select id="dynasty-member-gender"><option value="MALE" ${selected("MALE", member?.gender || "MALE")}>Erkek</option><option value="FEMALE" ${selected("FEMALE", member?.gender)}>Kadın</option></select></label><label>Yaş<input id="dynasty-member-age" type="number" min="0" max="120" step="1" value="${Number(member?.age ?? 0)}" required></label><label>Unvan<input id="dynasty-member-title" value="${escapeHtml(member?.title || "Hanedan Üyesi")}" minlength="2" maxlength="80" required></label><label>Özel açıklama / yedek ilişki<input id="dynasty-member-relation" value="${escapeHtml(member?.relation || "Soy bağı belirlenemedi")}" minlength="2" maxlength="120" required><small>Anne, baba ve eş kayıtları yeterliyse hükümdara akrabalık otomatik hesaplanır.</small></label><label>Sağlık<select id="dynasty-member-health" ${dead ? "disabled" : ""}><option value="HEALTHY" ${selected("HEALTHY", health)}>Sağlıklı</option><option value="SICK" ${selected("SICK", health)}>Hasta</option></select></label><label>Hastalık bitiş turu<input id="dynasty-member-sick-until" type="number" min="${Number(dynasty.current_turn)}" step="1" value="${Number(defaultSickUntil)}" ${dead ? "disabled" : ""}><small>Sağlıklı seçilirse bu alan temizlenir.</small></label><label>Veraset sırası<input id="dynasty-member-rank" type="number" min="1" step="1" value="${member?.succession_rank ?? ""}" placeholder="Boş bırakılabilir"></label><label>Eş<select id="dynasty-member-spouse">${dynastyRelationOptions(dynasty, member, "spouse")}</select></label><label>Anne<select id="dynasty-member-mother">${dynastyRelationOptions(dynasty, member, "mother")}</select></label><label>Baba<select id="dynasty-member-father">${dynastyRelationOptions(dynasty, member, "father")}</select></label></div><div class="check-grid"><label class="check"><input id="dynasty-member-monarch" type="checkbox" ${member?.is_monarch ? "checked" : ""} ${dead ? "disabled" : ""}> Hükümdar</label><label class="check"><input id="dynasty-member-heir" type="checkbox" ${member?.is_heir ? "checked" : ""} ${dead ? "disabled" : ""}> Taht varisi</label></div>${dead ? '<div class="preview-warning"><strong>Ölü üye kaydı</strong><span>Kimlik ve akrabalık bilgileri düzeltilebilir; sağlık ve veraset görevleri yeniden açılamaz.</span></div>' : '<div class="preview-warning"><strong>Erkek öncelikli veraset aktiftir.</strong><span>Yaşayan ve verasete uygun erkek varken kadın üye varis veya yeni hükümdar seçilemez.</span></div>'}`, async () => {
     const input = dynastyMemberInput();
     await api(member ? `/api/admin/dynasty-members/${member.id}` : `/api/admin/dynasties/${dynasty.id}/members`, { method: member ? "PATCH" : "POST", body: JSON.stringify(input) });
-    closeEditor(); toast(member ? "Hanedan üyesi güncellendi." : "Yeni hanedan üyesi eklendi."); await dynastyDetailPage(dynasty.id);
+    closeEditor(); toast(member ? "Hanedan üyesi güncellendi." : "Yeni hanedan üyesi eklendi."); await refreshKeepingScroll(() => dynastyDetailPage(dynasty.id));
   });
 }
 
@@ -604,7 +618,7 @@ function openDynastyDeathEditor(dynasty, member) {
   if (!member) return;
   openEditor("Hanedan üyesini öldü olarak işle", `${dynasty.country_name} · ${member.name}`, `<div class="preview-warning"><strong>Bu işlem veraset düzenini değiştirebilir.</strong><span>Üye hükümdar veya varisse sistem yaşayan uygun üyeler arasından yeni atama yapar. Bekleyen evlilik teklifleri iptal edilir.</span></div><label>Ölüm nedeni<textarea id="dynasty-death-reason" minlength="2" maxlength="200" rows="3" required placeholder="Örn. Hastalık, savaş yaraları, yaşlılık…"></textarea></label>`, async () => {
     await api(`/api/admin/dynasty-members/${member.id}/death`, { method: "POST", body: JSON.stringify({ reason: document.getElementById("dynasty-death-reason").value }) });
-    closeEditor(); toast(`${member.name} öldü olarak işlendi.`); await dynastyDetailPage(dynasty.id);
+    closeEditor(); toast(`${member.name} öldü olarak işlendi.`); await refreshKeepingScroll(() => dynastyDetailPage(dynasty.id));
   });
 }
 
@@ -635,7 +649,7 @@ async function assignmentsPage() {
     try {
       await api(`/api/admin/characters/${character.id}/cancel-assignment`, { method: "POST" });
       toast(`${character.name} karakterinin görevi iptal edildi.`);
-      await assignmentsPage();
+      await refreshKeepingScroll(assignmentsPage);
     } catch (error) { toast(error.message, "error"); button.disabled = false; }
   }));
 }
@@ -736,7 +750,7 @@ async function rebellionsPage() {
   state.rebellionData = data;
   const countries = [...new Set(data.settlements.map((item)=>item.countryName))].sort((a,b)=>a.localeCompare(b,"tr"));
   page.innerHTML = `<div class="page-head"><div><h1>İsyanlar Komuta Merkezi</h1><p>Mevcut gerilim, gerçek tur hesabı, isyancı kuvvet önizlemesi ve yönetici müdahaleleri</p></div><div class="actions"><span class="pill ${data.settlements[0]?.systemEnabled === false ? "warning" : ""}">${data.settlements[0]?.systemEnabled === false ? "Sistem kapalı" : "Sistem aktif"}</span><button class="button" data-refresh-rebellions>↻ Yenile</button></div></div><section class="kpi-grid rebellion-kpis"><div class="card kpi danger"><span>Açık isyan</span><strong>${number(data.summary.active)}</strong><small>Sahada etkin grup</small></div><div class="card kpi warning"><span>Kritik gerilim</span><strong>${number(data.summary.critical)}</strong><small>70+ ilerleme</small></div><div class="card kpi"><span>Yüksek risk</span><strong>${number(data.summary.threatened)}</strong><small>%25+ tur riski</small></div><div class="card kpi"><span>Gelecek tur patlama</span><strong>${number(data.summary.projectedOutbreaks)}</strong><small>Sıfırdan büyük ihtimal</small></div></section><section class="card rebellion-toolbar"><label>Yerleşke veya grup ara<input id="rebellion-search" placeholder="Örn. Baktriya Gönüllüleri…"></label><label>Devlet<select id="rebellion-country-filter"><option value="">Tüm devletler</option>${countries.map((country)=>`<option value="${escapeHtml(country)}">${escapeHtml(country)}</option>`).join("")}</select></label><label>Durum<select id="rebellion-status-filter"><option value="">Tüm durumlar</option><option value="ACTIVE">Açık isyan</option><option value="CRITICAL">Kritik</option><option value="THREATENED">Yüksek risk</option><option value="STABLE">İzleniyor</option></select></label><label>İsyan türü<select id="rebellion-faction-filter"><option value="">Tüm türler</option>${Object.entries(rebellionFactionLabels).map(([value,label])=>`<option value="${value}">${escapeHtml(label)}</option>`).join("")}</select></label></section><div class="section-title"><h2>Yerleşke İstikrar Dosyaları</h2><span id="rebellion-result-count"></span></div><section id="rebellion-results" class="rebellion-grid"></section>`;
-  document.querySelector("[data-refresh-rebellions]").addEventListener("click",rebellionsPage);
+  document.querySelector("[data-refresh-rebellions]").addEventListener("click",()=>refreshKeepingScroll(rebellionsPage));
   bindRebellionFilters();
 }
 
@@ -757,7 +771,7 @@ async function runRebellionAction(item, action) {
   await api(`/api/admin/rebellions/${item.id}/action`,{method:"POST",body:JSON.stringify({action})});
   closeEditor();
   toast(action === "OUTBREAK" ? "İsyan ve isyancı kuvvet oluşturuldu." : action === "SUPPRESS" ? "İsyan bastırıldı ve koruma başladı." : "İsyan durumu güncellendi.");
-  await rebellionsPage();
+  await refreshKeepingScroll(rebellionsPage);
 }
 
 async function openRebellionEditor(settlementId) {
@@ -784,7 +798,7 @@ async function openRebellionEditor(settlementId) {
       liveLeaderSkill:item.liveFaction?Number(document.getElementById("edit-rebel-live-skill").value):undefined,
       liveSiegeAssets:item.liveFaction?Object.fromEntries(rebelSiegeAssetKeys.map((asset)=>[asset,Number(document.getElementById(`edit-rebel-siege-${asset}`).value)||0])):undefined
     })});
-    closeEditor();toast("Yerleşkenin isyan durumu ve isyancı kaydı güncellendi.");await rebellionsPage();
+    closeEditor();toast("Yerleşkenin isyan durumu ve isyancı kaydı güncellendi.");await refreshKeepingScroll(rebellionsPage);
   });
   editorModal.querySelector(".modal").classList.add("wide");
   document.querySelector("[data-recalculate-rebel-siege]")?.addEventListener("click",()=>{
@@ -932,7 +946,7 @@ async function openActiveBattleManager(battle) {
       await api(`/api/admin/battles/${battle.id}/participants`, { method:"POST",body:JSON.stringify({
         countryId:document.getElementById("battle-country-id").value,side:document.getElementById("battle-country-side").value,action:"ADD"
       }) });
-      closeEditor(); toast("Devlet aktif savaşa eklendi."); await battlesPage();
+      closeEditor(); toast("Devlet aktif savaşa eklendi."); await refreshKeepingScroll(battlesPage);
     } catch (error) { toast(error.message,"error"); event.currentTarget.disabled = false; }
   });
   addForceButton.addEventListener("click", async (event) => {
@@ -941,7 +955,7 @@ async function openActiveBattleManager(battle) {
       await api(`/api/admin/battles/${battle.id}/${forceEndpoint}`, { method:"POST",body:JSON.stringify({
         [forcePayloadKey]:forceSelect.value,side:forceSide.value,action:"ADD"
       }) });
-      closeEditor(); toast(`${forceName} aktif savaşa takviye olarak eklendi.`); await battlesPage();
+      closeEditor(); toast(`${forceName} aktif savaşa takviye olarak eklendi.`); await refreshKeepingScroll(battlesPage);
     } catch (error) { toast(error.message,"error"); event.currentTarget.disabled = false; }
   });
   addMercenaryButton.addEventListener("click",async(event)=>{
@@ -950,7 +964,7 @@ async function openActiveBattleManager(battle) {
       await api(`/api/admin/battles/${battle.id}/mercenaries`,{method:"POST",body:JSON.stringify({
         contractId:mercenarySelect.value,side:mercenarySide.value,action:"ADD"
       })});
-      closeEditor();toast("Paralı asker aktif savaşa takviye olarak eklendi.");await battlesPage();
+      closeEditor();toast("Paralı asker aktif savaşa takviye olarak eklendi.");await refreshKeepingScroll(battlesPage);
     }catch(error){toast(error.message,"error");event.currentTarget.disabled=false;}
   });
   document.querySelectorAll("[data-battle-remove-force]").forEach((button) => button.addEventListener("click", async () => {
@@ -959,7 +973,7 @@ async function openActiveBattleManager(battle) {
     button.disabled = true;
     try {
       await api(`/api/admin/battles/${battle.id}/${forceEndpoint}`, { method:"POST",body:JSON.stringify({ [forcePayloadKey]:force.id,side:button.dataset.side,action:"REMOVE" }) });
-      closeEditor(); toast(`${forceName} savaştan çıkarıldı.`); await battlesPage();
+      closeEditor(); toast(`${forceName} savaştan çıkarıldı.`); await refreshKeepingScroll(battlesPage);
     } catch (error) { toast(error.message,"error"); button.disabled = false; }
   }));
   document.querySelectorAll("[data-battle-remove-mercenary]").forEach((button)=>button.addEventListener("click",async()=>{
@@ -968,7 +982,7 @@ async function openActiveBattleManager(battle) {
     button.disabled=true;
     try{
       await api(`/api/admin/battles/${battle.id}/mercenaries`,{method:"POST",body:JSON.stringify({contractId:contract.id,side:button.dataset.side,action:"REMOVE"})});
-      closeEditor();toast("Paralı asker savaştan çıkarıldı.");await battlesPage();
+      closeEditor();toast("Paralı asker savaştan çıkarıldı.");await refreshKeepingScroll(battlesPage);
     }catch(error){toast(error.message,"error");button.disabled=false;}
   }));
   document.querySelectorAll("[data-battle-remove-country]").forEach((button) => button.addEventListener("click", async () => {
@@ -977,7 +991,7 @@ async function openActiveBattleManager(battle) {
     button.disabled = true;
     try {
       await api(`/api/admin/battles/${battle.id}/participants`, { method:"POST",body:JSON.stringify({ countryId:country.id,side:button.dataset.side,action:"REMOVE" }) });
-      closeEditor(); toast("Devlet savaştan çıkarıldı."); await battlesPage();
+      closeEditor(); toast("Devlet savaştan çıkarıldı."); await refreshKeepingScroll(battlesPage);
     } catch (error) { toast(error.message,"error"); button.disabled = false; }
   }));
 }
@@ -1009,7 +1023,7 @@ async function aiGovernancePage() {
     try {
       await api("/api/admin/ai-governance/settings", { method: "PATCH", body: JSON.stringify({ enabled: nextEnabled }) });
       toast(`AI test modu ${nextEnabled ? "açıldı" : "kapatıldı"}; otomatik emir yürütme kapalı kaldı.`);
-      await aiGovernancePage();
+      await refreshKeepingScroll(aiGovernancePage);
     } catch (error) { toast(error.message, "error"); button.disabled = false; }
   });
   document.querySelectorAll("[data-toggle-ai-country]").forEach((button) => button.addEventListener("click", async () => {
@@ -1023,7 +1037,7 @@ async function aiGovernancePage() {
         reservePercent: Number(country.reserve_percent), strategicGoals: country.strategic_goals || "", customInstructions: country.custom_instructions || ""
       }) });
       toast(`${country.name} için AI taslak üretimi ${enabled ? "açıldı" : "kapatıldı"}; hiçbir emir uygulanmadı.`);
-      await aiGovernancePage();
+      await refreshKeepingScroll(aiGovernancePage);
     } catch (error) { toast(error.message, "error"); button.disabled = false; }
   }));
   document.querySelectorAll("[data-review-ai-plan]").forEach((button) => button.addEventListener("click", async () => {
@@ -1051,7 +1065,7 @@ async function aiGovernancePage() {
     try {
       const result = await api(`/api/admin/ai-governance/countries/${country.id}/generate-draft`, { method: "POST" });
       toast(`${country.name}: Tur ${number(result.game_turn)} taslağı oluşturuldu; hiçbir emir uygulanmadı.`);
-      await aiGovernancePage();
+      await refreshKeepingScroll(aiGovernancePage);
     } catch (error) { toast(error.message, "error"); button.disabled = false; button.textContent = "Tam strateji üret"; }
   }));
 }
@@ -1091,7 +1105,7 @@ function openAiPlanReport(record) {
       await api(`/api/admin/ai-governance/plans/${record.id}/review`, { method: "POST", body: JSON.stringify({ decision, note: document.getElementById("ai-review-note").value }) });
       closeEditor();
       toast(decision === "APPROVE" ? "Plan manuel uygulamaya uygun işaretlendi; hiçbir oyun emri uygulanmadı." : "Plan reddedildi; hiçbir oyun emri uygulanmadı.");
-      await aiGovernancePage();
+      await refreshKeepingScroll(aiGovernancePage);
     } catch (error) { toast(error.message, "error"); button.disabled = false; }
   }));
 }
@@ -1108,7 +1122,7 @@ function openAiCountryEditor(country, doctrines) {
       strategicGoals: document.getElementById("edit-ai-goals").value,
       customInstructions: document.getElementById("edit-ai-instructions").value
     }) });
-    closeEditor(); toast(`${country.name} AI profili kaydedildi; otomatik emir yürütme kapalı kaldı.`); await aiGovernancePage();
+    closeEditor(); toast(`${country.name} AI profili kaydedildi; otomatik emir yürütme kapalı kaldı.`); await refreshKeepingScroll(aiGovernancePage);
   });
 }
 
@@ -1149,7 +1163,7 @@ function openCountryEditor(country) {
   if (!country) return;
   openEditor("Devleti düzenle", country.name, `<div class="form-grid"><label>Devlet adı<input id="edit-country-name" value="${escapeHtml(country.name)}" required minlength="2" maxlength="80"></label><label>Hazine<input id="edit-country-treasury" type="number" min="0" step="1" value="${Number(country.treasury)}" required></label></div><label>Seferberlik<select id="edit-country-mobilization"><option value="PEACE" ${selected("PEACE", country.mobilization)}>Barış</option><option value="PARTIAL" ${selected("PARTIAL", country.mobilization)}>Kısmi</option><option value="GENERAL" ${selected("GENERAL", country.mobilization)}>Genel</option></select></label>`, async () => {
     await api(`/api/admin/countries/${country.id}`, { method: "PATCH", body: JSON.stringify({ name: document.getElementById("edit-country-name").value, treasury: Number(document.getElementById("edit-country-treasury").value), mobilization: document.getElementById("edit-country-mobilization").value }) });
-    closeEditor(); toast("Devlet bilgileri güncellendi."); await countries();
+    closeEditor(); toast("Devlet bilgileri güncellendi."); await refreshKeepingScroll(countries);
   });
 }
 
@@ -1159,7 +1173,7 @@ function openSettlementEditor(settlement) {
   const religionOptions = religions.map((item) => `<option value="${item.value}" ${selected(item.value, settlement.religion_key)}>${escapeHtml(item.label)} — ${escapeHtml(item.secondaryLabel)}</option>`).join("");
   openEditor("Yerleşkeyi düzenle", `${settlement.country_name} · ${settlement.name}`, `<div class="form-grid"><label>Yerleşke adı<input id="edit-settlement-name" value="${escapeHtml(settlement.name)}" required minlength="2" maxlength="80"></label><label>Yerel hazine<input id="edit-settlement-treasury" type="number" min="0" step="1" value="${Number(settlement.local_treasury)}" required></label><label>Özgür nüfus<input id="edit-settlement-population" type="number" min="0" step="1" value="${Number(settlement.population)}" required></label><label>Köle nüfusu<input id="edit-settlement-slaves" type="number" min="0" step="1" value="${Number(settlement.slave_population)}" required></label><label>Vergi oranı (%)<input id="edit-settlement-tax-rate" type="number" min="0" max="100" step="0.001" value="${Number(settlement.tax_rate_percent ?? 3)}" required><small>Alım turunda halk vergisi bu oran × özgür nüfus olarak hesaplanır.</small></label><label>Temel kara ticareti<input id="edit-settlement-land-trade" type="number" min="0" step="1" value="${Number(settlement.base_land_trade_income)}" required></label><label>Ana din<select id="edit-settlement-religion">${religionOptions}</select></label><label>Din bağlılığı (%)<input id="edit-settlement-religion-adherence" type="number" min="0" max="100" step="0.01" value="${Number(settlement.religion_adherence_percent ?? 75)}" required><small>%80+ tam, %50–79 yarım, %50 altı ana dinin yerel etkisini vermez. Kalan oran seçilen dine bağlı ikinci mezhebe otomatik atanır; ikinci mezhep %25’te tam, %10–24’te yarım etki verir.</small></label><label>Haraplık<select id="edit-settlement-ruin"><option value="0" ${selected(0, settlement.ruin_stage)}>Normal</option><option value="1" ${selected(1, settlement.ruin_stage)}>Harap I</option><option value="2" ${selected(2, settlement.ruin_stage)}>Harap II</option></select></label><div class="check-grid"><label class="check"><input id="edit-settlement-coastal" type="checkbox" ${settlement.is_coastal ? "checked" : ""}> Kıyı yerleşkesi</label><label class="check"><input id="edit-settlement-conquered" type="checkbox" ${settlement.is_conquered ? "checked" : ""}> Fethedilmiş</label></div></div>`, async () => {
     await api(`/api/admin/settlements/${settlement.id}`, { method: "PATCH", body: JSON.stringify({ name: document.getElementById("edit-settlement-name").value, population: Number(document.getElementById("edit-settlement-population").value), slavePopulation: Number(document.getElementById("edit-settlement-slaves").value), localTreasury: Number(document.getElementById("edit-settlement-treasury").value), taxRatePercent: Number(document.getElementById("edit-settlement-tax-rate").value), baseLandTradeIncome: Number(document.getElementById("edit-settlement-land-trade").value), religionKey: document.getElementById("edit-settlement-religion").value, religionAdherencePercent: Number(document.getElementById("edit-settlement-religion-adherence").value), ruinStage: Number(document.getElementById("edit-settlement-ruin").value), isCoastal: document.getElementById("edit-settlement-coastal").checked, isConquered: document.getElementById("edit-settlement-conquered").checked }) });
-    closeEditor(); toast("Yerleşke ekonomisi, dini ve durumu güncellendi."); await settlementsPage();
+    closeEditor(); toast("Yerleşke ekonomisi, dini ve durumu güncellendi."); await refreshKeepingScroll(settlementsPage);
   });
 }
 
@@ -1174,7 +1188,7 @@ async function openCharacterEditor(character) {
   openEditor("Karakteri düzenle", `${character.country_name} · ${roleLabel(character)}`, `<div class="form-grid"><label>Karakter adı<input id="edit-character-name" value="${escapeHtml(character.name)}" required minlength="2" maxlength="80"></label><label>Puan / bonus<input id="edit-character-skill" type="number" min="0" max="100" step="1" value="${Number(character.skill_bonus)}" required></label><label>Uzmanlık<select id="edit-character-specialization">${options(specializations, character.specialization)}</select></label><label>Uzmanlık seviyesi<select id="edit-character-level"><option value="0" ${selected(0, character.specialization_level)}>Sv0</option><option value="1" ${selected(1, character.specialization_level)}>Sv1</option><option value="2" ${selected(2, character.specialization_level)}>Sv2</option><option value="3" ${selected(3, character.specialization_level)}>Sv3</option></select></label>${commander ? `<label>Komutan doktrini<select id="edit-character-doctrine">${options(catalog.commanderDoctrines, character.doctrine)}</select></label><label>Kara zaferi<input id="edit-character-victories" type="number" min="0" max="999" step="1" value="${Number(character.commander_victories || 0)}"></label>` : ""}${admiral ? `<label>Amiral uzmanlığı<select id="edit-admiral-specialization">${options(catalog.admiralSpecializations, character.admiral_specialization)}</select></label><label>Amiral uzmanlık seviyesi<select id="edit-admiral-level"><option value="0" ${selected(0, character.admiral_specialization_level)}>Sv0</option><option value="1" ${selected(1, character.admiral_specialization_level)}>Sv1</option><option value="2" ${selected(2, character.admiral_specialization_level)}>Sv2</option><option value="3" ${selected(3, character.admiral_specialization_level)}>Sv3</option></select></label><label>Amiral doktrini<select id="edit-admiral-doctrine">${options(catalog.admiralDoctrines, character.admiral_doctrine)}</select></label><label>Deniz zaferi<input id="edit-admiral-victories" type="number" min="0" max="9" step="1" value="${Number(character.admiral_victories || 0)}"></label>` : ""}</div><div class="preview-warning"><strong>Görev bağlantısı korunur.</strong><span>Ad, puan, uzmanlık ve doktrin değişir; karakter mevcut görevinden çıkarılmaz.</span></div>`, async () => {
     const nullable = (id) => document.getElementById(id)?.value || null;
     await api(`/api/admin/characters/${character.id}`, { method: "PATCH", body: JSON.stringify({ name: document.getElementById("edit-character-name").value, skillBonus: Number(document.getElementById("edit-character-skill").value), specialization: nullable("edit-character-specialization"), specializationLevel: Number(document.getElementById("edit-character-level").value), doctrine: commander ? nullable("edit-character-doctrine") : null, commanderVictories: commander ? Number(document.getElementById("edit-character-victories").value) : 0, admiralSpecialization: admiral ? nullable("edit-admiral-specialization") : null, admiralSpecializationLevel: admiral ? Number(document.getElementById("edit-admiral-level").value) : 0, admiralDoctrine: admiral ? nullable("edit-admiral-doctrine") : null, admiralVictories: admiral ? Number(document.getElementById("edit-admiral-victories").value) : 0 }) });
-    closeEditor(); toast("Karakter bilgileri güncellendi."); await charactersPage();
+    closeEditor(); toast("Karakter bilgileri güncellendi."); await refreshKeepingScroll(charactersPage);
   });
 }
 
@@ -1196,7 +1210,7 @@ async function openArmyEditor(armyId) {
     if (newQuantity > 0) await api("/api/admin/army-units", { method: "POST", body: JSON.stringify({ armyId, settlementId: document.getElementById("edit-army-new-settlement").value, unitType: document.getElementById("edit-army-new-unit").value, quantity: newQuantity, operation: "ADD" }) });
     closeEditor(); toast(active ? "Ordu ve aktif savaş mevcudu güncellendi." : "Ordu güncellendi.");
     const route = document.querySelector("[data-route].active")?.dataset.route || "armies";
-    await navigate(route);
+    await refreshKeepingScroll(() => navigate(route));
   });
 }
 
@@ -1215,7 +1229,7 @@ async function auditPage() {
   setActiveRoute("audit"); loading();
   const rows = await api("/api/audit?limit=150");
   page.innerHTML = `<div class="page-head"><div><h1>İşlem Geçmişi</h1><p>Discord ve panel üzerinden yapılan son yönetici işlemleri</p></div><button class="button" data-refresh-audit>Yenile</button></div><section class="card">${auditRows(rows)}</section>`;
-  document.querySelector("[data-refresh-audit]").addEventListener("click", auditPage);
+  document.querySelector("[data-refresh-audit]").addEventListener("click", () => refreshKeepingScroll(auditPage));
 }
 
 function bindPageActions() {
