@@ -43,6 +43,7 @@ import { assertCountryAccess,assertCountryExecutiveAccess,isGameMaster,requireGa
 import { buildingChoices, shipChoices, unitChoices } from "./commands.js";
 import { batchDocumentEmbeds, renderDocument } from "./document.js";
 import { renderSettlementsOverview } from "./settlements-overview.js";
+import { renderArmyPool } from "./army-pool-ui.js";
 import { playerMentionPayload } from "./player-mentions.js";
 import { publishGreatPowerRanking } from "./great-power-ui.js";
 import {
@@ -1269,6 +1270,16 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     const embeds=renderSettlementsOverview(document);
     await interaction.editReply({embeds:[embeds[0]!],files:[new AttachmentBuilder(SETTLEMENTS_OVERVIEW_BANNER_PATH,{name:SETTLEMENTS_OVERVIEW_BANNER_NAME})]});
     for(const embed of embeds.slice(1))await interaction.followUp({embeds:[embed],flags:MessageFlags.Ephemeral});
+  } else if(interaction.commandName==="asker-havuzu"){
+    if(!interaction.guildId)throw new GameError("Sunucu bulunamadı.");
+    await interaction.deferReply({flags:MessageFlags.Ephemeral});
+    const country=await resolveCountry(interaction,interaction.options.getString("ulke"));
+    const pool=await armyService.unallocatedPool(country.id);
+    const embeds=renderArmyPool(country.name,pool);
+    await interaction.editReply({embeds:[embeds[0]!]});
+    for(let index=1;index<embeds.length;index+=3){
+      await interaction.followUp({embeds:embeds.slice(index,index+3),flags:MessageFlags.Ephemeral});
+    }
   } else if (interaction.commandName === "belge") {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const country=await resolveDocumentCountry(interaction);

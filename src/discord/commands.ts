@@ -437,6 +437,9 @@ export const commandBuilders = [
     .setName("yerleskelerim").setDescription("Yerleşkelerin hazine, gelir, askerî kapasite, kültür, din, refah ve isyan durumunu gösterir")
     .addStringOption(countryOption),
   new SlashCommandBuilder()
+    .setName("asker-havuzu").setDescription("Yerleşkelerde ordulara tahsis edilmemiş saha birliklerini gösterir")
+    .addStringOption(countryOption),
+  new SlashCommandBuilder()
     .setName("devlet-bilgisi").setDescription("Bir devletin herkese açık, askerî ve ekonomik bilgi içermeyen profilini gösterir")
     .addStringOption((option) => option.setName("ulke").setDescription("Görüntülenecek devletin adı").setRequired(true)),
   new SlashCommandBuilder()

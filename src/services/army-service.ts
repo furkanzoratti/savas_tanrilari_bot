@@ -44,6 +44,24 @@ export interface ArmyView {
   active_battle_id: string | null;
 }
 
+export interface ArmyPoolUnit {
+  unit_type: BattleUnitType;
+  available: number;
+}
+
+export interface ArmyPoolSettlement {
+  settlement_id: string;
+  settlement_name: string;
+  units: ArmyPoolUnit[];
+  total: number;
+}
+
+export interface ArmyPoolView {
+  settlements: ArmyPoolSettlement[];
+  totals: ArmyPoolUnit[];
+  grandTotal: number;
+}
+
 interface ArmyBaseRow {
   id: string; guild_id: string; country_id: string; country_name: string; name: string;
   commander_character_id: string | null; commander_name: string | null; commander_skill_bonus: number;
@@ -168,6 +186,60 @@ export const armyService = {
     return rows
       .map((row) => ({ unit_type: row.unit_type, available: Number(row.available) }))
       .filter((row) => row.available > 0 && row.unit_type !== "militia" && Boolean(BATTLE_UNIT_STATS[row.unit_type]));
+  },
+
+  async unallocatedPool(countryId: string): Promise<ArmyPoolView> {
+    const rows = (await pool.query<{
+      settlement_id: string;
+      settlement_name: string;
+      unit_type: BattleUnitType | null;
+      available: number | null;
+    }>(
+      `WITH stock AS (
+         SELECT u.settlement_id,u.unit_type,COALESCE(SUM(u.quantity),0)::integer AS quantity
+           FROM unit_stacks u
+           JOIN settlements owned ON owned.id=u.settlement_id
+          WHERE owned.country_id=$1 AND u.force_type='ARMY'
+          GROUP BY u.settlement_id,u.unit_type
+       ), allocated AS (
+         SELECT au.settlement_id,au.unit_type,COALESCE(SUM(au.quantity),0)::integer AS quantity
+           FROM army_units au
+           JOIN settlements owned ON owned.id=au.settlement_id
+          WHERE owned.country_id=$1
+          GROUP BY au.settlement_id,au.unit_type
+       )
+       SELECT s.id AS settlement_id,s.name AS settlement_name,stock.unit_type,
+              GREATEST(0,stock.quantity-COALESCE(allocated.quantity,0))::integer AS available
+         FROM settlements s
+         LEFT JOIN stock ON stock.settlement_id=s.id
+         LEFT JOIN allocated ON allocated.settlement_id=stock.settlement_id AND allocated.unit_type=stock.unit_type
+        WHERE s.country_id=$1
+        ORDER BY lower(s.name),stock.unit_type`,
+      [countryId]
+    )).rows;
+
+    const settlements = new Map<string, ArmyPoolSettlement>();
+    const totals = new Map<BattleUnitType, number>();
+    for (const row of rows) {
+      let settlement = settlements.get(row.settlement_id);
+      if (!settlement) {
+        settlement = { settlement_id: row.settlement_id, settlement_name: row.settlement_name, units: [], total: 0 };
+        settlements.set(row.settlement_id, settlement);
+      }
+      if (!row.unit_type || row.unit_type === "militia" || !BATTLE_UNIT_STATS[row.unit_type]) continue;
+      const available = Number(row.available ?? 0);
+      if (available <= 0) continue;
+      settlement.units.push({ unit_type: row.unit_type, available });
+      settlement.total += available;
+      totals.set(row.unit_type, (totals.get(row.unit_type) ?? 0) + available);
+    }
+
+    const totalRows = Array.from(totals, ([unit_type, available]) => ({ unit_type, available }));
+    return {
+      settlements: Array.from(settlements.values()),
+      totals: totalRows,
+      grandTotal: totalRows.reduce((sum, row) => sum + row.available, 0)
+    };
   },
 
   async availableSettlementSiegeAssets(countryId: string, settlementValue: string): Promise<Array<{ asset_type: MobileSiegeAssetType; available: number; enhanced: number }>> {
