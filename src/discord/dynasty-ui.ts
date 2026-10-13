@@ -33,6 +33,9 @@ function birthResultMessage(result:Awaited<ReturnType<typeof dynastyService.atte
   const roll=result.attemptRoll+(result.ageModifier>=0?" + "+result.ageModifier:" − "+Math.abs(result.ageModifier));
   if(!result.success)return "🕯️ **Çocuk denemesi başarısız oldu.**\nDoğum zarı: **"+roll+" = "+(result.attemptRoll+result.ageModifier)+"** • Gerekli sonuç: **11**\nYeni deneme iki tur sonra yapılabilir.";
   const gender=result.childGender==="MALE"?"erkek":"kız";
+  if(result.resumed)return "👶 **İsim bekleyen doğum yeniden açıldı.**\n"+
+    "Anne: **"+result.motherName+"** • Baba: **"+result.fatherName+"** • Çocuk **"+gender+"**.\n"+
+    "Yeni doğum zarı atılmadı; aşağıdaki düğmeyle mevcut çocuğa isim verin.";
   const complication=result.complication==="DEATH"
     ?" **"+result.motherName+"** doğum komplikasyonu nedeniyle hayatını kaybetti."
     :result.complication==="ILLNESS"

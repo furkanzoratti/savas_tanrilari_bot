@@ -1063,7 +1063,7 @@ export const dynastyService={
     guildId:string;countryId:string;actorId:string;parentMemberId?:string|null;
     allowAnyMarriedMember?:boolean;dynastyId?:string;
   }):Promise<{
-    success:boolean;attemptRoll:number;ageModifier:number;pendingBirthId:string|null;childGender:DynastyGender|null;
+    success:boolean;resumed:boolean;attemptRoll:number;ageModifier:number;pendingBirthId:string|null;childGender:DynastyGender|null;
     genderRoll:number|null;complication:"DEATH"|"ILLNESS"|"HEALTHY"|null;complicationRoll:number|null;
     motherName:string;fatherName:string;
   }>{
@@ -1071,11 +1071,33 @@ export const dynastyService={
       await activeCountry(client,input.guildId,input.countryId);
       const dynasty=await dynastyForContext(client,input.guildId,input.countryId,input.dynastyId,true);
       const turn=await currentTurn(client,input.guildId);
-      const pendingName=await client.query(
-        "SELECT 1 FROM dynasty_birth_sessions WHERE dynasty_id=$1 AND status='PENDING_NAME' LIMIT 1",
+      const pendingName=(await client.query<{
+        id:string;initiated_by:string;attempt_roll:number;age_modifier:number;gender_roll:number;
+        gender:DynastyGender;complication_roll:number;complication:"DEATH"|"ILLNESS"|"HEALTHY";
+        mother_name:string;father_name:string;
+      }>(
+        `SELECT session.id,session.initiated_by,session.attempt_roll,session.age_modifier,
+                session.gender_roll,session.gender,session.complication_roll,session.complication,
+                mother.name AS mother_name,father.name AS father_name
+           FROM dynasty_birth_sessions session
+           JOIN dynasty_members mother ON mother.id=session.mother_id
+           JOIN dynasty_members father ON father.id=session.father_id
+          WHERE session.dynasty_id=$1 AND session.status='PENDING_NAME'
+          ORDER BY session.created_at DESC
+          LIMIT 1
+          FOR UPDATE OF session`,
         [dynasty.id]
-      );
-      if(pendingName.rowCount)throw new GameError("Bu hanedanda adı henüz konulmamış bir çocuk bulunuyor. Önce mevcut doğumu isimlendirin.");
+      )).rows[0];
+      if(pendingName){
+        if(pendingName.initiated_by!==input.actorId&&!input.allowAnyMarriedMember)
+          throw new GameError("Bu hanedanda başka bir oyuncunun isimlendirmesini bekleyen çocuk bulunuyor. Doğum zarını atan oyuncu `/hanedan cocuk-dene` komutuyla isimlendirme formunu yeniden açabilir.");
+        return{
+          success:true,resumed:true,attemptRoll:Number(pendingName.attempt_roll),ageModifier:Number(pendingName.age_modifier),
+          pendingBirthId:pendingName.id,childGender:pendingName.gender,genderRoll:Number(pendingName.gender_roll),
+          complication:pendingName.complication,complicationRoll:Number(pendingName.complication_roll),
+          motherName:pendingName.mother_name,fatherName:pendingName.father_name
+        };
+      }
       const monarch=await client.query<DynastyMemberView>(
         "SELECT * FROM dynasty_members WHERE dynasty_id=$1 AND status='ALIVE' AND is_monarch=TRUE LIMIT 1 FOR UPDATE",
         [dynasty.id]
@@ -1130,7 +1152,7 @@ export const dynastyService={
       if(!birthAttemptSucceeded(motherAge,attemptRoll)){
         await addEvent(client,dynasty.id,turn,"BIRTH_ATTEMPT_FAILED",mother.id,{motherName:mother.name,fatherName:father.name,parentMemberId:parent.id,roll:attemptRoll,modifier});
         return{
-          success:false,attemptRoll,ageModifier:modifier,pendingBirthId:null,childGender:null,genderRoll:null,
+          success:false,resumed:false,attemptRoll,ageModifier:modifier,pendingBirthId:null,childGender:null,genderRoll:null,
           complication:null,complicationRoll:null,motherName:mother.name,fatherName:father.name
         };
       }
@@ -1168,7 +1190,7 @@ export const dynastyService={
         await killMember(client,dynasty.id,mother,turn,"Doğum komplikasyonu",dynasty.country_name,texts);
       }
       return{
-        success:true,attemptRoll,ageModifier:modifier,pendingBirthId:pending.id,childGender,genderRoll,
+        success:true,resumed:false,attemptRoll,ageModifier:modifier,pendingBirthId:pending.id,childGender,genderRoll,
         complication,complicationRoll,motherName:mother.name,fatherName:father.name
       };
     });
