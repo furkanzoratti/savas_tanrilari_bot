@@ -1,4 +1,4 @@
-const state = { session: null, csrf: "", countries: [], catalog: [], characterCatalog: null, religionCatalog: null, rebellionData: null, previewToken: null, selectedCountry: null, editor: null };
+const state = { session: null, csrf: "", countries: [], catalog: [], characterCatalog: null, religionCatalog: null, rebellionData: null, previewToken: null, selectedCountry: null, editor: null, pendingPageScrollTop: null };
 const page = document.getElementById("page");
 const app = document.getElementById("app");
 const login = document.getElementById("login");
@@ -133,8 +133,26 @@ function toast(message, kind = "success") {
 function loading() { page.innerHTML = '<div class="skeleton"></div>'; }
 function setActiveRoute(route) { document.querySelectorAll("[data-route]").forEach((button) => button.classList.toggle("active", button.dataset.route === route)); }
 
+function pageScrollTop() {
+  return Math.max(window.scrollY, document.scrollingElement?.scrollTop || 0, document.documentElement.scrollTop || 0, document.body.scrollTop || 0);
+}
+
+function restorePageScroll(scrollTop) {
+  const apply = () => {
+    const maximumScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    const target = Math.min(scrollTop, maximumScroll);
+    if (document.scrollingElement) document.scrollingElement.scrollTop = target;
+    document.documentElement.scrollTop = target;
+    document.body.scrollTop = target;
+    window.scrollTo(0, target);
+  };
+  apply();
+  requestAnimationFrame(apply);
+}
+
 async function refreshKeepingScroll(loader) {
-  const scrollTop = window.scrollY;
+  const scrollTop = Number.isFinite(state.pendingPageScrollTop) ? state.pendingPageScrollTop : pageScrollTop();
+  state.pendingPageScrollTop = null;
   const previousMinHeight = page.style.minHeight;
   page.style.minHeight = `${Math.max(page.scrollHeight, window.innerHeight)}px`;
   try {
@@ -142,8 +160,7 @@ async function refreshKeepingScroll(loader) {
     await new Promise((resolve) => requestAnimationFrame(resolve));
   } finally {
     page.style.minHeight = previousMinHeight;
-    const maximumScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-    window.scrollTo(0, Math.min(scrollTop, maximumScroll));
+    restorePageScroll(scrollTop);
   }
 }
 
@@ -1139,7 +1156,7 @@ function bindCountryRows() {
 function selected(value, current) { return String(value ?? "") === String(current ?? "") ? "selected" : ""; }
 
 function openEditor(title, subtitle, content, submit) {
-  state.editor = { submit };
+  state.editor = { submit, pageScrollTop: pageScrollTop() };
   document.getElementById("editor-title").textContent = title;
   document.getElementById("editor-subtitle").textContent = subtitle || "";
   document.getElementById("editor-content").innerHTML = content;
@@ -1153,6 +1170,8 @@ function openEditor(title, subtitle, content, submit) {
 }
 
 function closeEditor() {
+  if (Number.isFinite(state.editor?.pageScrollTop)) state.pendingPageScrollTop = state.editor.pageScrollTop;
+  if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   editorModal.hidden = true;
   editorModal.querySelector(".modal").classList.remove("wide");
   state.editor = null;
