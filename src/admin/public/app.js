@@ -130,8 +130,20 @@ function toast(message, kind = "success") {
   toast.timer = setTimeout(() => { element.hidden = true; }, 4500);
 }
 
-function loading() { page.innerHTML = '<div class="skeleton"></div>'; }
-function setActiveRoute(route) { document.querySelectorAll("[data-route]").forEach((button) => button.classList.toggle("active", button.dataset.route === route)); }
+const routeTitles = {
+  overview: "Genel Bakış", countries: "Devletler", settlements: "Yerleşkeler", armies: "Ordular & Filolar",
+  characters: "Karakterler", dynasties: "Hanedanlar", "roman-politics": "Roma Siyaseti",
+  "steppe-politics": "Bozkır Kurultayı", assignments: "Görevler", battles: "Savaşlar",
+  rebellions: "İsyanlar", "data-control": "Tam Yetki", audit: "İşlem Geçmişi"
+};
+function loading() { page.innerHTML = '<div class="loading-shell"><div class="skeleton skeleton-title"></div><div class="loading-grid"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div><div class="skeleton skeleton-content"></div></div>'; }
+function setActiveRoute(route) {
+  document.querySelectorAll("[data-route]").forEach((button) => button.classList.toggle("active", button.dataset.route === route));
+  const title = routeTitles[route] || "GM Operasyon Masası";
+  const activeTitle = document.getElementById("active-page-title");
+  if (activeTitle) activeTitle.textContent = title;
+  document.title = `${title} · AMRP GM`;
+}
 
 function pageScrollTop() {
   return Math.max(window.scrollY, document.scrollingElement?.scrollTop || 0, document.documentElement.scrollTop || 0, document.body.scrollTop || 0);
@@ -173,7 +185,7 @@ async function overview() {
   setActiveRoute("overview"); loading();
   const data = await api("/api/overview");
   document.getElementById("turn-badge").textContent = `Tur ${data.guild.current_turn} · ${turnPhaseLabels[data.guild.turn_phase] || data.guild.turn_phase}`;
-  page.innerHTML = `<div class="page-head"><div><h1>Genel Bakış</h1><p>Canlı oyun durumu ve sık kullanılan yönetici işlemleri</p></div><div class="actions"><button class="button" data-open-army>＋ Yeni ordu</button><button class="button primary" data-route-action="audit">İşlem geçmişi</button></div></div>
+  page.innerHTML = `<section class="page-head overview-hero"><div><span class="overview-kicker">ANTİK MEDENİYETLER ROLE PLAY</span><h1>Oyun Kontrol Merkezi</h1><p>Canlı oyun durumunu izle, kritik mekaniklere ulaş ve yönetici işlemlerini tek merkezden yürüt.</p></div><div class="actions"><button class="button" data-open-army>＋ Yeni ordu</button><button class="button primary" data-route-action="audit">İşlem geçmişi</button></div></section>
     <section class="kpi-grid"><div class="card kpi"><span>Aktif devlet</span><strong>${number(data.counts.countries)}</strong><small class="muted">${number(data.counts.settlements)} yerleşke</small></div><div class="card kpi"><span>Aktif savaş</span><strong>${number(data.counts.battles)}</strong><small class="muted">Devam eden tüm cepheler</small></div><div class="card kpi"><span>Ordu ve filo</span><strong>${number(data.counts.armies + data.counts.fleets)}</strong><small class="muted">${number(data.counts.armies)} ordu · ${number(data.counts.fleets)} filo</small></div><div class="card kpi"><span>Son 24 saat</span><strong>${number(data.counts.reviews)}</strong><small class="muted">Denetim kaydı</small></div></section>
     <section class="content-grid"><div class="card"><div class="card-head"><div><h2>Devlet durumu</h2><p>Askerî hareketliliğe göre öne çıkan kayıtlar</p></div><button class="button" data-route-action="countries">Tümünü gör</button></div><div class="data-list">${data.countries.map((country) => `<div class="data-row"><div><strong>${escapeHtml(country.name)}</strong><small>${number(country.settlement_count)} yerleşke · ${number(country.army_count)} ordu</small></div><span>${number(country.personnel)} asker</span><span>${money(country.treasury)}</span><button class="button" data-country="${country.id}">Aç</button></div>`).join("")}</div></div>
     <aside class="card"><div class="card-head"><div><h3>Hızlı işlemler</h3><p>Sık kullanılan GM araçları</p></div></div><div class="quick-actions"><button class="button" data-open-army>⚔ Yeni ordu oluştur</button><button class="button" data-route-action="countries">♜ Devlet ve şehirleri aç</button><button class="button" data-route-action="audit">↶ Son değişiklikleri incele</button></div><hr><div class="card-head"><div><h3>Son kayıtlar</h3></div></div>${auditRows(data.audit, 5)}</aside></section>`;
@@ -1464,7 +1476,6 @@ async function navigate(route) {
     if (route === "roman-politics") return romanPoliticsPage();
     if (route === "steppe-politics") return steppePoliticsPage();
     if (route === "assignments") return assignmentsPage();
-    if (route === "ai-governance") return aiGovernancePage();
     if (route === "battles") return battlesPage();
     if (route === "rebellions") return rebellionsPage();
     if (route === "data-control") return dataControlPage();
