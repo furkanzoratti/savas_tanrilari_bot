@@ -120,7 +120,7 @@ describe("GM operasyon merkezi", () => {
     expect(html).toContain('data-route="diplomacy-control"');
     expect(html).toContain('data-route="economy-control"');
     expect(server).toContain('url.pathname === "/api/mechanics-control"');
-    expect(service).toContain("async mechanicsControl()");
+    expect(service).toContain("async mechanicsControl(scope:");
     expect(service).toContain("FROM diplomatic_pacts pact");
     expect(service).toContain("FROM country_port_access access");
     expect(service).toContain("FROM naval_orders naval");
@@ -177,10 +177,14 @@ describe("GM operasyon merkezi", () => {
     expect(service).toContain("warnings");
     expect(app).toContain("function loadWarningsMarkup");
     expect(app).toContain("Bazı alt bölümler yüklenemedi");
-    expect(app).toContain("30_000");
+    expect(app).toContain("16_000");
     expect(app).toContain("data-retry-page");
+    expect(app).toContain("/api/mechanics-control?scope=DIPLOMACY");
+    expect(app).toContain("/api/mechanics-control?scope=ECONOMY");
+    expect(service).toContain("WITH settlement_stats AS");
+    expect(service).toContain('scope !== "DIPLOMACY"');
     expect(css).toContain(".load-warning");
-    expect(html).toContain("menu-recovery-v17");
+    expect(html).toContain("menu-split-v18");
   });
 
   it("son güvenlik ve performans katmanını istek izleme ve canlı durumla tamamlar", () => {
@@ -199,13 +203,13 @@ describe("GM operasyon merkezi", () => {
     expect(server).toContain("databaseError");
     expect(service).toContain("async systemStatus()");
     expect(service).toContain("databaseLatencyMs");
-    expect(database).toContain("statement_timeout: 20_000");
+    expect(database).toContain("statement_timeout: 7_000");
     expect(database).toContain("idle_in_transaction_session_timeout");
     expect(app).toContain("const inflightGets = new Map()");
     expect(app).toContain("new AbortController()");
     expect(app).toContain('Promise.all([api("/api/game-health"), api("/api/system-status")])');
     expect(app).toContain("Panel çalışma durumu");
     expect(css).toContain(".system-status-grid");
-    expect(html).toContain("menu-recovery-v17");
+    expect(html).toContain("menu-split-v18");
   });
 });

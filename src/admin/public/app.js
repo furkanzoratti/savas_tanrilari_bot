@@ -136,7 +136,7 @@ function api(path, options = {}) {
     const headers = { ...(options.body ? { "content-type": "application/json" } : {}), ...(options.headers || {}) };
     if (method !== "GET") headers["x-csrf-token"] = state.csrf;
     const controller = method === "GET" && !options.signal ? new AbortController() : null;
-    const timeout = controller ? setTimeout(() => controller.abort(), 30_000) : null;
+    const timeout = controller ? setTimeout(() => controller.abort(), 16_000) : null;
     try {
       const response = await fetch(path, { ...options, method, headers, signal: options.signal || controller?.signal });
       const payload = await response.json().catch(() => ({}));
@@ -148,7 +148,7 @@ function api(path, options = {}) {
       }
       return payload;
     } catch (error) {
-      if (error?.name === "AbortError") throw new Error("Panel verisi 30 saniye içinde yüklenemedi. Bağlantıyı kontrol edip yeniden deneyin.");
+      if (error?.name === "AbortError") throw new Error("Panel verisi 16 saniye içinde yüklenemedi. Bağlantıyı kontrol edip yeniden deneyin.");
       throw error;
     } finally { if (timeout) clearTimeout(timeout); }
   };
@@ -1074,7 +1074,7 @@ function loadWarningsMarkup(warnings) {
 
 async function diplomacyControlPage() {
   setActiveRoute("diplomacy-control"); loading();
-  const data = await api("/api/mechanics-control");
+  const data = await api("/api/mechanics-control?scope=DIPLOMACY");
   const activeAlliances = data.alliances.filter((row) => row.status === "ACTIVE");
   const pendingAlliances = data.alliances.filter((row) => row.status === "PENDING");
   const activeTrades = data.trades.filter((row) => row.status === "ACTIVE");
@@ -1093,7 +1093,7 @@ async function diplomacyControlPage() {
 
 async function economyControlPage() {
   setActiveRoute("economy-control"); loading();
-  const data = await api("/api/mechanics-control");
+  const data = await api("/api/mechanics-control?scope=ECONOMY");
   const totalTreasury = data.countries.reduce((sum, row) => sum + Number(row.treasury || 0), 0);
   const totalIncome = data.countries.reduce((sum, row) => sum + Number(row.tax_income || 0) + Number(row.land_trade_income || 0) + Number(row.sea_trade_income || 0), 0);
   const productionCount = data.buildings.length + data.recruitments.length + data.navalOrders.length;

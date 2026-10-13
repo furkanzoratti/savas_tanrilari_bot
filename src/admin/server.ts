@@ -152,7 +152,9 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === "GET" && url.pathname === "/api/mechanics-control") {
       if (!requireSession(request, response)) return;
-      return json(response, 200, await adminPanelService.mechanicsControl());
+      const requestedScope = url.searchParams.get("scope");
+      const scope = requestedScope === "DIPLOMACY" || requestedScope === "ECONOMY" ? requestedScope : "ALL";
+      return json(response, 200, await adminPanelService.mechanicsControl(scope));
     }
     if (request.method === "GET" && url.pathname === "/api/reports") {
       if (!requireSession(request, response)) return;

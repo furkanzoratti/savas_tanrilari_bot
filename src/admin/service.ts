@@ -1015,11 +1015,14 @@ export const adminPanelService = {
     };
   },
 
-  async mechanicsControl() {
+  async mechanicsControl(scope: "ALL" | "DIPLOMACY" | "ECONOMY" = "ALL") {
     const labels = ["Oyun durumu", "Devlet ekonomileri", "Bina inşaatları", "Asker alımları", "Gemi üretimleri", "İttifaklar", "Vassallıklar", "Savaşlar", "Ticaret yolları", "Diplomatik paktlar", "Liman erişimleri"];
+    const loadEconomy = scope !== "DIPLOMACY";
+    const loadDiplomacy = scope !== "ECONOMY";
+    const skippedQuery = () => Promise.resolve({ rows: [] });
     const settled = await Promise.allSettled([
       adminPool.query("SELECT current_turn,turn_phase FROM guilds WHERE discord_id=$1", [adminConfig.guildId]),
-      adminPool.query(
+      loadEconomy ? adminPool.query(
         `SELECT country.id,country.name,country.mobilization,
                 COUNT(settlement.id)::integer AS settlement_count,
                 COALESCE(SUM(settlement.local_treasury),country.treasury)::bigint AS treasury,
@@ -1030,8 +1033,8 @@ export const adminPanelService = {
            FROM countries country LEFT JOIN settlements settlement ON settlement.country_id=country.id
           WHERE country.guild_id=$1 AND country.status='ACTIVE' AND country.is_system_faction=FALSE
           GROUP BY country.id ORDER BY country.name`, [adminConfig.guildId]
-      ),
-      adminPool.query(
+      ) : skippedQuery(),
+      loadEconomy ? adminPool.query(
         `SELECT building.id,building.building_type,building.level,building.target_level,
                 building.started_turn,building.completion_turn,settlement.id AS settlement_id,
                 settlement.name AS settlement_name,country.id AS country_id,country.name AS country_name
@@ -1039,8 +1042,8 @@ export const adminPanelService = {
            JOIN countries country ON country.id=settlement.country_id
           WHERE country.guild_id=$1 AND country.status='ACTIVE' AND building.status='BUILDING'
           ORDER BY building.completion_turn,country.name,settlement.name LIMIT 200`, [adminConfig.guildId]
-      ),
-      adminPool.query(
+      ) : skippedQuery(),
+      loadEconomy ? adminPool.query(
         `SELECT recruitment.id,recruitment.unit_type,recruitment.total_quantity,recruitment.remaining_quantity,
                 recruitment.ordered_turn,MIN(wave.due_turn) FILTER(WHERE wave.processed_at IS NULL) AS next_due_turn,
                 settlement.id AS settlement_id,settlement.name AS settlement_name,
@@ -1050,8 +1053,8 @@ export const adminPanelService = {
            LEFT JOIN recruitment_waves wave ON wave.order_id=recruitment.id
           WHERE country.guild_id=$1 AND country.status='ACTIVE' AND recruitment.status='TRAINING'
           GROUP BY recruitment.id,settlement.id,country.id ORDER BY next_due_turn,country.name LIMIT 200`, [adminConfig.guildId]
-      ),
-      adminPool.query(
+      ) : skippedQuery(),
+      loadEconomy ? adminPool.query(
         `SELECT naval.id,naval.ship_type,naval.quantity,naval.ordered_turn,naval.completion_turn,
                 settlement.id AS settlement_id,settlement.name AS settlement_name,
                 country.id AS country_id,country.name AS country_name
@@ -1059,29 +1062,29 @@ export const adminPanelService = {
            JOIN countries country ON country.id=naval.country_id
           WHERE country.guild_id=$1 AND country.status='ACTIVE' AND naval.status='BUILDING'
           ORDER BY naval.completion_turn,country.name LIMIT 200`, [adminConfig.guildId]
-      ),
-      adminPool.query(
+      ) : skippedQuery(),
+      loadDiplomacy ? adminPool.query(
         `SELECT alliance.id,alliance.status,proposer.id AS proposer_country_id,proposer.name AS proposer_name,
                 receiver.id AS receiver_country_id,receiver.name AS receiver_name,alliance.created_at
            FROM country_alliances alliance JOIN countries proposer ON proposer.id=alliance.proposer_country_id
            JOIN countries receiver ON receiver.id=alliance.receiver_country_id
           WHERE alliance.guild_id=$1 AND alliance.status IN ('PENDING','ACTIVE')
           ORDER BY CASE alliance.status WHEN 'PENDING' THEN 0 ELSE 1 END,alliance.created_at DESC`, [adminConfig.guildId]
-      ),
-      adminPool.query(
+      ) : skippedQuery(),
+      loadDiplomacy ? adminPool.query(
         `SELECT relation.id,relation.started_turn,overlord.id AS overlord_country_id,overlord.name AS overlord_name,
                 vassal.id AS vassal_country_id,vassal.name AS vassal_name
            FROM country_vassalages relation JOIN countries overlord ON overlord.id=relation.overlord_country_id
            JOIN countries vassal ON vassal.id=relation.vassal_country_id
           WHERE relation.guild_id=$1 AND relation.status='ACTIVE' ORDER BY overlord.name,vassal.name`, [adminConfig.guildId]
-      ),
-      adminPool.query(
+      ) : skippedQuery(),
+      loadDiplomacy ? adminPool.query(
         `SELECT war.id,war.started_turn,war.reason,attacker.id AS attacker_country_id,attacker.name AS attacker_name,
                 defender.id AS defender_country_id,defender.name AS defender_name
            FROM state_wars war JOIN countries attacker ON attacker.id=war.attacker_country_id
            JOIN countries defender ON defender.id=war.defender_country_id
           WHERE war.guild_id=$1 AND war.status='ACTIVE' ORDER BY war.started_turn DESC`, [adminConfig.guildId]
-      ),
+      ) : skippedQuery(),
       adminPool.query(
         `SELECT trade.id,trade.status,trade.route,trade.income_per_country,
                 proposer_country.name AS proposer_country_name,receiver_country.name AS receiver_country_name,
@@ -1093,20 +1096,20 @@ export const adminPanelService = {
           WHERE trade.guild_id=$1 AND trade.status IN ('PENDING','ACTIVE')
           ORDER BY CASE trade.status WHEN 'PENDING' THEN 0 ELSE 1 END,trade.created_at DESC LIMIT 200`, [adminConfig.guildId]
       ),
-      adminPool.query(
+      loadDiplomacy ? adminPool.query(
         `SELECT pact.id,pact.name,pact.purpose,founder.name AS founder_name,
                 COUNT(member.country_id)::integer AS member_count
            FROM diplomatic_pacts pact JOIN countries founder ON founder.id=pact.founder_country_id
            LEFT JOIN pact_memberships member ON member.pact_id=pact.id
           WHERE pact.guild_id=$1 GROUP BY pact.id,founder.name ORDER BY pact.name`, [adminConfig.guildId]
-      ),
-      adminPool.query(
+      ) : skippedQuery(),
+      loadDiplomacy ? adminPool.query(
         `SELECT access.id,access.status,requester.name AS requester_name,grantor.name AS grantor_name,access.created_at
            FROM country_port_access access JOIN countries requester ON requester.id=access.requester_country_id
            JOIN countries grantor ON grantor.id=access.grantor_country_id
           WHERE access.guild_id=$1 AND access.status IN ('PENDING','ACTIVE')
           ORDER BY CASE access.status WHEN 'PENDING' THEN 0 ELSE 1 END,access.created_at DESC`, [adminConfig.guildId]
-      )
+      ) : skippedQuery()
     ]);
     const warnings = settled.flatMap((result, index) => result.status === "rejected"
       ? [`${labels[index]} şu anda yüklenemedi${result.reason && typeof result.reason === "object" && "code" in result.reason ? ` (${String((result.reason as { code?: unknown }).code)})` : ""}.`]
@@ -1134,19 +1137,47 @@ export const adminPanelService = {
     const labels = ["Devlet karşılaştırması", "Mali akış", "Yönetim etkinliği", "İşlem türleri"];
     const settled = await Promise.allSettled([
       adminPool.query(
-        `SELECT country.id,country.name,country.mobilization,
-                COUNT(settlement.id)::integer AS settlements,
-                COALESCE(SUM(settlement.population+settlement.slave_population),0)::bigint AS population,
-                COALESCE(SUM(settlement.local_treasury),country.treasury)::bigint AS treasury,
-                COALESCE(SUM(settlement.tax_income+settlement.land_trade_income+settlement.sea_trade_income),0)::bigint AS turn_income,
-                COALESCE((SELECT SUM(unit.quantity) FROM army_units unit JOIN armies army ON army.id=unit.army_id WHERE army.country_id=country.id),0)::bigint AS field_army,
-                COALESCE((SELECT SUM(stack.quantity) FROM unit_stacks stack JOIN settlements own ON own.id=stack.settlement_id WHERE own.country_id=country.id AND stack.force_type='GARRISON'),0)::bigint AS garrison,
-                COALESCE((SELECT SUM(ship.quantity) FROM fleet_ships ship JOIN fleets fleet ON fleet.id=ship.fleet_id WHERE fleet.country_id=country.id),0)::bigint
-                  + COALESCE((SELECT SUM(ship.quantity) FROM naval_units ship JOIN settlements own ON own.id=ship.settlement_id WHERE own.country_id=country.id),0)::bigint AS ships,
-                (SELECT COUNT(*)::integer FROM state_wars war WHERE war.guild_id=$1 AND war.status='ACTIVE' AND country.id IN(war.attacker_country_id,war.defender_country_id)) AS active_wars
-           FROM countries country LEFT JOIN settlements settlement ON settlement.country_id=country.id
+        `WITH settlement_stats AS (
+           SELECT settlement.country_id,COUNT(*)::integer AS settlements,
+                  COALESCE(SUM(settlement.population+settlement.slave_population),0)::bigint AS population,
+                  COALESCE(SUM(settlement.local_treasury),0)::bigint AS treasury,
+                  COALESCE(SUM(settlement.tax_income+settlement.land_trade_income+settlement.sea_trade_income),0)::bigint AS turn_income
+             FROM settlements settlement GROUP BY settlement.country_id
+         ), army_stats AS (
+           SELECT army.country_id,COALESCE(SUM(unit.quantity),0)::bigint AS field_army
+             FROM armies army JOIN army_units unit ON unit.army_id=army.id GROUP BY army.country_id
+         ), garrison_stats AS (
+           SELECT settlement.country_id,COALESCE(SUM(stack.quantity),0)::bigint AS garrison
+             FROM settlements settlement JOIN unit_stacks stack ON stack.settlement_id=settlement.id
+            WHERE stack.force_type='GARRISON' GROUP BY settlement.country_id
+         ), naval_stats AS (
+           SELECT settlement.country_id,COALESCE(SUM(ship.quantity),0)::bigint AS ships
+             FROM settlements settlement JOIN naval_units ship ON ship.settlement_id=settlement.id GROUP BY settlement.country_id
+         ), war_stats AS (
+           SELECT participant.country_id,COUNT(*)::integer AS active_wars
+             FROM (
+               SELECT attacker_country_id AS country_id FROM state_wars WHERE guild_id=$1 AND status='ACTIVE'
+               UNION ALL
+               SELECT defender_country_id AS country_id FROM state_wars WHERE guild_id=$1 AND status='ACTIVE'
+             ) participant GROUP BY participant.country_id
+         )
+         SELECT country.id,country.name,country.mobilization,
+                COALESCE(settlement_stats.settlements,0)::integer AS settlements,
+                COALESCE(settlement_stats.population,0)::bigint AS population,
+                COALESCE(settlement_stats.treasury,country.treasury)::bigint AS treasury,
+                COALESCE(settlement_stats.turn_income,0)::bigint AS turn_income,
+                COALESCE(army_stats.field_army,0)::bigint AS field_army,
+                COALESCE(garrison_stats.garrison,0)::bigint AS garrison,
+                COALESCE(naval_stats.ships,0)::bigint AS ships,
+                COALESCE(war_stats.active_wars,0)::integer AS active_wars
+           FROM countries country
+           LEFT JOIN settlement_stats ON settlement_stats.country_id=country.id
+           LEFT JOIN army_stats ON army_stats.country_id=country.id
+           LEFT JOIN garrison_stats ON garrison_stats.country_id=country.id
+           LEFT JOIN naval_stats ON naval_stats.country_id=country.id
+           LEFT JOIN war_stats ON war_stats.country_id=country.id
           WHERE country.guild_id=$1 AND country.status='ACTIVE' AND country.is_system_faction=FALSE
-          GROUP BY country.id ORDER BY country.name`, [adminConfig.guildId]
+          ORDER BY country.name`, [adminConfig.guildId]
       ),
       adminPool.query(
         `SELECT tx.country_id,country.name AS country_name,tx.turn,
