@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { performance } from "node:perf_hooks";
 import { z } from "zod";
 import {
   BATTLE_UNIT_STATS,
@@ -17,6 +18,7 @@ import {
 } from "../domain/characters.js";
 import { CULTURE_GROUPS, type CultureGroup } from "../domain/cultures.js";
 import { MINIMUM_MARRIAGE_AGE,automaticDynastyRelations } from "../domain/dynasty.js";
+import { settlementTransferPolicy, type SettlementTransferType } from "../domain/settlement-transfer.js";
 import { MERCENARY_COMPANIES, type MercenaryCompanyKey } from "../domain/mercenaries.js";
 import { RESOURCES, type ResourceType } from "../domain/resources.js";
 import { RELIGIONS, isReligionKey, secondaryReligionFor, type ReligionKey } from "../domain/religions.js";
@@ -32,6 +34,10 @@ import {
 import { resolveArmyUnitTargetQuantity } from "./army-unit-update.js";
 import {steppeKurultayService} from "../services/steppe-kurultay-service.js";
 import {ensureCountryMarshal} from "../services/marshal-service.js";
+import { gameService } from "../services/game-service.js";
+import { diplomacyService } from "../services/diplomacy-service.js";
+import { warDeclarationService } from "../services/war-declaration-service.js";
+import { terminateCharacterDuties } from "../services/character-duty-lifecycle-service.js";
 
 const usableUnitTypes = (Object.keys(BATTLE_UNIT_STATS) as BattleUnitType[]).filter((unitType) => unitType !== "militia");
 const usableUnitTypeSet = new Set<string>(usableUnitTypes);
@@ -212,12 +218,99 @@ const armyInputSchema = z.object({
   })).min(1).max(30)
 });
 
+const guidedTreasurySchema = z.object({
+  targetType: z.enum(["COUNTRY", "SETTLEMENT"]),
+  targetId: z.string().uuid(),
+  direction: z.enum(["ADD", "SUBTRACT"]),
+  amount: z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  reason: z.string().trim().min(3).max(500)
+});
+
+const guidedSettlementTransferSchema = z.object({
+  settlementId: z.string().uuid(),
+  targetCountryId: z.string().uuid(),
+  transferType: z.enum(["CONQUEST", "PEACE_TRANSFER", "VOLUNTARY_TRANSFER"]),
+  reason: z.string().trim().min(3).max(500)
+});
+
+const guidedDiplomacyEndSchema = z.object({
+  kind: z.enum(["ALLIANCE", "VASSALAGE", "WAR"]),
+  relationId: z.string().uuid(),
+  winnerCountryId: z.string().uuid().nullable().optional(),
+  reason: z.string().trim().min(3).max(2000),
+  confirmation: z.literal("SONLANDIR")
+});
+
+const characterAssignmentCancelSchema = z.object({
+  reason: z.string().trim().min(3).max(500).optional()
+});
+
+const bulkOperationSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("COUNTRY_MOBILIZATION"),
+    targetIds: z.array(z.string().uuid()).min(1).max(100),
+    mobilization: z.enum(["PEACE", "PARTIAL", "GENERAL"]),
+    reason: z.string().trim().min(3).max(500)
+  }),
+  z.object({
+    kind: z.literal("SETTLEMENT_TAX"),
+    targetIds: z.array(z.string().uuid()).min(1).max(100),
+    taxRatePercent: z.coerce.number().min(0).max(100),
+    reason: z.string().trim().min(3).max(500)
+  }),
+  z.object({
+    kind: z.literal("CHARACTER_ASSIGNMENT_CANCEL"),
+    targetIds: z.array(z.string().uuid()).min(1).max(100),
+    reason: z.string().trim().min(3).max(500)
+  })
+]);
+
+const gameHealthRepairSchema = z.object({
+  action: z.enum(["DISMISS_INACTIVE_CHARACTER", "RECONCILE_MARSHALS", "COMPLETE_OVERDUE_REPAIR", "REMOVE_FOREIGN_COMMANDER", "END_INVALID_VASSALAGE"]),
+  targetId: z.string().uuid(),
+  reason: z.string().trim().min(3).max(500),
+  confirmation: z.literal("ONAR")
+});
+
 export type AdminArmyInput = z.infer<typeof armyInputSchema>;
 
 interface ArmyOperationToken {
   kind: "ARMY_CREATE";
   actorId: string;
   input: AdminArmyInput;
+  idempotencyKey: string;
+  exp: number;
+}
+
+interface GuidedTreasuryOperationToken {
+  kind: "GUIDED_TREASURY";
+  actorId: string;
+  input: z.infer<typeof guidedTreasurySchema>;
+  currentBalance: number;
+  nextBalance: number;
+  countryId: string;
+  label: string;
+  idempotencyKey: string;
+  exp: number;
+}
+
+interface GuidedSettlementTransferOperationToken {
+  kind: "GUIDED_SETTLEMENT_TRANSFER";
+  actorId: string;
+  input: z.infer<typeof guidedSettlementTransferSchema>;
+  sourceCountryId: string;
+  settlementName: string;
+  sourceCountryName: string;
+  targetCountryName: string;
+  idempotencyKey: string;
+  exp: number;
+}
+
+interface BulkOperationToken {
+  kind: "BULK_OPERATION";
+  actorId: string;
+  input: z.infer<typeof bulkOperationSchema>;
+  snapshots: Array<{ id: string; label: string; currentValue: string | number }>;
   idempotencyKey: string;
   exp: number;
 }
@@ -509,6 +602,16 @@ interface AdminAuditRow {
   created_at: string;
 }
 
+interface AdminAuditQuery {
+  search?: string;
+  source?: "ALL" | "PANEL" | "DISCORD";
+  kind?: "ALL" | "CREATE" | "UPDATE" | "DELETE" | "UNDO";
+  from?: string;
+  to?: string;
+  offset?: number;
+  limit?: number;
+}
+
 async function presentAuditRows(rows: AdminAuditRow[]) {
   const ids = new Set<string>();
   for (const row of rows) {
@@ -518,11 +621,13 @@ async function presentAuditRows(rows: AdminAuditRow[]) {
   const names = await auditEntityNames([...ids]);
   return rows.map((row) => ({
     id: row.id,
+    action: row.action,
+    canUndo: row.action === "ADMIN_DATA_UPDATE",
     actionLabel: auditActionLabel(row.action),
     entityLabel: row.entity_id && names.has(row.entity_id)
       ? names.get(row.entity_id)
       : auditEntityTypeLabel(row.entity_type),
-    actorLabel: row.action.startsWith("admin.panel.") ? "Operasyon Masası yöneticisi" : "Discord işlemi",
+    actorLabel: row.action.startsWith("admin.panel.") || row.action.startsWith("ADMIN_DATA_") ? "Operasyon Masası yöneticisi" : "Discord işlemi",
     detailSummary: auditDetailsSummary(row.details, names),
     created_at: row.created_at
   }));
@@ -781,6 +886,29 @@ async function armyContext(client: AdminDbClient, input: AdminArmyInput) {
   return { country, settlement, units };
 }
 
+async function claimAdminOperation(actorId: string, action: string, idempotencyKey: string, request: unknown) {
+  const inserted = await adminPool.query<{ id: string }>(
+    `INSERT INTO admin_panel_operations(guild_id,actor_user_id,action,idempotency_key,request)
+     VALUES($1,$2,$3,$4,$5::jsonb) ON CONFLICT(idempotency_key) DO NOTHING RETURNING id`,
+    [adminConfig.guildId, actorId, action, idempotencyKey, JSON.stringify(request)]
+  );
+  if (inserted.rowCount) return { claimed: true as const, result: null };
+  const previous = (await adminPool.query<{ status: string; result: unknown }>(
+    "SELECT status,result FROM admin_panel_operations WHERE idempotency_key=$1 AND guild_id=$2",
+    [idempotencyKey, adminConfig.guildId]
+  )).rows[0];
+  if (previous?.status === "APPLIED") return { claimed: false as const, result: previous.result };
+  throw new Error("Bu işlem halen uygulanıyor veya sonucu denetleniyor. Aynı önizlemeyi tekrar göndermeyin.");
+}
+
+async function completeAdminOperation(idempotencyKey: string, result: unknown) {
+  await adminPool.query(
+    `UPDATE admin_panel_operations SET status='APPLIED',result=$1::jsonb,applied_at=NOW()
+      WHERE idempotency_key=$2 AND guild_id=$3`,
+    [JSON.stringify(result), idempotencyKey, adminConfig.guildId]
+  );
+}
+
 export const adminPanelService = {
   unitCatalog() {
     return usableUnitTypes.map((value) => ({ value, label: BATTLE_UNIT_STATS[value].label }));
@@ -836,6 +964,527 @@ export const adminPanelService = {
     return { guild, counts, countries, audit };
   },
 
+  async guidedOperations() {
+    const [guild, countries, settlements, assignments, alliances, vassalages, wars] = await Promise.all([
+      adminPool.query<{ current_turn: number; turn_phase: string }>(
+        "SELECT current_turn,turn_phase FROM guilds WHERE discord_id=$1", [adminConfig.guildId]
+      ),
+      adminPool.query(
+        `SELECT country.id,country.name,country.mobilization,
+                COALESCE((SELECT SUM(settlement.local_treasury) FROM settlements settlement WHERE settlement.country_id=country.id),country.treasury)::bigint AS treasury
+           FROM countries country WHERE country.guild_id=$1 AND country.status='ACTIVE' ORDER BY country.name`, [adminConfig.guildId]
+      ),
+      adminPool.query(
+        `SELECT settlement.id,settlement.name,settlement.country_id,country.name AS country_name,
+                settlement.local_treasury,settlement.population,settlement.slave_population,
+                (SELECT COUNT(*)::integer FROM recruitment_orders recruitment WHERE recruitment.settlement_id=settlement.id AND recruitment.status='TRAINING') AS active_recruitment,
+                (SELECT COUNT(*)::integer FROM trade_agreements trade WHERE trade.status IN ('PENDING','ACTIVE') AND settlement.id IN(trade.proposer_settlement_id,trade.receiver_settlement_id)) AS live_trades
+           FROM settlements settlement JOIN countries country ON country.id=settlement.country_id
+          WHERE country.guild_id=$1 AND country.status='ACTIVE' ORDER BY country.name,settlement.name`, [adminConfig.guildId]
+      ),
+      this.characterAssignments(),
+      adminPool.query(
+        `SELECT alliance.id,proposer.id AS proposer_country_id,proposer.name AS proposer_name,
+                receiver.id AS receiver_country_id,receiver.name AS receiver_name,alliance.status
+           FROM country_alliances alliance
+           JOIN countries proposer ON proposer.id=alliance.proposer_country_id
+           JOIN countries receiver ON receiver.id=alliance.receiver_country_id
+          WHERE alliance.guild_id=$1 AND alliance.status='ACTIVE' ORDER BY proposer.name,receiver.name`, [adminConfig.guildId]
+      ),
+      adminPool.query(
+        `SELECT relation.id,overlord.id AS overlord_country_id,overlord.name AS overlord_name,
+                vassal.id AS vassal_country_id,vassal.name AS vassal_name,relation.started_turn
+           FROM country_vassalages relation
+           JOIN countries overlord ON overlord.id=relation.overlord_country_id
+           JOIN countries vassal ON vassal.id=relation.vassal_country_id
+          WHERE relation.guild_id=$1 AND relation.status='ACTIVE' ORDER BY overlord.name,vassal.name`, [adminConfig.guildId]
+      ),
+      adminPool.query(
+        `SELECT war.id,attacker.id AS attacker_country_id,attacker.name AS attacker_name,
+                defender.id AS defender_country_id,defender.name AS defender_name,war.started_turn,war.reason
+           FROM state_wars war
+           JOIN countries attacker ON attacker.id=war.attacker_country_id
+           JOIN countries defender ON defender.id=war.defender_country_id
+          WHERE war.guild_id=$1 AND war.status='ACTIVE' ORDER BY war.started_turn DESC,attacker.name`, [adminConfig.guildId]
+      )
+    ]);
+    if (!guild.rows[0]) throw new Error("Oyun durumu bulunamadı.");
+    return {
+      guild: guild.rows[0], countries: countries.rows, settlements: settlements.rows,
+      assignments, alliances: alliances.rows, vassalages: vassalages.rows, wars: wars.rows
+    };
+  },
+
+  async mechanicsControl() {
+    const [guild, countries, buildings, recruitments, navalOrders, alliances, vassalages, wars, trades, pacts, portAccess] = await Promise.all([
+      adminPool.query("SELECT current_turn,turn_phase FROM guilds WHERE discord_id=$1", [adminConfig.guildId]),
+      adminPool.query(
+        `SELECT country.id,country.name,country.mobilization,
+                COUNT(settlement.id)::integer AS settlement_count,
+                COALESCE(SUM(settlement.local_treasury),country.treasury)::bigint AS treasury,
+                COALESCE(SUM(settlement.tax_income),0)::bigint AS tax_income,
+                COALESCE(SUM(settlement.land_trade_income),0)::bigint AS land_trade_income,
+                COALESCE(SUM(settlement.sea_trade_income),0)::bigint AS sea_trade_income,
+                COALESCE(SUM(settlement.population),0)::bigint AS population
+           FROM countries country LEFT JOIN settlements settlement ON settlement.country_id=country.id
+          WHERE country.guild_id=$1 AND country.status='ACTIVE' AND country.is_system_faction=FALSE
+          GROUP BY country.id ORDER BY country.name`, [adminConfig.guildId]
+      ),
+      adminPool.query(
+        `SELECT building.id,building.building_type,building.level,building.target_level,
+                building.started_turn,building.completion_turn,settlement.id AS settlement_id,
+                settlement.name AS settlement_name,country.id AS country_id,country.name AS country_name
+           FROM buildings building JOIN settlements settlement ON settlement.id=building.settlement_id
+           JOIN countries country ON country.id=settlement.country_id
+          WHERE country.guild_id=$1 AND country.status='ACTIVE' AND building.status='BUILDING'
+          ORDER BY building.completion_turn,country.name,settlement.name LIMIT 200`, [adminConfig.guildId]
+      ),
+      adminPool.query(
+        `SELECT recruitment.id,recruitment.unit_type,recruitment.total_quantity,recruitment.remaining_quantity,
+                recruitment.ordered_turn,MIN(wave.due_turn) FILTER(WHERE wave.processed_at IS NULL) AS next_due_turn,
+                settlement.id AS settlement_id,settlement.name AS settlement_name,
+                country.id AS country_id,country.name AS country_name
+           FROM recruitment_orders recruitment JOIN settlements settlement ON settlement.id=recruitment.settlement_id
+           JOIN countries country ON country.id=recruitment.country_id
+           LEFT JOIN recruitment_waves wave ON wave.order_id=recruitment.id
+          WHERE country.guild_id=$1 AND country.status='ACTIVE' AND recruitment.status='TRAINING'
+          GROUP BY recruitment.id,settlement.id,country.id ORDER BY next_due_turn,country.name LIMIT 200`, [adminConfig.guildId]
+      ),
+      adminPool.query(
+        `SELECT naval.id,naval.ship_type,naval.quantity,naval.ordered_turn,naval.completion_turn,
+                settlement.id AS settlement_id,settlement.name AS settlement_name,
+                country.id AS country_id,country.name AS country_name
+           FROM naval_orders naval JOIN settlements settlement ON settlement.id=naval.settlement_id
+           JOIN countries country ON country.id=naval.country_id
+          WHERE country.guild_id=$1 AND country.status='ACTIVE' AND naval.status='BUILDING'
+          ORDER BY naval.completion_turn,country.name LIMIT 200`, [adminConfig.guildId]
+      ),
+      adminPool.query(
+        `SELECT alliance.id,alliance.status,proposer.id AS proposer_country_id,proposer.name AS proposer_name,
+                receiver.id AS receiver_country_id,receiver.name AS receiver_name,alliance.created_at
+           FROM country_alliances alliance JOIN countries proposer ON proposer.id=alliance.proposer_country_id
+           JOIN countries receiver ON receiver.id=alliance.receiver_country_id
+          WHERE alliance.guild_id=$1 AND alliance.status IN ('PENDING','ACTIVE')
+          ORDER BY CASE alliance.status WHEN 'PENDING' THEN 0 ELSE 1 END,alliance.created_at DESC`, [adminConfig.guildId]
+      ),
+      adminPool.query(
+        `SELECT relation.id,relation.started_turn,overlord.id AS overlord_country_id,overlord.name AS overlord_name,
+                vassal.id AS vassal_country_id,vassal.name AS vassal_name
+           FROM country_vassalages relation JOIN countries overlord ON overlord.id=relation.overlord_country_id
+           JOIN countries vassal ON vassal.id=relation.vassal_country_id
+          WHERE relation.guild_id=$1 AND relation.status='ACTIVE' ORDER BY overlord.name,vassal.name`, [adminConfig.guildId]
+      ),
+      adminPool.query(
+        `SELECT war.id,war.started_turn,war.reason,attacker.id AS attacker_country_id,attacker.name AS attacker_name,
+                defender.id AS defender_country_id,defender.name AS defender_name
+           FROM state_wars war JOIN countries attacker ON attacker.id=war.attacker_country_id
+           JOIN countries defender ON defender.id=war.defender_country_id
+          WHERE war.guild_id=$1 AND war.status='ACTIVE' ORDER BY war.started_turn DESC`, [adminConfig.guildId]
+      ),
+      adminPool.query(
+        `SELECT trade.id,trade.status,trade.route,trade.income_per_country,
+                proposer_country.name AS proposer_country_name,receiver_country.name AS receiver_country_name,
+                proposer.name AS proposer_settlement_name,receiver.name AS receiver_settlement_name
+           FROM trade_agreements trade JOIN countries proposer_country ON proposer_country.id=trade.proposer_country_id
+           JOIN countries receiver_country ON receiver_country.id=trade.receiver_country_id
+           JOIN settlements proposer ON proposer.id=trade.proposer_settlement_id
+           LEFT JOIN settlements receiver ON receiver.id=trade.receiver_settlement_id
+          WHERE trade.guild_id=$1 AND trade.status IN ('PENDING','ACTIVE')
+          ORDER BY CASE trade.status WHEN 'PENDING' THEN 0 ELSE 1 END,trade.created_at DESC LIMIT 200`, [adminConfig.guildId]
+      ),
+      adminPool.query(
+        `SELECT pact.id,pact.name,pact.purpose,founder.name AS founder_name,
+                COUNT(member.country_id)::integer AS member_count
+           FROM diplomatic_pacts pact JOIN countries founder ON founder.id=pact.founder_country_id
+           LEFT JOIN pact_memberships member ON member.pact_id=pact.id
+          WHERE pact.guild_id=$1 GROUP BY pact.id,founder.name ORDER BY pact.name`, [adminConfig.guildId]
+      ),
+      adminPool.query(
+        `SELECT access.id,access.status,requester.name AS requester_name,grantor.name AS grantor_name,access.created_at
+           FROM country_port_access access JOIN countries requester ON requester.id=access.requester_country_id
+           JOIN countries grantor ON grantor.id=access.grantor_country_id
+          WHERE access.guild_id=$1 AND access.status IN ('PENDING','ACTIVE')
+          ORDER BY CASE access.status WHEN 'PENDING' THEN 0 ELSE 1 END,access.created_at DESC`, [adminConfig.guildId]
+      )
+    ]);
+    if (!guild.rows[0]) throw new Error("Oyun durumu bulunamadı.");
+    return {
+      guild: guild.rows[0], countries: countries.rows, buildings: buildings.rows,
+      recruitments: recruitments.rows, navalOrders: navalOrders.rows,
+      alliances: alliances.rows, vassalages: vassalages.rows, wars: wars.rows,
+      trades: trades.rows, pacts: pacts.rows, portAccess: portAccess.rows
+    };
+  },
+
+  async reporting() {
+    const guild = (await adminPool.query<{ current_turn: number; turn_phase: string }>(
+      "SELECT current_turn,turn_phase FROM guilds WHERE discord_id=$1", [adminConfig.guildId]
+    )).rows[0];
+    if (!guild) throw new Error("Oyun durumu bulunamadı.");
+    const firstTurn = Math.max(0, Number(guild.current_turn) - 7);
+    const [countries, financialHistory, activity, transactionKinds] = await Promise.all([
+      adminPool.query(
+        `SELECT country.id,country.name,country.mobilization,
+                COUNT(settlement.id)::integer AS settlements,
+                COALESCE(SUM(settlement.population+settlement.slave_population),0)::bigint AS population,
+                COALESCE(SUM(settlement.local_treasury),country.treasury)::bigint AS treasury,
+                COALESCE(SUM(settlement.tax_income+settlement.land_trade_income+settlement.sea_trade_income),0)::bigint AS turn_income,
+                COALESCE((SELECT SUM(unit.quantity) FROM army_units unit JOIN armies army ON army.id=unit.army_id WHERE army.country_id=country.id),0)::bigint AS field_army,
+                COALESCE((SELECT SUM(stack.quantity) FROM unit_stacks stack JOIN settlements own ON own.id=stack.settlement_id WHERE own.country_id=country.id AND stack.force_type='GARRISON'),0)::bigint AS garrison,
+                COALESCE((SELECT SUM(ship.quantity) FROM fleet_ships ship JOIN fleets fleet ON fleet.id=ship.fleet_id WHERE fleet.country_id=country.id),0)::bigint
+                  + COALESCE((SELECT SUM(ship.quantity) FROM naval_units ship JOIN settlements own ON own.id=ship.settlement_id WHERE own.country_id=country.id),0)::bigint AS ships,
+                (SELECT COUNT(*)::integer FROM state_wars war WHERE war.guild_id=$1 AND war.status='ACTIVE' AND country.id IN(war.attacker_country_id,war.defender_country_id)) AS active_wars
+           FROM countries country LEFT JOIN settlements settlement ON settlement.country_id=country.id
+          WHERE country.guild_id=$1 AND country.status='ACTIVE' AND country.is_system_faction=FALSE
+          GROUP BY country.id ORDER BY country.name`, [adminConfig.guildId]
+      ),
+      adminPool.query(
+        `SELECT tx.country_id,country.name AS country_name,tx.turn,
+                COALESCE(SUM(tx.amount) FILTER(WHERE tx.amount>0),0)::bigint AS income,
+                ABS(COALESCE(SUM(tx.amount) FILTER(WHERE tx.amount<0),0))::bigint AS expense,
+                COALESCE(SUM(tx.amount),0)::bigint AS net,
+                COUNT(*)::integer AS transaction_count
+           FROM transactions tx JOIN countries country ON country.id=tx.country_id
+          WHERE country.guild_id=$1 AND tx.turn>=$2
+          GROUP BY tx.country_id,country.name,tx.turn
+          ORDER BY tx.turn, country.name`, [adminConfig.guildId, firstTurn]
+      ),
+      adminPool.query(
+        `SELECT created_at::date AS day,
+                COUNT(*)::integer AS total,
+                COUNT(*) FILTER(WHERE action LIKE 'admin.panel.%' OR action LIKE 'ADMIN_DATA_%')::integer AS panel,
+                COUNT(*) FILTER(WHERE action NOT LIKE 'admin.panel.%' AND action NOT LIKE 'ADMIN_DATA_%')::integer AS game
+           FROM audit_logs WHERE guild_id=$1 AND created_at>=CURRENT_DATE-INTERVAL '13 days'
+          GROUP BY created_at::date ORDER BY day`, [adminConfig.guildId]
+      ),
+      adminPool.query(
+        `SELECT tx.kind,COUNT(*)::integer AS count,
+                COALESCE(SUM(tx.amount),0)::bigint AS net
+           FROM transactions tx JOIN countries country ON country.id=tx.country_id
+          WHERE country.guild_id=$1 AND tx.turn>=$2
+          GROUP BY tx.kind ORDER BY COUNT(*) DESC,tx.kind LIMIT 12`, [adminConfig.guildId, firstTurn]
+      )
+    ]);
+    return {
+      guild, firstTurn, countries: countries.rows, financialHistory: financialHistory.rows,
+      activity: activity.rows, transactionKinds: transactionKinds.rows, generatedAt: new Date().toISOString()
+    };
+  },
+
+  async previewBulkOperation(actorId: string, rawInput: unknown) {
+    const input = bulkOperationSchema.parse(rawInput);
+    const targetIds = [...new Set(input.targetIds)];
+    if (targetIds.length !== input.targetIds.length) throw new Error("Aynı kayıt toplu işleme birden fazla kez eklenemez.");
+    let snapshots: BulkOperationToken["snapshots"];
+    if (input.kind === "COUNTRY_MOBILIZATION") {
+      snapshots = (await adminPool.query<{ id: string; name: string; mobilization: string }>(
+        `SELECT id,name,mobilization FROM countries
+          WHERE guild_id=$1 AND status='ACTIVE' AND id=ANY($2::uuid[]) ORDER BY name`,
+        [adminConfig.guildId, targetIds]
+      )).rows.map((row) => ({ id: row.id, label: row.name, currentValue: row.mobilization }));
+    } else if (input.kind === "SETTLEMENT_TAX") {
+      snapshots = (await adminPool.query<{ id: string; name: string; country_name: string; tax_rate_percent: number }>(
+        `SELECT settlement.id,settlement.name,country.name AS country_name,settlement.tax_rate_percent
+           FROM settlements settlement JOIN countries country ON country.id=settlement.country_id
+          WHERE country.guild_id=$1 AND country.status='ACTIVE' AND settlement.id=ANY($2::uuid[])
+          ORDER BY country.name,settlement.name`, [adminConfig.guildId, targetIds]
+      )).rows.map((row) => ({ id: row.id, label: `${row.country_name} · ${row.name}`, currentValue: Number(row.tax_rate_percent) }));
+    } else {
+      snapshots = (await adminPool.query<{ id: string; name: string; country_name: string; assignment: string }>(
+        `SELECT character.id,character.name,country.name AS country_name,character.assignment
+           FROM country_characters character JOIN countries country ON country.id=character.country_id
+          WHERE country.guild_id=$1 AND country.status='ACTIVE' AND character.character_status='ACTIVE'
+            AND character.assignment NOT IN ('NONE','CAPTURED') AND character.id=ANY($2::uuid[])
+          ORDER BY country.name,character.name`, [adminConfig.guildId, targetIds]
+      )).rows.map((row) => ({ id: row.id, label: `${row.country_name} · ${row.name}`, currentValue: row.assignment }));
+    }
+    if (snapshots.length !== targetIds.length) throw new Error("Seçilen kayıtlardan biri artık aktif veya toplu işleme uygun değil.");
+    const nextValue = input.kind === "COUNTRY_MOBILIZATION"
+      ? input.mobilization
+      : input.kind === "SETTLEMENT_TAX" ? input.taxRatePercent : "NONE";
+    const token: BulkOperationToken = {
+      kind: "BULK_OPERATION", actorId, input: { ...input, targetIds }, snapshots,
+      idempotencyKey: randomUUID(), exp: Date.now() + 10 * 60_000
+    };
+    return {
+      previewToken: signValue(token, adminConfig.sessionSecret), expiresInSeconds: 600,
+      kind: input.kind, reason: input.reason, nextValue,
+      rows: snapshots.map((row) => ({ ...row, nextValue }))
+    };
+  },
+
+  async applyBulkOperation(actorId: string, previewToken: string) {
+    const operation = verifySignedValue<BulkOperationToken>(previewToken, adminConfig.sessionSecret);
+    if (!operation || operation.kind !== "BULK_OPERATION" || operation.actorId !== actorId || operation.exp <= Date.now()) {
+      throw new Error("Toplu işlem önizlemesi geçersiz veya süresi dolmuş. Yeniden önizleyin.");
+    }
+    const input = bulkOperationSchema.parse(operation.input);
+    return withAdminTransaction(async (client) => {
+      const inserted = await client.query(
+        `INSERT INTO admin_panel_operations(guild_id,actor_user_id,action,idempotency_key,request)
+         VALUES($1,$2,$3,$4,$5::jsonb) ON CONFLICT(idempotency_key) DO NOTHING RETURNING id`,
+        [adminConfig.guildId, actorId, `BULK_${input.kind}`, operation.idempotencyKey, JSON.stringify(input)]
+      );
+      if (!inserted.rowCount) {
+        const existing = (await client.query<{ status: string; result: unknown }>(
+          "SELECT status,result FROM admin_panel_operations WHERE guild_id=$1 AND idempotency_key=$2",
+          [adminConfig.guildId, operation.idempotencyKey]
+        )).rows[0];
+        if (existing?.status === "APPLIED") return existing.result;
+        throw new Error("Bu toplu işlem halen uygulanıyor. Birkaç saniye sonra sonucu yenileyin.");
+      }
+      const expected = new Map(operation.snapshots.map((row) => [row.id, String(row.currentValue)]));
+      let currentRows: Array<{ id: string; name: string; current_value: string | number }>;
+      if (input.kind === "COUNTRY_MOBILIZATION") {
+        currentRows = (await client.query<{ id: string; name: string; current_value: string }>(
+          `SELECT id,name,mobilization AS current_value FROM countries
+            WHERE guild_id=$1 AND status='ACTIVE' AND id=ANY($2::uuid[]) FOR UPDATE`,
+          [adminConfig.guildId, input.targetIds]
+        )).rows;
+      } else if (input.kind === "SETTLEMENT_TAX") {
+        currentRows = (await client.query<{ id: string; name: string; current_value: number }>(
+          `SELECT settlement.id,settlement.name,settlement.tax_rate_percent AS current_value
+             FROM settlements settlement JOIN countries country ON country.id=settlement.country_id
+            WHERE country.guild_id=$1 AND country.status='ACTIVE' AND settlement.id=ANY($2::uuid[])
+            FOR UPDATE OF settlement`, [adminConfig.guildId, input.targetIds]
+        )).rows;
+      } else {
+        currentRows = (await client.query<{ id: string; name: string; current_value: string }>(
+          `SELECT character.id,character.name,character.assignment AS current_value
+             FROM country_characters character JOIN countries country ON country.id=character.country_id
+            WHERE country.guild_id=$1 AND country.status='ACTIVE' AND character.character_status='ACTIVE'
+              AND character.assignment NOT IN ('NONE','CAPTURED') AND character.id=ANY($2::uuid[])
+            FOR UPDATE OF character`, [adminConfig.guildId, input.targetIds]
+        )).rows;
+      }
+      if (currentRows.length !== operation.snapshots.length || currentRows.some((row) => expected.get(row.id) !== String(row.current_value))) {
+        throw new Error("Seçilen kayıtlardan en az biri önizlemeden sonra değişti. Yeni bir önizleme oluşturun.");
+      }
+      let affected = 0;
+      const details: Record<string, unknown> = { kind: input.kind, reason: input.reason, targets: operation.snapshots };
+      if (input.kind === "COUNTRY_MOBILIZATION") {
+        affected = Number((await client.query(
+          "UPDATE countries SET mobilization=$1 WHERE id=ANY($2::uuid[]) RETURNING id",
+          [input.mobilization, input.targetIds]
+        )).rowCount ?? 0);
+        details.nextValue = input.mobilization;
+      } else if (input.kind === "SETTLEMENT_TAX") {
+        affected = Number((await client.query(
+          "UPDATE settlements SET tax_rate_percent=$1 WHERE id=ANY($2::uuid[]) RETURNING id",
+          [input.taxRatePercent, input.targetIds]
+        )).rowCount ?? 0);
+        details.nextValue = input.taxRatePercent;
+      } else {
+        const ids = input.targetIds;
+        const merchant = await client.query(
+          `UPDATE merchant_operations SET status='CANCELLED',ended_turn=state.current_turn,updated_at=NOW()
+             FROM guilds state WHERE state.discord_id=$1 AND merchant_character_id=ANY($2::uuid[])
+              AND status IN ('PENDING_ACCEPTANCE','TRAVELING','ACTIVE','CONTROLLED') RETURNING id`, [adminConfig.guildId, ids]
+        );
+        await client.query(
+          "UPDATE purchase_agent_discounts SET consumed_at=NOW() WHERE merchant_character_id=ANY($1::uuid[]) AND consumed_at IS NULL", [ids]
+        );
+        const diplomat = await client.query(
+          `UPDATE diplomat_operations SET status='CANCELLED',updated_at=NOW(),
+                  completion_text='Yönetici tarafından toplu işlem merkezinden iptal edildi.'
+            WHERE diplomat_character_id=ANY($1::uuid[]) AND status IN ('TRAVELING','ACTIVE','PAUSED') RETURNING id`, [ids]
+        );
+        const missionary = await client.query(
+          "UPDATE missionary_operations SET status='CANCELLED',updated_at=NOW() WHERE missionary_character_id=ANY($1::uuid[]) AND status IN ('TRAVELING','ACTIVE') RETURNING id", [ids]
+        );
+        const espionage = await client.query(
+          "UPDATE espionage_operations SET status='CANCELLED',resolved_at=NOW() WHERE spy_character_id=ANY($1::uuid[]) AND status='TRAVELING' RETURNING id", [ids]
+        );
+        await client.query("DELETE FROM settlement_assimilation_diplomats WHERE character_id=ANY($1::uuid[])", [ids]);
+        await client.query("UPDATE armies SET commander_character_id=NULL,updated_at=NOW() WHERE commander_character_id=ANY($1::uuid[])", [ids]);
+        await client.query("UPDATE fleets SET commander_character_id=NULL,updated_at=NOW() WHERE commander_character_id=ANY($1::uuid[])", [ids]);
+        await client.query("UPDATE battle_sides SET chief_commander_character_id=NULL WHERE chief_commander_character_id=ANY($1::uuid[])", [ids]);
+        affected = Number((await client.query(
+          `UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL,
+                  protected_character_id=NULL,assignment_ready_turn=NULL
+            WHERE id=ANY($1::uuid[]) RETURNING id`, [ids]
+        )).rowCount ?? 0);
+        Object.assign(details, {
+          nextValue: "NONE", merchantOperations: merchant.rowCount ?? 0,
+          diplomatOperations: diplomat.rowCount ?? 0, missionaryOperations: missionary.rowCount ?? 0,
+          espionageOperations: espionage.rowCount ?? 0
+        });
+      }
+      const result = { kind: input.kind, affected, reason: input.reason };
+      await writeAdminAudit(client, actorId, "admin.panel.bulk.apply", "bulk_operation", operation.idempotencyKey, details);
+      await client.query(
+        `UPDATE admin_panel_operations SET status='APPLIED',result=$1::jsonb,applied_at=NOW()
+          WHERE guild_id=$2 AND idempotency_key=$3`,
+        [JSON.stringify(result), adminConfig.guildId, operation.idempotencyKey]
+      );
+      return result;
+    });
+  },
+
+  async previewGuidedTreasury(actorId: string, rawInput: unknown) {
+    const input = guidedTreasurySchema.parse(rawInput);
+    const target = input.targetType === "COUNTRY"
+      ? (await adminPool.query<{ id: string; name: string; balance: number; country_id: string }>(
+        `SELECT country.id,country.name,
+                COALESCE((SELECT SUM(settlement.local_treasury) FROM settlements settlement WHERE settlement.country_id=country.id),country.treasury)::bigint AS balance,
+                country.id AS country_id
+           FROM countries country WHERE country.id=$1 AND country.guild_id=$2 AND country.status='ACTIVE'`,
+        [input.targetId, adminConfig.guildId]
+      )).rows[0]
+      : (await adminPool.query<{ id: string; name: string; balance: number; country_id: string }>(
+        `SELECT settlement.id,settlement.name,settlement.local_treasury AS balance,settlement.country_id
+           FROM settlements settlement JOIN countries country ON country.id=settlement.country_id
+          WHERE settlement.id=$1 AND country.guild_id=$2 AND country.status='ACTIVE'`,
+        [input.targetId, adminConfig.guildId]
+      )).rows[0];
+    if (!target) throw new Error("Hazine hedefi bulunamadı.");
+    const currentBalance = Number(target.balance);
+    const delta = input.direction === "ADD" ? input.amount : -input.amount;
+    const nextBalance = currentBalance + delta;
+    if (!Number.isSafeInteger(nextBalance) || nextBalance < 0) throw new Error("İşlem sonucunda hazine sıfırın altına düşemez.");
+    const token: GuidedTreasuryOperationToken = {
+      kind: "GUIDED_TREASURY", actorId, input, currentBalance, nextBalance,
+      countryId: target.country_id, label: target.name, idempotencyKey: randomUUID(), exp: Date.now() + 10 * 60_000
+    };
+    return {
+      previewToken: signValue(token, adminConfig.sessionSecret), expiresInSeconds: 600,
+      targetType: input.targetType, targetId: target.id, label: target.name,
+      currentBalance, delta, nextBalance, reason: input.reason
+    };
+  },
+
+  async applyGuidedTreasury(actorId: string, previewToken: string) {
+    const operation = verifySignedValue<GuidedTreasuryOperationToken>(previewToken, adminConfig.sessionSecret);
+    if (!operation || operation.kind !== "GUIDED_TREASURY" || operation.actorId !== actorId || operation.exp <= Date.now()) {
+      throw new Error("Hazine önizlemesi geçersiz veya süresi dolmuş. Yeniden önizleyin.");
+    }
+    const input = guidedTreasurySchema.parse(operation.input);
+    const current = input.targetType === "COUNTRY"
+      ? Number((await adminPool.query<{ balance: number }>(
+        `SELECT COALESCE((SELECT SUM(local_treasury) FROM settlements WHERE country_id=country.id),country.treasury)::bigint AS balance
+           FROM countries country WHERE country.id=$1 AND country.guild_id=$2 AND country.status='ACTIVE'`,
+        [input.targetId, adminConfig.guildId]
+      )).rows[0]?.balance)
+      : Number((await adminPool.query<{ balance: number }>(
+        `SELECT settlement.local_treasury AS balance FROM settlements settlement JOIN countries country ON country.id=settlement.country_id
+          WHERE settlement.id=$1 AND country.guild_id=$2 AND country.status='ACTIVE'`,
+        [input.targetId, adminConfig.guildId]
+      )).rows[0]?.balance);
+    if (!Number.isFinite(current)) throw new Error("Hazine hedefi artık bulunmuyor.");
+    if (current !== operation.currentBalance) throw new Error("Hazine önizlemeden sonra değişti. Yeni bir önizleme oluşturun.");
+    const claim = await claimAdminOperation(actorId, "GUIDED_TREASURY", operation.idempotencyKey, input);
+    if (!claim.claimed) return claim.result;
+    const delta = input.direction === "ADD" ? input.amount : -input.amount;
+    if (input.targetType === "COUNTRY") {
+      await gameService.adjustTreasury({ guildId: adminConfig.guildId, actorId, countryId: input.targetId, amount: delta, reason: input.reason });
+    } else {
+      await gameService.adjustSettlementTreasury({ guildId: adminConfig.guildId, actorId, countryId: operation.countryId, settlementId: input.targetId, amount: delta, reason: input.reason });
+    }
+    const result = { targetType: input.targetType, targetId: input.targetId, label: operation.label, previousBalance: operation.currentBalance, delta, balance: operation.nextBalance };
+    await completeAdminOperation(operation.idempotencyKey, result);
+    return result;
+  },
+
+  async previewGuidedSettlementTransfer(actorId: string, rawInput: unknown) {
+    const input = guidedSettlementTransferSchema.parse(rawInput);
+    const context = (await adminPool.query<{
+      settlement_id: string; settlement_name: string; source_country_id: string; source_country_name: string;
+      target_country_name: string; current_turn: number; source_settlement_count: number;
+      active_recruitment: number; live_trades: number; army_personnel: number; garrison_personnel: number; ships: number;
+    }>(
+      `SELECT settlement.id AS settlement_id,settlement.name AS settlement_name,
+              source.id AS source_country_id,source.name AS source_country_name,target.name AS target_country_name,
+              guild.current_turn,
+              (SELECT COUNT(*)::integer FROM settlements own WHERE own.country_id=source.id) AS source_settlement_count,
+              (SELECT COUNT(*)::integer FROM recruitment_orders recruitment WHERE recruitment.settlement_id=settlement.id AND recruitment.status='TRAINING') AS active_recruitment,
+              (SELECT COUNT(*)::integer FROM trade_agreements trade WHERE trade.status IN ('PENDING','ACTIVE') AND settlement.id IN(trade.proposer_settlement_id,trade.receiver_settlement_id)) AS live_trades,
+              COALESCE((SELECT SUM(unit.quantity) FROM army_units unit JOIN armies army ON army.id=unit.army_id WHERE unit.settlement_id=settlement.id AND army.country_id=source.id),0)::integer AS army_personnel,
+              COALESCE((SELECT SUM(stack.quantity) FROM unit_stacks stack WHERE stack.settlement_id=settlement.id AND stack.force_type='GARRISON'),0)::integer AS garrison_personnel,
+              COALESCE((SELECT SUM(ship.quantity) FROM naval_units ship WHERE ship.settlement_id=settlement.id),0)::integer AS ships
+         FROM settlements settlement
+         JOIN countries source ON source.id=settlement.country_id
+         JOIN countries target ON target.id=$2 AND target.guild_id=$3 AND target.status='ACTIVE'
+         JOIN guilds guild ON guild.discord_id=$3
+        WHERE settlement.id=$1 AND source.guild_id=$3 AND source.status='ACTIVE'`,
+      [input.settlementId, input.targetCountryId, adminConfig.guildId]
+    )).rows[0];
+    if (!context) throw new Error("Yerleşke, kaynak devlet veya hedef devlet bulunamadı.");
+    if (context.source_country_id === input.targetCountryId) throw new Error("Yerleşke zaten hedef devlete ait.");
+    const policy = settlementTransferPolicy(input.transferType as SettlementTransferType);
+    const warnings = [
+      Number(context.active_recruitment) ? `${context.active_recruitment} asker alım emri iptal edilir.` : null,
+      Number(context.live_trades) ? `${context.live_trades} ticaret bağlantısı sona erer.` : null,
+      Number(context.garrison_personnel) ? `${Number(context.garrison_personnel).toLocaleString("tr-TR")} garnizon askeri devir politikasına göre işlenir.` : null,
+      Number(context.ships) ? `${Number(context.ships).toLocaleString("tr-TR")} gemi uygun dost limana aktarılır veya güvenli biçimde işlenir.` : null,
+      Number(context.source_settlement_count) === 1 ? `${context.source_country_name} son yerleşkesini kaybedecek; Son Direniş süreci başlayabilir.` : null
+    ].filter(Boolean);
+    const token: GuidedSettlementTransferOperationToken = {
+      kind: "GUIDED_SETTLEMENT_TRANSFER", actorId, input,
+      sourceCountryId: context.source_country_id, settlementName: context.settlement_name,
+      sourceCountryName: context.source_country_name, targetCountryName: context.target_country_name,
+      idempotencyKey: randomUUID(), exp: Date.now() + 10 * 60_000
+    };
+    return {
+      previewToken: signValue(token, adminConfig.sessionSecret), expiresInSeconds: 600,
+      settlementName: context.settlement_name, sourceCountryName: context.source_country_name,
+      targetCountryName: context.target_country_name, transferType: input.transferType, transferLabel: policy.label,
+      currentTurn: Number(context.current_turn), armyPersonnel: Number(context.army_personnel), warnings, reason: input.reason
+    };
+  },
+
+  async applyGuidedSettlementTransfer(actorId: string, previewToken: string) {
+    const operation = verifySignedValue<GuidedSettlementTransferOperationToken>(previewToken, adminConfig.sessionSecret);
+    if (!operation || operation.kind !== "GUIDED_SETTLEMENT_TRANSFER" || operation.actorId !== actorId || operation.exp <= Date.now()) {
+      throw new Error("Yerleşke devri önizlemesi geçersiz veya süresi dolmuş. Yeniden önizleyin.");
+    }
+    const input = guidedSettlementTransferSchema.parse(operation.input);
+    const currentOwner = (await adminPool.query<{ country_id: string }>(
+      `SELECT settlement.country_id FROM settlements settlement JOIN countries country ON country.id=settlement.country_id
+        WHERE settlement.id=$1 AND country.guild_id=$2`, [input.settlementId, adminConfig.guildId]
+    )).rows[0];
+    if (!currentOwner || currentOwner.country_id !== operation.sourceCountryId) {
+      throw new Error("Yerleşkenin sahibi önizlemeden sonra değişti. İşlem durduruldu.");
+    }
+    const claim = await claimAdminOperation(actorId, "GUIDED_SETTLEMENT_TRANSFER", operation.idempotencyKey, input);
+    if (!claim.claimed) return claim.result;
+    const result = await gameService.transferSettlement({
+      guildId: adminConfig.guildId, actorId, sourceCountryId: operation.sourceCountryId,
+      targetCountryId: input.targetCountryId, settlementId: input.settlementId,
+      transferType: input.transferType as SettlementTransferType
+    });
+    await completeAdminOperation(operation.idempotencyKey, { ...result, reason: input.reason });
+    return result;
+  },
+
+  async endGuidedDiplomacy(actorId: string, rawInput: unknown) {
+    const input = guidedDiplomacyEndSchema.parse(rawInput);
+    if (input.kind === "ALLIANCE") {
+      const relation = (await adminPool.query<{ proposer_country_id: string; receiver_country_id: string }>(
+        "SELECT proposer_country_id,receiver_country_id FROM country_alliances WHERE id=$1 AND guild_id=$2 AND status='ACTIVE'",
+        [input.relationId, adminConfig.guildId]
+      )).rows[0];
+      if (!relation) throw new Error("Aktif ittifak bulunamadı.");
+      return diplomacyService.endAlliance({ guildId: adminConfig.guildId, actorId, countryId: relation.proposer_country_id, targetCountryId: relation.receiver_country_id });
+    }
+    if (input.kind === "WAR") {
+      return warDeclarationService.forceEnd({ guildId: adminConfig.guildId, actorId, warId: input.relationId, winnerCountryId: input.winnerCountryId ?? null, description: input.reason });
+    }
+    return withAdminTransaction(async (client) => {
+      const turn = Number((await client.query<{ current_turn: number }>(
+        "SELECT current_turn FROM guilds WHERE discord_id=$1 FOR UPDATE", [adminConfig.guildId]
+      )).rows[0]?.current_turn ?? 0);
+      const ended = (await client.query(
+        `UPDATE country_vassalages SET status='ENDED',ended_turn=$1,ended_by=$2,ended_at=NOW()
+          WHERE id=$3 AND guild_id=$4 AND status='ACTIVE'
+          RETURNING id,overlord_country_id,vassal_country_id,started_turn,ended_turn`,
+        [turn, actorId, input.relationId, adminConfig.guildId]
+      )).rows[0];
+      if (!ended) throw new Error("Aktif vassallık bulunamadı.");
+      await writeAdminAudit(client, actorId, "admin.panel.vassalage.end", "vassalage", input.relationId, { ...ended, reason: input.reason });
+      return ended;
+    });
+  },
+
   async gameHealth() {
     type HealthIssue = {
       id: string;
@@ -848,6 +1497,7 @@ export const adminPanelService = {
       targetId: string | null;
       targetLabel: string | null;
       route: string;
+      repairAction: z.infer<typeof gameHealthRepairSchema>["action"] | null;
     };
     const issues: HealthIssue[] = [];
     const add = (issue: Omit<HealthIssue, "id">) => issues.push({
@@ -924,13 +1574,13 @@ export const adminPanelService = {
       )
     ]);
 
-    for (const row of landlessCountries.rows) add({ severity: "WARNING", category: "DEVLET", title: "Yerleşkesiz aktif devlet", detail: `${row.name} aktif durumda ancak bağlı yerleşkesi bulunmuyor.`, count: 1, targetType: "COUNTRY", targetId: row.id, targetLabel: row.name, route: "countries" });
-    for (const row of inactiveAssets.rows) add({ severity: "CRITICAL", category: "ASKERÎ", title: "Yok edilmiş devlete bağlı kuvvet", detail: `${row.name} üzerinde ${row.armies} ordu ve ${row.fleets} filo kaydı kaldı.`, count: Number(row.armies) + Number(row.fleets), targetType: "COUNTRY", targetId: row.id, targetLabel: row.name, route: "countries" });
-    for (const row of inactiveCharacters.rows) add({ severity: "CRITICAL", category: "KARAKTER", title: "Yok edilmiş ülkede aktif karakter", detail: `${row.name} hâlâ ${row.country_name} adına aktif görünüyor.`, count: 1, targetType: "CHARACTER", targetId: row.id, targetLabel: row.name, route: "characters" });
-    for (const row of marshalConflicts.rows) add({ severity: "CRITICAL", category: "KARAKTER", title: "Birden fazla mareşal", detail: `${row.name} devletinde ${row.marshal_count} aktif mareşal bulunuyor.`, count: Number(row.marshal_count), targetType: "COUNTRY", targetId: row.id, targetLabel: row.name, route: "characters" });
-    for (const row of overdueRepairs.rows) add({ severity: "WARNING", category: "DONANMA", title: "Süresi geçen filo tamiri", detail: `${row.country_name} · ${row.name}, Tur ${row.completion_turn} tarihinde tamamlanmalıydı.`, count: 1, targetType: "FLEET_REPAIR", targetId: row.id, targetLabel: row.name, route: "data-control" });
-    for (const row of commanderConflicts.rows) add({ severity: "CRITICAL", category: "ASKERÎ", title: "Yabancı kuvvet komutanı", detail: `${row.country_name} · ${row.name} kuvvetine başka devletten ${row.character_name} atanmış.`, count: 1, targetType: row.force_type, targetId: row.id, targetLabel: row.name, route: "armies" });
-    for (const row of vassalConflicts.rows) add({ severity: "CRITICAL", category: "DİPLOMASİ", title: "Geçersiz aktif vassallık", detail: `${row.vassal_name} → ${row.overlord_name} bağlantısında taraflardan biri artık aktif değil.`, count: 1, targetType: "VASSALAGE", targetId: row.id, targetLabel: `${row.vassal_name} → ${row.overlord_name}`, route: "data-control" });
+    for (const row of landlessCountries.rows) add({ severity: "WARNING", category: "DEVLET", title: "Yerleşkesiz aktif devlet", detail: `${row.name} aktif durumda ancak bağlı yerleşkesi bulunmuyor.`, count: 1, targetType: "COUNTRY", targetId: row.id, targetLabel: row.name, route: "countries", repairAction: null });
+    for (const row of inactiveAssets.rows) add({ severity: "CRITICAL", category: "ASKERÎ", title: "Yok edilmiş devlete bağlı kuvvet", detail: `${row.name} üzerinde ${row.armies} ordu ve ${row.fleets} filo kaydı kaldı. Veri kaybı riski nedeniyle kuvvetlerin hedefi GM tarafından seçilmelidir.`, count: Number(row.armies) + Number(row.fleets), targetType: "COUNTRY", targetId: row.id, targetLabel: row.name, route: "armies", repairAction: null });
+    for (const row of inactiveCharacters.rows) add({ severity: "CRITICAL", category: "KARAKTER", title: "Yok edilmiş ülkede aktif karakter", detail: `${row.name} hâlâ ${row.country_name} adına aktif görünüyor. Görevleri sonlandırılıp görevden alınabilir.`, count: 1, targetType: "CHARACTER", targetId: row.id, targetLabel: row.name, route: "characters", repairAction: "DISMISS_INACTIVE_CHARACTER" });
+    for (const row of marshalConflicts.rows) add({ severity: "CRITICAL", category: "KARAKTER", title: "Birden fazla mareşal", detail: `${row.name} devletinde ${row.marshal_count} aktif mareşal bulunuyor. En yüksek zaferli mareşal korunabilir.`, count: Number(row.marshal_count), targetType: "COUNTRY", targetId: row.id, targetLabel: row.name, route: "characters", repairAction: "RECONCILE_MARSHALS" });
+    for (const row of overdueRepairs.rows) add({ severity: "WARNING", category: "DONANMA", title: "Süresi geçen filo tamiri", detail: `${row.country_name} · ${row.name}, Tur ${row.completion_turn} tarihinde tamamlanmalıydı. Gemi canları tamamlanıp filo hazır durumuna getirilebilir.`, count: 1, targetType: "FLEET_REPAIR", targetId: row.id, targetLabel: row.name, route: "data-control", repairAction: "COMPLETE_OVERDUE_REPAIR" });
+    for (const row of commanderConflicts.rows) add({ severity: "CRITICAL", category: "ASKERÎ", title: "Yabancı kuvvet komutanı", detail: `${row.country_name} · ${row.name} kuvvetine başka devletten ${row.character_name} atanmış. Yabancı atama kaldırılabilir.`, count: 1, targetType: row.force_type, targetId: row.id, targetLabel: row.name, route: "armies", repairAction: "REMOVE_FOREIGN_COMMANDER" });
+    for (const row of vassalConflicts.rows) add({ severity: "CRITICAL", category: "DİPLOMASİ", title: "Geçersiz aktif vassallık", detail: `${row.vassal_name} → ${row.overlord_name} bağlantısında taraflardan biri artık aktif değil. İlişki sona erdirilebilir.`, count: 1, targetType: "VASSALAGE", targetId: row.id, targetLabel: `${row.vassal_name} → ${row.overlord_name}`, route: "data-control", repairAction: "END_INVALID_VASSALAGE" });
 
     const summary = {
       total: issues.length,
@@ -939,6 +1589,140 @@ export const adminPanelService = {
       info: issues.filter((issue) => issue.severity === "INFO").length
     };
     return { checkedAt: new Date().toISOString(), guild, summary, issues };
+  },
+
+  async systemStatus() {
+    const startedAt = performance.now();
+    const status = (await adminPool.query<{
+      current_turn: number; turn_phase: string; processing_operations: number; recent_audits: number;
+    }>(
+      `SELECT guild.current_turn,guild.turn_phase,
+              (SELECT COUNT(*)::integer FROM admin_panel_operations operation
+                WHERE operation.guild_id=guild.discord_id AND operation.status='PROCESSING') AS processing_operations,
+              (SELECT COUNT(*)::integer FROM audit_logs audit
+                WHERE audit.guild_id=guild.discord_id AND audit.created_at>NOW()-INTERVAL '1 hour') AS recent_audits
+         FROM guilds guild WHERE guild.discord_id=$1`, [adminConfig.guildId]
+    )).rows[0];
+    if (!status) throw new Error("Oyun durumu bulunamadı.");
+    const memory = process.memoryUsage();
+    return {
+      checkedAt: new Date().toISOString(), databaseLatencyMs: Number((performance.now() - startedAt).toFixed(1)),
+      pool: { total: adminPool.totalCount, idle: adminPool.idleCount, waiting: adminPool.waitingCount },
+      uptimeSeconds: Math.floor(process.uptime()), memoryMb: Math.round(memory.rss / 1024 / 1024),
+      processingOperations: Number(status.processing_operations), recentAudits: Number(status.recent_audits),
+      currentTurn: Number(status.current_turn), turnPhase: status.turn_phase
+    };
+  },
+
+  async repairGameHealthIssue(actorId: string, rawInput: unknown) {
+    const input = gameHealthRepairSchema.parse(rawInput);
+    return withAdminTransaction(async (client) => {
+      const guild = (await client.query<{ current_turn: number }>(
+        "SELECT current_turn FROM guilds WHERE discord_id=$1 FOR UPDATE", [adminConfig.guildId]
+      )).rows[0];
+      if (!guild) throw new Error("Oyun durumu bulunamadı.");
+      let result: Record<string, unknown>;
+      if (input.action === "DISMISS_INACTIVE_CHARACTER") {
+        const character = (await client.query<{ id: string; name: string; country_id: string; country_name: string }>(
+          `SELECT character.id,character.name,character.country_id,country.name AS country_name
+             FROM country_characters character JOIN countries country ON country.id=character.country_id
+            WHERE character.id=$1 AND country.guild_id=$2 AND country.status='YOK_EDİLDİ'
+              AND character.character_status='ACTIVE' FOR UPDATE OF character`,
+          [input.targetId, adminConfig.guildId]
+        )).rows[0];
+        if (!character) throw new Error("Bu karakter sorunu artık mevcut değil.");
+        await terminateCharacterDuties(client, character.id, input.reason);
+        await client.query(
+          `UPDATE country_characters SET character_status='DISMISSED',dismissed_at=NOW(),dismissed_by=$1,
+                  assignment='NONE',assigned_settlement_id=NULL,protected_character_id=NULL,
+                  assignment_ready_turn=NULL,unavailable_until_turn=NULL,is_marshal=FALSE
+            WHERE id=$2`, [actorId, character.id]
+        );
+        result = { characterId: character.id, characterName: character.name, countryName: character.country_name, status: "DISMISSED" };
+      } else if (input.action === "RECONCILE_MARSHALS") {
+        const marshals = (await client.query<{ id: string; name: string; commander_victories: number }>(
+          `SELECT character.id,character.name,character.commander_victories
+             FROM country_characters character JOIN countries country ON country.id=character.country_id
+            WHERE character.country_id=$1 AND country.guild_id=$2 AND country.status='ACTIVE'
+              AND character.character_status='ACTIVE' AND character.is_marshal=TRUE
+            ORDER BY character.commander_victories DESC,character.name,character.id FOR UPDATE OF character`,
+          [input.targetId, adminConfig.guildId]
+        )).rows;
+        if (marshals.length <= 1) throw new Error("Bu devlette artık birden fazla mareşal bulunmuyor.");
+        const keeper = marshals[0]!;
+        const cleared = await client.query(
+          "UPDATE country_characters SET is_marshal=FALSE WHERE country_id=$1 AND is_marshal=TRUE AND id<>$2 RETURNING id",
+          [input.targetId, keeper.id]
+        );
+        result = { countryId: input.targetId, retainedMarshalId: keeper.id, retainedMarshalName: keeper.name, cleared: cleared.rowCount ?? 0 };
+      } else if (input.action === "COMPLETE_OVERDUE_REPAIR") {
+        const repair = (await client.query<{ id: string; name: string; completion_turn: number }>(
+          `SELECT repair.id,repair.name,repair.completion_turn FROM fleet_repair_groups repair
+            WHERE repair.id=$1 AND repair.guild_id=$2 AND repair.status='REPAIRING'
+              AND repair.completion_turn<$3 FOR UPDATE`,
+          [input.targetId, adminConfig.guildId, guild.current_turn]
+        )).rows[0];
+        if (!repair) throw new Error("Bu filo tamiri artık gecikmiş durumda değil.");
+        const ships = await client.query(
+          `UPDATE naval_ship_damage SET current_hp=max_hp,status='READY',updated_at=NOW()
+            WHERE repair_group_id=$1 AND status='REPAIRING' RETURNING id`, [repair.id]
+        );
+        await client.query(
+          "UPDATE fleet_repair_groups SET status='READY',completed_at=NOW() WHERE id=$1", [repair.id]
+        );
+        result = { repairId: repair.id, repairName: repair.name, completionTurn: repair.completion_turn, ships: ships.rowCount ?? 0, status: "READY" };
+      } else if (input.action === "REMOVE_FOREIGN_COMMANDER") {
+        const army = (await client.query<{ id: string; name: string; commander_character_id: string }>(
+          `SELECT army.id,army.name,army.commander_character_id FROM armies army
+             JOIN countries country ON country.id=army.country_id
+             JOIN country_characters character ON character.id=army.commander_character_id
+            WHERE army.id=$1 AND army.guild_id=$2 AND character.country_id<>army.country_id FOR UPDATE OF army`,
+          [input.targetId, adminConfig.guildId]
+        )).rows[0];
+        const fleet = army ? undefined : (await client.query<{ id: string; name: string; commander_character_id: string }>(
+          `SELECT fleet.id,fleet.name,fleet.commander_character_id FROM fleets fleet
+             JOIN countries country ON country.id=fleet.country_id
+             JOIN country_characters character ON character.id=fleet.commander_character_id
+            WHERE fleet.id=$1 AND fleet.guild_id=$2 AND character.country_id<>fleet.country_id FOR UPDATE OF fleet`,
+          [input.targetId, adminConfig.guildId]
+        )).rows[0];
+        const force = army ?? fleet;
+        if (!force) throw new Error("Bu yabancı komutan ataması artık mevcut değil.");
+        if (army) await client.query("UPDATE armies SET commander_character_id=NULL,updated_at=NOW() WHERE id=$1", [army.id]);
+        else await client.query("UPDATE fleets SET commander_character_id=NULL,updated_at=NOW() WHERE id=$1", [fleet!.id]);
+        const stillAssigned = await client.query(
+          `SELECT 1 FROM armies WHERE commander_character_id=$1
+           UNION ALL SELECT 1 FROM fleets WHERE commander_character_id=$1 LIMIT 1`, [force.commander_character_id]
+        );
+        if (!stillAssigned.rowCount) {
+          await client.query(
+            "UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL WHERE id=$1 AND assignment IN ('ARMY','FLEET')",
+            [force.commander_character_id]
+          );
+        }
+        result = { forceId: force.id, forceName: force.name, forceType: army ? "ARMY" : "FLEET", removedCommanderId: force.commander_character_id };
+      } else {
+        const relation = (await client.query<{ id: string; overlord_country_id: string; vassal_country_id: string }>(
+          `SELECT relation.id,relation.overlord_country_id,relation.vassal_country_id
+             FROM country_vassalages relation
+             JOIN countries overlord ON overlord.id=relation.overlord_country_id
+             JOIN countries vassal ON vassal.id=relation.vassal_country_id
+            WHERE relation.id=$1 AND relation.guild_id=$2 AND relation.status='ACTIVE'
+              AND (overlord.status<>'ACTIVE' OR vassal.status<>'ACTIVE') FOR UPDATE OF relation`,
+          [input.targetId, adminConfig.guildId]
+        )).rows[0];
+        if (!relation) throw new Error("Bu geçersiz vassallık sorunu artık mevcut değil.");
+        await client.query(
+          `UPDATE country_vassalages SET status='ENDED',ended_turn=$1,ended_by=$2,ended_at=NOW()
+            WHERE id=$3`, [guild.current_turn, actorId, relation.id]
+        );
+        result = { relationId: relation.id, overlordCountryId: relation.overlord_country_id, vassalCountryId: relation.vassal_country_id, status: "ENDED" };
+      }
+      await writeAdminAudit(client, actorId, "admin.panel.health.repair", "health_issue", input.targetId, {
+        action: input.action, reason: input.reason, result
+      });
+      return { action: input.action, repaired: true, result };
+    });
   },
 
   async countries() {
@@ -3125,8 +3909,9 @@ export const adminPanelService = {
     });
   },
 
-  async cancelCharacterAssignment(actorId: string, characterId: string) {
+  async cancelCharacterAssignment(actorId: string, characterId: string, rawInput: unknown = {}) {
     if (!z.string().uuid().safeParse(characterId).success) throw new Error("Geçersiz karakter kimliği.");
+    const input = characterAssignmentCancelSchema.parse(rawInput);
     return withAdminTransaction(async (client) => {
       const character = (await client.query<{
         id: string; country_id: string; name: string; country_name: string; assignment: string;
@@ -3221,7 +4006,8 @@ export const adminPanelService = {
         assimilationAssignments: assimilationAssignments.rowCount ?? 0,
         armyCommands: armyCommands.rowCount ?? 0,
         fleetCommands: fleetCommands.rowCount ?? 0,
-        battleCommands: battleCommands.rowCount ?? 0
+        battleCommands: battleCommands.rowCount ?? 0,
+        reason: input.reason ?? "GM Operasyon Masası üzerinden görev sonlandırıldı."
       };
       await writeAdminAudit(client, actorId, "admin.panel.character.assignment.cancel", "character", character.id, result);
       return result;
@@ -3395,14 +4181,59 @@ export const adminPanelService = {
     )).rows;
   },
 
-  async audit(limit = 60) {
-    const safeLimit = Math.min(200, Math.max(1, Math.floor(limit)));
+  async audit(rawQuery: AdminAuditQuery = {}) {
+    const safeLimit = Math.min(100, Math.max(1, Math.floor(Number(rawQuery.limit) || 50)));
+    const safeOffset = Math.max(0, Math.floor(Number(rawQuery.offset) || 0));
+    const search = String(rawQuery.search ?? "").trim().slice(0, 120);
+    const source: NonNullable<AdminAuditQuery["source"]> = ["PANEL", "DISCORD"].includes(String(rawQuery.source))
+      ? rawQuery.source as NonNullable<AdminAuditQuery["source"]>
+      : "ALL";
+    const kind: NonNullable<AdminAuditQuery["kind"]> = ["CREATE", "UPDATE", "DELETE", "UNDO"].includes(String(rawQuery.kind))
+      ? rawQuery.kind as NonNullable<AdminAuditQuery["kind"]>
+      : "ALL";
+    const params: unknown[] = [adminConfig.guildId];
+    const filters = ["guild_id=$1"];
+    if (search) {
+      params.push(`%${search}%`);
+      filters.push(`(action ILIKE $${params.length} OR entity_type ILIKE $${params.length} OR COALESCE(entity_id,'') ILIKE $${params.length} OR details::text ILIKE $${params.length})`);
+    }
+    if (source === "PANEL") filters.push("(action LIKE 'admin.panel.%' OR action LIKE 'ADMIN_DATA_%')");
+    if (source === "DISCORD") filters.push("NOT (action LIKE 'admin.panel.%' OR action LIKE 'ADMIN_DATA_%')");
+    const kindPatterns: Record<string, string> = {
+      CREATE: "(create|add|assign|start|declare|insert|purchase)",
+      UPDATE: "(update|set|configure|correct|change|apply|resolve|complete)",
+      DELETE: "(cancel|remove|delete|withdraw|end|lift|disband|dismiss|death)",
+      UNDO: "(undo)"
+    };
+    if (kind !== "ALL") {
+      params.push(kindPatterns[kind]);
+      filters.push(`action ~* $${params.length}`);
+    }
+    if (rawQuery.from && !Number.isNaN(Date.parse(rawQuery.from))) {
+      params.push(new Date(rawQuery.from));
+      filters.push(`created_at >= $${params.length}`);
+    }
+    if (rawQuery.to && !Number.isNaN(Date.parse(rawQuery.to))) {
+      const upperBound = new Date(rawQuery.to);
+      if (/^\d{4}-\d{2}-\d{2}$/u.test(rawQuery.to)) upperBound.setUTCDate(upperBound.getUTCDate() + 1);
+      params.push(upperBound);
+      filters.push(`created_at < $${params.length}`);
+    }
+    const where = filters.join(" AND ");
+    const count = await adminPool.query<{ count: number }>(`SELECT COUNT(*)::integer AS count FROM audit_logs WHERE ${where}`, params);
+    const rowParams = [...params, safeLimit, safeOffset];
     const rows = (await adminPool.query<AdminAuditRow>(
       `SELECT id,actor_user_id,action,entity_type,entity_id,details,created_at
-         FROM audit_logs WHERE guild_id=$1 ORDER BY created_at DESC LIMIT $2`,
-      [adminConfig.guildId, safeLimit]
+         FROM audit_logs WHERE ${where}
+        ORDER BY created_at DESC LIMIT $${rowParams.length - 1} OFFSET $${rowParams.length}`,
+      rowParams
     )).rows;
-    return presentAuditRows(rows);
+    return {
+      rows: await presentAuditRows(rows),
+      total: Number(count.rows[0]?.count ?? 0),
+      offset: safeOffset,
+      limit: safeLimit
+    };
   },
 
   async previewArmy(actorId: string, rawInput: unknown) {

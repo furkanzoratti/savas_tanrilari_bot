@@ -1,4 +1,4 @@
-const state = { session: null, csrf: "", countries: [], catalog: [], characterCatalog: null, religionCatalog: null, rebellionData: null, previewToken: null, selectedCountry: null, editor: null, pendingPageScrollTop: null, dataCatalog: null, dataTable: null, dataRows: [], dataOffset: 0, dataSearch: "", activeRoute: "overview", focusTarget: null };
+const state = { session: null, csrf: "", countries: [], catalog: [], characterCatalog: null, religionCatalog: null, rebellionData: null, guidedOperations: null, previewToken: null, selectedCountry: null, editor: null, pendingPageScrollTop: null, dataCatalog: null, dataTable: null, dataRows: [], dataOffset: 0, dataSearch: "", auditRows: [], auditOffset: 0, auditSearch: "", auditSource: "ALL", auditKind: "ALL", auditFrom: "", auditTo: "", activeRoute: "overview", focusTarget: null };
 const page = document.getElementById("page");
 const app = document.getElementById("app");
 const login = document.getElementById("login");
@@ -129,17 +129,34 @@ const developmentLabel = (value) => {
   return all.find((item) => item.value === value)?.label || String(value).replaceAll("_", " ");
 };
 
-async function api(path, options = {}) {
-  const headers = { ...(options.body ? { "content-type": "application/json" } : {}), ...(options.headers || {}) };
-  if (options.method && options.method !== "GET") headers["x-csrf-token"] = state.csrf;
-  const response = await fetch(path, { ...options, headers });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const error = new Error(payload.message || payload.error || "İşlem başarısız.");
-    error.status = response.status;
-    throw error;
-  }
-  return payload;
+const inflightGets = new Map();
+function api(path, options = {}) {
+  const method = options.method || "GET";
+  const execute = async () => {
+    const headers = { ...(options.body ? { "content-type": "application/json" } : {}), ...(options.headers || {}) };
+    if (method !== "GET") headers["x-csrf-token"] = state.csrf;
+    const controller = method === "GET" && !options.signal ? new AbortController() : null;
+    const timeout = controller ? setTimeout(() => controller.abort(), 20_000) : null;
+    try {
+      const response = await fetch(path, { ...options, method, headers, signal: options.signal || controller?.signal });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const suffix = payload.requestId ? ` · İşlem ${String(payload.requestId).slice(0, 8)}` : "";
+        const error = new Error(`${payload.message || payload.error || "İşlem başarısız."}${suffix}`);
+        error.status = response.status; error.requestId = payload.requestId || response.headers.get("x-request-id");
+        throw error;
+      }
+      return payload;
+    } catch (error) {
+      if (error?.name === "AbortError") throw new Error("Panel verisi 20 saniye içinde yüklenemedi. Bağlantıyı kontrol edip yeniden deneyin.");
+      throw error;
+    } finally { if (timeout) clearTimeout(timeout); }
+  };
+  if (method !== "GET") return execute();
+  if (inflightGets.has(path)) return inflightGets.get(path);
+  const pending = execute().finally(() => inflightGets.delete(path));
+  inflightGets.set(path, pending);
+  return pending;
 }
 
 function toast(message, kind = "success") {
@@ -152,10 +169,10 @@ function toast(message, kind = "success") {
 }
 
 const routeTitles = {
-  overview: "Genel Bakış", countries: "Devletler", settlements: "Yerleşkeler", armies: "Ordular & Filolar",
+  overview: "Genel Bakış", workspace: "Çalışma Alanım", countries: "Devletler", settlements: "Yerleşkeler", armies: "Ordular & Filolar",
   characters: "Karakterler", dynasties: "Hanedanlar", "roman-politics": "Roma Siyaseti",
-  "steppe-politics": "Bozkır Kurultayı", assignments: "Görevler", battles: "Savaşlar",
-  rebellions: "İsyanlar", health: "Oyun Sağlığı", "data-control": "Tam Yetki", audit: "İşlem Geçmişi"
+  "steppe-politics": "Bozkır Kurultayı", "diplomacy-control": "Diplomasi & Ticaret", assignments: "Görevler", "gm-operations": "Rehberli İşlemler", "bulk-operations": "Toplu İşlemler", "economy-control": "Ekonomi & Üretim", battles: "Savaşlar",
+  rebellions: "İsyanlar", reports: "Raporlar", health: "Oyun Sağlığı", "data-control": "Tam Yetki", audit: "İşlem Geçmişi"
 };
 function loading() { page.innerHTML = '<div class="loading-shell"><div class="skeleton skeleton-title"></div><div class="loading-grid"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div><div class="skeleton skeleton-content"></div></div>'; }
 function setActiveRoute(route) {
@@ -209,6 +226,105 @@ function workspaceListMarkup() {
   return `<div class="workspace-shortcuts">${group("Favoriler", favorites, "favorites")}${group("Son açılanlar", recent, "recent")}</div>`;
 }
 
+function saveNamedView(route, label, params) {
+  const view = { id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, route, label, params, createdAt: new Date().toISOString() };
+  writeStoredList("saved-views", [view, ...readStoredList("saved-views")]);
+  return view;
+}
+
+function openSaveView(route, params, suggestedLabel) {
+  openEditor("Görünümü kaydet", routeTitles[route] || "GM görünümü", `<div class="guided-form-note">Mevcut tablo ve filtre ayarları bu tarayıcıdaki kişisel GM çalışma alanına kaydedilir.</div><label>Görünüm adı<input id="saved-view-name" minlength="2" maxlength="80" value="${escapeHtml(suggestedLabel)}" required></label>`, async () => {
+    const view = saveNamedView(route, document.getElementById("saved-view-name").value.trim(), params);
+    closeEditor(); toast(`“${view.label}” görünümü çalışma alanına kaydedildi.`);
+  });
+  setEditorSaveLabel("Görünümü kaydet");
+}
+
+function applySavedView(view) {
+  if (view.route === "audit") {
+    Object.assign(state, {
+      auditSearch: view.params?.search || "", auditSource: view.params?.source || "ALL",
+      auditKind: view.params?.kind || "ALL", auditFrom: view.params?.from || "",
+      auditTo: view.params?.to || "", auditOffset: 0
+    });
+  } else if (view.route === "data-control") {
+    state.dataTable = view.params?.table || state.dataTable;
+    state.dataSearch = view.params?.search || "";
+    state.dataOffset = 0;
+  }
+  return navigate(view.route);
+}
+
+async function workspacePage() {
+  setActiveRoute("workspace");
+  const favorites = readStoredList("favorites");
+  const recent = readStoredList("recent");
+  const views = readStoredList("saved-views");
+  const recordCards = (items, source, empty) => items.length ? items.map((item, index) => `<article class="workspace-record"><div><span>${escapeHtml(searchTypeLabels[item.type] || item.type)}</span><strong>${escapeHtml(item.label)}</strong><small>${escapeHtml(item.detail || "Oyun kaydı")}</small></div><button class="button compact" data-workspace-source="${source}" data-workspace-index="${index}">Aç</button></article>`).join("") : `<div class="empty">${escapeHtml(empty)}</div>`;
+  page.innerHTML = `<div class="page-head workspace-hero"><div><span class="overview-kicker">KİŞİSEL GM ALANI</span><h1>Çalışma Alanım</h1><p>Favori kayıtlarını, son açtığın dosyaları ve kaydettiğin filtreli görünümleri tek yerde tut.</p></div><div class="actions"><button class="button" data-route-action="data-control">Tam Yetki</button><button class="button primary" data-route-action="audit">İşlem Geçmişi</button></div></div><section class="workspace-dashboard"><article class="card workspace-panel"><div class="card-head"><div><h2>Kaydedilmiş görünümler</h2><p>Filtreli çalışma listelerine tek tıkla dön</p></div><span class="pill neutral">${number(views.length)}</span></div><div class="saved-view-list">${views.length ? views.map((view, index) => `<article class="saved-view-card"><div><span>${escapeHtml(routeTitles[view.route] || view.route)}</span><strong>${escapeHtml(view.label)}</strong><small>${date(view.createdAt)}</small></div><div><button class="button compact" data-open-saved-view="${index}">Aç</button><button class="button compact danger" data-delete-saved-view="${index}">Sil</button></div></article>`).join("") : '<div class="empty">İşlem Geçmişi veya Tam Yetki ekranında “Görünümü kaydet” düğmesini kullanabilirsin.</div>'}</div></article><article class="card workspace-panel"><div class="card-head"><div><h2>Favoriler</h2><p>Sık kullandığın oyun kayıtları</p></div><span class="pill neutral">${number(favorites.length)}</span></div><div class="workspace-record-list">${recordCards(favorites, "favorites", "Henüz favori kayıt yok.")}</div></article><article class="card workspace-panel relation-span"><div class="card-head"><div><h2>Son açılanlar</h2><p>En son incelediğin kayıtlar</p></div><button class="button compact" data-clear-recents ${recent.length ? "" : "disabled"}>Geçmişi temizle</button></div><div class="workspace-record-grid">${recordCards(recent, "recent", "Henüz açılmış kayıt yok.")}</div></article></section>`;
+  document.querySelectorAll("[data-open-saved-view]").forEach((button) => button.addEventListener("click", () => applySavedView(views[Number(button.dataset.openSavedView)])));
+  document.querySelectorAll("[data-delete-saved-view]").forEach((button) => button.addEventListener("click", () => {
+    const index = Number(button.dataset.deleteSavedView);
+    writeStoredList("saved-views", views.filter((_, itemIndex) => itemIndex !== index));
+    toast("Kaydedilmiş görünüm silindi."); workspacePage();
+  }));
+  document.querySelector("[data-clear-recents]")?.addEventListener("click", () => { writeStoredList("recent", []); toast("Son açılanlar temizlendi."); workspacePage(); });
+  bindPageActions();
+}
+
+function reportCountryValue(country, key) {
+  if (key === "military") return Number(country.field_army || 0) + Number(country.garrison || 0);
+  return Number(country[key] || 0);
+}
+
+function renderCountryComparison(data) {
+  const first = data.countries.find((row) => row.id === document.getElementById("report-country-a")?.value) || data.countries[0];
+  const second = data.countries.find((row) => row.id === document.getElementById("report-country-b")?.value) || data.countries[1];
+  const target = document.getElementById("country-comparison");
+  if (!target) return;
+  if (!first || !second) { target.innerHTML = '<div class="empty">Karşılaştırma için en az iki aktif devlet gerekir.</div>'; return; }
+  const metrics = [
+    { key: "treasury", label: "Hazine", format: money }, { key: "turn_income", label: "Tur geliri", format: money },
+    { key: "population", label: "Nüfus", format: number }, { key: "military", label: "Kara askeri", format: number },
+    { key: "ships", label: "Gemi", format: number }, { key: "settlements", label: "Yerleşke", format: number }
+  ];
+  target.innerHTML = metrics.map((metric) => {
+    const a = reportCountryValue(first, metric.key); const b = reportCountryValue(second, metric.key);
+    const max = Math.max(1, a, b); const diff = a - b;
+    return `<div class="comparison-row"><span>${escapeHtml(metric.label)}</span><div class="comparison-side"><strong>${escapeHtml(metric.format(a))}</strong><i style="--comparison-width:${Math.round(a / max * 100)}%"></i></div><b class="${diff === 0 ? "" : diff > 0 ? "success-text" : "danger-text"}">${diff > 0 ? "+" : ""}${escapeHtml(metric.format(diff))}</b><div class="comparison-side second"><strong>${escapeHtml(metric.format(b))}</strong><i style="--comparison-width:${Math.round(b / max * 100)}%"></i></div></div>`;
+  }).join("");
+}
+
+function downloadReportCsv(data) {
+  const header = ["Devlet", "Yerleşke", "Nüfus", "Hazine", "Tur Geliri", "Saha Ordusu", "Garnizon", "Gemi", "Aktif Savaş"];
+  const rows = data.countries.map((row) => [row.name, row.settlements, row.population, row.treasury, row.turn_income, row.field_army, row.garrison, row.ships, row.active_wars]);
+  const cell = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+  const blob = new Blob([[header, ...rows].map((row) => row.map(cell).join(",")).join("\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob); const link = document.createElement("a");
+  link.href = url; link.download = `amrp-devlet-raporu-tur-${data.guild.current_turn}.csv`; link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function reportsPage() {
+  setActiveRoute("reports"); loading();
+  const data = await api("/api/reports");
+  const totalTreasury = data.countries.reduce((sum, row) => sum + Number(row.treasury || 0), 0);
+  const totalPopulation = data.countries.reduce((sum, row) => sum + Number(row.population || 0), 0);
+  const totalMilitary = data.countries.reduce((sum, row) => sum + Number(row.field_army || 0) + Number(row.garrison || 0), 0);
+  const turns = [];
+  for (let turn = Number(data.firstTurn); turn <= Number(data.guild.current_turn); turn += 1) {
+    const rows = data.financialHistory.filter((row) => Number(row.turn) === turn);
+    turns.push({ turn, income: rows.reduce((sum, row) => sum + Number(row.income || 0), 0), expense: rows.reduce((sum, row) => sum + Number(row.expense || 0), 0), net: rows.reduce((sum, row) => sum + Number(row.net || 0), 0), count: rows.reduce((sum, row) => sum + Number(row.transaction_count || 0), 0) });
+  }
+  const maxFlow = Math.max(1, ...turns.flatMap((row) => [row.income, row.expense]));
+  const options = data.countries.map((row, index) => `<option value="${row.id}">${escapeHtml(row.name)}</option>`).join("");
+  page.innerHTML = `<div class="page-head reports-hero"><div><span class="overview-kicker">OYUN RAPORLAMA MERKEZİ</span><h1>Raporlar & Karşılaştırma</h1><p>Devletlerin güncel gücünü karşılaştır, son sekiz turun mali akışını izle ve veriyi CSV olarak dışa aktar.</p></div><div class="actions"><span class="pill neutral">${date(data.generatedAt)}</span><button class="button primary" data-export-report>CSV dışa aktar</button></div></div><section class="kpi-grid"><div class="card kpi"><span>Aktif devlet</span><strong>${number(data.countries.length)}</strong><small>Karşılaştırılabilir kayıt</small></div><div class="card kpi"><span>Toplam hazine</span><strong>${money(totalTreasury)}</strong><small>Yerel hazineler toplamı</small></div><div class="card kpi"><span>Toplam nüfus</span><strong>${number(totalPopulation)}</strong><small>Özgür + köle nüfus</small></div><div class="card kpi"><span>Kara gücü</span><strong>${number(totalMilitary)}</strong><small>Saha ordusu + garnizon</small></div></section><section class="card comparison-card"><div class="card-head"><div><h2>Devlet karşılaştırması</h2><p>Aynı ölçekte iki devleti yan yana incele</p></div><div class="comparison-selectors"><select id="report-country-a">${options}</select><span>↔</span><select id="report-country-b">${data.countries.map((row, index) => `<option value="${row.id}" ${index === 1 ? "selected" : ""}>${escapeHtml(row.name)}</option>`).join("")}</select></div></div><div id="country-comparison" class="country-comparison"></div></section><section class="reports-grid"><article class="card"><div class="card-head"><div><h2>Son turların mali akışı</h2><p>Gelir, gider ve net işlem hareketi</p></div></div><div class="turn-flow-list">${turns.map((row) => `<div class="turn-flow"><strong>Tur ${number(row.turn)}</strong><div><span class="income" style="--flow-width:${Math.round(row.income / maxFlow * 100)}%">+${money(row.income)}</span><span class="expense" style="--flow-width:${Math.round(row.expense / maxFlow * 100)}%">−${money(row.expense)}</span></div><em class="${row.net < 0 ? "danger-text" : "success-text"}">${signedMoney(row.net)} · ${number(row.count)} işlem</em></div>`).join("")}</div></article><article class="card"><div class="card-head"><div><h2>İşlem türleri</h2><p>Son sekiz turdaki en yoğun mali hareketler</p></div></div>${rowsOrEmpty(data.transactionKinds, (row) => `<div class="relation-row static"><span><strong>${escapeHtml(humanKey(row.kind))}</strong><small>${number(row.count)} işlem</small></span><em class="${Number(row.net) < 0 ? "danger-text" : "success-text"}">${signedMoney(row.net)}</em></div>`, "Mali işlem bulunmuyor.")}</article><article class="card relation-span"><div class="card-head"><div><h2>Yönetim etkinliği</h2><p>Son 14 günün panel ve oyun işlem sayıları</p></div></div><div class="activity-strip">${data.activity.map((row) => `<div><span>${new Intl.DateTimeFormat("tr-TR", { day: "2-digit", month: "2-digit" }).format(new Date(row.day))}</span><strong>${number(row.total)}</strong><small>${number(row.panel)} panel · ${number(row.game)} oyun</small></div>`).join("") || '<div class="empty">Etkinlik kaydı bulunmuyor.</div>'}</div></article></section><div class="section-title"><h2>Tüm devletler</h2><span>Güncel karşılaştırmalı tablo</span></div><section class="card table-wrap"><table><thead><tr><th>Devlet</th><th>Yerleşke</th><th>Nüfus</th><th>Hazine</th><th>Tur geliri</th><th>Saha / Garnizon</th><th>Gemi</th><th>Savaş</th></tr></thead><tbody>${data.countries.map((row) => `<tr><td><strong>${escapeHtml(row.name)}</strong><small>${escapeHtml(mobilizationLabels[row.mobilization] || row.mobilization)}</small></td><td>${number(row.settlements)}</td><td>${number(row.population)}</td><td>${money(row.treasury)}</td><td>${money(row.turn_income)}</td><td>${number(row.field_army)} / ${number(row.garrison)}</td><td>${number(row.ships)}</td><td>${number(row.active_wars)}</td></tr>`).join("")}</tbody></table></section>`;
+  document.getElementById("report-country-a").addEventListener("change", () => renderCountryComparison(data));
+  document.getElementById("report-country-b").addEventListener("change", () => renderCountryComparison(data));
+  document.querySelector("[data-export-report]").addEventListener("click", () => downloadReportCsv(data));
+  renderCountryComparison(data);
+}
+
 function pageScrollTop() {
   return Math.max(window.scrollY, document.scrollingElement?.scrollTop || 0, document.documentElement.scrollTop || 0, document.body.scrollTop || 0);
 }
@@ -240,9 +356,9 @@ async function refreshKeepingScroll(loader) {
   }
 }
 
-function auditRows(rows, limit = rows.length) {
+function auditRows(rows, limit = rows.length, interactive = false) {
   if (!rows?.length) return '<div class="empty">Henüz işlem kaydı yok.</div>';
-  return rows.slice(0, limit).map((row) => `<div class="audit-item"><span class="audit-dot"></span><div><strong>${escapeHtml(row.actionLabel)}</strong><span>${escapeHtml(row.entityLabel)} · ${date(row.created_at)} · ${escapeHtml(row.actorLabel)}</span>${row.detailSummary ? `<small>${escapeHtml(row.detailSummary)}</small>` : ""}</div></div>`).join("");
+  return rows.slice(0, limit).map((row, index) => `<div class="audit-item"><span class="audit-dot"></span><div><strong>${escapeHtml(row.actionLabel)}</strong><span>${escapeHtml(row.entityLabel)} · ${date(row.created_at)} · ${escapeHtml(row.actorLabel)}</span>${row.detailSummary ? `<small>${escapeHtml(row.detailSummary)}</small>` : ""}</div>${interactive ? `<div class="audit-item-actions"><button class="button compact" data-audit-detail="${index}">İncele</button>${row.canUndo ? `<button class="button compact audit-undo-button" data-audit-undo="${row.id}">Geri almayı denetle</button>` : ""}</div>` : ""}</div>`).join("");
 }
 
 async function overview() {
@@ -767,14 +883,214 @@ async function assignmentsPage() {
   }).join("") || '<tr><td colspan="8" class="empty">Aktif karakter görevi bulunmuyor.</td></tr>'}</tbody></table></section>`;
   document.querySelectorAll("[data-cancel-character]").forEach((button) => button.addEventListener("click", async () => {
     const character = rows.find((item) => item.id === button.dataset.cancelCharacter);
-    if (!character || !window.confirm(`${character.name} karakterinin “${operationLabels[character.operation_type] || assignmentLabel(character.assignment)}” görevini iptal etmek istediğine emin misin?`)) return;
-    button.disabled = true;
-    try {
-      await api(`/api/admin/characters/${character.id}/cancel-assignment`, { method: "POST" });
-      toast(`${character.name} karakterinin görevi iptal edildi.`);
-      await refreshKeepingScroll(assignmentsPage);
-    } catch (error) { toast(error.message, "error"); button.disabled = false; }
+    if (!character) return;
+    openEditor("Karakter görevini sonlandır", `${character.country_name} · ${character.name}`, `<div class="preview-warning"><strong>${escapeHtml(operationLabels[character.operation_type] || assignmentLabel(character.assignment))}</strong><span>Karakter silinmez; görev ve bağlı operasyon kayıtları güvenli biçimde sonlandırılır.</span></div><label>Gerekçe<textarea id="assignment-cancel-reason" minlength="3" maxlength="500" rows="3" required placeholder="Görevin neden sonlandırıldığı"></textarea></label>`, async () => {
+      await api(`/api/admin/characters/${character.id}/cancel-assignment`, { method: "POST", body: JSON.stringify({ reason: document.getElementById("assignment-cancel-reason").value }) });
+      closeEditor(); toast(`${character.name} karakterinin görevi sonlandırıldı.`); await refreshKeepingScroll(assignmentsPage);
+    });
+    setEditorSaveLabel("Görevi sonlandır", true);
   }));
+}
+
+function guidedRelationLabel(kind) {
+  return kind === "ALLIANCE" ? "İttifak" : kind === "VASSALAGE" ? "Vassallık" : "Resmî savaş";
+}
+
+function setEditorSaveLabel(label, danger = false) {
+  const button = document.getElementById("editor-save");
+  button.textContent = label;
+  button.classList.toggle("danger", danger);
+}
+
+function finishGuidedOperation(message) {
+  closeEditor();
+  toast(message);
+  return refreshKeepingScroll(guidedOperationsPage);
+}
+
+function openGuidedTreasury(data, defaultTarget = "") {
+  const targets = [
+    ...data.countries.map((country) => ({ value: `COUNTRY:${country.id}`, label: `Devlet · ${country.name}`, balance: country.treasury })),
+    ...data.settlements.map((settlement) => ({ value: `SETTLEMENT:${settlement.id}`, label: `Yerleşke · ${settlement.country_name} / ${settlement.name}`, balance: settlement.local_treasury }))
+  ];
+  openEditor("Hazine düzeltmesi", "Önce mevcut ve yeni bakiye hesaplanır; veri ancak ikinci onayda değişir.", `<div class="guided-form-note">Bu işlem seçilen devletin veya yerleşkenin hazinesine gerekçeli bir düzeltme uygular.</div><label>Hedef<select id="guided-treasury-target" required>${targets.map((target) => `<option value="${target.value}" ${selected(target.value, defaultTarget)}>${escapeHtml(target.label)} · ${money(target.balance)}</option>`).join("")}</select></label><div class="form-grid"><label>İşlem<select id="guided-treasury-direction"><option value="ADD">Altın ekle</option><option value="SUBTRACT">Altın çıkar</option></select></label><label>Tutar<input id="guided-treasury-amount" type="number" min="1" step="1" required></label></div><label>Gerekçe<textarea id="guided-treasury-reason" minlength="3" maxlength="500" rows="3" required placeholder="Düzeltmenin oyun içi veya teknik gerekçesi"></textarea></label>`, async () => {
+    const [targetType, targetId] = document.getElementById("guided-treasury-target").value.split(":");
+    const preview = await api("/api/operations/treasury/preview", { method: "POST", body: JSON.stringify({ targetType, targetId, direction: document.getElementById("guided-treasury-direction").value, amount: Number(document.getElementById("guided-treasury-amount").value), reason: document.getElementById("guided-treasury-reason").value }) });
+    openEditor("Hazine düzeltmesini onayla", `${preview.label} · önizleme 10 dakika geçerli`, `<div class="preview-warning"><strong>Henüz hiçbir veri değişmedi.</strong><span>Bakiyeyi ve gerekçeyi kontrol edip işlemi uygula.</span></div><div class="guided-preview-grid"><div><span>Mevcut hazine</span><strong>${money(preview.currentBalance)}</strong></div><div><span>Düzeltme</span><strong class="${preview.delta < 0 ? "danger-text" : "success-text"}">${preview.delta > 0 ? "+" : ""}${money(preview.delta)}</strong></div><div><span>Yeni hazine</span><strong>${money(preview.nextBalance)}</strong></div></div><div class="guided-reason"><span>Gerekçe</span><p>${escapeHtml(preview.reason)}</p></div>`, async () => {
+      const result = await api("/api/operations/treasury/apply", { method: "POST", body: JSON.stringify({ previewToken: preview.previewToken }) });
+      await finishGuidedOperation(`${result.label} hazinesi ${money(result.balance)} olarak güncellendi.`);
+    });
+    setEditorSaveLabel("Düzeltmeyi uygula");
+  });
+  setEditorSaveLabel("Önizlemeyi oluştur");
+}
+
+function openGuidedSettlementTransfer(data) {
+  if (!data.settlements.length || data.countries.length < 2) return toast("Devir için en az iki aktif devlet ve bir yerleşke gerekir.", "error");
+  openEditor("Yerleşke devri", "Bağlı asker, ticaret ve son yerleşke etkileri uygulamadan önce gösterilir.", `<div class="guided-form-note">Yerleşkenin yeni sahibini ve devir türünü seç. Sistem mevcut sahipliği ve bağlı kayıtları yeniden doğrular.</div><label>Yerleşke<select id="guided-transfer-settlement" required>${data.settlements.map((settlement) => `<option value="${settlement.id}" data-owner="${settlement.country_id}">${escapeHtml(settlement.country_name)} · ${escapeHtml(settlement.name)}</option>`).join("")}</select></label><label>Yeni devlet<select id="guided-transfer-country" required>${data.countries.map((country) => `<option value="${country.id}">${escapeHtml(country.name)}</option>`).join("")}</select></label><label>Devir türü<select id="guided-transfer-type"><option value="CONQUEST">Fetih</option><option value="PEACE_TRANSFER">Barış anlaşması</option><option value="VOLUNTARY_TRANSFER">Gönüllü devir</option></select></label><label>Gerekçe<textarea id="guided-transfer-reason" minlength="3" maxlength="500" rows="3" required placeholder="Devrin gerekçesi"></textarea></label>`, async () => {
+    const settlementSelect = document.getElementById("guided-transfer-settlement");
+    const targetCountryId = document.getElementById("guided-transfer-country").value;
+    if (settlementSelect.selectedOptions[0]?.dataset.owner === targetCountryId) throw new Error("Yerleşkenin mevcut sahibinden farklı bir hedef devlet seçin.");
+    const preview = await api("/api/operations/settlement-transfer/preview", { method: "POST", body: JSON.stringify({ settlementId: settlementSelect.value, targetCountryId, transferType: document.getElementById("guided-transfer-type").value, reason: document.getElementById("guided-transfer-reason").value }) });
+    openEditor("Yerleşke devrini onayla", `${preview.settlementName} · ${preview.sourceCountryName} → ${preview.targetCountryName}`, `<div class="preview-warning"><strong>Bu işlem birden fazla oyun kaydını etkileyebilir.</strong><span>Önizleme 10 dakika geçerlidir ve sahiplik değişirse otomatik olarak iptal edilir.</span></div><div class="guided-preview-grid"><div><span>Kaynak</span><strong>${escapeHtml(preview.sourceCountryName)}</strong></div><div><span>Hedef</span><strong>${escapeHtml(preview.targetCountryName)}</strong></div><div><span>Devir türü</span><strong>${escapeHtml(preview.transferLabel)}</strong></div></div><div class="guided-impact-list"><strong>Beklenen etkiler</strong>${preview.warnings.length ? preview.warnings.map((warning) => `<span>⚠ ${escapeHtml(warning)}</span>`).join("") : "<span>Bağlı riskli kayıt bulunmadı.</span>"}${preview.armyPersonnel ? `<span>⚔ ${number(preview.armyPersonnel)} saha askeri devir kurallarına göre işlenecek.</span>` : ""}</div><div class="guided-reason"><span>Gerekçe</span><p>${escapeHtml(preview.reason)}</p></div>`, async () => {
+      const result = await api("/api/operations/settlement-transfer/apply", { method: "POST", body: JSON.stringify({ previewToken: preview.previewToken }) });
+      await finishGuidedOperation(`${preview.settlementName}, ${preview.targetCountryName} yönetimine devredildi${result?.lastStandDetails?.length ? "; Son Direniş süreci başlatıldı" : ""}.`);
+    });
+    setEditorSaveLabel("Devri uygula", true);
+  });
+  setEditorSaveLabel("Etkileri önizle");
+}
+
+function openGuidedCharacterCancel(data) {
+  if (!data.assignments.length) return toast("Sonlandırılabilecek aktif karakter görevi bulunmuyor.", "error");
+  openEditor("Karakter görevini sonlandır", "Bağlı görev, komutanlık ve operasyon kayıtları birlikte temizlenir.", `<label>Aktif görev<select id="guided-assignment" required>${data.assignments.map((row) => `<option value="${row.id}">${escapeHtml(row.country_name)} · ${escapeHtml(row.name)} · ${escapeHtml(operationLabels[row.operation_type] || assignmentLabel(row.assignment))}</option>`).join("")}</select></label><label>Gerekçe<textarea id="guided-assignment-reason" minlength="3" maxlength="500" rows="3" required placeholder="Görevin neden sonlandırıldığı"></textarea></label><div class="preview-warning"><strong>Karakter silinmez.</strong><span>Yalnız etkin görevi ve bu göreve bağlı operasyon/komutanlık kayıtları sonlandırılır.</span></div>`, async () => {
+    const id = document.getElementById("guided-assignment").value;
+    const character = data.assignments.find((row) => row.id === id);
+    const result = await api(`/api/admin/characters/${id}/cancel-assignment`, { method: "POST", body: JSON.stringify({ reason: document.getElementById("guided-assignment-reason").value }) });
+    await finishGuidedOperation(`${character?.name || result.name} karakterinin görevi sonlandırıldı.`);
+  });
+  setEditorSaveLabel("Görevi sonlandır", true);
+}
+
+function openGuidedDiplomacyEnd(data) {
+  const relations = [
+    ...data.alliances.map((row) => ({ kind: "ALLIANCE", id: row.id, label: `İttifak · ${row.proposer_name} ↔ ${row.receiver_name}`, parties: [row.proposer_country_id, row.receiver_country_id] })),
+    ...data.vassalages.map((row) => ({ kind: "VASSALAGE", id: row.id, label: `Vassallık · ${row.overlord_name} → ${row.vassal_name}`, parties: [row.overlord_country_id, row.vassal_country_id] })),
+    ...data.wars.map((row) => ({ kind: "WAR", id: row.id, label: `Savaş · ${row.attacker_name} ↔ ${row.defender_name}`, parties: [row.attacker_country_id, row.defender_country_id] }))
+  ];
+  if (!relations.length) return toast("Sonlandırılabilecek aktif diplomatik ilişki veya savaş bulunmuyor.", "error");
+  openEditor("Diplomatik ilişkiyi sonlandır", "Aktif ittifak, vassallık veya resmî savaşı kontrollü biçimde kapat.", `<label>Aktif ilişki<select id="guided-relation" required>${relations.map((row, index) => `<option value="${index}">${escapeHtml(row.label)}</option>`).join("")}</select></label><label id="guided-winner-wrap">Savaş galibi<select id="guided-winner"><option value="">Galip yok / anlaşmalı bitiş</option></select></label><label>Gerekçe<textarea id="guided-diplomacy-reason" minlength="3" maxlength="2000" rows="3" required placeholder="İlişkinin neden sonlandırıldığı"></textarea></label><label>Güvenlik onayı<input id="guided-diplomacy-confirmation" autocomplete="off" required placeholder="SONLANDIR yazın"></label><div class="preview-warning"><strong>İlişki geçmişi silinmez.</strong><span>Kayıt sona ermiş olarak işaretlenir ve işlem geçmişine yönetici gerekçesiyle yazılır.</span></div>`, async () => {
+    const relation = relations[Number(document.getElementById("guided-relation").value)];
+    await api("/api/operations/diplomacy/end", { method: "POST", body: JSON.stringify({ kind: relation.kind, relationId: relation.id, winnerCountryId: relation.kind === "WAR" ? document.getElementById("guided-winner").value || null : null, reason: document.getElementById("guided-diplomacy-reason").value, confirmation: document.getElementById("guided-diplomacy-confirmation").value }) });
+    await finishGuidedOperation(`${guidedRelationLabel(relation.kind)} sona erdirildi.`);
+  });
+  const relationSelect = document.getElementById("guided-relation");
+  const updateWinner = () => {
+    const relation = relations[Number(relationSelect.value)];
+    const wrap = document.getElementById("guided-winner-wrap");
+    wrap.hidden = relation.kind !== "WAR";
+    document.getElementById("guided-winner").innerHTML = `<option value="">Galip yok / anlaşmalı bitiş</option>${data.countries.filter((country) => relation.parties.includes(country.id)).map((country) => `<option value="${country.id}">${escapeHtml(country.name)}</option>`).join("")}`;
+  };
+  relationSelect.addEventListener("change", updateWinner);
+  updateWinner();
+  setEditorSaveLabel("İlişkiyi sonlandır", true);
+}
+
+async function guidedOperationsPage() {
+  setActiveRoute("gm-operations"); loading();
+  const data = await api("/api/gm-operations");
+  state.guidedOperations = data;
+  const relationCount = data.alliances.length + data.vassalages.length + data.wars.length;
+  page.innerHTML = `<div class="page-head guided-hero"><div><span class="overview-kicker">GÜVENLİ GM AKIŞLARI</span><h1>Rehberli İşlemler</h1><p>Riskli oyun müdahalelerini hedef seçimi, etki önizlemesi, açık gerekçe ve ikinci onayla uygula.</p></div><span class="pill neutral">Tur ${number(data.guild.current_turn)} · ${turnPhaseLabels[data.guild.turn_phase] || data.guild.turn_phase}</span></div><section class="guided-operation-grid"><article class="card guided-operation-card"><div class="guided-operation-icon">¤</div><div><h2>Hazine düzeltmesi</h2><p>Devlet veya yerleşke hazinesine kontrollü altın ekle ya da çıkar.</p></div><div class="guided-operation-meta"><span>${number(data.countries.length)} devlet</span><span>${number(data.settlements.length)} yerleşke</span></div><button class="button primary" data-guided-treasury>İşlemi başlat</button></article><article class="card guided-operation-card"><div class="guided-operation-icon">⌖</div><div><h2>Yerleşke devri</h2><p>Fetih, barış veya gönüllü devir etkilerini uygulamadan önce incele.</p></div><div class="guided-operation-meta"><span>${number(data.settlements.length)} yerleşke</span><span>Bağlı kayıt kontrolü</span></div><button class="button primary" data-guided-transfer>İşlemi başlat</button></article><article class="card guided-operation-card"><div class="guided-operation-icon">♟</div><div><h2>Karakter görevi</h2><p>Etkin görevleri ve bağlı operasyonları tek güvenli akışta sonlandır.</p></div><div class="guided-operation-meta"><span>${number(data.assignments.length)} aktif görev</span><span>Karakter korunur</span></div><button class="button primary" data-guided-character>İşlemi başlat</button></article><article class="card guided-operation-card"><div class="guided-operation-icon">⚖</div><div><h2>Diplomatik sonlandırma</h2><p>İttifak, vassallık veya resmî savaşı gerekçeli biçimde kapat.</p></div><div class="guided-operation-meta"><span>${number(relationCount)} aktif kayıt</span><span>Geçmiş korunur</span></div><button class="button primary" data-guided-diplomacy>İşlemi başlat</button></article></section><section class="card guided-safety"><div><strong>Her kritik adım yeniden doğrulanır</strong><p>Önizlemeden sonra sahiplik veya hazine değişirse işlem uygulanmaz. Aynı imzalı işlem ikinci kez gönderilirse çoğaltılmaz.</p></div><button class="button" data-route-action="audit">İşlem geçmişini aç</button></section>`;
+  document.querySelector("[data-guided-treasury]").addEventListener("click", () => openGuidedTreasury(data));
+  document.querySelector("[data-guided-transfer]").addEventListener("click", () => openGuidedSettlementTransfer(data));
+  document.querySelector("[data-guided-character]").addEventListener("click", () => openGuidedCharacterCancel(data));
+  document.querySelector("[data-guided-diplomacy]").addEventListener("click", () => openGuidedDiplomacyEnd(data));
+  bindPageActions();
+}
+
+const bulkOperationConfig = {
+  COUNTRY_MOBILIZATION: {
+    title: "Devlet seferberliği", description: "Seçili devletlerin seferberlik düzeyini aynı anda değiştir.", icon: "♜",
+    targetLabel: "Devletler", nextLabel: "Yeni seferberlik",
+    nextField: `<select id="bulk-next-value"><option value="PEACE">Barış</option><option value="PARTIAL">Kısmi seferberlik</option><option value="GENERAL">Genel seferberlik</option></select>`
+  },
+  SETTLEMENT_TAX: {
+    title: "Yerleşke vergisi", description: "Seçili yerleşkelere ortak bir vergi oranı uygula.", icon: "%",
+    targetLabel: "Yerleşkeler", nextLabel: "Yeni vergi oranı",
+    nextField: `<input id="bulk-next-value" type="number" min="0" max="100" step="0.1" value="3" required>`
+  },
+  CHARACTER_ASSIGNMENT_CANCEL: {
+    title: "Karakter görevleri", description: "Seçili karakterlerin etkin görevlerini ve bağlı operasyonlarını sonlandır.", icon: "♟",
+    targetLabel: "Aktif görevler", nextLabel: "Yeni durum",
+    nextField: `<input id="bulk-next-value" value="Görevsiz" disabled>`
+  }
+};
+
+function bulkTargets(data, kind) {
+  if (kind === "COUNTRY_MOBILIZATION") return data.countries.map((row) => ({ id: row.id, label: row.name, detail: mobilizationLabels[row.mobilization] || row.mobilization }));
+  if (kind === "SETTLEMENT_TAX") return data.settlements.map((row) => ({ id: row.id, label: `${row.country_name} · ${row.name}`, detail: `%${number(row.tax_rate_percent)}` }));
+  return data.assignments.map((row) => ({ id: row.id, label: `${row.country_name} · ${row.name}`, detail: operationLabels[row.operation_type] || assignmentLabel(row.assignment) }));
+}
+
+function bulkValueLabel(kind, value) {
+  if (kind === "COUNTRY_MOBILIZATION") return mobilizationLabels[value] || value;
+  if (kind === "SETTLEMENT_TAX") return `%${number(value)}`;
+  return assignmentLabel(value);
+}
+
+function openBulkOperation(data, kind) {
+  const config = bulkOperationConfig[kind];
+  const targets = bulkTargets(data, kind);
+  if (!targets.length) return toast(`${config.targetLabel} için uygun kayıt bulunmuyor.`, "error");
+  openEditor(config.title, `${config.description} En fazla 100 kayıt seçilebilir.`, `<div class="bulk-toolbar"><strong>${escapeHtml(config.targetLabel)}</strong><div><button type="button" class="button compact" data-bulk-select-all>Tümünü seç</button><button type="button" class="button compact" data-bulk-select-none>Temizle</button></div></div><div class="bulk-target-list">${targets.map((target) => `<label class="bulk-target"><input type="checkbox" name="bulk-target" value="${target.id}"><span><strong>${escapeHtml(target.label)}</strong><small>${escapeHtml(target.detail)}</small></span></label>`).join("")}</div><div class="form-grid bulk-fields"><label>${escapeHtml(config.nextLabel)}${config.nextField}</label><label>Gerekçe<textarea id="bulk-reason" minlength="3" maxlength="500" rows="3" required placeholder="Toplu değişikliğin gerekçesi"></textarea></label></div>`, async () => {
+    const targetIds = [...document.querySelectorAll('input[name="bulk-target"]:checked')].map((input) => input.value);
+    if (!targetIds.length) throw new Error("En az bir kayıt seçin.");
+    const payload = { kind, targetIds, reason: document.getElementById("bulk-reason").value };
+    if (kind === "COUNTRY_MOBILIZATION") payload.mobilization = document.getElementById("bulk-next-value").value;
+    if (kind === "SETTLEMENT_TAX") payload.taxRatePercent = Number(document.getElementById("bulk-next-value").value);
+    const preview = await api("/api/operations/bulk/preview", { method: "POST", body: JSON.stringify(payload) });
+    openEditor("Toplu işlemi onayla", `${config.title} · ${number(preview.rows.length)} kayıt · önizleme 10 dakika geçerli`, `<div class="preview-warning"><strong>Henüz hiçbir kayıt değiştirilmedi.</strong><span>Tüm kayıtlar tek işlemde uygulanır; bir kayıt değişmişse toplu işlemin tamamı durdurulur.</span></div><div class="bulk-preview-list">${preview.rows.map((row) => `<div><strong>${escapeHtml(row.label)}</strong><span>${escapeHtml(bulkValueLabel(kind, row.currentValue))}</span><b>→</b><span>${escapeHtml(bulkValueLabel(kind, row.nextValue))}</span></div>`).join("")}</div><div class="guided-reason"><span>Gerekçe</span><p>${escapeHtml(preview.reason)}</p></div>`, async () => {
+      const result = await api("/api/operations/bulk/apply", { method: "POST", body: JSON.stringify({ previewToken: preview.previewToken }) });
+      await finishBulkOperation(`${number(result.affected)} kayıt toplu olarak güncellendi.`);
+    });
+    editorModal.querySelector(".modal").classList.add("wide");
+    setEditorSaveLabel("Toplu işlemi uygula", kind === "CHARACTER_ASSIGNMENT_CANCEL");
+  });
+  editorModal.querySelector(".modal").classList.add("wide");
+  document.querySelector("[data-bulk-select-all]").addEventListener("click", () => document.querySelectorAll('input[name="bulk-target"]').forEach((input) => { input.checked = true; }));
+  document.querySelector("[data-bulk-select-none]").addEventListener("click", () => document.querySelectorAll('input[name="bulk-target"]').forEach((input) => { input.checked = false; }));
+  setEditorSaveLabel("Önizlemeyi oluştur");
+}
+
+function finishBulkOperation(message) {
+  closeEditor();
+  toast(message);
+  return refreshKeepingScroll(bulkOperationsPage);
+}
+
+async function bulkOperationsPage() {
+  setActiveRoute("bulk-operations"); loading();
+  const data = await api("/api/gm-operations");
+  page.innerHTML = `<div class="page-head"><div><span class="overview-kicker">ÇOKLU KAYIT YÖNETİMİ</span><h1>Toplu İşlem Merkezi</h1><p>Aynı değişikliği seçili oyun kayıtlarına önizleme, tutarlılık kontrolü ve tek işlem güvencesiyle uygula.</p></div><span class="pill neutral">En fazla 100 kayıt / işlem</span></div><section class="bulk-operation-grid">${Object.entries(bulkOperationConfig).map(([kind, config]) => { const count = bulkTargets(data, kind).length; return `<article class="card bulk-operation-card"><div class="guided-operation-icon">${config.icon}</div><div><h2>${escapeHtml(config.title)}</h2><p>${escapeHtml(config.description)}</p></div><span class="bulk-count">${number(count)} uygun kayıt</span><button class="button primary" data-bulk-kind="${kind}" ${count ? "" : "disabled"}>Seç ve önizle</button></article>`; }).join("")}</section><section class="card guided-safety"><div><strong>Ya hep ya hiç uygulama</strong><p>Seçilen kayıtlardan biri önizlemeden sonra değişirse hiçbir kayıt güncellenmez. Her toplu işlem tek denetim kaydı ve benzersiz işlem anahtarıyla izlenir.</p></div><button class="button" data-route-action="audit">İşlem geçmişini aç</button></section>`;
+  document.querySelectorAll("[data-bulk-kind]").forEach((button) => button.addEventListener("click", () => openBulkOperation(data, button.dataset.bulkKind)));
+  bindPageActions();
+}
+
+function openMechanicDataTable(table) {
+  state.dataTable = table;
+  state.dataOffset = 0;
+  state.dataSearch = "";
+  navigate("data-control");
+}
+
+async function diplomacyControlPage() {
+  setActiveRoute("diplomacy-control"); loading();
+  const data = await api("/api/mechanics-control");
+  const activeAlliances = data.alliances.filter((row) => row.status === "ACTIVE");
+  const pendingAlliances = data.alliances.filter((row) => row.status === "PENDING");
+  const activeTrades = data.trades.filter((row) => row.status === "ACTIVE");
+  const pendingTrades = data.trades.filter((row) => row.status === "PENDING");
+  const activePorts = data.portAccess.filter((row) => row.status === "ACTIVE");
+  const pendingPorts = data.portAccess.filter((row) => row.status === "PENDING");
+  page.innerHTML = `<div class="page-head mechanics-hero"><div><span class="overview-kicker">MEKANİK KONTROLÜ</span><h1>Diplomasi & Ticaret</h1><p>Devlet ilişkilerini, açık teklifleri, savaşları, paktları ve ticaret bağlantılarını isimleriyle tek yerde yönet.</p></div><div class="actions"><button class="button" data-open-diplomacy-data>Ham kayıtları aç</button><button class="button primary" data-end-diplomacy>İlişkiyi sonlandır</button></div></div><section class="kpi-grid"><div class="card kpi"><span>Aktif ittifak</span><strong>${number(activeAlliances.length)}</strong><small>${number(pendingAlliances.length)} teklif bekliyor</small></div><div class="card kpi"><span>Aktif vassallık</span><strong>${number(data.vassalages.length)}</strong><small>Hâkim–vassal ilişkileri</small></div><div class="card kpi"><span>Resmî savaş</span><strong>${number(data.wars.length)}</strong><small>Devam eden devlet savaşları</small></div><div class="card kpi"><span>Ticaret / liman</span><strong>${number(activeTrades.length + activePorts.length)}</strong><small>${number(pendingTrades.length + pendingPorts.length)} açık teklif</small></div></section><section class="mechanics-grid"><article class="card"><div class="card-head"><div><h2>İttifaklar ve teklifler</h2><p>Aktif ve yanıt bekleyen ilişkiler</p></div></div>${rowsOrEmpty(data.alliances, (row) => `<div class="relation-row static"><span><strong>${escapeHtml(row.proposer_name)} ↔ ${escapeHtml(row.receiver_name)}</strong><small>${row.status === "ACTIVE" ? "Etkin ittifak" : "Yanıt bekliyor"}</small></span><em class="pill ${row.status === "ACTIVE" ? "success" : "warning"}">${escapeHtml(humanKey(row.status))}</em></div>`, "İttifak veya teklif bulunmuyor.")}</article><article class="card"><div class="card-head"><div><h2>Vassallıklar</h2><p>Etkin bağlı devlet düzeni</p></div></div>${rowsOrEmpty(data.vassalages, (row) => `<div class="relation-row static"><span><strong>${escapeHtml(row.overlord_name)} → ${escapeHtml(row.vassal_name)}</strong><small>Tur ${number(row.started_turn)} tarihinden beri</small></span><em>Etkin</em></div>`, "Aktif vassallık bulunmuyor.")}</article><article class="card"><div class="card-head"><div><h2>Resmî savaşlar</h2><p>Devletler arası açık savaş durumu</p></div></div>${rowsOrEmpty(data.wars, (row) => `<div class="relation-row static"><span><strong>${escapeHtml(row.attacker_name)} ⚔ ${escapeHtml(row.defender_name)}</strong><small>Tur ${number(row.started_turn)} · ${escapeHtml(row.reason)}</small></span><em class="danger-text">Savaşta</em></div>`, "Aktif resmî savaş bulunmuyor.")}</article><article class="card"><div class="card-head"><div><h2>Diplomatik paktlar</h2><p>Kurucular ve üye sayıları</p></div></div>${rowsOrEmpty(data.pacts, (row) => `<div class="relation-row static"><span><strong>${escapeHtml(row.name)}</strong><small>${escapeHtml(row.founder_name)} · ${escapeHtml(row.purpose)}</small></span><em>${number(row.member_count)} üye</em></div>`, "Diplomatik pakt bulunmuyor.")}</article><article class="card relation-span"><div class="card-head"><div><h2>Ticaret yolları</h2><p>Aktif ve yanıt bekleyen kara/deniz bağlantıları</p></div><button class="button compact" data-open-trades>Tüm kayıtlar</button></div>${rowsOrEmpty(data.trades, (row) => `<div class="relation-row static"><span><strong>${escapeHtml(row.proposer_country_name)} ↔ ${escapeHtml(row.receiver_country_name)}</strong><small>${escapeHtml(row.proposer_settlement_name)} → ${escapeHtml(row.receiver_settlement_name || "Yerleşke bekleniyor")} · ${row.route === "SEA" ? "Deniz" : "Kara"}</small></span><em class="pill ${row.status === "ACTIVE" ? "success" : "warning"}">${row.status === "ACTIVE" ? money(row.income_per_country) : "Bekliyor"}</em></div>`, "Açık ticaret kaydı bulunmuyor.")}</article><article class="card relation-span"><div class="card-head"><div><h2>Liman erişimleri</h2><p>Yabancı tersane ve liman kullanım hakları</p></div><button class="button compact" data-open-ports>Tüm kayıtlar</button></div>${rowsOrEmpty(data.portAccess, (row) => `<div class="relation-row static"><span><strong>${escapeHtml(row.requester_name)} → ${escapeHtml(row.grantor_name)}</strong><small>${row.status === "ACTIVE" ? "Liman erişimi etkin" : "Onay bekliyor"}</small></span><em class="pill ${row.status === "ACTIVE" ? "success" : "warning"}">${escapeHtml(humanKey(row.status))}</em></div>`, "Açık liman erişimi bulunmuyor.")}</article></section>`;
+  document.querySelector("[data-end-diplomacy]").addEventListener("click", async () => openGuidedDiplomacyEnd(await api("/api/gm-operations")));
+  document.querySelector("[data-open-diplomacy-data]").addEventListener("click", () => openMechanicDataTable("country_alliances"));
+  document.querySelector("[data-open-trades]").addEventListener("click", () => openMechanicDataTable("trade_agreements"));
+  document.querySelector("[data-open-ports]").addEventListener("click", () => openMechanicDataTable("country_port_access"));
+}
+
+async function economyControlPage() {
+  setActiveRoute("economy-control"); loading();
+  const data = await api("/api/mechanics-control");
+  const totalTreasury = data.countries.reduce((sum, row) => sum + Number(row.treasury || 0), 0);
+  const totalIncome = data.countries.reduce((sum, row) => sum + Number(row.tax_income || 0) + Number(row.land_trade_income || 0) + Number(row.sea_trade_income || 0), 0);
+  const productionCount = data.buildings.length + data.recruitments.length + data.navalOrders.length;
+  page.innerHTML = `<div class="page-head mechanics-hero"><div><span class="overview-kicker">MEKANİK KONTROLÜ</span><h1>Ekonomi & Üretim</h1><p>Devlet hazinelerini, tur gelirlerini, inşaatları, asker alımlarını ve gemi üretimini tek görünümden izle ve düzelt.</p></div><div class="actions"><button class="button" data-bulk-tax>Toplu vergi</button><button class="button primary" data-new-treasury>Hazine düzelt</button></div></div><section class="kpi-grid"><div class="card kpi"><span>Toplam hazine</span><strong>${money(totalTreasury)}</strong><small>${number(data.countries.length)} aktif devlet</small></div><div class="card kpi"><span>Tur geliri</span><strong>${money(totalIncome)}</strong><small>Vergi + kara + deniz</small></div><div class="card kpi"><span>Üretim kuyruğu</span><strong>${number(productionCount)}</strong><small>İnşaat, asker ve gemi</small></div><div class="card kpi"><span>Aktif ticaret</span><strong>${number(data.trades.filter((row) => row.status === "ACTIVE").length)}</strong><small>Gelir üreten anlaşma</small></div></section><div class="section-title"><h2>Devlet ekonomileri</h2><span>Hazine ve gerçekleşen tur geliri</span></div><section class="economy-country-grid">${data.countries.map((row) => { const income = Number(row.tax_income || 0) + Number(row.land_trade_income || 0) + Number(row.sea_trade_income || 0); return `<article class="card economy-country-card"><div><span>${escapeHtml(mobilizationLabels[row.mobilization] || row.mobilization)}</span><h3>${escapeHtml(row.name)}</h3><small>${number(row.settlement_count)} yerleşke · ${number(row.population)} nüfus</small></div><div class="economy-country-values"><span><small>Hazine</small><strong>${money(row.treasury)}</strong></span><span><small>Tur geliri</small><strong>${money(income)}</strong></span></div><button class="button compact" data-country-treasury="${row.id}">Hazineyi düzelt</button></article>`; }).join("")}</section><section class="mechanics-grid section-gap"><article class="card"><div class="card-head"><div><h2>Devam eden inşaatlar</h2><p>Bina seviyesi ve tamamlanma turu</p></div></div>${rowsOrEmpty(data.buildings, (row) => `<button class="relation-row" data-production-settlement="${row.settlement_id}"><span><strong>${escapeHtml(row.country_name)} · ${escapeHtml(row.settlement_name)}</strong><small>${escapeHtml(humanKey(row.building_type))} · Sv${number(row.level)} → Sv${number(row.target_level)}</small></span><em>Tur ${number(row.completion_turn)}</em></button>`, "Devam eden bina inşaatı yok.")}</article><article class="card"><div class="card-head"><div><h2>Asker alımları</h2><p>Kalan birlik ve sonraki dalga</p></div></div>${rowsOrEmpty(data.recruitments, (row) => `<button class="relation-row" data-production-settlement="${row.settlement_id}"><span><strong>${escapeHtml(row.country_name)} · ${escapeHtml(row.settlement_name)}</strong><small>${escapeHtml(humanKey(row.unit_type))} · ${number(row.remaining_quantity)} / ${number(row.total_quantity)} kaldı</small></span><em>Tur ${number(row.next_due_turn)}</em></button>`, "Devam eden asker alımı yok.")}</article><article class="card relation-span"><div class="card-head"><div><h2>Gemi üretimi</h2><p>Tersane siparişleri ve tamamlanma turu</p></div></div>${rowsOrEmpty(data.navalOrders, (row) => `<button class="relation-row" data-production-settlement="${row.settlement_id}"><span><strong>${escapeHtml(row.country_name)} · ${escapeHtml(row.settlement_name)}</strong><small>${number(row.quantity)} ${escapeHtml(humanKey(row.ship_type))}</small></span><em>Tur ${number(row.completion_turn)}</em></button>`, "Devam eden gemi üretimi yok.")}</article></section>`;
+  document.querySelector("[data-new-treasury]").addEventListener("click", async () => openGuidedTreasury(await api("/api/gm-operations")));
+  document.querySelector("[data-bulk-tax]").addEventListener("click", async () => openBulkOperation(await api("/api/gm-operations"), "SETTLEMENT_TAX"));
+  document.querySelectorAll("[data-country-treasury]").forEach((button) => button.addEventListener("click", async () => openGuidedTreasury(await api("/api/gm-operations"), `COUNTRY:${button.dataset.countryTreasury}`)));
+  document.querySelectorAll("[data-production-settlement]").forEach((button) => button.addEventListener("click", () => settlementDetail(button.dataset.productionSettlement).catch(showPageError)));
 }
 
 function compositionAmount(composition) {
@@ -1270,6 +1586,7 @@ function openEditor(title, subtitle, content, submit) {
   const saveButton = document.getElementById("editor-save");
   saveButton.hidden = typeof submit !== "function";
   saveButton.disabled = false;
+  saveButton.classList.remove("danger");
   saveButton.textContent = "Değişiklikleri kaydet";
   editorModal.hidden = false;
   document.body.style.overflow = "hidden";
@@ -1537,10 +1854,11 @@ async function dataControlPage() {
   const options = [...categories.entries()].map(([category, tables]) => `<optgroup label="${escapeHtml(category)}">${tables.map((item) => `<option value="${item.name}" ${item.name === table.name ? "selected" : ""}>${escapeHtml(item.label)}${item.mutable ? "" : " · salt okunur"}</option>`).join("")}</optgroup>`).join("");
   const rows = data.rows.map((row, index) => dataRecordCard(table, row, index)).join("");
   const end = Math.min(data.total, data.offset + data.rows.length);
-  page.innerHTML = `<div class="page-head"><div><span class="pill danger">GM Kontrol Merkezi</span><h1 style="margin-top:10px">Oyun Mekanikleri</h1><p>Teknik kimliklerle uğraşmadan devletleri, yerleşkeleri, orduları ve mekanik kayıtlarını doğrudan yönet.</p></div><div class="actions"><span class="pill neutral">${number(catalog.length)} mekanik tablosu</span>${table.mutable ? '<button class="button primary" data-data-new>＋ Yeni kayıt</button>' : ""}</div></div><section class="card data-control-warning"><strong>Adlarla ve seçimlerle tam kontrol</strong><p>Bağlantılı kayıtlar UUID yerine oyun içindeki adlarıyla gösterilir ve seçim kutusundan değiştirilir. Teknik alanlar düzenleme ekranında ayrı ve kapalı tutulur. Her işlem gerekçe, eski değer ve yeni değerle kaydedilir.</p></section><section class="card data-control-toolbar"><label>Yönetilecek mekanik<select id="data-table-select">${options}</select></label><form id="data-search-form"><label>Ad veya duruma göre ara<input id="data-search" value="${escapeHtml(state.dataSearch)}" placeholder="Örn. Roma, Atina, aktif, bekliyor…"></label><button class="button" type="submit">Ara</button></form></section><div class="section-title"><h2>${escapeHtml(table.label)}</h2><span>${escapeHtml(table.category)} · ${number(data.total)} kayıt · ${table.scoped ? "bu Discord sunucusu" : "oyun geneli"}</span></div><section class="data-record-grid">${rows || '<div class="card empty">Bu mekanikte henüz kayıt bulunmuyor.</div>'}</section><div class="data-pager"><button class="button" data-data-prev ${data.offset <= 0 ? "disabled" : ""}>← Önceki</button><span>${data.total ? `${number(data.offset + 1)}–${number(end)} / ${number(data.total)}` : "0 kayıt"}</span><button class="button" data-data-next ${end >= data.total ? "disabled" : ""}>Sonraki →</button></div>`;
+  page.innerHTML = `<div class="page-head"><div><span class="pill danger">GM Kontrol Merkezi</span><h1 style="margin-top:10px">Oyun Mekanikleri</h1><p>Teknik kimliklerle uğraşmadan devletleri, yerleşkeleri, orduları ve mekanik kayıtlarını doğrudan yönet.</p></div><div class="actions"><span class="pill neutral">${number(catalog.length)} mekanik tablosu</span><button class="button" data-save-data-view>Görünümü kaydet</button>${table.mutable ? '<button class="button primary" data-data-new>＋ Yeni kayıt</button>' : ""}</div></div><section class="card data-control-warning"><strong>Adlarla ve seçimlerle tam kontrol</strong><p>Bağlantılı kayıtlar UUID yerine oyun içindeki adlarıyla gösterilir ve seçim kutusundan değiştirilir. Teknik alanlar düzenleme ekranında ayrı ve kapalı tutulur. Her işlem gerekçe, eski değer ve yeni değerle kaydedilir.</p></section><section class="card data-control-toolbar"><label>Yönetilecek mekanik<select id="data-table-select">${options}</select></label><form id="data-search-form"><label>Ad veya duruma göre ara<input id="data-search" value="${escapeHtml(state.dataSearch)}" placeholder="Örn. Roma, Atina, aktif, bekliyor…"></label><button class="button" type="submit">Ara</button></form></section><div class="section-title"><h2>${escapeHtml(table.label)}</h2><span>${escapeHtml(table.category)} · ${number(data.total)} kayıt · ${table.scoped ? "bu Discord sunucusu" : "oyun geneli"}</span></div><section class="data-record-grid">${rows || '<div class="card empty">Bu mekanikte henüz kayıt bulunmuyor.</div>'}</section><div class="data-pager"><button class="button" data-data-prev ${data.offset <= 0 ? "disabled" : ""}>← Önceki</button><span>${data.total ? `${number(data.offset + 1)}–${number(end)} / ${number(data.total)}` : "0 kayıt"}</span><button class="button" data-data-next ${end >= data.total ? "disabled" : ""}>Sonraki →</button></div>`;
   document.getElementById("data-table-select").addEventListener("change", (event) => { state.dataTable = event.target.value; state.dataOffset = 0; state.dataSearch = ""; dataControlPage().catch(showPageError); });
   document.getElementById("data-search-form").addEventListener("submit", (event) => { event.preventDefault(); state.dataSearch = document.getElementById("data-search").value.trim(); state.dataOffset = 0; dataControlPage().catch(showPageError); });
   document.querySelector("[data-data-new]")?.addEventListener("click", () => openDataRecordEditor(table).catch((error) => toast(error.message, "error")));
+  document.querySelector("[data-save-data-view]").addEventListener("click", () => openSaveView("data-control", { table: table.name, search: state.dataSearch }, `${table.label}${state.dataSearch ? ` · ${state.dataSearch}` : ""}`));
   document.querySelectorAll("[data-data-row]").forEach((button) => button.addEventListener("click", () => openDataRecordEditor(table, state.dataRows[Number(button.dataset.dataRow)]).catch((error) => toast(error.message, "error"))));
   document.querySelector("[data-data-prev]")?.addEventListener("click", () => { state.dataOffset = Math.max(0, state.dataOffset - 25); refreshKeepingScroll(dataControlPage).catch(showPageError); });
   document.querySelector("[data-data-next]")?.addEventListener("click", () => { state.dataOffset += 25; refreshKeepingScroll(dataControlPage).catch(showPageError); });
@@ -1548,11 +1866,21 @@ async function dataControlPage() {
 
 async function gameHealthPage() {
   setActiveRoute("health"); loading();
-  const data = await api("/api/game-health");
+  const [data, system] = await Promise.all([api("/api/game-health"), api("/api/system-status")]);
   const severityLabel = { CRITICAL: "Kritik", WARNING: "Uyarı", INFO: "Bilgi" };
-  const issueRows = data.issues.map((issue, index) => `<article class="health-issue ${issue.severity.toLowerCase()}"><div class="health-icon">${issue.severity === "CRITICAL" ? "!" : issue.severity === "WARNING" ? "△" : "i"}</div><div><div class="health-meta"><span>${escapeHtml(issue.category)}</span><span>•</span><span>${escapeHtml(severityLabel[issue.severity] || issue.severity)}</span></div><h3>${escapeHtml(issue.title)}</h3><p>${escapeHtml(issue.detail)}</p></div><div class="health-actions"><span class="pill ${issue.severity === "CRITICAL" ? "danger" : issue.severity === "WARNING" ? "warning" : "neutral"}">${number(issue.count)} kayıt</span>${issue.targetId ? `<button class="button compact" data-health-issue="${index}">Kayda git</button>` : `<button class="button compact" data-route-action="${issue.route}">İncele</button>`}</div></article>`).join("");
-  page.innerHTML = `<div class="page-head"><div><span class="pill ${data.summary.critical ? "danger" : data.summary.warning ? "warning" : ""}">${data.summary.total ? `${number(data.summary.total)} bulgu` : "Sistem sağlıklı"}</span><h1 style="margin-top:10px">Oyun Sağlığı</h1><p>Verilerdeki tutarsızlıkları oyun akışına müdahale etmeden denetler.</p></div><button class="button" data-refresh-health>↻ Yeniden tara</button></div><section class="health-summary"><div class="card kpi health-critical"><span>Kritik</span><strong>${number(data.summary.critical)}</strong><small>Oyun akışını bozabilir</small></div><div class="card kpi health-warning"><span>Uyarı</span><strong>${number(data.summary.warning)}</strong><small>Yönetici incelemesi gerekir</small></div><div class="card kpi"><span>Bilgi</span><strong>${number(data.summary.info)}</strong><small>Takip edilebilir kayıt</small></div><div class="card kpi"><span>Son tarama</span><strong class="health-time">${date(data.checkedAt)}</strong><small>Tur ${number(data.guild.current_turn)} · ${escapeHtml(turnPhaseLabels[data.guild.turn_phase] || data.guild.turn_phase)}</small></div></section><section class="card health-panel"><div class="card-head"><div><h2>Denetim bulguları</h2><p>Yerleşkesiz devlet, geçersiz kuvvet, karakter, mareşal, filo tamiri ve vassallık kontrolleri</p></div></div><div class="health-list">${issueRows || '<div class="health-clean"><span>✓</span><div><h3>Tutarsızlık bulunmadı</h3><p>Kontrol edilen temel oyun kayıtları birbiriyle uyumlu.</p></div></div>'}</div></section>`;
+  const repairable = data.issues.filter((issue) => issue.repairAction).length;
+  const issueRows = data.issues.map((issue, index) => `<article class="health-issue ${issue.severity.toLowerCase()}"><div class="health-icon">${issue.severity === "CRITICAL" ? "!" : issue.severity === "WARNING" ? "△" : "i"}</div><div><div class="health-meta"><span>${escapeHtml(issue.category)}</span><span>•</span><span>${escapeHtml(severityLabel[issue.severity] || issue.severity)}</span>${issue.repairAction ? '<span class="health-repairable">• Güvenli onarım var</span>' : ""}</div><h3>${escapeHtml(issue.title)}</h3><p>${escapeHtml(issue.detail)}</p></div><div class="health-actions"><span class="pill ${issue.severity === "CRITICAL" ? "danger" : issue.severity === "WARNING" ? "warning" : "neutral"}">${number(issue.count)} kayıt</span>${issue.repairAction ? `<button class="button compact primary" data-health-repair="${index}">Onar</button>` : ""}${issue.targetId ? `<button class="button compact" data-health-issue="${index}">Kayda git</button>` : `<button class="button compact" data-route-action="${issue.route}">İncele</button>`}</div></article>`).join("");
+  const poolState = system.pool.waiting > 0 ? "Yoğun" : "Hazır";
+  page.innerHTML = `<div class="page-head"><div><span class="pill ${data.summary.critical ? "danger" : data.summary.warning ? "warning" : ""}">${data.summary.total ? `${number(data.summary.total)} bulgu` : "Sistem sağlıklı"}</span><h1 style="margin-top:10px">Oyun Sağlığı ve Onarım</h1><p>Veri tutarsızlıklarını tara; sonucu açık ve deterministik olan sorunları gerekçeli, denetlenebilir onarımla düzelt.</p></div><button class="button" data-refresh-health>↻ Yeniden tara</button></div><section class="health-summary"><div class="card kpi health-critical"><span>Kritik</span><strong>${number(data.summary.critical)}</strong><small>Oyun akışını bozabilir</small></div><div class="card kpi health-warning"><span>Uyarı</span><strong>${number(data.summary.warning)}</strong><small>Yönetici incelemesi gerekir</small></div><div class="card kpi"><span>Onarılabilir</span><strong>${number(repairable)}</strong><small>Güvenli otomatik düzeltme</small></div><div class="card kpi"><span>Son tarama</span><strong class="health-time">${date(data.checkedAt)}</strong><small>Tur ${number(data.guild.current_turn)} · ${escapeHtml(turnPhaseLabels[data.guild.turn_phase] || data.guild.turn_phase)}</small></div></section><section class="card system-status"><div class="card-head"><div><h2>Panel çalışma durumu</h2><p>Canlı hizmet ölçümleri yalnız yöneticinin teşhis yapabilmesi için gösterilir.</p></div><span class="pill ${system.pool.waiting > 0 ? "warning" : ""}">${poolState}</span></div><div class="system-status-grid"><div><span>Veritabanı yanıtı</span><strong>${number(system.databaseLatencyMs)} ms</strong><small>Sorgu gidiş-dönüş süresi</small></div><div><span>Bağlantı havuzu</span><strong>${number(system.pool.idle)} / ${number(system.pool.total)}</strong><small>Boş / toplam · bekleyen ${number(system.pool.waiting)}</small></div><div><span>Panel belleği</span><strong>${number(system.memoryMb)} MB</strong><small>Çalışan süreç kullanımı</small></div><div><span>Çalışma süresi</span><strong>${number(Math.floor(system.uptimeSeconds / 3600))} sa</strong><small>Kesintisiz hizmet süresi</small></div><div><span>İşlem hareketi</span><strong>${number(system.processingOperations)}</strong><small>Devam eden · son saatte ${number(system.recentAudits)} kayıt</small></div></div></section><section class="card health-panel"><div class="card-head"><div><h2>Denetim bulguları</h2><p>Veri kaybı riski taşıyan bulgular yalnız ilgili kayıt ekranına yönlendirir; güvenli olanlarda Onar düğmesi görünür.</p></div></div><div class="health-list">${issueRows || '<div class="health-clean"><span>✓</span><div><h3>Tutarsızlık bulunmadı</h3><p>Kontrol edilen temel oyun kayıtları birbiriyle uyumlu.</p></div></div>'}</div></section>`;
   document.querySelector("[data-refresh-health]").addEventListener("click", () => refreshKeepingScroll(gameHealthPage).catch(showPageError));
+  document.querySelectorAll("[data-health-repair]").forEach((button) => button.addEventListener("click", () => {
+    const issue = data.issues[Number(button.dataset.healthRepair)];
+    openEditor("Oyun sağlığı bulgusunu onar", issue.targetLabel || issue.title, `<div class="preview-warning"><strong>${escapeHtml(issue.title)}</strong><span>${escapeHtml(issue.detail)}</span></div><label>Onarım gerekçesi<textarea id="health-repair-reason" minlength="3" maxlength="500" rows="3" required placeholder="Bu onarım neden uygulanıyor?"></textarea></label><label>Güvenlik onayı<input id="health-repair-confirmation" autocomplete="off" required placeholder="ONAR yazın"></label>`, async () => {
+      await api("/api/game-health/repair", { method: "POST", body: JSON.stringify({ action: issue.repairAction, targetId: issue.targetId, reason: document.getElementById("health-repair-reason").value, confirmation: document.getElementById("health-repair-confirmation").value }) });
+      closeEditor(); toast(`${issue.title} güvenle onarıldı.`); await refreshKeepingScroll(gameHealthPage);
+    });
+    setEditorSaveLabel("Onarımı uygula", true);
+  }));
   document.querySelectorAll("[data-health-issue]").forEach((button) => button.addEventListener("click", () => {
     const issue = data.issues[Number(button.dataset.healthIssue)];
     openWorkspaceRecord({ type: issue.targetType, id: issue.targetId, label: issue.targetLabel || issue.title, detail: issue.detail }).catch(showPageError);
@@ -1560,11 +1888,58 @@ async function gameHealthPage() {
   bindPageActions();
 }
 
+async function openAuditUndo(auditId) {
+  const preview = await api(`/api/admin-data/undo-preview/${auditId}`);
+  const changes = preview.changes.map((change) => `<div class="undo-diff-row"><div><span>${escapeHtml(dataColumnLabel(change.field))}</span><strong>${escapeHtml(dataValuePreview(change.after))}</strong></div><span class="undo-arrow">→</span><div><span>Geri yüklenecek</span><strong>${escapeHtml(dataValuePreview(change.before))}</strong></div></div>`).join("");
+  const content = `<div class="preview-warning ${preview.reversible ? "" : "danger-zone"}"><strong>${preview.reversible ? "Güvenli geri alma hazır" : "Bu işlem otomatik geri alınamaz"}</strong><span>${escapeHtml(preview.reason)}</span></div><div class="undo-summary"><div><span>Veri alanı</span><strong>${escapeHtml(preview.tableLabel)}</strong></div><div><span>İşlem zamanı</span><strong>${date(preview.createdAt)}</strong></div><div><span>Değişen alan</span><strong>${number(preview.changes.length)}</strong></div></div>${changes ? `<section class="undo-diff"><div class="section-title"><h3>Önce / geri yüklenecek</h3><span>Veritabanındaki güncel değer soldadır</span></div>${changes}</section>` : '<div class="empty">Karşılaştırılabilir alan değişikliği bulunamadı.</div>'}${preview.reversible ? '<label>Geri alma gerekçesi<textarea id="undo-reason" rows="3" minlength="3" maxlength="500" required placeholder="Bu geri alma neden gerekli?"></textarea></label><label>Onay<input id="undo-confirmation" autocomplete="off" required placeholder="GERI AL yaz"></label>' : ""}`;
+  openEditor("Değişikliği geri alma", `${preview.tableLabel} · çakışma korumalı işlem`, content, preview.reversible ? async () => {
+    const reason = document.getElementById("undo-reason").value.trim();
+    const confirmation = document.getElementById("undo-confirmation").value.trim();
+    if (reason.length < 3) throw new Error("Geri alma gerekçesi en az 3 karakter olmalıdır.");
+    if (confirmation !== "GERI AL") throw new Error("Onay alanına GERI AL yazılmalıdır.");
+    await api("/api/admin-data/undo", { method: "POST", body: JSON.stringify({ auditId, reason, confirmation }) });
+    closeEditor();
+    toast("Değişiklik önceki değerlerine güvenle döndürüldü.");
+    await refreshKeepingScroll(auditPage);
+  } : null);
+  if (preview.reversible) document.getElementById("editor-save").textContent = "Onayla ve geri al";
+}
+
+function openAuditDetail(row) {
+  const source = row.action?.startsWith("admin.panel.") || row.action?.startsWith("ADMIN_DATA_") ? "GM Operasyon Masası" : "Discord komutu / oyun akışı";
+  openEditor("İşlem ayrıntısı", row.actionLabel, `<div class="audit-detail-grid"><div><span>Hedef kayıt</span><strong>${escapeHtml(row.entityLabel)}</strong></div><div><span>Kaynak</span><strong>${escapeHtml(source)}</strong></div><div><span>İşlemi yapan</span><strong>${escapeHtml(row.actorLabel)}</strong></div><div><span>Zaman</span><strong>${date(row.created_at)}</strong></div></div><section class="audit-detail-summary"><h3>Kaydedilen değişiklik</h3><p>${escapeHtml(row.detailSummary || "Bu işlem için ek açıklama kaydedilmemiş.")}</p></section><details class="data-technical"><summary>Teknik denetim bilgisi</summary><div class="audit-technical-id"><span>İşlem kodu</span><code>${escapeHtml(row.id)}</code></div><div class="audit-technical-id"><span>Eylem anahtarı</span><code>${escapeHtml(row.action || "—")}</code></div></details>${row.canUndo ? '<div class="preview-warning"><strong>Kontrollü geri alma adayı</strong><span>İşlem geçmişindeki “Geri almayı denetle” düğmesi, kaydın daha sonra değişip değişmediğini kontrol eder.</span></div>' : ""}`, null);
+}
+
 async function auditPage() {
   setActiveRoute("audit"); loading();
-  const rows = await api("/api/audit?limit=150");
-  page.innerHTML = `<div class="page-head"><div><h1>İşlem Geçmişi</h1><p>Discord ve panel üzerinden yapılan son yönetici işlemleri</p></div><button class="button" data-refresh-audit>Yenile</button></div><section class="card">${auditRows(rows)}</section>`;
+  const query = new URLSearchParams({
+    search: state.auditSearch, source: state.auditSource, kind: state.auditKind,
+    from: state.auditFrom, to: state.auditTo, offset: String(state.auditOffset), limit: "50"
+  });
+  const data = await api(`/api/audit?${query}`);
+  state.auditRows = data.rows;
+  const end = Math.min(data.total, data.offset + data.rows.length);
+  page.innerHTML = `<div class="page-head"><div><h1>İşlem Geçmişi</h1><p>Discord ve panel üzerinden yapılan yönetici işlemlerini filtrele, incele ve uygun değişiklikleri güvenle geri al.</p></div><div class="actions"><span class="pill neutral">${number(data.total)} kayıt</span><button class="button" data-save-audit-view>Görünümü kaydet</button><button class="button" data-refresh-audit>↻ Yenile</button></div></div><section class="card audit-safety-note"><strong>Çakışma korumalı geri alma</strong><p>Tam Yetki ekranındaki güncellemeler, yalnız kayıt daha sonra değiştirilmediyse geri alınabilir. Ekleme ve silme işlemleri bağlantılı oyun verilerini korumak için otomatik geri alınmaz.</p></section><form id="audit-filter-form" class="card audit-toolbar"><label>İşlem veya kayıt ara<input id="audit-search" value="${escapeHtml(state.auditSearch)}" maxlength="120" placeholder="Devlet, işlem, gerekçe…"></label><label>Kaynak<select id="audit-source"><option value="ALL" ${selected("ALL", state.auditSource)}>Tüm kaynaklar</option><option value="PANEL" ${selected("PANEL", state.auditSource)}>GM paneli</option><option value="DISCORD" ${selected("DISCORD", state.auditSource)}>Discord ve oyun</option></select></label><label>İşlem türü<select id="audit-kind"><option value="ALL" ${selected("ALL", state.auditKind)}>Tüm işlemler</option><option value="CREATE" ${selected("CREATE", state.auditKind)}>Oluşturma / atama</option><option value="UPDATE" ${selected("UPDATE", state.auditKind)}>Güncelleme</option><option value="DELETE" ${selected("DELETE", state.auditKind)}>Silme / sonlandırma</option><option value="UNDO" ${selected("UNDO", state.auditKind)}>Geri alma</option></select></label><label>Başlangıç<input id="audit-from" type="date" value="${escapeHtml(state.auditFrom)}"></label><label>Bitiş<input id="audit-to" type="date" value="${escapeHtml(state.auditTo)}"></label><div class="audit-filter-actions"><button class="button primary" type="submit">Filtrele</button><button class="button" type="button" data-audit-clear>Temizle</button></div></form><section class="card audit-list">${auditRows(data.rows, data.rows.length, true)}</section><div class="data-pager"><button class="button" data-audit-prev ${data.offset <= 0 ? "disabled" : ""}>← Önceki</button><span>${data.total ? `${number(data.offset + 1)}–${number(end)} / ${number(data.total)}` : "0 kayıt"}</span><button class="button" data-audit-next ${end >= data.total ? "disabled" : ""}>Sonraki →</button></div>`;
   document.querySelector("[data-refresh-audit]").addEventListener("click", () => refreshKeepingScroll(auditPage));
+  document.querySelector("[data-save-audit-view]").addEventListener("click", () => openSaveView("audit", { search: state.auditSearch, source: state.auditSource, kind: state.auditKind, from: state.auditFrom, to: state.auditTo }, `İşlem geçmişi${state.auditSearch ? ` · ${state.auditSearch}` : ""}`));
+  document.getElementById("audit-filter-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    state.auditSearch = document.getElementById("audit-search").value.trim();
+    state.auditSource = document.getElementById("audit-source").value;
+    state.auditKind = document.getElementById("audit-kind").value;
+    state.auditFrom = document.getElementById("audit-from").value;
+    state.auditTo = document.getElementById("audit-to").value;
+    state.auditOffset = 0;
+    auditPage().catch(showPageError);
+  });
+  document.querySelector("[data-audit-clear]").addEventListener("click", () => {
+    Object.assign(state, { auditSearch: "", auditSource: "ALL", auditKind: "ALL", auditFrom: "", auditTo: "", auditOffset: 0 });
+    auditPage().catch(showPageError);
+  });
+  document.querySelector("[data-audit-prev]")?.addEventListener("click", () => { state.auditOffset = Math.max(0, state.auditOffset - 50); refreshKeepingScroll(auditPage).catch(showPageError); });
+  document.querySelector("[data-audit-next]")?.addEventListener("click", () => { state.auditOffset += 50; refreshKeepingScroll(auditPage).catch(showPageError); });
+  document.querySelectorAll("[data-audit-detail]").forEach((button) => button.addEventListener("click", () => openAuditDetail(state.auditRows[Number(button.dataset.auditDetail)])));
+  document.querySelectorAll("[data-audit-undo]").forEach((button) => button.addEventListener("click", () => openAuditUndo(button.dataset.auditUndo).catch((error) => toast(error.message, "error"))));
 }
 
 function bindPageActions() {
@@ -1580,6 +1955,7 @@ function bindPageActions() {
 async function navigate(route) {
   try {
     if (route === "overview") return overview();
+    if (route === "workspace") return workspacePage();
     if (route === "countries") return countries();
     if (route === "settlements") return settlementsPage();
     if (route === "armies") return forcesPage();
@@ -1587,9 +1963,14 @@ async function navigate(route) {
     if (route === "dynasties") return dynastiesPage();
     if (route === "roman-politics") return romanPoliticsPage();
     if (route === "steppe-politics") return steppePoliticsPage();
+    if (route === "diplomacy-control") return diplomacyControlPage();
     if (route === "assignments") return assignmentsPage();
+    if (route === "gm-operations") return guidedOperationsPage();
+    if (route === "bulk-operations") return bulkOperationsPage();
+    if (route === "economy-control") return economyControlPage();
     if (route === "battles") return battlesPage();
     if (route === "rebellions") return rebellionsPage();
+    if (route === "reports") return reportsPage();
     if (route === "health") return gameHealthPage();
     if (route === "data-control") return dataControlPage();
     if (route === "audit") return auditPage();
@@ -1666,10 +2047,16 @@ async function confirmArmy() {
 
 const paletteCommands = [
   { route: "overview", label: "Genel Bakış", detail: "Oyun kontrol merkezini aç" },
+  { route: "workspace", label: "Çalışma Alanım", detail: "Favoriler, son kayıtlar ve kaydedilmiş görünümler" },
   { route: "countries", label: "Devletler", detail: "Devlet kayıtlarını yönet" },
   { route: "settlements", label: "Yerleşkeler", detail: "Nüfus, ekonomi, kültür ve dini incele" },
   { route: "armies", label: "Ordular & Filolar", detail: "Kuvvetleri ve komutanları yönet" },
   { route: "characters", label: "Karakterler", detail: "Karakter ve uzmanlık kayıtlarını aç" },
+  { route: "gm-operations", label: "Rehberli İşlemler", detail: "Riskli GM müdahalelerini önizleme ve onayla uygula" },
+  { route: "bulk-operations", label: "Toplu İşlemler", detail: "Birden fazla oyun kaydını tek güvenli işlemde güncelle" },
+  { route: "diplomacy-control", label: "Diplomasi & Ticaret", detail: "İttifak, vassallık, savaş, pakt ve ticaret bağlantılarını yönet" },
+  { route: "economy-control", label: "Ekonomi & Üretim", detail: "Hazine, gelir ve üretim kuyruklarını kontrol et" },
+  { route: "reports", label: "Raporlar & Karşılaştırma", detail: "Devletleri karşılaştır ve mali eğilimleri incele" },
   { route: "battles", label: "Savaşlar", detail: "Aktif savaş ve kuşatmaları aç" },
   { route: "rebellions", label: "İsyanlar", detail: "İsyan durumlarını incele" },
   { route: "health", label: "Oyun Sağlığı", detail: "Veri tutarlılığı taramasını çalıştır" },

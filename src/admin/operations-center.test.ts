@@ -49,4 +49,147 @@ describe("GM operasyon merkezi", () => {
     expect(app).toContain("async function settlementDetail");
     expect(app).toContain("Ekonomi ve olay geçmişi");
   });
+
+  it("riskli GM müdahalelerini rehberli önizleme ve onay akışlarıyla yürütür", () => {
+    const server = read("./server.ts");
+    const service = read("./service.ts");
+    const app = read("./public/app.js");
+    const html = read("./public/index.html");
+
+    expect(html).toContain('data-route="gm-operations"');
+    expect(server).toContain('url.pathname === "/api/operations/treasury/preview"');
+    expect(server).toContain('url.pathname === "/api/operations/treasury/apply"');
+    expect(server).toContain('url.pathname === "/api/operations/settlement-transfer/preview"');
+    expect(server).toContain('url.pathname === "/api/operations/settlement-transfer/apply"');
+    expect(server).toContain('url.pathname === "/api/operations/diplomacy/end"');
+    expect(service).toContain('kind: "GUIDED_TREASURY"');
+    expect(service).toContain('kind: "GUIDED_SETTLEMENT_TRANSFER"');
+    expect(service).toContain("claimAdminOperation");
+    expect(service).toContain("Hazine önizlemeden sonra değişti");
+    expect(service).toContain("Yerleşkenin sahibi önizlemeden sonra değişti");
+    expect(app).toContain("async function guidedOperationsPage");
+    expect(app).toContain("function openGuidedTreasury");
+    expect(app).toContain("function openGuidedSettlementTransfer");
+    expect(app).toContain("function openGuidedCharacterCancel");
+    expect(app).toContain("function openGuidedDiplomacyEnd");
+  });
+
+  it("toplu değişiklikleri önizleme, tutarlılık ve tek işlem korumasıyla uygular", () => {
+    const server = read("./server.ts");
+    const service = read("./service.ts");
+    const app = read("./public/app.js");
+    const html = read("./public/index.html");
+
+    expect(html).toContain('data-route="bulk-operations"');
+    expect(server).toContain('url.pathname === "/api/operations/bulk/preview"');
+    expect(server).toContain('url.pathname === "/api/operations/bulk/apply"');
+    expect(service).toContain('kind: z.literal("COUNTRY_MOBILIZATION")');
+    expect(service).toContain('kind: z.literal("SETTLEMENT_TAX")');
+    expect(service).toContain('kind: z.literal("CHARACTER_ASSIGNMENT_CANCEL")');
+    expect(service).toContain("Seçilen kayıtlardan en az biri önizlemeden sonra değişti");
+    expect(service).toContain('"admin.panel.bulk.apply"');
+    expect(app).toContain("async function bulkOperationsPage");
+    expect(app).toContain("function openBulkOperation");
+    expect(app).toContain("Ya hep ya hiç uygulama");
+  });
+
+  it("oyun sağlığı bulgularında yalnız deterministik onarımları otomatik uygular", () => {
+    const server = read("./server.ts");
+    const service = read("./service.ts");
+    const app = read("./public/app.js");
+
+    expect(server).toContain('url.pathname === "/api/game-health/repair"');
+    expect(service).toContain('z.literal("ONAR")');
+    expect(service).toContain('"DISMISS_INACTIVE_CHARACTER"');
+    expect(service).toContain('"RECONCILE_MARSHALS"');
+    expect(service).toContain('"COMPLETE_OVERDUE_REPAIR"');
+    expect(service).toContain('"REMOVE_FOREIGN_COMMANDER"');
+    expect(service).toContain('"END_INVALID_VASSALAGE"');
+    expect(service).toContain('repairAction: null');
+    expect(service).toContain('"admin.panel.health.repair"');
+    expect(app).toContain('data-health-repair');
+    expect(app).toContain("Güvenli otomatik düzeltme");
+  });
+
+  it("diplomasi, ticaret, ekonomi ve üretimi mekanik odaklı ekranlarda toplar", () => {
+    const server = read("./server.ts");
+    const service = read("./service.ts");
+    const app = read("./public/app.js");
+    const html = read("./public/index.html");
+
+    expect(html).toContain('data-route="diplomacy-control"');
+    expect(html).toContain('data-route="economy-control"');
+    expect(server).toContain('url.pathname === "/api/mechanics-control"');
+    expect(service).toContain("async mechanicsControl()");
+    expect(service).toContain("FROM diplomatic_pacts pact");
+    expect(service).toContain("FROM country_port_access access");
+    expect(service).toContain("FROM naval_orders naval");
+    expect(app).toContain("async function diplomacyControlPage");
+    expect(app).toContain("async function economyControlPage");
+    expect(app).toContain("Hazineyi düzelt");
+    expect(app).toContain("İlişkiyi sonlandır");
+  });
+
+  it("kişisel GM çalışma alanı ve adlandırılmış filtre görünümleri sağlar", () => {
+    const app = read("./public/app.js");
+    const html = read("./public/index.html");
+    const css = read("./public/app.css");
+
+    expect(html).toContain('data-route="workspace"');
+    expect(app).toContain("async function workspacePage");
+    expect(app).toContain('writeStoredList("saved-views"');
+    expect(app).toContain("function openSaveView");
+    expect(app).toContain("function applySavedView");
+    expect(app).toContain("data-save-data-view");
+    expect(app).toContain("data-save-audit-view");
+    expect(app).toContain("data-delete-saved-view");
+    expect(css).toContain(".workspace-dashboard");
+    expect(css).toContain(".saved-view-card");
+  });
+
+  it("devlet karşılaştırması, mali eğilim ve dışa aktarım raporları sunar", () => {
+    const server = read("./server.ts");
+    const service = read("./service.ts");
+    const app = read("./public/app.js");
+    const html = read("./public/index.html");
+    const css = read("./public/app.css");
+
+    expect(html).toContain('data-route="reports"');
+    expect(server).toContain('url.pathname === "/api/reports"');
+    expect(service).toContain("async reporting()");
+    expect(service).toContain("financialHistory");
+    expect(service).toContain("transactionKinds");
+    expect(app).toContain("async function reportsPage");
+    expect(app).toContain("function renderCountryComparison");
+    expect(app).toContain("function downloadReportCsv");
+    expect(app).toContain("Son turların mali akışı");
+    expect(css).toContain(".country-comparison");
+    expect(css).toContain(".turn-flow");
+  });
+
+  it("son güvenlik ve performans katmanını istek izleme ve canlı durumla tamamlar", () => {
+    const server = read("./server.ts");
+    const service = read("./service.ts");
+    const database = read("./db.ts");
+    const app = read("./public/app.js");
+    const html = read("./public/index.html");
+    const css = read("./public/app.css");
+
+    expect(server).toContain("MUTATION_LIMIT");
+    expect(server).toContain('response.setHeader("x-request-id"');
+    expect(server).toContain('response.setHeader("server-timing"');
+    expect(server).toContain('response.setHeader("x-ratelimit-limit"');
+    expect(server).toContain('url.pathname === "/api/system-status"');
+    expect(server).toContain("databaseError");
+    expect(service).toContain("async systemStatus()");
+    expect(service).toContain("databaseLatencyMs");
+    expect(database).toContain("statement_timeout: 20_000");
+    expect(database).toContain("idle_in_transaction_session_timeout");
+    expect(app).toContain("const inflightGets = new Map()");
+    expect(app).toContain("new AbortController()");
+    expect(app).toContain('Promise.all([api("/api/game-health"), api("/api/system-status")])');
+    expect(app).toContain("Panel çalışma durumu");
+    expect(css).toContain(".system-status-grid");
+    expect(html).toContain("security-performance-v16");
+  });
 });

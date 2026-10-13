@@ -12,6 +12,8 @@ describe("GM paneli tam yetki veri katmanı", () => {
     expect(server).toContain('url.pathname === "/api/admin-data/rows"');
     expect(server).toContain('url.pathname === "/api/admin-data/options"');
     expect(server).toContain('url.pathname === "/api/admin-data/mutate"');
+    expect(server).toContain('url.pathname === "/api/admin-data/undo"');
+    expect(server).toContain("adminDataUndoPreviewMatch");
     expect(server).toContain("requireMutation(request, response)");
   });
 
@@ -49,5 +51,31 @@ describe("GM paneli tam yetki veri katmanı", () => {
     expect(service).toContain('settlements: "Yerleşkeler"');
     expect(app).toContain("dataFieldWords");
     expect(app).toContain('class="data-record-grid"');
+  });
+
+  it("geri almayı önizleme, açık onay, transaction ve son değer çakışma korumasıyla sınırlar", () => {
+    const service = read("./data-control-service.ts");
+    const app = read("./public/app.js");
+    expect(service).toContain('confirmation !== "GERI AL"');
+    expect(service).toContain("pg_advisory_xact_lock");
+    expect(service).toContain("rowsMatch(table, current, details.after)");
+    expect(service).toContain('action !== "ADMIN_DATA_UPDATE"');
+    expect(service).toContain('action=\'ADMIN_DATA_UNDO\'');
+    expect(app).toContain("openAuditUndo");
+    expect(app).toContain("Geri almayı denetle");
+    expect(app).toContain("Onayla ve geri al");
+  });
+
+  it("işlem geçmişini arama, kaynak, tür, tarih ve sayfalama filtreleriyle denetim merkezine dönüştürür", () => {
+    const service = read("./service.ts");
+    const app = read("./public/app.js");
+    expect(service).toContain("interface AdminAuditQuery");
+    expect(service).toContain("details::text ILIKE");
+    expect(service).toContain("created_at >=");
+    expect(service).toContain("created_at <");
+    expect(app).toContain('id="audit-filter-form"');
+    expect(app).toContain("openAuditDetail");
+    expect(app).toContain("data-audit-prev");
+    expect(app).toContain("data-audit-next");
   });
 });

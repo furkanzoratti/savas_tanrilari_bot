@@ -46,6 +46,20 @@ const mutationSchema = z.object({
   confirmation: z.string().optional()
 });
 
+const undoSchema = z.object({
+  auditId: z.string().uuid(),
+  reason: z.string().trim().min(3).max(500),
+  confirmation: z.string()
+});
+
+interface AdminDataAuditDetails {
+  table: string;
+  key: Record<string, unknown>;
+  reason: string | undefined;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+}
+
 function quoteIdentifier(value: string): string {
   if (!IDENTIFIER.test(value)) throw new Error("Geçersiz veri alanı.");
   return `"${value}"`;
@@ -320,6 +334,67 @@ async function audit(client: AdminDbClient, actorId: string, action: string, tab
   );
 }
 
+function auditDetails(value: unknown): AdminDataAuditDetails | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const details = value as Record<string, unknown>;
+  if (typeof details.table !== "string" || !IDENTIFIER.test(details.table)) return null;
+  if (!details.key || typeof details.key !== "object" || Array.isArray(details.key)) return null;
+  const before = details.before;
+  const after = details.after;
+  if (before !== null && (typeof before !== "object" || Array.isArray(before))) return null;
+  if (after !== null && (typeof after !== "object" || Array.isArray(after))) return null;
+  return {
+    table: details.table,
+    key: details.key as Record<string, unknown>,
+    reason: typeof details.reason === "string" ? details.reason : undefined,
+    before: before as Record<string, unknown> | null,
+    after: after as Record<string, unknown> | null
+  };
+}
+
+function canonicalValue(value: unknown): unknown {
+  if (value instanceof Date) return value.toISOString();
+  if (Array.isArray(value)) return value.map(canonicalValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => key !== "__ctid")
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, nested]) => [key, canonicalValue(nested)]));
+  }
+  return value;
+}
+
+function rowsMatch(table: TableMeta, current: Record<string, unknown>, expected: Record<string, unknown>): boolean {
+  const comparable = table.columns
+    .map((column) => column.name)
+    .filter((column) => Object.prototype.hasOwnProperty.call(expected, column));
+  const currentValues = Object.fromEntries(comparable.map((column) => [column, current[column]]));
+  const expectedValues = Object.fromEntries(comparable.map((column) => [column, expected[column]]));
+  return JSON.stringify(canonicalValue(currentValues)) === JSON.stringify(canonicalValue(expectedValues));
+}
+
+function undoChanges(table: TableMeta, details: AdminDataAuditDetails) {
+  if (!details.before || !details.after) return [];
+  return table.columns
+    .filter((column) => !column.primary && !column.generated)
+    .filter((column) => JSON.stringify(canonicalValue(details.before?.[column.name])) !== JSON.stringify(canonicalValue(details.after?.[column.name])))
+    .map((column) => ({
+      field: column.name,
+      before: details.before?.[column.name] ?? null,
+      after: details.after?.[column.name] ?? null
+    }));
+}
+
+async function undoAlreadyApplied(client: Pick<AdminDbClient, "query">, auditId: string): Promise<boolean> {
+  const result = await client.query(
+    `SELECT 1 FROM audit_logs
+      WHERE guild_id=$1 AND action='ADMIN_DATA_UNDO' AND details->>'originalAuditId'=$2
+      LIMIT 1`,
+    [adminConfig.guildId, auditId]
+  );
+  return Boolean(result.rowCount);
+}
+
 async function referenceLabels(meta: SchemaMeta, table: TableMeta, rows: Record<string, unknown>[]): Promise<Map<string, Map<string, string>>> {
   const resolved = new Map<string, Map<string, string>>();
   for (const foreignKey of table.foreignKeys) {
@@ -454,6 +529,132 @@ export const adminDataControlService = {
     return relationOptions(meta, table, columnName, search, current);
   },
 
+  async undoPreview(auditId: string) {
+    if (!z.string().uuid().safeParse(auditId).success) throw new Error("Geçersiz işlem kaydı kimliği.");
+    const auditRow = (await adminPool.query<{
+      id: string; action: string; details: unknown; created_at: string;
+    }>(
+      `SELECT id,action,details,created_at FROM audit_logs
+        WHERE id=$1 AND guild_id=$2 AND entity_type='ADMIN_DATA'`,
+      [auditId, adminConfig.guildId]
+    )).rows[0];
+    if (!auditRow) throw new Error("İşlem geçmişi kaydı bulunamadı.");
+    const details = auditDetails(auditRow.details);
+    if (!details) throw new Error("İşlem geçmişinin geri alma bilgileri eksik.");
+    const meta = await schema();
+    const table = assertTable(meta, details.table);
+    const base = {
+      auditId,
+      action: auditRow.action,
+      table: table.name,
+      tableLabel: tableLabel(table.name),
+      createdAt: auditRow.created_at,
+      changes: undoChanges(table, details)
+    };
+    if (auditRow.action !== "ADMIN_DATA_UPDATE") {
+      return {
+        ...base,
+        reversible: false,
+        reason: auditRow.action === "ADMIN_DATA_INSERT"
+          ? "Eklenen bir kaydı silmek bağlı oyun verilerini de silebileceği için otomatik geri alınamaz."
+          : "Kalıcı olarak silinen kayıtlar bağlantı bütünlüğü nedeniyle otomatik geri kurulamaz."
+      };
+    }
+    if (!table.mutable || !details.before || !details.after) {
+      return { ...base, reversible: false, reason: "Bu kayıt güvenli geri alma koşullarını karşılamıyor." };
+    }
+    if (await undoAlreadyApplied(adminPool, auditId)) {
+      return { ...base, reversible: false, reason: "Bu işlem daha önce geri alındı." };
+    }
+    const key = keyWhere(table, details.key, 1);
+    const params = [...key.params];
+    const scope = scopeExpression(meta, table.name, "target", params.length + 1);
+    if (scope) params.push(adminConfig.guildId);
+    const current = (await adminPool.query<Record<string, unknown>>(
+      `SELECT target.ctid::text AS "__ctid",target.*
+         FROM ${quoteIdentifier(table.name)} target
+        WHERE ${key.sql}${scope ? ` AND ${scope}` : ""}`,
+      params
+    )).rows[0];
+    if (!current) return { ...base, reversible: false, reason: "Hedef kayıt artık bulunmuyor veya bu sunucuya ait değil." };
+    if (!rowsMatch(table, current, details.after)) {
+      return { ...base, reversible: false, reason: "Kayıt bu işlemden sonra yeniden değiştirildi. Yeni değişikliklerin üzerine yazılmadı." };
+    }
+    if (!base.changes.length) return { ...base, reversible: false, reason: "Geri yüklenecek alan değişikliği bulunamadı." };
+    return {
+      ...base,
+      reversible: true,
+      reason: "Kayıt hâlâ işlemin bıraktığı durumla birebir aynı. Önceki değerler güvenle geri yüklenebilir."
+    };
+  },
+
+  async undo(actorId: string, rawInput: unknown) {
+    const input = undoSchema.parse(rawInput);
+    if (input.confirmation !== "GERI AL") throw new Error("Geri alma işlemi için GERI AL onayı gereklidir.");
+    const meta = await schema();
+    return withAdminTransaction(async (client) => {
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [input.auditId]);
+      const auditRow = (await client.query<{ id: string; action: string; details: unknown }>(
+        `SELECT id,action,details FROM audit_logs
+          WHERE id=$1 AND guild_id=$2 AND entity_type='ADMIN_DATA' FOR UPDATE`,
+        [input.auditId, adminConfig.guildId]
+      )).rows[0];
+      if (!auditRow) throw new Error("İşlem geçmişi kaydı bulunamadı.");
+      if (auditRow.action !== "ADMIN_DATA_UPDATE") throw new Error("Yalnız kayıt güncellemeleri güvenli biçimde geri alınabilir.");
+      if (await undoAlreadyApplied(client, input.auditId)) throw new Error("Bu işlem daha önce geri alındı.");
+      const details = auditDetails(auditRow.details);
+      if (!details?.before || !details.after) throw new Error("İşlem geçmişinin geri alma bilgileri eksik.");
+      const table = assertTable(meta, details.table);
+      if (!table.mutable) throw new Error("Bu kayıt tablosu değiştirilemez.");
+      const changes = undoChanges(table, details);
+      if (!changes.length) throw new Error("Geri yüklenecek alan değişikliği bulunamadı.");
+
+      const key = keyWhere(table, details.key, 1);
+      const selectParams = [...key.params];
+      const scope = scopeExpression(meta, table.name, "target", selectParams.length + 1);
+      if (scope) selectParams.push(adminConfig.guildId);
+      const where = `${key.sql}${scope ? ` AND ${scope}` : ""}`;
+      const current = (await client.query<Record<string, unknown>>(
+        `SELECT target.ctid::text AS "__ctid",target.*
+           FROM ${quoteIdentifier(table.name)} target WHERE ${where} FOR UPDATE`,
+        selectParams
+      )).rows[0];
+      if (!current) throw new Error("Hedef kayıt artık bulunmuyor veya bu sunucuya ait değil.");
+      if (!rowsMatch(table, current, details.after)) {
+        throw new Error("Kayıt bu işlemden sonra yeniden değiştirildi. Güvenlik için geri alma durduruldu.");
+      }
+
+      const restoreEntries = changes.map((change) => [change.field, details.before?.[change.field] ?? null] as const);
+      const updateParams: unknown[] = restoreEntries.map(([, value]) => value);
+      const updateKey = keyWhere(table, details.key, updateParams.length + 1);
+      updateParams.push(...updateKey.params);
+      const updateScope = scopeExpression(meta, table.name, "target", updateParams.length + 1);
+      if (updateScope) updateParams.push(adminConfig.guildId);
+      const restored = (await client.query<Record<string, unknown>>(
+        `UPDATE ${quoteIdentifier(table.name)} target
+            SET ${restoreEntries.map(([name], index) => `${quoteIdentifier(name)}=$${index + 1}`).join(",")}
+          WHERE ${updateKey.sql}${updateScope ? ` AND ${updateScope}` : ""}
+          RETURNING target.ctid::text AS "__ctid",target.*`,
+        updateParams
+      )).rows[0];
+      if (!restored) throw new Error("Kayıt geri yüklenemedi.");
+      await client.query(
+        `INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details)
+         VALUES($1,$2,'ADMIN_DATA_UNDO','ADMIN_DATA',$3,$4::jsonb)`,
+        [adminConfig.guildId, actorId, table.name, JSON.stringify({
+          table: table.name,
+          key: details.key,
+          reason: input.reason,
+          originalAuditId: input.auditId,
+          originalAction: auditRow.action,
+          before: current,
+          after: restored
+        })]
+      );
+      return { ok: true, auditId: input.auditId, table: table.name, key: rowKey(table, restored), restoredFields: changes.map((change) => change.field) };
+    });
+  },
+
   async mutate(actorId: string, rawInput: unknown) {
     const input = mutationSchema.parse(rawInput);
     const meta = await schema();
@@ -527,4 +728,4 @@ export const adminDataControlService = {
   }
 };
 
-export const adminDataControlInternals = { quoteIdentifier, tableCategory, normalizeValues };
+export const adminDataControlInternals = { quoteIdentifier, tableCategory, normalizeValues, canonicalValue, rowsMatch };

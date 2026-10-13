@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>AMRP GM Operasyon Masası</title>
-  <link rel="stylesheet" href="/app.css?v=20261013-relations-v7">
+  <link rel="stylesheet" href="/app.css?v=20261014-security-performance-v16">
 </head>
 <body>
   <main id="login" class="login-shell" hidden>
@@ -22,6 +22,7 @@
       <nav aria-label="Ana menü">
         <span class="nav-section">Kontrol</span>
         <button class="nav-item active" data-route="overview"><span>▦</span> Genel Bakış</button>
+        <button class="nav-item" data-route="workspace"><span>★</span> Çalışma Alanım</button>
         <button class="nav-item" data-route="countries"><span>♜</span> Devletler</button>
         <button class="nav-item" data-route="settlements"><span>⌖</span> Yerleşkeler</button>
         <button class="nav-item" data-route="armies"><span>⚔</span> Ordular & Filolar</button>
@@ -30,11 +31,16 @@
         <span class="nav-section">Siyaset</span>
         <button class="nav-item" data-route="roman-politics"><span>🏛</span> Roma Siyaseti</button>
         <button class="nav-item" data-route="steppe-politics"><span>🏕️</span> Bozkır Kurultayı</button>
+        <button class="nav-item" data-route="diplomacy-control"><span>⚖</span> Diplomasi & Ticaret</button>
         <button class="nav-item" data-route="assignments"><span>☷</span> Görevler</button>
         <span class="nav-section">Operasyon</span>
+        <button class="nav-item" data-route="economy-control"><span>¤</span> Ekonomi & Üretim</button>
+        <button class="nav-item" data-route="gm-operations"><span>✦</span> Rehberli İşlemler</button>
+        <button class="nav-item" data-route="bulk-operations"><span>☷</span> Toplu İşlemler</button>
         <button class="nav-item" data-route="battles"><span>🔥</span> Savaşlar</button>
         <button class="nav-item" data-route="rebellions"><span>⚑</span> İsyanlar</button>
         <span class="nav-section">Sistem</span>
+        <button class="nav-item" data-route="reports"><span>▥</span> Raporlar</button>
         <button class="nav-item" data-route="health"><span>♥</span> Oyun Sağlığı</button>
         <button class="nav-item" data-route="data-control"><span>⚙</span> Tam Yetki</button>
         <button class="nav-item" data-route="audit"><span>↶</span> İşlem Geçmişi</button>
@@ -90,6 +96,6 @@
   </div>
 
   <div id="toast" class="toast" role="status" hidden></div>
-  <script src="/app.js?v=20261013-relations-v7" defer></script>
+  <script src="/app.js?v=20261014-security-performance-v16" defer></script>
 </body>
 </html>

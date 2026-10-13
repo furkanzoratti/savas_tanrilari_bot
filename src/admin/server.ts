@@ -1,6 +1,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { randomUUID } from "node:crypto";
+import { performance } from "node:perf_hooks";
 import pino from "pino";
 import { ZodError } from "zod";
 import { adminConfig } from "./config.js";
@@ -18,6 +20,10 @@ import { adminDataControlService } from "./data-control-service.js";
 import { aiCountryGovernanceService } from "../services/ai-country-governance-service.js";
 
 const logger = pino({ level: adminConfig.logLevel });
+const responseStartedAt = new WeakMap<ServerResponse, number>();
+const mutationWindows = new Map<string, { count: number; resetAt: number }>();
+const MUTATION_LIMIT = 120;
+const MUTATION_WINDOW_MS = 60_000;
 const publicFiles = {
   "/": { path: fileURLToPath(new URL("./public/index.html", import.meta.url)), type: "text/html; charset=utf-8" },
   "/app.css": { path: fileURLToPath(new URL("./public/app.css", import.meta.url)), type: "text/css; charset=utf-8" },
@@ -30,16 +36,25 @@ function securityHeaders(response: ServerResponse): void {
   response.setHeader("referrer-policy", "no-referrer");
   response.setHeader("permissions-policy", "camera=(), microphone=(), geolocation=()");
   response.setHeader("content-security-policy", "default-src 'self'; connect-src 'self'; img-src 'self' https://cdn.discordapp.com data:; style-src 'self'; script-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+  response.setHeader("cross-origin-opener-policy", "same-origin");
+  response.setHeader("cross-origin-resource-policy", "same-origin");
+}
+
+function responseTiming(response: ServerResponse): void {
+  const startedAt = responseStartedAt.get(response);
+  if (startedAt !== undefined) response.setHeader("server-timing", `app;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}`);
 }
 
 function json(response: ServerResponse, status: number, value: unknown): void {
   securityHeaders(response);
+  responseTiming(response);
   response.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
   response.end(JSON.stringify(value));
 }
 
 function redirect(response: ServerResponse, location: string): void {
   securityHeaders(response);
+  responseTiming(response);
   response.writeHead(302, { location, "cache-control": "no-store" }).end();
 }
 
@@ -70,6 +85,19 @@ function requireMutation(request: IncomingMessage, response: ServerResponse): Ad
     json(response, 403, { error: "CSRF_REJECTED", message: "İşlem güvenlik doğrulamasından geçemedi." });
     return null;
   }
+  const now = Date.now();
+  const current = mutationWindows.get(session.sub);
+  const window = !current || current.resetAt <= now ? { count: 0, resetAt: now + MUTATION_WINDOW_MS } : current;
+  window.count += 1;
+  mutationWindows.set(session.sub, window);
+  response.setHeader("x-ratelimit-limit", String(MUTATION_LIMIT));
+  response.setHeader("x-ratelimit-remaining", String(Math.max(0, MUTATION_LIMIT - window.count)));
+  response.setHeader("x-ratelimit-reset", String(Math.ceil(window.resetAt / 1000)));
+  if (window.count > MUTATION_LIMIT) {
+    response.setHeader("retry-after", String(Math.max(1, Math.ceil((window.resetAt - now) / 1000))));
+    json(response, 429, { error: "RATE_LIMITED", message: "Çok kısa sürede çok fazla yönetici işlemi gönderildi. Bir dakika içinde yeniden deneyin." });
+    return null;
+  }
   return session;
 }
 
@@ -77,12 +105,23 @@ async function serveStatic(pathname: keyof typeof publicFiles, response: ServerR
   const file = publicFiles[pathname];
   const content = await readFile(file.path);
   securityHeaders(response);
+  responseTiming(response);
   response.writeHead(200, { "content-type": file.type, "cache-control": "no-store" });
   response.end(content);
 }
 
 const server = createServer(async (request, response) => {
+  const requestId = randomUUID();
+  const startedAt = performance.now();
+  responseStartedAt.set(response, startedAt);
+  response.setHeader("x-request-id", requestId);
   const url = new URL(request.url ?? "/", adminConfig.baseUrl);
+  response.once("finish", () => {
+    const durationMs = performance.now() - startedAt;
+    if (url.pathname.startsWith("/api/") || durationMs >= 500) {
+      logger.info({ requestId, method: request.method, path: url.pathname, status: response.statusCode, durationMs: Number(durationMs.toFixed(1)) }, "GM paneli isteği tamamlandı");
+    }
+  });
   try {
     if (request.method === "GET" && url.pathname === "/health") {
       await adminPool.query("SELECT 1");
@@ -107,9 +146,30 @@ const server = createServer(async (request, response) => {
       if (!requireSession(request, response)) return;
       return json(response, 200, await adminPanelService.overview());
     }
+    if (request.method === "GET" && url.pathname === "/api/gm-operations") {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await adminPanelService.guidedOperations());
+    }
+    if (request.method === "GET" && url.pathname === "/api/mechanics-control") {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await adminPanelService.mechanicsControl());
+    }
+    if (request.method === "GET" && url.pathname === "/api/reports") {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await adminPanelService.reporting());
+    }
     if (request.method === "GET" && url.pathname === "/api/game-health") {
       if (!requireSession(request, response)) return;
       return json(response, 200, await adminPanelService.gameHealth());
+    }
+    if (request.method === "GET" && url.pathname === "/api/system-status") {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await adminPanelService.systemStatus());
+    }
+    if (request.method === "POST" && url.pathname === "/api/game-health/repair") {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.repairGameHealthIssue(session.sub, await body(request)));
     }
     if (request.method === "GET" && url.pathname === "/api/countries") {
       if (!requireSession(request, response)) return;
@@ -198,7 +258,15 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === "GET" && url.pathname === "/api/audit") {
       if (!requireSession(request, response)) return;
-      return json(response, 200, await adminPanelService.audit(Number(url.searchParams.get("limit") ?? 60)));
+      return json(response, 200, await adminPanelService.audit({
+        search: url.searchParams.get("search") ?? "",
+        source: (url.searchParams.get("source") ?? "ALL") as "ALL" | "PANEL" | "DISCORD",
+        kind: (url.searchParams.get("kind") ?? "ALL") as "ALL" | "CREATE" | "UPDATE" | "DELETE" | "UNDO",
+        from: url.searchParams.get("from") ?? "",
+        to: url.searchParams.get("to") ?? "",
+        offset: Number(url.searchParams.get("offset") ?? 0),
+        limit: Number(url.searchParams.get("limit") ?? 50)
+      }));
     }
     if (request.method === "GET" && url.pathname === "/api/ai-governance") {
       if (!requireSession(request, response)) return;
@@ -246,10 +314,22 @@ const server = createServer(async (request, response) => {
       const current = url.searchParams.get("current") ?? undefined;
       return json(response, 200, await adminDataControlService.options(table, column, search, current));
     }
+    const adminDataUndoPreviewMatch = request.method === "GET"
+      ? url.pathname.match(/^\/api\/admin-data\/undo-preview\/([0-9a-f-]+)$/iu)
+      : null;
+    if (adminDataUndoPreviewMatch) {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await adminDataControlService.undoPreview(adminDataUndoPreviewMatch[1]!));
+    }
     if (request.method === "POST" && url.pathname === "/api/admin-data/mutate") {
       const session = requireMutation(request, response);
       if (!session) return;
       return json(response, 200, await adminDataControlService.mutate(session.sub, await body(request)));
+    }
+    if (request.method === "POST" && url.pathname === "/api/admin-data/undo") {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminDataControlService.undo(session.sub, await body(request)));
     }
     const countryUpdateMatch = request.method === "PATCH" ? url.pathname.match(/^\/api\/admin\/countries\/([0-9a-f-]+)$/iu) : null;
     if (countryUpdateMatch) {
@@ -390,7 +470,7 @@ const server = createServer(async (request, response) => {
     if (characterCancelMatch) {
       const session = requireMutation(request, response);
       if (!session) return;
-      return json(response, 200, await adminPanelService.cancelCharacterAssignment(session.sub, characterCancelMatch[1]!));
+      return json(response, 200, await adminPanelService.cancelCharacterAssignment(session.sub, characterCancelMatch[1]!, await body(request)));
     }
     const battleParticipantMatch = request.method === "POST"
       ? url.pathname.match(/^\/api\/admin\/(?:battles|sieges)\/([0-9a-f-]+)\/participants$/iu)
@@ -453,6 +533,47 @@ const server = createServer(async (request, response) => {
       if (typeof input.previewToken !== "string") throw new Error("Önizleme anahtarı eksik.");
       return json(response, 200, await adminPanelService.createArmy(session.sub, input.previewToken));
     }
+    if (request.method === "POST" && url.pathname === "/api/operations/treasury/preview") {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.previewGuidedTreasury(session.sub, await body(request)));
+    }
+    if (request.method === "POST" && url.pathname === "/api/operations/treasury/apply") {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      const input = await body(request) as { previewToken?: unknown };
+      if (typeof input.previewToken !== "string") throw new Error("Hazine önizleme anahtarı eksik.");
+      return json(response, 200, await adminPanelService.applyGuidedTreasury(session.sub, input.previewToken));
+    }
+    if (request.method === "POST" && url.pathname === "/api/operations/settlement-transfer/preview") {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.previewGuidedSettlementTransfer(session.sub, await body(request)));
+    }
+    if (request.method === "POST" && url.pathname === "/api/operations/settlement-transfer/apply") {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      const input = await body(request) as { previewToken?: unknown };
+      if (typeof input.previewToken !== "string") throw new Error("Yerleşke devri önizleme anahtarı eksik.");
+      return json(response, 200, await adminPanelService.applyGuidedSettlementTransfer(session.sub, input.previewToken));
+    }
+    if (request.method === "POST" && url.pathname === "/api/operations/diplomacy/end") {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.endGuidedDiplomacy(session.sub, await body(request)));
+    }
+    if (request.method === "POST" && url.pathname === "/api/operations/bulk/preview") {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.previewBulkOperation(session.sub, await body(request)));
+    }
+    if (request.method === "POST" && url.pathname === "/api/operations/bulk/apply") {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      const input = await body(request) as { previewToken?: unknown };
+      if (typeof input.previewToken !== "string") throw new Error("Toplu işlem önizleme anahtarı eksik.");
+      return json(response, 200, await adminPanelService.applyBulkOperation(session.sub, input.previewToken));
+    }
     if (request.method === "GET" && url.pathname in publicFiles) {
       return serveStatic(url.pathname as keyof typeof publicFiles, response);
     }
@@ -461,8 +582,9 @@ const server = createServer(async (request, response) => {
     const message = error instanceof ZodError
       ? error.issues.map((issue) => issue.message).join(" • ")
       : error instanceof Error ? error.message : "Beklenmeyen hata";
-    logger.error({ err: error, method: request.method, path: url.pathname }, "GM paneli isteği başarısız");
-    json(response, 400, { error: "REQUEST_FAILED", message });
+    const databaseError = Boolean(error && typeof error === "object" && "code" in error && typeof (error as { code?: unknown }).code === "string");
+    logger.error({ err: error, requestId, method: request.method, path: url.pathname }, "GM paneli isteği başarısız");
+    json(response, 400, { error: "REQUEST_FAILED", message: databaseError ? "Veritabanı işlemi güvenle tamamlanamadı. İşlem kimliğiyle kayıtları inceleyin." : message, requestId });
   }
 });
 

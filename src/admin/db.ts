@@ -11,6 +11,8 @@ export const adminPool = new pg.Pool({
   min: 1,
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 10_000,
+  statement_timeout: 20_000,
+  query_timeout: 25_000,
   keepAlive: true
 });
 
@@ -20,6 +22,7 @@ export async function withAdminTransaction<T>(work: (client: AdminDbClient) => P
   const client = await adminPool.connect();
   try {
     await client.query("BEGIN");
+    await client.query("SET LOCAL idle_in_transaction_session_timeout='20s'");
     const result = await work(client);
     await client.query("COMMIT");
     return result;

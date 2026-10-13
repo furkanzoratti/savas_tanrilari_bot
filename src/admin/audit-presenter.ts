@@ -3,6 +3,9 @@ const ACTION_LABELS: Record<string, string> = {
   "admin.panel.settlement.update": "Yerleşke bilgileri güncellendi",
   "admin.panel.character.update": "Karakter bilgileri güncellendi",
   "admin.panel.character.assignment.cancel": "Karakter görevi iptal edildi",
+  "admin.panel.vassalage.end": "Vassallık yönetici tarafından sona erdirildi",
+  "admin.panel.bulk.apply": "Toplu yönetici işlemi uygulandı",
+  "admin.panel.health.repair": "Oyun sağlığı sorunu onarıldı",
   "admin.panel.dynasty.update": "Hanedan bilgileri güncellendi",
   "admin.panel.dynasty.member.add": "Hanedana yeni üye eklendi",
   "admin.panel.dynasty.member.update": "Hanedan üyesi güncellendi",
@@ -43,6 +46,7 @@ const ACTION_LABELS: Record<string, string> = {
   "ADMIN_DATA_INSERT": "Tam yetki panelinden oyun kaydı eklendi",
   "ADMIN_DATA_UPDATE": "Tam yetki panelinden oyun kaydı güncellendi",
   "ADMIN_DATA_DELETE": "Tam yetki panelinden oyun kaydı silindi",
+  "ADMIN_DATA_UNDO": "Tam yetki panelindeki değişiklik geri alındı",
   "CHARACTER_ASSIGN": "Karakter görevlendirildi",
   "CHARACTER_UNASSIGN": "Karakter görevi kaldırıldı",
   "ACADEMY_CHARACTER_CREATE": "Akademi karakteri oluşturuldu",
@@ -88,6 +92,8 @@ const ENTITY_LABELS: Record<string, string> = {
   steppe_hegemony: "Hanlar Hanlığı", steppe_tributary: "Bağlı Han",
   steppe_hegemony_war_call: "Hanlar Hanı savaş çağrısı",
   roman_family: "Roma siyasi ailesi", roman_family_member: "Roma aile üyesi",
+  bulk_operation: "Toplu işlem",
+  health_issue: "Oyun sağlığı bulgusu",
   ADMIN_DATA: "Oyun verisi"
 };
 
