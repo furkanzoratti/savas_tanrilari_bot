@@ -1190,7 +1190,11 @@ export const commandBuilders = [
     .addSubcommand((sub) => sub.setName("iptal").setDescription("Yoldaki bir casusluk operasyonunu iptal eder")
       .addStringOption((o) => o.setName("operasyon").setDescription("İptal edilecek operasyon").setRequired(true).setAutocomplete(true)))
     .addSubcommand((sub) => sub.setName("idam-et").setDescription("Yakalanmış bir casusu kalıcı olarak öldürür")
-      .addStringOption((o) => o.setName("casus").setDescription("Hâlen gözaltında bulunan casus").setRequired(true).setAutocomplete(true))),
+      .addStringOption((o) => o.setName("casus").setDescription("Hâlen gözaltında bulunan casus").setRequired(true).setAutocomplete(true)))
+    .addSubcommand((sub) => sub.setName("esir-serbest-birak").setDescription("Kaçırılmış bir karakteri veya soyluyu serbest bırakır")
+      .addStringOption((o) => o.setName("tutsak").setDescription("Serbest bırakılacak karakter veya soylu").setRequired(true).setAutocomplete(true)))
+    .addSubcommand((sub) => sub.setName("esir-infaz-et").setDescription("Kaçırılmış bir karakteri veya soyluyu kalıcı olarak öldürür")
+      .addStringOption((o) => o.setName("tutsak").setDescription("İnfaz edilecek karakter veya soylu").setRequired(true).setAutocomplete(true))),
   new SlashCommandBuilder()
     .setName("buyuk-gucler").setDescription("Yalnızca yönetici: Büyük Güçler sıralamasını yönetir")
     .addSubcommand((sub) => sub.setName("kanal").setDescription("Günlük Büyük Güçler paylaşım kanalını ayarlar")

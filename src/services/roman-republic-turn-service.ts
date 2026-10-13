@@ -96,6 +96,8 @@ async function processRomanNpcMarriages(
        AND NOT EXISTS(SELECT 1 FROM roman_family_players player
          WHERE player.family_id=family.id AND player.status='ACTIVE')
        AND member.status='ALIVE' AND member.spouse_id IS NULL AND member.age>=$2
+       AND NOT EXISTS(SELECT 1 FROM espionage_captivities captivity
+         WHERE captivity.captive_type='ROMAN_FAMILY' AND captivity.captive_id=member.id AND captivity.status='HELD')
        AND member.relation NOT ILIKE '%köle%'
      ORDER BY family.name,member.age DESC,member.name
      FOR UPDATE OF member`,[guildId,MINIMUM_MARRIAGE_AGE])).rows.map((row):RomanLifecycleMarriageRow=>({
@@ -196,6 +198,9 @@ export async function processRomanFamilyLifecycle(
        WHERE mother.family_id=$1 AND father.family_id=$1
          AND mother.gender='FEMALE' AND father.gender='MALE'
          AND mother.status='ALIVE' AND father.status='ALIVE'
+         AND NOT EXISTS(SELECT 1 FROM espionage_captivities captivity
+           WHERE captivity.captive_type='ROMAN_FAMILY' AND captivity.status='HELD'
+             AND captivity.captive_id IN (mother.id,father.id))
          AND mother.health='HEALTHY' AND mother.age BETWEEN 18 AND 44
        ORDER BY mother.position='HEAD' DESC,father.position='HEAD' DESC,mother.age,mother.id
        FOR UPDATE OF mother,father`,[family.id])).rows;

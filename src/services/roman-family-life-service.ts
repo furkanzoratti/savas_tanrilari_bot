@@ -29,6 +29,7 @@ interface FamilyMemberRow{
   id:string;family_id:string;family_name:string;name:string;gender:DynastyGender;age:number;
   position:string;relation:string;spouse_id:string|null;status:"ALIVE"|"DEAD";
   health:"HEALTHY"|"SICK";sick_until_turn:number|null;
+  kidnapped:boolean;
 }
 
 async function republic(client:DbClient,guildId:string,countryId:string,lock=false):Promise<RepublicRow>{
@@ -44,7 +45,9 @@ async function republic(client:DbClient,guildId:string,countryId:string,lock=fal
 async function member(client:DbClient,republicId:string,value:string,lock=false):Promise<FamilyMemberRow>{
   const row=(await client.query<FamilyMemberRow>(`
     SELECT member.id,member.family_id,family.name AS family_name,member.name,member.gender,member.age,
-           member.position,member.relation,member.spouse_id,member.status,member.health,member.sick_until_turn
+           member.position,member.relation,member.spouse_id,member.status,member.health,member.sick_until_turn,
+           EXISTS(SELECT 1 FROM espionage_captivities captivity
+             WHERE captivity.captive_type='ROMAN_FAMILY' AND captivity.captive_id=member.id AND captivity.status='HELD') AS kidnapped
       FROM roman_family_members member JOIN roman_families family ON family.id=member.family_id
      WHERE family.republic_id=$1 AND family.status='ACTIVE'
        AND (member.id::text=$2 OR lower(member.name)=lower($2))
@@ -64,6 +67,7 @@ async function requireFamilyLeader(
 
 function requireMarriageEligibility(item:FamilyMemberRow):void{
   if(item.status!=="ALIVE")throw new GameError(item.name+" hayatta değil.");
+  if(item.kidnapped)throw new GameError(item.name+" kaçırılmış durumda olduğu için evlendirilemez.");
   if(item.age<MINIMUM_MARRIAGE_AGE)throw new GameError(item.name+" henüz "+MINIMUM_MARRIAGE_AGE+" yaşını doldurmadı.");
   if(item.spouse_id)throw new GameError(item.name+" zaten evli.");
 }
@@ -260,6 +264,7 @@ export const romanFamilyLifeService={
       if(parent.status!=="ALIVE"||!parent.spouse_id)throw new GameError("Seçilen aile üyesinin yaşayan bir eşi bulunmalıdır.");
       const spouse=await member(client,rep.id,parent.spouse_id,true);
       if(spouse.status!=="ALIVE"||spouse.spouse_id!==parent.id)throw new GameError("Seçilen çiftin karşılıklı ve yaşayan evlilik kaydı bulunmalıdır.");
+      if(parent.kidnapped||spouse.kidnapped)throw new GameError("Kaçırılmış bir Roma aile üyesi çocuk denemesi yapamaz.");
       if(spouse.family_id!==parent.family_id)throw new GameError("Evlilik kaydı yeni siyasi aileye henüz aktarılmamış; yönetici düzeltmesi gerekiyor.");
       const mother=parent.gender==="FEMALE"?parent:spouse.gender==="FEMALE"?spouse:null;
       const father=parent.gender==="MALE"?parent:spouse.gender==="MALE"?spouse:null;

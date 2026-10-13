@@ -46,4 +46,30 @@ describe("casusluk etki hedefleri", () => {
     expect(queries[0]).toContain("black_market_active OR epidemic_active OR unrest_active");
     expect(queries[0]).not.toContain("rebellion_active");
   });
+
+  it("kaçırma görevinde yaşayan hanedan soylusunu hedef olarak kabul eder",async()=>{
+    const queries:string[]=[];
+    const client={query:async(sql:string)=>{
+      queries.push(sql);
+      return queries.length===1?{rows:[],rowCount:0}:{rows:[{id:"member"}],rowCount:1};
+    }} as unknown as DbClient;
+    const exists=await espionageTargetExists(client,{
+      attacker_country_id:"attacker",target_country_id:"target",target_settlement_id:"settlement",
+      target_character_id:null,target_noble_type:"DYNASTY",target_noble_id:"member",target_noble_family_id:"family",
+      target_army_id:null,spy_character_id:"spy",target_type:"KIDNAP"
+    });
+    expect(exists).toBe(true);
+    expect(queries[0]).toContain("espionage_captivities");
+    expect(queries[1]).toContain("dynasty_members");
+  });
+
+  it("başarılı soylu kaçırmasını yönetici kararı bekleyen tutsaklık olarak açıklar",async()=>{
+    const client={query:async()=>({rows:[],rowCount:1})} as unknown as DbClient;
+    const result=await applyEspionageEffect(client,{
+      attacker_country_id:"attacker",target_country_id:"target",target_settlement_id:"settlement",
+      target_character_id:null,target_noble_type:"DYNASTY",target_noble_id:"member",target_noble_family_id:"family",
+      target_army_id:null,spy_character_id:"spy",target_type:"KIDNAP"
+    },"LIGHT",20);
+    expect(result).toContain("yönetici kararıyla serbest bırakılana veya infaz edilene kadar");
+  });
 });

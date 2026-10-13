@@ -23,6 +23,7 @@ export interface RomanFamilyMemberView {
   id:string;name:string;gender:"MALE"|"FEMALE";age:number;
   position:"HEAD"|"SPOUSE"|"CHILD"|"PARENT"|"HEAD_SIBLING"|"SPOUSE_SIBLING"|"HOUSEHOLD";
   relation:string;spouseName:string|null;motherName:string|null;fatherName:string|null;
+  kidnapped:boolean;captorCountryName:string|null;capturedSettlementName:string|null;
 }
 
 export interface RomanRepublicView {
@@ -114,13 +115,24 @@ async function viewWithClient(client:DbClient,guildId:string,countryId?:string):
     id:string;family_id:string;name:string;gender:"MALE"|"FEMALE";age:number;
     position:"HEAD"|"SPOUSE"|"CHILD"|"HEAD_SIBLING"|"SPOUSE_SIBLING";relation:string;
     spouse_name:string|null;mother_name:string|null;father_name:string|null;
+    kidnapped:boolean;captor_country_name:string|null;captured_settlement_name:string|null;
   }>(`SELECT member.id,member.family_id,member.name,member.gender,member.age,member.position,member.relation,
-             spouse.name AS spouse_name,mother.name AS mother_name,father.name AS father_name
+             spouse.name AS spouse_name,mother.name AS mother_name,father.name AS father_name,
+             (captivity.id IS NOT NULL) AS kidnapped,captor.name AS captor_country_name,
+             captive_settlement.name AS captured_settlement_name
         FROM roman_family_members member
         JOIN roman_families family ON family.id=member.family_id
         LEFT JOIN roman_family_members spouse ON spouse.id=member.spouse_id
         LEFT JOIN roman_family_members mother ON mother.id=member.mother_id
         LEFT JOIN roman_family_members father ON father.id=member.father_id
+        LEFT JOIN LATERAL (
+          SELECT held.id,held.captor_country_id,held.captured_settlement_id
+            FROM espionage_captivities held
+           WHERE held.captive_type='ROMAN_FAMILY' AND held.captive_id=member.id AND held.status='HELD'
+           ORDER BY held.created_at DESC LIMIT 1
+        ) captivity ON TRUE
+        LEFT JOIN countries captor ON captor.id=captivity.captor_country_id
+        LEFT JOIN settlements captive_settlement ON captive_settlement.id=captivity.captured_settlement_id
        WHERE family.republic_id=$1 AND member.status='ALIVE'
        ORDER BY family.name,member.sort_order,member.age DESC`,[republic.id])).rows;
   const electionRow=(await client.query<{
@@ -187,7 +199,8 @@ async function viewWithClient(client:DbClient,guildId:string,countryId?:string):
       isConsulFamily:republic.current_consul_family_id===family.id,
       members:members.filter((member)=>member.family_id===family.id).map((member)=>({
         id:member.id,name:member.name,gender:member.gender,age:Number(member.age),position:member.position,
-        relation:member.relation,spouseName:member.spouse_name,motherName:member.mother_name,fatherName:member.father_name
+        relation:member.relation,spouseName:member.spouse_name,motherName:member.mother_name,fatherName:member.father_name,
+        kidnapped:member.kidnapped,captorCountryName:member.captor_country_name,capturedSettlementName:member.captured_settlement_name
       })),
       businesses:businesses.filter((business)=>business.family_id===family.id).map((business)=>({
         id:business.id,type:business.business_type,settlementName:business.settlement_name,

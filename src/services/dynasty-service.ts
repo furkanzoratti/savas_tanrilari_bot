@@ -21,6 +21,7 @@ export interface DynastyMemberView{
   spouse_status:DynastyMemberStatus|null;
   mother_id:string|null;mother_name:string|null;
   father_id:string|null;father_name:string|null;born_turn:number|null;died_turn:number|null;death_reason:string|null;
+  kidnapped:boolean;captor_country_name:string|null;captured_settlement_name:string|null;
 }
 
 export interface DynastyView{
@@ -118,7 +119,9 @@ async function memberForDynasty(client:DbClient,dynastyId:string,memberId:string
             birth_dynasty.name AS birth_dynasty_name,birth_country.name AS birth_country_name,
             spouse_birth_dynasty.name AS spouse_birth_dynasty_name,
             spouse_birth_country.name AS spouse_birth_country_name,
-            spouse.status AS spouse_status,mother.name AS mother_name,father.name AS father_name
+            spouse.status AS spouse_status,mother.name AS mother_name,father.name AS father_name,
+            (captivity.id IS NOT NULL) AS kidnapped,captor.name AS captor_country_name,
+            captive_settlement.name AS captured_settlement_name
        FROM dynasty_members member
        LEFT JOIN dynasty_members spouse ON spouse.id=member.spouse_id
        LEFT JOIN dynasties spouse_dynasty ON spouse_dynasty.id=spouse.dynasty_id
@@ -129,6 +132,14 @@ async function memberForDynasty(client:DbClient,dynastyId:string,memberId:string
        LEFT JOIN countries spouse_birth_country ON spouse_birth_country.id=spouse_birth_dynasty.country_id
        LEFT JOIN dynasty_members mother ON mother.id=member.mother_id
        LEFT JOIN dynasty_members father ON father.id=member.father_id
+       LEFT JOIN LATERAL (
+         SELECT held.id,held.captor_country_id,held.captured_settlement_id
+           FROM espionage_captivities held
+          WHERE held.captive_type='DYNASTY' AND held.captive_id=member.id AND held.status='HELD'
+          ORDER BY held.created_at DESC LIMIT 1
+       ) captivity ON TRUE
+       LEFT JOIN countries captor ON captor.id=captivity.captor_country_id
+       LEFT JOIN settlements captive_settlement ON captive_settlement.id=captivity.captured_settlement_id
       WHERE member.id=$1 AND member.dynasty_id=$2${lock?" FOR UPDATE OF member":""}`,
     [memberId,dynastyId]
   )).rows[0];
@@ -144,6 +155,8 @@ async function memberAcrossGuild(client:DbClient,guildId:string,memberId:string,
             spouse_birth_dynasty.name AS spouse_birth_dynasty_name,
             spouse_birth_country.name AS spouse_birth_country_name,
             spouse.status AS spouse_status,mother.name AS mother_name,father.name AS father_name,
+            (captivity.id IS NOT NULL) AS kidnapped,captor.name AS captor_country_name,
+            captive_settlement.name AS captured_settlement_name,
             dynasty.id AS dynasty_id,dynasty.guild_id,dynasty.country_id,dynasty.name AS dynasty_name,
             country.name AS country_name
        FROM dynasty_members member
@@ -158,6 +171,14 @@ async function memberAcrossGuild(client:DbClient,guildId:string,memberId:string,
        LEFT JOIN countries spouse_birth_country ON spouse_birth_country.id=spouse_birth_dynasty.country_id
        LEFT JOIN dynasty_members mother ON mother.id=member.mother_id
        LEFT JOIN dynasty_members father ON father.id=member.father_id
+       LEFT JOIN LATERAL (
+         SELECT held.id,held.captor_country_id,held.captured_settlement_id
+           FROM espionage_captivities held
+          WHERE held.captive_type='DYNASTY' AND held.captive_id=member.id AND held.status='HELD'
+          ORDER BY held.created_at DESC LIMIT 1
+       ) captivity ON TRUE
+       LEFT JOIN countries captor ON captor.id=captivity.captor_country_id
+       LEFT JOIN settlements captive_settlement ON captive_settlement.id=captivity.captured_settlement_id
       WHERE member.id=$1 AND dynasty.guild_id=$2${lock?" FOR UPDATE OF member":""}`,
     [memberId,guildId]
   )).rows[0];
@@ -167,6 +188,7 @@ async function memberAcrossGuild(client:DbClient,guildId:string,memberId:string,
 
 function requireMarriageEligibility(member:DynastyMemberView,label:string):void{
   if(member.status!=="ALIVE")throw new GameError(label+" hayatta değil.");
+  if(member.kidnapped)throw new GameError(label+" kaçırılmış durumda olduğu için evlendirilemez.");
   if(member.age===null)throw new GameError(label+" için yaş bilgisi girilmeden evlilik yapılamaz.");
   if(member.age<MINIMUM_MARRIAGE_AGE)throw new GameError(label+" henüz "+MINIMUM_MARRIAGE_AGE+" yaşını doldurmadı.");
   if(member.spouse_id)throw new GameError(label+" zaten evli.");
@@ -352,7 +374,9 @@ async function killMember(
   if(member.is_monarch||member.is_heir)await reconcileSuccession(client,dynastyId,turn,countryName,eventTexts);
 }
 
-export async function killDynastyMemberFromEspionage(client:DbClient,memberId:string,turn:number):Promise<void>{
+export async function killDynastyMemberFromEspionage(
+  client:DbClient,memberId:string,turn:number,reason="Suikast"
+):Promise<void>{
   const row=(await client.query<DynastyMemberView&{dynasty_id:string;country_name:string}>(
     `SELECT member.*,dynasty.id AS dynasty_id,country.name AS country_name,
             spouse.name AS spouse_name,mother.name AS mother_name,father.name AS father_name
@@ -365,7 +389,7 @@ export async function killDynastyMemberFromEspionage(client:DbClient,memberId:st
       WHERE member.id=$1 FOR UPDATE OF member`,[memberId]
   )).rows[0];
   if(!row||row.status!=="ALIVE")return;
-  await killMember(client,row.dynasty_id,row,turn,"Suikast",row.country_name,[]);
+  await killMember(client,row.dynasty_id,row,turn,reason,row.country_name,[]);
 }
 
 interface NpcDynastyCountry{
@@ -519,6 +543,9 @@ async function processNpcBirthsForCountry(
       WHERE mother.dynasty_id=$1 AND father.dynasty_id=$1
         AND mother.gender='FEMALE' AND father.gender='MALE'
         AND mother.status='ALIVE' AND father.status='ALIVE'
+        AND NOT EXISTS(SELECT 1 FROM espionage_captivities captivity
+          WHERE captivity.captive_type='DYNASTY' AND captivity.status='HELD'
+            AND captivity.captive_id IN (mother.id,father.id))
         AND mother.age BETWEEN 18 AND 44
         AND mother.health='HEALTHY'
       ORDER BY mother.is_monarch DESC,father.is_monarch DESC,mother.age,mother.id
@@ -598,6 +625,8 @@ async function processNpcMarriages(
         AND ((dynasty.steppe_title_id IS NULL AND NOT EXISTS(SELECT 1 FROM country_members player WHERE player.country_id=country.id))
           OR (dynasty.steppe_title_id IS NOT NULL AND steppe_title.holder_user_id IS NULL))
         AND member.status='ALIVE' AND member.spouse_id IS NULL AND member.age>=$2
+        AND NOT EXISTS(SELECT 1 FROM espionage_captivities captivity
+          WHERE captivity.captive_type='DYNASTY' AND captivity.captive_id=member.id AND captivity.status='HELD')
       ORDER BY country.name,member.age DESC,member.name`,[guildId,MINIMUM_MARRIAGE_AGE]
   )).rows.map((row)=>({...row,age:Number(row.age)}));
   const possible:Array<{man:NpcMarriageCandidate;woman:NpcMarriageCandidate;score:number}>=[];
@@ -754,6 +783,8 @@ export const dynastyService={
                dynasty.id AS dynasty_id,dynasty.name AS dynasty_name
           FROM dynasties dynasty JOIN dynasty_members member ON member.dynasty_id=dynasty.id
          WHERE dynasty.guild_id=$1 AND dynasty.country_id=$2 AND member.status='ALIVE'
+           AND NOT EXISTS(SELECT 1 FROM espionage_captivities captivity
+             WHERE captivity.captive_type='DYNASTY' AND captivity.captive_id=member.id AND captivity.status='HELD')
            AND ($3::uuid IS NULL OR dynasty.id<>$3)
          ORDER BY dynasty.name,member.is_monarch DESC,member.is_heir DESC,member.age DESC`,
       [guildId,countryId,excludeDynastyId??null])).rows;
@@ -1117,6 +1148,12 @@ export const dynastyService={
       if(!parent.spouse_id)throw new GameError((parent.id===ruler.id?"Hükümdarın":"Seçilen hanedan üyesinin")+" yaşayan bir eşi bulunmalıdır.");
       const spouse=await memberAcrossGuild(client,input.guildId,parent.spouse_id,true);
       if(spouse.status!=="ALIVE")throw new GameError((parent.id===ruler.id?"Hükümdarın":"Seçilen hanedan üyesinin")+" yaşayan bir eşi bulunmalıdır.");
+      const captiveCouple=await client.query(
+        `SELECT 1 FROM espionage_captivities
+          WHERE captive_type='DYNASTY' AND captive_id=ANY($1::uuid[]) AND status='HELD' LIMIT 1`,
+        [[parent.id,spouse.id]]
+      );
+      if(captiveCouple.rowCount)throw new GameError("Kaçırılmış bir hanedan üyesi çocuk denemesi yapamaz.");
       if(spouse.spouse_id!==parent.id)throw new GameError("Seçilen çiftin evlilik kaydı karşılıklı değil; yönetici düzeltmesi gerekiyor.");
       if(spouse.dynasty_id!==dynasty.id)
         throw new GameError("Gebelik denemesi yalnızca çiftin kayıtlı olduğu yeni hanedanın yöneticisi tarafından yapılabilir.");

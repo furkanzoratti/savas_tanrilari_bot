@@ -123,7 +123,8 @@ function familyEmbed(view:RomanRepublicView,family:RomanFamilyView):EmbedBuilder
   const memberRows=family.members.map((member)=>{
     const links=[member.spouseName?`Eş: ${member.spouseName}`:"",member.motherName?`Anne: ${member.motherName}`:"",member.fatherName?`Baba: ${member.fatherName}`:""]
       .filter(Boolean).join(" • ");
-    return `${member.gender==="MALE"?"👨":"👩"} **${member.name}** — ${member.age} yaş • ${member.relation}${links?`\n↳ ${links}`:""}`;
+    const captivity=member.kidnapped?`\n↳ ⛓️ **Kaçırıldı** • ${member.captorCountryName??"Bilinmeyen devlet"} / ${member.capturedSettlementName??"Bilinmeyen yer"}`:"";
+    return `${member.gender==="MALE"?"👨":"👩"} **${member.name}** — ${member.age} yaş • ${member.relation}${member.kidnapped?" • ⛓️ Kaçırıldı":""}${links?`\n↳ ${links}`:""}${captivity}`;
   });
   return new EmbedBuilder()
     .setColor(family.isConsulFamily?0xc59b45:0x5865f2)

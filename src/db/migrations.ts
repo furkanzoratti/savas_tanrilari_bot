@@ -123,6 +123,7 @@ import { formableCountryCatalogSyncMigration } from "./formable-country-catalog-
 import { mountedArcherSeparationMigration } from "./mounted-archer-separation-migration.js";
 import { movementRuntimeRetirementMigration } from "./movement-runtime-retirement-migration.js";
 import { missionaryRollPercentRepairMigration } from "./missionary-roll-percent-repair-migration.js";
+import { espionageCaptivitiesMigration } from "./espionage-captivities-migration.js";
 
 export const migrations = [
   {
@@ -2463,5 +2464,6 @@ export const migrations = [
   formableCountryCatalogSyncMigration,
   mountedArcherSeparationMigration,
   movementRuntimeRetirementMigration,
-  missionaryRollPercentRepairMigration
+  missionaryRollPercentRepairMigration,
+  espionageCaptivitiesMigration
 ] as const;

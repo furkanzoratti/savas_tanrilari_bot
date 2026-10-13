@@ -90,12 +90,38 @@ export async function espionageTargetExists(client: DbClient, operation: Espiona
       WHERE army.country_id=$1 AND army.status='ACTIVE' AND unit.quantity>0 LIMIT 1`,
     [operation.target_country_id]
   )).rowCount);
-  if (["DISCREDIT","KIDNAP"].includes(operation.target_type)) {
+  if (operation.target_type === "DISCREDIT") {
     if (!operation.target_character_id) return false;
     return Boolean((await client.query(
       "SELECT 1 FROM country_characters WHERE id=$1 AND country_id=$2 AND character_status='ACTIVE'",
       [operation.target_character_id,operation.target_country_id]
     )).rowCount);
+  }
+  if(operation.target_type==="KIDNAP"){
+    const captiveType=operation.target_character_id?"CHARACTER":operation.target_noble_type;
+    const captiveId=operation.target_character_id??operation.target_noble_id;
+    if(!captiveType||!captiveId)return false;
+    const alreadyHeld=await client.query(
+      "SELECT 1 FROM espionage_captivities WHERE captive_type=$1 AND captive_id=$2 AND status='HELD' LIMIT 1",
+      [captiveType,captiveId]
+    );
+    if(alreadyHeld.rowCount)return false;
+    if(operation.target_character_id)return Boolean((await client.query(
+      "SELECT 1 FROM country_characters WHERE id=$1 AND country_id=$2 AND character_status='ACTIVE'",
+      [operation.target_character_id,operation.target_country_id]
+    )).rowCount);
+    if(operation.target_noble_type==="DYNASTY"&&operation.target_noble_id)return Boolean((await client.query(
+      `SELECT 1 FROM dynasty_members member JOIN dynasties dynasty ON dynasty.id=member.dynasty_id
+        WHERE member.id=$1 AND dynasty.country_id=$2 AND member.status='ALIVE'`,
+      [operation.target_noble_id,operation.target_country_id]
+    )).rowCount);
+    if(operation.target_noble_type==="ROMAN_FAMILY"&&operation.target_noble_id)return Boolean((await client.query(
+      `SELECT 1 FROM roman_family_members member JOIN roman_families family ON family.id=member.family_id
+        JOIN roman_republics republic ON republic.id=family.republic_id
+        WHERE member.id=$1 AND republic.country_id=$2 AND member.status='ALIVE'`,
+      [operation.target_noble_id,operation.target_country_id]
+    )).rowCount);
+    return false;
   }
   if(operation.target_type==="ASSASSINATE"){
     if(operation.target_character_id)return Boolean((await client.query(
@@ -446,7 +472,7 @@ export async function applyEspionageEffect(
   }
   if (["DISCREDIT","KIDNAP","ASSASSINATE"].includes(operation.target_type) && operation.target_character_id) {
     const duration = operation.target_type === "DISCREDIT" ? percent(severity,2,4,6)
-      : operation.target_type === "KIDNAP" ? (severity === "LIGHT" ? 2 : severity === "MEDIUM" ? 4 : 0)
+      : operation.target_type === "KIDNAP" ? 0
       : severity === "LIGHT" ? 3 : severity === "MEDIUM" ? 6 : 0;
     if (operation.target_type === "ASSASSINATE" && severity === "HEAVY") {
       await markCharacterDead({
@@ -457,9 +483,15 @@ export async function applyEspionageEffect(
     }
     await client.query("UPDATE merchant_operations SET status='CANCELLED',updated_at=NOW() WHERE merchant_character_id=$1 AND status IN ('PENDING_ACCEPTANCE','TRAVELING','ACTIVE','CONTROLLED')",[operation.target_character_id]);
     await client.query("UPDATE diplomat_operations SET status='CANCELLED',updated_at=NOW() WHERE diplomat_character_id=$1 AND status IN ('TRAVELING','ACTIVE','PAUSED')",[operation.target_character_id]);
+    await client.query("UPDATE missionary_operations SET status='CANCELLED',updated_at=NOW() WHERE missionary_character_id=$1 AND status IN ('TRAVELING','ACTIVE')",[operation.target_character_id]);
+    await client.query("UPDATE armies SET commander_character_id=NULL WHERE commander_character_id=$1",[operation.target_character_id]);
+    await client.query("UPDATE fleets SET commander_character_id=NULL WHERE commander_character_id=$1",[operation.target_character_id]);
     await client.query("UPDATE country_characters SET assignment='CAPTURED',assigned_settlement_id=$1,unavailable_until_turn=$2,specialization_progress=CASE WHEN $3 THEN 0 ELSE specialization_progress END WHERE id=$4",[operation.target_settlement_id,duration>0?turn+duration:null,operation.target_type==="DISCREDIT"&&severity==="HEAVY",operation.target_character_id]);
-    if (operation.target_type === "KIDNAP" && severity === "HEAVY") return "Hedef karakter süresiz esir alındı.";
+    if (operation.target_type === "KIDNAP") return "Hedef karakter kaçırıldı; yönetici kararıyla serbest bırakılana veya infaz edilene kadar tutsak kalacak.";
     return "Hedef karakter "+duration+" tur kullanılamayacak.";
+  }
+  if(operation.target_type==="KIDNAP"&&operation.target_noble_id&&operation.target_noble_type){
+    return "Hedef soylu kaçırıldı; yönetici kararıyla serbest bırakılana veya infaz edilene kadar tutsak kalacak.";
   }
   if(operation.target_type==="ASSASSINATE"&&operation.target_noble_id&&operation.target_noble_type){
     const duration=severity==="LIGHT"?3:severity==="MEDIUM"?6:0;

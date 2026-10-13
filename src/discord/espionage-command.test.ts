@@ -37,10 +37,16 @@ describe("casusluk komutları", () => {
 
   it("yöneticiye log, liste ve iptal araçlarını verir", () => {
     const command = commandBuilders.find((item) => item.name === "casusluk-yonetim");
-    expect(command?.options?.map((item) => item.name)).toEqual(["log-kanali", "listele", "iptal", "idam-et"]);
+    expect(command?.options?.map((item) => item.name)).toEqual([
+      "log-kanali", "listele", "iptal", "idam-et", "esir-serbest-birak", "esir-infaz-et"
+    ]);
     expect(command?.options?.find((item) => item.name === "iptal")?.options?.find((item) => item.name === "operasyon"))
       .toMatchObject({ required: true, autocomplete: true });
     expect(command?.options?.find((item) => item.name === "idam-et")?.options?.find((item) => item.name === "casus"))
+      .toMatchObject({ required: true, autocomplete: true });
+    expect(command?.options?.find((item) => item.name === "esir-serbest-birak")?.options?.find((item) => item.name === "tutsak"))
+      .toMatchObject({ required: true, autocomplete: true });
+    expect(command?.options?.find((item) => item.name === "esir-infaz-et")?.options?.find((item) => item.name === "tutsak"))
       .toMatchObject({ required: true, autocomplete: true });
   });
 });

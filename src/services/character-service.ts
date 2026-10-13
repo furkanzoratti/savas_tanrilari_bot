@@ -58,6 +58,7 @@ export interface CharacterView {
   missionary_operation_religion_key?: ReligionKey | null;
   died_at?: Date | string | null;
   death_settlement_name?: string | null;
+  kidnapped:boolean;
 }
 
 interface GuildState {
@@ -136,13 +137,17 @@ async function activeCharacter(
   const row = (await client.query<BasicCharacter>(
     `SELECT character.id,character.name,character.role,character.skill_bonus,character.assignment,
             character.specialization,character.specialization_progress,
-            EXISTS (
+            (EXISTS (
               SELECT 1 FROM espionage_operations operation
               JOIN guilds state ON state.discord_id=operation.guild_id
               WHERE operation.spy_character_id=character.id AND operation.status='RESOLVED'
                 AND operation.captured=TRUE AND operation.executed_at IS NULL
                 AND operation.return_turn+2>state.current_turn
-            ) AS captured
+            ) OR EXISTS (
+              SELECT 1 FROM espionage_captivities captivity
+               WHERE captivity.captive_type='CHARACTER' AND captivity.captive_id=character.id
+                 AND captivity.status='HELD'
+            )) AS captured
        FROM country_characters character
       WHERE character.id=$1 AND character.country_id=$2 AND character.role=$3
         AND character.character_status='ACTIVE' FOR UPDATE OF character`,
@@ -441,7 +446,7 @@ export const characterService = {
   async list(countryId: string): Promise<CharacterView[]> {
     return (await pool.query<CharacterView>(
       `SELECT character.id,character.country_id,character.name,character.role,character.skill_bonus,
-              CASE WHEN captivity.target_settlement_id IS NOT NULL THEN 'CAPTURED' ELSE character.assignment END AS assignment,
+              CASE WHEN kidnapping.id IS NOT NULL OR captivity.target_settlement_id IS NOT NULL THEN 'CAPTURED' ELSE character.assignment END AS assignment,
               character.assignment_ready_turn,character.doctrine,
               character.commander_victories,character.specialization,character.specialization_progress,
               character.specialization_level,character.specialization_choice_credit,
@@ -450,10 +455,11 @@ export const characterService = {
               character.admiral_doctrine,character.admiral_specialization,
               character.admiral_victories,character.admiral_specialization_level,
               character.died_at,death_settlement.name AS death_settlement_name,
+              (kidnapping.id IS NOT NULL) AS kidnapped,
               COALESCE(specialization_tracks.tracks,'{}'::jsonb) AS specialization_tracks,
               trained.name AS trained_settlement_name,
-              COALESCE(captive_settlement.name,assigned.name) AS assigned_settlement_name,
-              COALESCE(captive_country.name,assigned_country.name) AS assigned_country_name,
+              COALESCE(kidnapped_settlement.name,captive_settlement.name,assigned.name) AS assigned_settlement_name,
+              COALESCE(kidnapper_country.name,captive_country.name,assigned_country.name) AS assigned_country_name,
               army.name AS assigned_army_name,fleet.name AS assigned_fleet_name,
               COALESCE(merchant.task_type,diplomat.task_type,espionage.target_type,
                 CASE WHEN missionary.id IS NOT NULL THEN 'RELIGIOUS_CONVERSION' END) AS operation_type,
@@ -474,6 +480,15 @@ export const characterService = {
          LEFT JOIN countries assigned_country ON assigned_country.id=assigned.country_id
          LEFT JOIN armies army ON army.commander_character_id=character.id
          LEFT JOIN fleets fleet ON fleet.commander_character_id=character.id
+         LEFT JOIN LATERAL (
+           SELECT captivity.id,captivity.captor_country_id,captivity.captured_settlement_id
+             FROM espionage_captivities captivity
+            WHERE captivity.captive_type='CHARACTER' AND captivity.captive_id=character.id
+              AND captivity.status='HELD'
+            ORDER BY captivity.created_at DESC LIMIT 1
+         ) kidnapping ON TRUE
+         LEFT JOIN settlements kidnapped_settlement ON kidnapped_settlement.id=kidnapping.captured_settlement_id
+         LEFT JOIN countries kidnapper_country ON kidnapper_country.id=kidnapping.captor_country_id
          LEFT JOIN LATERAL (
            SELECT operation.target_country_id,operation.target_settlement_id
              FROM espionage_operations operation

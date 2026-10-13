@@ -11,6 +11,7 @@ import { GameError } from "./game-service.js";
 import { awardCharacterSpecializationProgress } from "./character-specialization-progress.js";
 import type { CharacterSpecialization } from "../domain/characters.js";
 import { markCharacterDead } from "./character-death-service.js";
+import { killDynastyMemberFromEspionage } from "./dynasty-service.js";
 import { RELIGIONS } from "../domain/religions.js";
 import { loadCountryReligionProfile } from "./religion-service.js";
 
@@ -79,6 +80,18 @@ export interface CapturedSpyView {
   captured_turn: number;
   automatic_return_turn: number;
   operation_id: string;
+}
+
+export interface KidnappedPersonView {
+  id:string;
+  captive_type:"CHARACTER"|"DYNASTY"|"ROMAN_FAMILY";
+  captive_id:string;
+  name:string;
+  origin_country_name:string;
+  captor_country_name:string;
+  captured_settlement_name:string;
+  captured_turn:number;
+  operation_id:string;
 }
 
 export interface EspionageResolutionFailure {
@@ -219,12 +232,17 @@ export function randomEspionageCandidate<T>(validTarget:boolean,candidates:reado
 
 async function isActivelyCaptured(client: Pick<DbClient,"query">, characterId: string, guildId: string): Promise<boolean> {
   return Boolean((await client.query(
-    `SELECT 1 FROM espionage_operations operation
+    `SELECT 1 WHERE EXISTS(
+       SELECT 1 FROM espionage_operations operation
        JOIN guilds state ON state.discord_id=operation.guild_id
-      WHERE operation.spy_character_id=$1 AND operation.guild_id=$2
-        AND operation.status='RESOLVED' AND operation.captured=TRUE
-        AND operation.executed_at IS NULL AND operation.return_turn+2>state.current_turn
-      LIMIT 1`,
+       WHERE operation.spy_character_id=$1 AND operation.guild_id=$2
+         AND operation.status='RESOLVED' AND operation.captured=TRUE
+         AND operation.executed_at IS NULL AND operation.return_turn+2>state.current_turn
+     ) OR EXISTS(
+       SELECT 1 FROM espionage_captivities captivity
+        WHERE captivity.guild_id=$2 AND captivity.captive_type='CHARACTER'
+          AND captivity.captive_id=$1 AND captivity.status='HELD'
+     )`,
     [characterId,guildId]
   )).rowCount);
 }
@@ -313,7 +331,8 @@ async function finalizeEspionageResolution(
   client: DbClient,
   prepared: PreparedEspionageResolution,
   turn: number,
-  lostSupplyCompetition: boolean
+  lostSupplyCompetition: boolean,
+  guildId:string
 ): Promise<void> {
   const { operation } = prepared;
   const severity: EspionageSeverity = lostSupplyCompetition ? "NONE" : prepared.severity;
@@ -322,6 +341,29 @@ async function finalizeEspionageResolution(
     : prepared.validTarget
       ? await applyEspionageEffect(client,operation,severity,turn,prepared.selected)
       : "Uygun hedef bulunamadı; mekanik etki oluşmadı.";
+
+  if(operation.target_type==="KIDNAP"&&severity!=="NONE"){
+    const captiveType=operation.target_character_id?"CHARACTER":operation.target_noble_type;
+    const captiveId=operation.target_character_id??operation.target_noble_id;
+    if(captiveType&&captiveId){
+      await client.query(
+        `INSERT INTO espionage_captivities(
+           guild_id,operation_id,captor_country_id,captive_country_id,captive_type,captive_id,
+           captured_settlement_id,captured_turn
+         ) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [guildId,operation.id,operation.attacker_country_id,operation.target_country_id,captiveType,captiveId,
+          operation.target_settlement_id,turn]
+      );
+      if(captiveType==="DYNASTY"){
+        await client.query(
+          `INSERT INTO dynasty_events(dynasty_id,game_turn,event_type,member_id,details)
+           SELECT member.dynasty_id,$2,'KIDNAPPED',member.id,$3::jsonb
+             FROM dynasty_members member WHERE member.id=$1`,
+          [captiveId,turn,JSON.stringify({captorCountryId:operation.attacker_country_id,settlementId:operation.target_settlement_id})]
+        );
+      }
+    }
+  }
 
   await client.query(
     `UPDATE espionage_operations SET status='RESOLVED',target_building_type=$2,valid_target=$3,
@@ -364,6 +406,9 @@ export async function resolveDueEspionageOperations(guildId: string, turn: numbe
       WHERE character.assignment='CAPTURED' AND EXISTS (
         SELECT 1 FROM espionage_operations operation WHERE operation.spy_character_id=character.id
           AND operation.guild_id=$1 AND operation.status='RESOLVED' AND operation.return_turn+2<=$2
+      ) AND NOT EXISTS (
+        SELECT 1 FROM espionage_captivities captivity
+         WHERE captivity.captive_type='CHARACTER' AND captivity.captive_id=character.id AND captivity.status='HELD'
       )`, [guildId,turn]);
     await client.query(
       `UPDATE country_characters character SET assignment='NONE',assigned_settlement_id=NULL
@@ -433,7 +478,7 @@ export async function resolveDueEspionageOperations(guildId: string, turn: numbe
         try {
           const lostSupplyCompetition = prepared.operation.target_type === "DESTROY_SIEGE_SUPPLIES"
             && supplyWinnerId !== null && prepared.operation.id !== supplyWinnerId;
-          await finalizeEspionageResolution(client,prepared,turn,lostSupplyCompetition);
+          await finalizeEspionageResolution(client,prepared,turn,lostSupplyCompetition,guildId);
           await client.query("RELEASE SAVEPOINT espionage_operation");
         } catch (error) {
           await client.query("ROLLBACK TO SAVEPOINT espionage_operation");
@@ -494,7 +539,16 @@ export const espionageService = {
       if (await isActivelyCaptured(client,input.spyCharacterId,input.guildId)) throw new GameError("Bu casus tutsak olduğu için kullanılamaz.");
       if (spy.assignment !== "NONE") throw new GameError("Bu casus şu anda başka bir görevde.");
       if (!isPlayerEspionageTarget(input.targetType)) throw new GameError("Bu casusluk görevi artık yeni operasyonlara kapalı.");
-      if (input.targetType === "ASSASSINATE" && !input.targetCharacterId && !input.targetNobleId) throw new GameError("Suikast için hedef karakter veya soylu seçmelisiniz.");
+      if (["ASSASSINATE","KIDNAP"].includes(input.targetType) && !input.targetCharacterId && !input.targetNobleId) {
+        throw new GameError((input.targetType==="KIDNAP"?"Kaçırma":"Suikast")+" için hedef karakter veya soylu seçmelisiniz.");
+      }
+      if(input.targetCharacterId){
+        const valid=await client.query(
+          "SELECT 1 FROM country_characters WHERE id=$1 AND country_id=$2 AND character_status='ACTIVE'",
+          [input.targetCharacterId,input.targetCountryId]
+        );
+        if(!valid.rowCount)throw new GameError("Seçilen karakter hedef ülkeye ait veya etkin değil.");
+      }
       if(input.targetNobleId){
         const valid=input.targetNobleType==="DYNASTY"
           ?await client.query(`SELECT dynasty.id FROM dynasty_members member JOIN dynasties dynasty ON dynasty.id=member.dynasty_id WHERE member.id=$1 AND dynasty.country_id=$2 AND member.status='ALIVE'`,[input.targetNobleId,input.targetCountryId])
@@ -502,6 +556,15 @@ export const espionageService = {
             ?await client.query(`SELECT family.id FROM roman_family_members member JOIN roman_families family ON family.id=member.family_id JOIN roman_republics republic ON republic.id=family.republic_id WHERE member.id=$1 AND republic.country_id=$2 AND member.status='ALIVE'`,[input.targetNobleId,input.targetCountryId])
             :{rowCount:0,rows:[]};
         if(!valid.rowCount)throw new GameError("Seçilen soylu hedef ülkeye ait veya hayatta değil.");
+      }
+      if(input.targetType==="KIDNAP"){
+        const captiveType=input.targetCharacterId?"CHARACTER":input.targetNobleType;
+        const captiveId=input.targetCharacterId??input.targetNobleId;
+        const held=await client.query(
+          "SELECT 1 FROM espionage_captivities WHERE captive_type=$1 AND captive_id=$2 AND status='HELD' LIMIT 1",
+          [captiveType,captiveId]
+        );
+        if(held.rowCount)throw new GameError("Seçilen hedef zaten kaçırılmış durumda.");
       }
       const preparation = ESPIONAGE_PREPARATIONS[input.preparation];
       if (!preparation) throw new GameError("Geçersiz hazırlık seviyesi.");
@@ -543,12 +606,20 @@ export const espionageService = {
   async spies(countryId: string): Promise<Array<{ id: string; name: string; skill_bonus: number; assignment: string; settlement_name: string | null; country_name: string | null; specialization: CharacterSpecialization | null; specialization_progress: number }>> {
     return (await pool.query(
       `SELECT spy.id,spy.name,spy.skill_bonus,
-              CASE WHEN captivity.target_settlement_id IS NOT NULL THEN 'CAPTURED' ELSE spy.assignment END AS assignment,
+              CASE WHEN kidnapping.id IS NOT NULL OR captivity.target_settlement_id IS NOT NULL THEN 'CAPTURED' ELSE spy.assignment END AS assignment,
               spy.specialization,spy.specialization_progress,
-              COALESCE(captive_settlement.name,settlement.name) AS settlement_name,
-              COALESCE(captive_country.name,target.name) AS country_name
+              COALESCE(kidnapped_settlement.name,captive_settlement.name,settlement.name) AS settlement_name,
+              COALESCE(kidnapper.name,captive_country.name,target.name) AS country_name
          FROM country_characters spy LEFT JOIN settlements settlement ON settlement.id=spy.assigned_settlement_id
          LEFT JOIN countries target ON target.id=settlement.country_id
+         LEFT JOIN LATERAL (
+           SELECT held.id,held.captor_country_id,held.captured_settlement_id
+             FROM espionage_captivities held
+            WHERE held.captive_type='CHARACTER' AND held.captive_id=spy.id AND held.status='HELD'
+            ORDER BY held.created_at DESC LIMIT 1
+         ) kidnapping ON TRUE
+         LEFT JOIN settlements kidnapped_settlement ON kidnapped_settlement.id=kidnapping.captured_settlement_id
+         LEFT JOIN countries kidnapper ON kidnapper.id=kidnapping.captor_country_id
          LEFT JOIN LATERAL (
            SELECT operation.target_country_id,operation.target_settlement_id
              FROM espionage_operations operation
@@ -582,6 +653,30 @@ export const espionageService = {
          FROM roman_family_members member JOIN roman_families family ON family.id=member.family_id
          JOIN roman_republics republic ON republic.id=family.republic_id
         WHERE republic.country_id=$1 AND member.status='ALIVE'
+       ORDER BY name`,[countryId]
+    )).rows;
+  },
+
+  async kidnappingTargets(countryId:string):Promise<Array<{id:string;name:string}>>{
+    return (await pool.query<{id:string;name:string}>(
+      `SELECT 'ACADEMY:'||character.id::text AS id,character.name||' • Akademi karakteri' AS name
+         FROM country_characters character
+        WHERE character.country_id=$1 AND character.character_status='ACTIVE'
+          AND NOT EXISTS(SELECT 1 FROM espionage_captivities captivity
+            WHERE captivity.captive_type='CHARACTER' AND captivity.captive_id=character.id AND captivity.status='HELD')
+       UNION ALL
+       SELECT 'DYNASTY:'||member.id::text,member.name||' • '||dynasty.name
+         FROM dynasty_members member JOIN dynasties dynasty ON dynasty.id=member.dynasty_id
+        WHERE dynasty.country_id=$1 AND member.status='ALIVE'
+          AND NOT EXISTS(SELECT 1 FROM espionage_captivities captivity
+            WHERE captivity.captive_type='DYNASTY' AND captivity.captive_id=member.id AND captivity.status='HELD')
+       UNION ALL
+       SELECT 'ROMAN:'||member.id::text,member.name||' • '||family.name
+         FROM roman_family_members member JOIN roman_families family ON family.id=member.family_id
+         JOIN roman_republics republic ON republic.id=family.republic_id
+        WHERE republic.country_id=$1 AND member.status='ALIVE'
+          AND NOT EXISTS(SELECT 1 FROM espionage_captivities captivity
+            WHERE captivity.captive_type='ROMAN_FAMILY' AND captivity.captive_id=member.id AND captivity.status='HELD')
        ORDER BY name`,[countryId]
     )).rows;
   },
@@ -758,6 +853,103 @@ export const espionageService = {
         ORDER BY captor.name,origin.name,spy.name`,
       [guildId]
     )).rows;
+  },
+
+  async kidnappedPeople(guildId:string):Promise<KidnappedPersonView[]> {
+    return (await pool.query<KidnappedPersonView>(
+      `SELECT captivity.id,captivity.captive_type,captivity.captive_id,
+              COALESCE(character.name,dynasty_member.name,roman_member.name,'Bilinmeyen tutsak') AS name,
+              origin.name AS origin_country_name,captor.name AS captor_country_name,
+              COALESCE(settlement.name,'Bilinmeyen yerleşke') AS captured_settlement_name,
+              captivity.captured_turn,captivity.operation_id
+         FROM espionage_captivities captivity
+         JOIN countries origin ON origin.id=captivity.captive_country_id
+         JOIN countries captor ON captor.id=captivity.captor_country_id
+         LEFT JOIN settlements settlement ON settlement.id=captivity.captured_settlement_id
+         LEFT JOIN country_characters character
+           ON captivity.captive_type='CHARACTER' AND character.id=captivity.captive_id
+         LEFT JOIN dynasty_members dynasty_member
+           ON captivity.captive_type='DYNASTY' AND dynasty_member.id=captivity.captive_id
+         LEFT JOIN roman_family_members roman_member
+           ON captivity.captive_type='ROMAN_FAMILY' AND roman_member.id=captivity.captive_id
+        WHERE captivity.guild_id=$1 AND captivity.status='HELD'
+        ORDER BY captor.name,origin.name,name`,
+      [guildId]
+    )).rows;
+  },
+
+  async resolveKidnapping(input:{
+    guildId:string;captivityId:string;actorId:string;decision:"RELEASE"|"EXECUTE";
+  }):Promise<KidnappedPersonView> {
+    requireUuid(input.captivityId,"Tutsak");
+    return withTransaction(async(client)=>{
+      const captive=(await client.query<KidnappedPersonView&{captured_settlement_id:string|null}>(
+        `SELECT captivity.id,captivity.captive_type,captivity.captive_id,captivity.captured_settlement_id,
+                COALESCE(character.name,dynasty_member.name,roman_member.name,'Bilinmeyen tutsak') AS name,
+                origin.name AS origin_country_name,captor.name AS captor_country_name,
+                COALESCE(settlement.name,'Bilinmeyen yerleşke') AS captured_settlement_name,
+                captivity.captured_turn,captivity.operation_id
+           FROM espionage_captivities captivity
+           JOIN countries origin ON origin.id=captivity.captive_country_id
+           JOIN countries captor ON captor.id=captivity.captor_country_id
+           LEFT JOIN settlements settlement ON settlement.id=captivity.captured_settlement_id
+           LEFT JOIN country_characters character
+             ON captivity.captive_type='CHARACTER' AND character.id=captivity.captive_id
+           LEFT JOIN dynasty_members dynasty_member
+             ON captivity.captive_type='DYNASTY' AND dynasty_member.id=captivity.captive_id
+           LEFT JOIN roman_family_members roman_member
+             ON captivity.captive_type='ROMAN_FAMILY' AND roman_member.id=captivity.captive_id
+          WHERE captivity.id=$1 AND captivity.guild_id=$2 AND captivity.status='HELD'
+          FOR UPDATE OF captivity`,
+        [input.captivityId,input.guildId]
+      )).rows[0];
+      if(!captive)throw new GameError("Seçilen kişi artık tutsak değil veya kayıt bulunamadı.");
+      const turn=Number((await client.query<{current_turn:number}>(
+        "SELECT current_turn FROM guilds WHERE discord_id=$1",[input.guildId]
+      )).rows[0]?.current_turn??0);
+      if(input.decision==="RELEASE"){
+        if(captive.captive_type==="CHARACTER"){
+          await client.query(
+            `UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL,
+                    assignment_ready_turn=NULL,unavailable_until_turn=NULL
+              WHERE id=$1 AND character_status='ACTIVE'`,[captive.captive_id]
+          );
+        }else if(captive.captive_type==="DYNASTY"){
+          await client.query(
+            `INSERT INTO dynasty_events(dynasty_id,game_turn,event_type,member_id,details)
+             SELECT member.dynasty_id,$2,'KIDNAP_RELEASED',member.id,$3::jsonb
+               FROM dynasty_members member WHERE member.id=$1`,
+            [captive.captive_id,turn,JSON.stringify({actorId:input.actorId})]
+          );
+        }
+      }else if(captive.captive_type==="CHARACTER"){
+        await markCharacterDead({
+          client,characterId:captive.captive_id,deathSettlementId:captive.captured_settlement_id,
+          reason:"Kaçırıldıktan sonra yönetici kararıyla infaz edildi."
+        });
+      }else if(captive.captive_type==="DYNASTY"){
+        await killDynastyMemberFromEspionage(client,captive.captive_id,turn,"Kaçırıldıktan sonra infaz");
+      }else{
+        await client.query(
+          `UPDATE roman_family_members SET status='DEAD',health='HEALTHY',sick_until_turn=NULL,
+                  died_turn=$2,death_reason='Kaçırıldıktan sonra infaz',updated_at=NOW()
+            WHERE id=$1 AND status='ALIVE'`,[captive.captive_id,turn]
+        );
+      }
+      await client.query(
+        `UPDATE espionage_captivities SET status=$1,resolved_by=$2,resolved_at=NOW(),updated_at=NOW()
+          WHERE id=$3`,
+        [input.decision==="RELEASE"?"RELEASED":"EXECUTED",input.actorId,captive.id]
+      );
+      await client.query(
+        `INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details)
+         VALUES($1,$2,$3,'espionage_captivity',$4,$5::jsonb)`,
+        [input.guildId,input.actorId,input.decision==="RELEASE"?"KIDNAPPED_PERSON_RELEASED":"KIDNAPPED_PERSON_EXECUTED",
+          captive.id,JSON.stringify({captiveType:captive.captive_type,captiveId:captive.captive_id,name:captive.name,
+            originCountry:captive.origin_country_name,captorCountry:captive.captor_country_name,turn})]
+      );
+      return captive;
+    });
   },
 
   async executeCapturedSpy(input: { guildId: string; characterId: string; actorId: string }): Promise<CapturedSpyView> {

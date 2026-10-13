@@ -148,6 +148,8 @@ function recentEventLine(event:DynastyView["events"][number]):string|null{
   if(event.event_type==="MARRIAGE")return "💍 Tur "+event.game_turn+": **"+String(details.memberName??"Üye")+"** ile **"+String(details.spouseName??"eş")+"** evlendi.";
   if(event.event_type==="MATERNAL_ILLNESS")return "🩺 Tur "+event.game_turn+": **"+String(details.name??"Hanedan üyesi")+"** doğum sonrasında hastalandı.";
   if(event.event_type==="RECOVERY")return "💚 Tur "+event.game_turn+": **"+String(details.name??"Hanedan üyesi")+"** iyileşti.";
+  if(event.event_type==="KIDNAPPED")return "⛓️ Tur "+event.game_turn+": Bir hanedan üyesi kaçırıldı.";
+  if(event.event_type==="KIDNAP_RELEASED")return "🕊️ Tur "+event.game_turn+": Kaçırılan hanedan üyesi serbest bırakıldı.";
   if(event.event_type==="SUCCESSION_CRISIS")return "⚠️ Tur "+event.game_turn+": Veraset krizi başladı.";
   return null;
 }
@@ -161,7 +163,7 @@ function fit(value:string,maximum=1024):string{
 
 function memberName(member:DynastyMember,includeTitle=true):string{
   const prefix=member.status==="DEAD"?"† ":"";
-  return prefix+(includeTitle?member.title+" ":"")+member.name+(member.age===null?"":" — "+member.age);
+  return prefix+(includeTitle?member.title+" ":"")+member.name+(member.age===null?"":" — "+member.age)+(member.kidnapped?" • ⛓️ Kaçırıldı":"");
 }
 
 function memberOrder(left:DynastyMember,right:DynastyMember):number{
@@ -308,7 +310,8 @@ export function dynastyPersonEmbed(view:DynastyView,memberId:string):EmbedBuilde
   const position=member.is_monarch?"Hükümdar":member.is_heir?"Tahtın Varisi":member.succession_rank!==null?"Taht Sırasında":"Hanedan Üyesi";
   const lines=[
     "**🎂 Yaş:** "+age(member.age),"**"+(member.gender==="MALE"?"♂️":"♀️")+" Cinsiyet:** "+DYNASTY_GENDER_LABELS[member.gender],
-    "**❤️ Durum:** "+(member.status==="DEAD"?"Öldü":DYNASTY_HEALTH_LABELS[member.health]),"",
+    "**❤️ Durum:** "+(member.status==="DEAD"?"Öldü":member.kidnapped?"⛓️ Kaçırıldı":DYNASTY_HEALTH_LABELS[member.health]),
+    member.kidnapped?"**📍 Esaret:** "+(member.captor_country_name??"Bilinmeyen devlet")+" • "+(member.captured_settlement_name??"Bilinmeyen yer"):"","",
     "**👑 Hanedan:** "+view.name,"**📜 Unvan:** "+member.title,"**🧬 Akrabalık:** "+member.relation,"**👑 Konum:** "+position,
     "**⚖️ Veraset:** "+(member.is_monarch?"Tahtta":member.succession_rank!==null?"#"+member.succession_rank:"Sırada değil"),"",
     "**👨 Baba:** "+(member.father_name??"Kayıt yok"),"**👩 Anne:** "+(member.mother_name??"Kayıt yok"),"",

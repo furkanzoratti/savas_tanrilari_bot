@@ -123,9 +123,12 @@ export async function handleEspionageCommand(interaction: ChatInputCommandIntera
       );
       const targetType = interaction.options.getString("hedef", true) as EspionageTarget;
       const rawSpecialTarget = interaction.options.getString("ozel-hedef");
-      const assassinationTarget=targetType==="ASSASSINATE"&&rawSpecialTarget
-        ?resolveEspionageChoice(await espionageService.assassinationTargets(targetCountry.id),rawSpecialTarget,"Suikast hedefi"):null;
-      const [targetKind,targetId]=assassinationTarget?.id.split(":",2)??[null,null];
+      const personalTarget=["ASSASSINATE","KIDNAP"].includes(targetType)&&rawSpecialTarget
+        ?resolveEspionageChoice(
+          targetType==="KIDNAP"?await espionageService.kidnappingTargets(targetCountry.id):await espionageService.assassinationTargets(targetCountry.id),
+          rawSpecialTarget,targetType==="KIDNAP"?"Kaçırma hedefi":"Suikast hedefi"
+        ):null;
+      const [targetKind,targetId]=personalTarget?.id.split(":",2)??[null,null];
       const operation = await espionageService.startOperation({
         guildId: interaction.guildId,
         actorId: interaction.user.id,
@@ -238,6 +241,24 @@ export async function handleEspionageCommand(interaction: ChatInputCommandIntera
       }).catch(()=>undefined);
       return true;
     }
+    if(sub==="esir-serbest-birak"||sub==="esir-infaz-et"){
+      const execute=sub==="esir-infaz-et";
+      const result=await espionageService.resolveKidnapping({
+        guildId:interaction.guildId,captivityId:interaction.options.getString("tutsak",true),
+        actorId:interaction.user.id,decision:execute?"EXECUTE":"RELEASE"
+      });
+      await interaction.editReply(
+        (execute?"☠️":"🕊️")+" **"+result.name+"** "+(execute?"kalıcı olarak infaz edildi.":"serbest bırakıldı.")+"\n"+
+        "Köken: **"+result.origin_country_name+"** • Kaçıran: **"+result.captor_country_name+"** • Yer: **"+result.captured_settlement_name+"**"
+      );
+      await queueCharacterLog({
+        client:interaction.client,guildId:interaction.guildId,interactionId:interaction.id,
+        actorUserId:interaction.user.id,title:"Kaçırma Yönetimi",source:execute?"KIDNAP_EXECUTION":"KIDNAP_RELEASE",
+        entry:(execute?"☠️":"🕊️")+" <@"+interaction.user.id+"> tarafından **"+result.name+"** "+(execute?"infaz edildi.":"serbest bırakıldı.")+"\n"+
+          "↳ Köken: **"+result.origin_country_name+"** • Kaçıran: **"+result.captor_country_name+"** • Yer: **"+result.captured_settlement_name+"**"
+      }).catch(()=>undefined);
+      return true;
+    }
   }
   return false;
 }
@@ -261,6 +282,18 @@ export async function handleEspionageAutocomplete(interaction: AutocompleteInter
       .map((spy)=>({
         name:(spy.name+" • "+spy.origin_country_name+" → "+spy.captor_country_name+" • dönüş Tur "+spy.automatic_return_turn).slice(0,100),
         value:spy.id
+      })));
+    return true;
+  }
+  if(interaction.commandName==="casusluk-yonetim"&&focused.name==="tutsak"){
+    if(!isGameMaster(interaction)){await interaction.respond([]);return true;}
+    const captives=await espionageService.kidnappedPeople(interaction.guildId);
+    await interaction.respond(captives
+      .filter((captive)=>!query||`${captive.name} ${captive.origin_country_name} ${captive.captor_country_name}`.toLocaleLowerCase("tr-TR").includes(query))
+      .slice(0,25)
+      .map((captive)=>({
+        name:(captive.name+" • "+captive.origin_country_name+" → "+captive.captor_country_name+" • Tur "+captive.captured_turn).slice(0,100),
+        value:captive.id
       })));
     return true;
   }
@@ -310,7 +343,8 @@ export async function handleEspionageAutocomplete(interaction: AutocompleteInter
     const name = interaction.options.getString("hedef-ulke");
     const target = name ? await gameService.countryByName(interaction.guildId,name) : null;
     if (!target || !targetType) { await interaction.respond([]); return true; }
-    const rows = targetType==="ASSASSINATE"?await espionageService.assassinationTargets(target.id):[];
+    const rows = targetType==="ASSASSINATE"?await espionageService.assassinationTargets(target.id)
+      :targetType==="KIDNAP"?await espionageService.kidnappingTargets(target.id):[];
     await interaction.respond(rows.filter((item)=>!query||item.name.toLocaleLowerCase("tr-TR").includes(query)).slice(0,25).map((item)=>({name:item.name.slice(0,100),value:item.id})));
     return true;
   }

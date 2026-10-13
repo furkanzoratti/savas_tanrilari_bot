@@ -18,7 +18,7 @@ export const ESPIONAGE_TARGETS = {
   DESTROY_SIEGE_SUPPLIES: { label: "Kuşatma Erzağı Yakma", buildingTypes: [], group: "MILITARY_AGENT" },
   SABOTAGE_FLEET: { label: "Filoyu Sabote Etme", buildingTypes: [], group: "MILITARY_AGENT" },
   DISCREDIT: { label: "Karakteri İtibarsızlaştırma", buildingTypes: [], group: "ASSASSIN" },
-  KIDNAP: { label: "Karakter Kaçırma", buildingTypes: [], group: "ASSASSIN" },
+  KIDNAP: { label: "Karakter veya Soylu Kaçırma", buildingTypes: [], group: "ASSASSIN" },
   ASSASSINATE: { label: "Karakter veya Soylu Suikasti", buildingTypes: [], group: "ASSASSIN" }
 } as const;
 
@@ -29,7 +29,7 @@ export const PLAYER_ESPIONAGE_TARGETS = [
   "RECRUITMENT_SABOTAGE","CONSTRUCTION","PRODUCTION_SABOTAGE",
   "INCOME_SABOTAGE","TREASURY_INFILTRATION",
   "INCITE_PUBLIC","AGGRAVATE_EVENT",
-  "DESERTION","POISON_GARRISON","DESTROY_SIEGE_SUPPLIES","ASSASSINATE"
+  "DESERTION","POISON_GARRISON","DESTROY_SIEGE_SUPPLIES","KIDNAP","ASSASSINATE"
 ] as const satisfies readonly EspionageTarget[];
 
 export function isPlayerEspionageTarget(target:string):target is typeof PLAYER_ESPIONAGE_TARGETS[number]{

@@ -161,9 +161,12 @@ function characterLine(character: CharacterView): string {
   const task = character.operation_type
     ? operationLabel ?? assignmentLabels[character.assignment] ?? "Tanımsız görev"
     : assignmentLabels[character.assignment] ?? "Tanımsız görev";
-  const details: string[] = [character.character_status === "DEAD" ? "Öldü" : character.character_status === "DISMISSED" ? "Kalıcı görevden alındı" : task];
+  const details: string[] = [character.character_status === "DEAD" ? "Öldü" : character.character_status === "DISMISSED" ? "Kalıcı görevden alındı" : character.kidnapped ? "⛓️ Kaçırıldı" : task];
   const place = characterLocation(character);
-  if (character.assignment === "CAPTURED") details.push("Tutsak olduğu şehir: **"+(character.assigned_settlement_name??"Bilinmiyor")+"**"+(character.assigned_country_name?" ("+character.assigned_country_name+")":""));
+  if(character.assignment==="CAPTURED"&&character.kidnapped){
+    details.push("Kaçırıldığı yer: **"+(character.assigned_settlement_name??"Bilinmiyor")+"**"+
+      (character.assigned_country_name?" • Kaçıran: **"+character.assigned_country_name+"**":""));
+  }else if (character.assignment === "CAPTURED") details.push("Tutsak olduğu şehir: **"+(character.assigned_settlement_name??"Bilinmiyor")+"**"+(character.assigned_country_name?" ("+character.assigned_country_name+")":""));
   else if (place) details.push(place);
   if (character.assignment_ready_turn !== null) details.push("Tur " + character.assignment_ready_turn);
   if (character.operation_progress !== null && character.operation_goal !== null) {
