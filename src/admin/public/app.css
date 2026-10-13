@@ -266,6 +266,10 @@ label.check input { width: auto; min-height: 0; }
 .health-clean > span { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 50%; background: rgba(34,83,61,.12); color: #22533d; font-size: 22px; }
 .health-clean p { margin-top: 4px; color: var(--muted); }
 .loading-shell { display: grid; gap: 14px; }
+.load-warning { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 0 14px; padding: 13px 15px; border: 1px solid rgba(154,100,47,.38); border-radius: 12px; background: rgba(183,132,73,.10); color: var(--warning); }
+.load-warning div { min-width: 0; }
+.load-warning strong,.load-warning span { display: block; }
+.load-warning span { margin-top: 3px; color: var(--muted); font-size: 12px; line-height: 1.4; }
 .loading-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
 .skeleton { min-height: 130px; border: 1px solid rgba(128,82,56,.1); border-radius: 13px; background: linear-gradient(90deg,#eee5da 25%,#ded0bf 50%,#eee5da 75%); background-size: 200% 100%; animation: loading 1.25s infinite; }
 .skeleton-title { min-height: 82px; }

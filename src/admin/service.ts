@@ -1016,7 +1016,8 @@ export const adminPanelService = {
   },
 
   async mechanicsControl() {
-    const [guild, countries, buildings, recruitments, navalOrders, alliances, vassalages, wars, trades, pacts, portAccess] = await Promise.all([
+    const labels = ["Oyun durumu", "Devlet ekonomileri", "Bina inşaatları", "Asker alımları", "Gemi üretimleri", "İttifaklar", "Vassallıklar", "Savaşlar", "Ticaret yolları", "Diplomatik paktlar", "Liman erişimleri"];
+    const settled = await Promise.allSettled([
       adminPool.query("SELECT current_turn,turn_phase FROM guilds WHERE discord_id=$1", [adminConfig.guildId]),
       adminPool.query(
         `SELECT country.id,country.name,country.mobilization,
@@ -1107,12 +1108,20 @@ export const adminPanelService = {
           ORDER BY CASE access.status WHEN 'PENDING' THEN 0 ELSE 1 END,access.created_at DESC`, [adminConfig.guildId]
       )
     ]);
+    const warnings = settled.flatMap((result, index) => result.status === "rejected"
+      ? [`${labels[index]} şu anda yüklenemedi${result.reason && typeof result.reason === "object" && "code" in result.reason ? ` (${String((result.reason as { code?: unknown }).code)})` : ""}.`]
+      : []);
+    const [
+      guild = { rows: [] }, countries = { rows: [] }, buildings = { rows: [] }, recruitments = { rows: [] },
+      navalOrders = { rows: [] }, alliances = { rows: [] }, vassalages = { rows: [] }, wars = { rows: [] },
+      trades = { rows: [] }, pacts = { rows: [] }, portAccess = { rows: [] }
+    ] = settled.map((result) => result.status === "fulfilled" ? result.value : { rows: [] });
     if (!guild.rows[0]) throw new Error("Oyun durumu bulunamadı.");
     return {
       guild: guild.rows[0], countries: countries.rows, buildings: buildings.rows,
       recruitments: recruitments.rows, navalOrders: navalOrders.rows,
       alliances: alliances.rows, vassalages: vassalages.rows, wars: wars.rows,
-      trades: trades.rows, pacts: pacts.rows, portAccess: portAccess.rows
+      trades: trades.rows, pacts: pacts.rows, portAccess: portAccess.rows, warnings
     };
   },
 
@@ -1122,7 +1131,8 @@ export const adminPanelService = {
     )).rows[0];
     if (!guild) throw new Error("Oyun durumu bulunamadı.");
     const firstTurn = Math.max(0, Number(guild.current_turn) - 7);
-    const [countries, financialHistory, activity, transactionKinds] = await Promise.all([
+    const labels = ["Devlet karşılaştırması", "Mali akış", "Yönetim etkinliği", "İşlem türleri"];
+    const settled = await Promise.allSettled([
       adminPool.query(
         `SELECT country.id,country.name,country.mobilization,
                 COUNT(settlement.id)::integer AS settlements,
@@ -1165,9 +1175,15 @@ export const adminPanelService = {
           GROUP BY tx.kind ORDER BY COUNT(*) DESC,tx.kind LIMIT 12`, [adminConfig.guildId, firstTurn]
       )
     ]);
+    const warnings = settled.flatMap((result, index) => result.status === "rejected"
+      ? [`${labels[index]} şu anda yüklenemedi${result.reason && typeof result.reason === "object" && "code" in result.reason ? ` (${String((result.reason as { code?: unknown }).code)})` : ""}.`]
+      : []);
+    const [
+      countries = { rows: [] }, financialHistory = { rows: [] }, activity = { rows: [] }, transactionKinds = { rows: [] }
+    ] = settled.map((result) => result.status === "fulfilled" ? result.value : { rows: [] });
     return {
       guild, firstTurn, countries: countries.rows, financialHistory: financialHistory.rows,
-      activity: activity.rows, transactionKinds: transactionKinds.rows, generatedAt: new Date().toISOString()
+      activity: activity.rows, transactionKinds: transactionKinds.rows, warnings, generatedAt: new Date().toISOString()
     };
   },
 

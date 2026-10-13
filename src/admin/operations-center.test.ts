@@ -167,6 +167,22 @@ describe("GM operasyon merkezi", () => {
     expect(css).toContain(".turn-flow");
   });
 
+  it("mekanik ve rapor menülerini kısmi sorgu hatalarında kullanılabilir tutar", () => {
+    const service = read("./service.ts");
+    const app = read("./public/app.js");
+    const html = read("./public/index.html");
+    const css = read("./public/app.css");
+
+    expect(service).toContain("Promise.allSettled");
+    expect(service).toContain("warnings");
+    expect(app).toContain("function loadWarningsMarkup");
+    expect(app).toContain("Bazı alt bölümler yüklenemedi");
+    expect(app).toContain("30_000");
+    expect(app).toContain("data-retry-page");
+    expect(css).toContain(".load-warning");
+    expect(html).toContain("menu-recovery-v17");
+  });
+
   it("son güvenlik ve performans katmanını istek izleme ve canlı durumla tamamlar", () => {
     const server = read("./server.ts");
     const service = read("./service.ts");
@@ -190,6 +206,6 @@ describe("GM operasyon merkezi", () => {
     expect(app).toContain('Promise.all([api("/api/game-health"), api("/api/system-status")])');
     expect(app).toContain("Panel çalışma durumu");
     expect(css).toContain(".system-status-grid");
-    expect(html).toContain("security-performance-v16");
+    expect(html).toContain("menu-recovery-v17");
   });
 });
