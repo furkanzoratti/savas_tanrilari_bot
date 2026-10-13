@@ -14,6 +14,7 @@ import {
 } from "./auth.js";
 import { adminPanelService } from "./service.js";
 import { adminRebellionService } from "./rebellion-service.js";
+import { adminDataControlService } from "./data-control-service.js";
 import { aiCountryGovernanceService } from "../services/ai-country-governance-service.js";
 
 const logger = pino({ level: adminConfig.logLevel });
@@ -215,6 +216,23 @@ const server = createServer(async (request, response) => {
     if (request.method === "GET" && url.pathname === "/api/catalog/religions") {
       if (!requireSession(request, response)) return;
       return json(response, 200, adminPanelService.religionCatalog());
+    }
+    if (request.method === "GET" && url.pathname === "/api/admin-data/catalog") {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await adminDataControlService.catalog());
+    }
+    if (request.method === "GET" && url.pathname === "/api/admin-data/rows") {
+      if (!requireSession(request, response)) return;
+      const table = url.searchParams.get("table") ?? "";
+      const search = url.searchParams.get("search") ?? "";
+      const offset = Number(url.searchParams.get("offset") ?? 0);
+      const limit = Number(url.searchParams.get("limit") ?? 25);
+      return json(response, 200, await adminDataControlService.rows(table, search, offset, limit));
+    }
+    if (request.method === "POST" && url.pathname === "/api/admin-data/mutate") {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminDataControlService.mutate(session.sub, await body(request)));
     }
     const countryUpdateMatch = request.method === "PATCH" ? url.pathname.match(/^\/api\/admin\/countries\/([0-9a-f-]+)$/iu) : null;
     if (countryUpdateMatch) {

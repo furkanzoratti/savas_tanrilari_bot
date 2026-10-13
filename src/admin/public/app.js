@@ -1,4 +1,4 @@
-const state = { session: null, csrf: "", countries: [], catalog: [], characterCatalog: null, religionCatalog: null, rebellionData: null, previewToken: null, selectedCountry: null, editor: null, pendingPageScrollTop: null };
+const state = { session: null, csrf: "", countries: [], catalog: [], characterCatalog: null, religionCatalog: null, rebellionData: null, previewToken: null, selectedCountry: null, editor: null, pendingPageScrollTop: null, dataCatalog: null, dataTable: null, dataRows: [], dataOffset: 0, dataSearch: "" };
 const page = document.getElementById("page");
 const app = document.getElementById("app");
 const login = document.getElementById("login");
@@ -1244,6 +1244,127 @@ async function submitEditor(event) {
   finally { button.disabled = false; button.textContent = "Değişiklikleri kaydet"; }
 }
 
+const dataColumnLabel = (name) => String(name || "").split("_").map((part) => part ? `${part[0].toLocaleUpperCase("tr-TR")}${part.slice(1)}` : part).join(" ");
+const dataValuePreview = (value) => {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "object") return JSON.stringify(value).slice(0, 180);
+  return String(value).slice(0, 180);
+};
+
+function dataInputValue(column, value) {
+  if (value === null || value === undefined) return "";
+  if (column.dataType === "json" || column.dataType === "jsonb" || column.dataType === "ARRAY" || typeof value === "object") return JSON.stringify(value, null, 2);
+  return String(value);
+}
+
+function dataField(column, value, insert) {
+  const identifier = `data-field-${column.name}`;
+  const attributes = `data-data-column="${escapeHtml(column.name)}" data-data-type="${escapeHtml(column.dataType)}" data-nullable="${column.nullable}" data-default="${column.defaultValue ? "true" : "false"}"`;
+  const hint = [column.dataType, column.nullable ? "boş olabilir" : "zorunlu", column.defaultValue ? `varsayılan: ${column.defaultValue}` : ""].filter(Boolean).join(" · ");
+  const disabled = !insert && (column.primary || column.generated);
+  const valueText = dataInputValue(column, value);
+  let control;
+  if (column.dataType === "boolean") {
+    control = `<select id="${identifier}" ${attributes} ${disabled ? "disabled" : ""}>${column.nullable ? `<option value="" ${value === null ? "selected" : ""}>NULL</option>` : ""}<option value="true" ${value === true ? "selected" : ""}>true</option><option value="false" ${value === false ? "selected" : ""}>false</option></select>`;
+  } else if (column.dataType === "json" || column.dataType === "jsonb" || column.dataType === "ARRAY") {
+    control = `<textarea id="${identifier}" ${attributes} rows="4" ${disabled ? "disabled" : ""}>${escapeHtml(valueText)}</textarea>`;
+  } else {
+    const numeric = ["smallint", "integer", "real", "double precision", "numeric", "decimal"].includes(column.dataType);
+    control = `<input id="${identifier}" ${attributes} type="${numeric ? "number" : "text"}" value="${escapeHtml(valueText)}" ${disabled ? "disabled" : ""}>`;
+  }
+  return `<label>${escapeHtml(dataColumnLabel(column.name))}${control}<small>${escapeHtml(hint)}${column.primary ? " · birincil anahtar" : ""}${column.generated ? " · otomatik üretilir" : ""}</small></label>`;
+}
+
+function collectDataEditorValues(insert) {
+  const values = {};
+  for (const element of document.querySelectorAll("[data-data-column]")) {
+    if (element.disabled) continue;
+    const raw = element.value;
+    if (insert && raw === "" && element.dataset.default === "true") continue;
+    if (raw === "" && element.dataset.nullable === "true") { values[element.dataset.dataColumn] = null; continue; }
+    if (["json", "jsonb", "ARRAY"].includes(element.dataset.dataType)) {
+      try { values[element.dataset.dataColumn] = raw === "" ? null : JSON.parse(raw); }
+      catch { throw new Error(`${dataColumnLabel(element.dataset.dataColumn)} geçerli JSON olmalıdır.`); }
+    } else if (element.dataset.dataType === "boolean") values[element.dataset.dataColumn] = raw === "true";
+    else values[element.dataset.dataColumn] = raw;
+  }
+  return values;
+}
+
+function openDataRecordEditor(table, record = null) {
+  const insert = !record;
+  const values = record?.values || {};
+  const columns = table.columns.filter((column) => insert ? !column.generated : true);
+  const fields = columns.map((column) => dataField(column, values[column.name], insert)).join("");
+  openEditor(
+    insert ? "Yeni oyun kaydı" : "Oyun kaydını düzenle",
+    `${table.category} · ${table.label} (${table.name})`,
+    `<div class="preview-warning"><strong>Gelişmiş tam yetki işlemi</strong><span>Bu ekran oyunun doğrudan kalıcı verisini değiştirir. Veritabanı kuralları uygulanır ve işlem önce/sonra görüntüsüyle denetim geçmişine yazılır.</span></div><div class="form-grid data-control-form">${fields}</div><label>Değişiklik gerekçesi<textarea id="data-change-reason" rows="2" minlength="3" maxlength="500" required placeholder="Bu değişikliğin oyun içi gerekçesi…"></textarea></label>${!insert && table.mutable ? '<button type="button" class="button danger" id="data-delete-record">Bu kaydı kalıcı olarak sil</button>' : ""}`,
+    table.mutable ? async () => {
+      const reason = document.getElementById("data-change-reason").value.trim();
+      if (reason.length < 3) throw new Error("Değişiklik gerekçesi en az 3 karakter olmalıdır.");
+      await api("/api/admin-data/mutate", { method: "POST", body: JSON.stringify({
+        table: table.name,
+        action: insert ? "INSERT" : "UPDATE",
+        key: record?.key,
+        values: collectDataEditorValues(insert),
+        reason
+      }) });
+      closeEditor();
+      toast(insert ? `${table.label} tablosuna yeni kayıt eklendi.` : `${table.label} kaydı güncellendi.`);
+      await refreshKeepingScroll(dataControlPage);
+    } : null
+  );
+  editorModal.querySelector(".modal").classList.add("wide");
+  const deleteButton = document.getElementById("data-delete-record");
+  if (deleteButton) deleteButton.addEventListener("click", async () => {
+    const reason = document.getElementById("data-change-reason").value.trim();
+    if (reason.length < 3) return toast("Silme gerekçesini önce yazın.", "error");
+    if (window.prompt("Kalıcı silmeyi onaylamak için SIL yazın.") !== "SIL") return;
+    deleteButton.disabled = true;
+    try {
+      await api("/api/admin-data/mutate", { method: "POST", body: JSON.stringify({ table: table.name, action: "DELETE", key: record.key, reason, confirmation: "SIL" }) });
+      closeEditor();
+      toast(`${table.label} kaydı silindi.`);
+      await refreshKeepingScroll(dataControlPage);
+    } catch (error) { toast(error.message, "error"); deleteButton.disabled = false; }
+  });
+}
+
+async function dataControlPage() {
+  setActiveRoute("data-control"); loading();
+  if (!state.dataCatalog) state.dataCatalog = await api("/api/admin-data/catalog");
+  const catalog = state.dataCatalog;
+  if (!state.dataTable || !catalog.some((table) => table.name === state.dataTable)) state.dataTable = catalog.find((table) => table.name === "countries")?.name || catalog[0]?.name;
+  if (!state.dataTable) throw new Error("Yönetilebilir oyun veri tablosu bulunamadı.");
+  const table = catalog.find((item) => item.name === state.dataTable);
+  const query = new URLSearchParams({ table: table.name, search: state.dataSearch, offset: String(state.dataOffset), limit: "25" });
+  const data = await api(`/api/admin-data/rows?${query}`);
+  state.dataRows = data.rows;
+  const categories = new Map();
+  for (const item of catalog) {
+    const items = categories.get(item.category) || [];
+    items.push(item);
+    categories.set(item.category, items);
+  }
+  const options = [...categories.entries()].map(([category, tables]) => `<optgroup label="${escapeHtml(category)}">${tables.map((item) => `<option value="${item.name}" ${item.name === table.name ? "selected" : ""}>${escapeHtml(item.label)}${item.mutable ? "" : " · salt okunur"}</option>`).join("")}</optgroup>`).join("");
+  const preferred = ["name", "display_name", "status", "country_id", "settlement_id", "guild_id", "current_turn", "created_at", "updated_at"];
+  const visibleColumns = [...table.columns].sort((left, right) => {
+    const leftScore = left.primary ? -100 : preferred.indexOf(left.name) >= 0 ? preferred.indexOf(left.name) : 100;
+    const rightScore = right.primary ? -100 : preferred.indexOf(right.name) >= 0 ? preferred.indexOf(right.name) : 100;
+    return leftScore - rightScore;
+  }).slice(0, 9);
+  const rows = data.rows.map((row, index) => `<tr>${visibleColumns.map((column) => `<td title="${escapeHtml(dataValuePreview(row.values[column.name]))}">${escapeHtml(dataValuePreview(row.values[column.name]))}</td>`).join("")}<td><button class="button compact" data-data-row="${index}">${table.mutable ? "Düzenle" : "Görüntüle"}</button></td></tr>`).join("");
+  const end = Math.min(data.total, data.offset + data.rows.length);
+  page.innerHTML = `<div class="page-head"><div><span class="pill danger">GM Tam Yetki</span><h1 style="margin-top:10px">Oyun Verileri</h1><p>Özel yönetim ekranlarında bulunmayan bütün mevcut ve gelecekteki mekanik kayıtlarına doğrudan, denetimli erişim.</p></div><div class="actions"><span class="pill neutral">${number(catalog.length)} tablo</span>${table.mutable ? '<button class="button primary" data-data-new>＋ Yeni kayıt</button>' : ""}</div></div><section class="card data-control-warning"><strong>⚠ Doğrudan kalıcı veri yönetimi</strong><p>Önce ilgili mekanizmanın özel panelini kullanın. Buradaki değişiklikler oyun kayıtlarını doğrudan etkiler; veritabanı bağlantıları ve kısıtları yine korunur. Her işlem gerekçe, eski değer ve yeni değerle kaydedilir.</p></section><section class="card data-control-toolbar"><label>Mekanik / veri tablosu<select id="data-table-select">${options}</select></label><form id="data-search-form"><label>Kayıtlarda ara<input id="data-search" value="${escapeHtml(state.dataSearch)}" placeholder="Ad, durum, kimlik veya JSON içeriği…"></label><button class="button" type="submit">Ara</button></form></section><div class="section-title"><h2>${escapeHtml(table.label)}</h2><span>${escapeHtml(table.category)} · ${number(data.total)} kayıt · ${table.scoped ? "sunucuya bağlı" : "küresel"}</span></div><section class="card table-wrap"><table><thead><tr>${visibleColumns.map((column) => `<th>${escapeHtml(dataColumnLabel(column.name))}</th>`).join("")}<th></th></tr></thead><tbody>${rows || `<tr><td colspan="${visibleColumns.length + 1}" class="empty">Kayıt bulunmuyor.</td></tr>`}</tbody></table></section><div class="data-pager"><button class="button" data-data-prev ${data.offset <= 0 ? "disabled" : ""}>← Önceki</button><span>${data.total ? `${number(data.offset + 1)}–${number(end)} / ${number(data.total)}` : "0 kayıt"}</span><button class="button" data-data-next ${end >= data.total ? "disabled" : ""}>Sonraki →</button></div>`;
+  document.getElementById("data-table-select").addEventListener("change", (event) => { state.dataTable = event.target.value; state.dataOffset = 0; state.dataSearch = ""; dataControlPage().catch(showPageError); });
+  document.getElementById("data-search-form").addEventListener("submit", (event) => { event.preventDefault(); state.dataSearch = document.getElementById("data-search").value.trim(); state.dataOffset = 0; dataControlPage().catch(showPageError); });
+  document.querySelector("[data-data-new]")?.addEventListener("click", () => openDataRecordEditor(table));
+  document.querySelectorAll("[data-data-row]").forEach((button) => button.addEventListener("click", () => openDataRecordEditor(table, state.dataRows[Number(button.dataset.dataRow)])));
+  document.querySelector("[data-data-prev]")?.addEventListener("click", () => { state.dataOffset = Math.max(0, state.dataOffset - 25); refreshKeepingScroll(dataControlPage).catch(showPageError); });
+  document.querySelector("[data-data-next]")?.addEventListener("click", () => { state.dataOffset += 25; refreshKeepingScroll(dataControlPage).catch(showPageError); });
+}
+
 async function auditPage() {
   setActiveRoute("audit"); loading();
   const rows = await api("/api/audit?limit=150");
@@ -1271,6 +1392,7 @@ async function navigate(route) {
     if (route === "ai-governance") return aiGovernancePage();
     if (route === "battles") return battlesPage();
     if (route === "rebellions") return rebellionsPage();
+    if (route === "data-control") return dataControlPage();
     if (route === "audit") return auditPage();
     return overview();
   } catch (error) { showPageError(error); }

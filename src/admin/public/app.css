@@ -192,6 +192,16 @@ textarea { resize: vertical; line-height: 1.45; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
 .error { padding: 10px 12px; border-radius: 8px; background: rgba(239, 119, 119, .12); color: var(--danger); }
 .preview-warning { display: grid; gap: 3px; padding: 12px; border-radius: 9px; background: rgba(229, 173, 103, .12); color: var(--warning); }
+.data-control-warning { margin-bottom: 12px; border-color: rgba(239,119,119,.42); background: linear-gradient(145deg,var(--surface),rgba(104,34,34,.18)); }
+.data-control-warning strong { color: var(--danger); }
+.data-control-warning p { margin: 7px 0 0; color: var(--muted); line-height: 1.5; }
+.data-control-toolbar { display: grid; grid-template-columns: minmax(260px,.7fr) minmax(320px,1.3fr); gap: 12px; align-items: end; }
+.data-control-toolbar label { margin: 0; }
+.data-control-toolbar form { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; align-items: end; }
+.data-control-toolbar form label { margin: 0; }
+.data-control-form { margin: 14px 0; align-items: start; }
+.data-control-form textarea { min-height: 104px; font-family: ui-monospace,SFMono-Regular,Consolas,monospace; font-size: 12px; }
+.data-pager { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 14px 0 30px; color: var(--muted); }
 .rebellion-kpis .kpi.danger { border-color: rgba(239,119,119,.42); background: linear-gradient(145deg,var(--surface),rgba(104,34,34,.24)); }
 .rebellion-kpis .kpi.warning { border-color: rgba(229,173,103,.38); background: linear-gradient(145deg,var(--surface),rgba(99,70,30,.2)); }
 .rebellion-toolbar { display: grid; grid-template-columns: minmax(220px,1.5fr) repeat(3,minmax(150px,.7fr)); gap: 10px; margin-top: 12px; }
@@ -314,6 +324,7 @@ textarea { resize: vertical; line-height: 1.45; }
   .dynasty-grid { grid-template-columns: 1fr; }
   .roman-family-grid { grid-template-columns: 1fr; }
   .ai-plan-two-columns { grid-template-columns: 1fr; }
+  .data-control-toolbar { grid-template-columns: 1fr; }
 }
 @media (max-width: 620px) {
   .page { padding: 16px; }
@@ -332,4 +343,5 @@ textarea { resize: vertical; line-height: 1.45; }
   .rebellion-card-split { grid-template-columns: 1fr; }
   .roman-family-stats,.roman-members { grid-template-columns: 1fr; }
   .roman-seat-grid { grid-template-columns: repeat(10,minmax(10px,1fr)); gap: 6px; }
+  .data-control-toolbar form { grid-template-columns: 1fr; }
 }
