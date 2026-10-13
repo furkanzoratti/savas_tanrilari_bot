@@ -107,6 +107,10 @@ const server = createServer(async (request, response) => {
       if (!requireSession(request, response)) return;
       return json(response, 200, await adminPanelService.overview());
     }
+    if (request.method === "GET" && url.pathname === "/api/game-health") {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await adminPanelService.gameHealth());
+    }
     if (request.method === "GET" && url.pathname === "/api/countries") {
       if (!requireSession(request, response)) return;
       return json(response, 200, await adminPanelService.countries());
@@ -177,6 +181,11 @@ const server = createServer(async (request, response) => {
     if (armyDetailMatch) {
       if (!requireSession(request, response)) return;
       return json(response, 200, await adminPanelService.army(armyDetailMatch[1]!));
+    }
+    const settlementDetailMatch = request.method === "GET" ? url.pathname.match(/^\/api\/settlements\/([0-9a-f-]+)$/iu) : null;
+    if (settlementDetailMatch) {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await adminPanelService.settlement(settlementDetailMatch[1]!));
     }
     const countryMatch = request.method === "GET" ? url.pathname.match(/^\/api\/countries\/([0-9a-f-]+)$/iu) : null;
     if (countryMatch) {

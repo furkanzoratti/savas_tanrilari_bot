@@ -1,4 +1,4 @@
-const state = { session: null, csrf: "", countries: [], catalog: [], characterCatalog: null, religionCatalog: null, rebellionData: null, previewToken: null, selectedCountry: null, editor: null, pendingPageScrollTop: null, dataCatalog: null, dataTable: null, dataRows: [], dataOffset: 0, dataSearch: "" };
+const state = { session: null, csrf: "", countries: [], catalog: [], characterCatalog: null, religionCatalog: null, rebellionData: null, previewToken: null, selectedCountry: null, editor: null, pendingPageScrollTop: null, dataCatalog: null, dataTable: null, dataRows: [], dataOffset: 0, dataSearch: "", activeRoute: "overview", focusTarget: null };
 const page = document.getElementById("page");
 const app = document.getElementById("app");
 const login = document.getElementById("login");
@@ -9,6 +9,27 @@ const number = (value) => Number(value || 0).toLocaleString("tr-TR");
 const money = (value) => `${number(value)} Altın`;
 const date = (value) => new Intl.DateTimeFormat("tr-TR", { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
+const storageKey = (name) => `amrp-gm:${name}`;
+const readStoredList = (name) => {
+  try { const value = JSON.parse(localStorage.getItem(storageKey(name)) || "[]"); return Array.isArray(value) ? value : []; }
+  catch { return []; }
+};
+const writeStoredList = (name, value) => localStorage.setItem(storageKey(name), JSON.stringify(value.slice(0, 12)));
+const searchTypeLabels = { COUNTRY: "Devlet", SETTLEMENT: "Yerleşke", ARMY: "Ordu", FLEET: "Filo", CHARACTER: "Karakter", FLEET_REPAIR: "Filo tamiri", VASSALAGE: "Vassallık" };
+const searchTypeRoutes = { COUNTRY: "countries", SETTLEMENT: "settlements", ARMY: "armies", FLEET: "armies", CHARACTER: "characters", FLEET_REPAIR: "data-control", VASSALAGE: "data-control" };
+const normalizeWorkspaceRecord = (row) => ({ type: row.type, id: row.id, label: row.label, detail: row.detail || "" });
+function recordRecent(row) {
+  const record = normalizeWorkspaceRecord(row);
+  writeStoredList("recent", [record, ...readStoredList("recent").filter((item) => !(item.type === record.type && item.id === record.id))]);
+}
+function toggleFavorite(row) {
+  const record = normalizeWorkspaceRecord(row);
+  const favorites = readStoredList("favorites");
+  const exists = favorites.some((item) => item.type === record.type && item.id === record.id);
+  writeStoredList("favorites", exists ? favorites.filter((item) => !(item.type === record.type && item.id === record.id)) : [record, ...favorites]);
+  return !exists;
+}
+function isFavorite(row) { return readStoredList("favorites").some((item) => item.type === row.type && item.id === row.id); }
 const religionDistribution = (settlement) => {
   const shares = Array.isArray(settlement.religion_distribution) ? settlement.religion_distribution : [];
   if (!shares.length) return `${escapeHtml(settlement.religion_label || settlement.religion_key || "—")} · %${number(settlement.religion_adherence_percent)}`;
@@ -134,15 +155,58 @@ const routeTitles = {
   overview: "Genel Bakış", countries: "Devletler", settlements: "Yerleşkeler", armies: "Ordular & Filolar",
   characters: "Karakterler", dynasties: "Hanedanlar", "roman-politics": "Roma Siyaseti",
   "steppe-politics": "Bozkır Kurultayı", assignments: "Görevler", battles: "Savaşlar",
-  rebellions: "İsyanlar", "data-control": "Tam Yetki", audit: "İşlem Geçmişi"
+  rebellions: "İsyanlar", health: "Oyun Sağlığı", "data-control": "Tam Yetki", audit: "İşlem Geçmişi"
 };
 function loading() { page.innerHTML = '<div class="loading-shell"><div class="skeleton skeleton-title"></div><div class="loading-grid"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div><div class="skeleton skeleton-content"></div></div>'; }
 function setActiveRoute(route) {
+  state.activeRoute = route;
   document.querySelectorAll("[data-route]").forEach((button) => button.classList.toggle("active", button.dataset.route === route));
   const title = routeTitles[route] || "GM Operasyon Masası";
   const activeTitle = document.getElementById("active-page-title");
   if (activeTitle) activeTitle.textContent = title;
   document.title = `${title} · AMRP GM`;
+}
+
+function revealFocusedRecord() {
+  if (!state.focusTarget) return;
+  const target = document.querySelector(`[data-record-type="${CSS.escape(state.focusTarget.type)}"][data-record-id="${CSS.escape(state.focusTarget.id)}"]`);
+  if (!target) return;
+  target.classList.add("record-focus");
+  target.scrollIntoView({ behavior: "smooth", block: "center" });
+  setTimeout(() => target.classList.remove("record-focus"), 3200);
+  state.focusTarget = null;
+}
+
+async function openWorkspaceRecord(row) {
+  if (!row?.type || !row?.id) return;
+  recordRecent(row);
+  if (row.type === "COUNTRY") return countryDetail(row.id);
+  if (row.type === "SETTLEMENT") return settlementDetail(row.id);
+  if (row.type === "FLEET_REPAIR") { state.dataTable = "fleet_repair_groups"; state.dataSearch = row.label || ""; state.dataOffset = 0; }
+  if (row.type === "VASSALAGE") { state.dataTable = "country_vassalages"; state.dataSearch = ""; state.dataOffset = 0; }
+  state.focusTarget = { type: row.type, id: row.id };
+  return navigate(searchTypeRoutes[row.type] || "overview");
+}
+
+const humanKey = (value) => String(value || "—").replaceAll("_", " ").toLocaleLowerCase("tr-TR").replace(/(^|\s)\S/gu, (letter) => letter.toLocaleUpperCase("tr-TR"));
+const signedMoney = (value) => `${Number(value) > 0 ? "+" : ""}${money(value)}`;
+
+function countryRelationsPanel(data) {
+  const diplomacy = data.diplomacy || {};
+  const alliances = diplomacy.alliances || [];
+  const vassalages = diplomacy.vassalages || [];
+  const wars = diplomacy.wars || [];
+  const pacts = diplomacy.pacts || [];
+  const trades = diplomacy.trades || [];
+  const relationRows = (items, render, empty) => items.length ? items.map(render).join("") : `<div class="compact-empty muted">${empty}</div>`;
+  return `<div class="section-title"><h2>Diplomasi ve ilişkiler</h2><span>${number(alliances.length + vassalages.length + wars.length + pacts.length + trades.length)} bağlantı</span></div><section class="relation-grid"><article class="card"><div class="card-head"><div><h3>Savaşlar</h3><p>Aktif ve geçmiş devlet savaşları</p></div><span class="pill ${wars.some((row) => row.status === "ACTIVE") ? "danger" : "neutral"}">${number(wars.filter((row) => row.status === "ACTIVE").length)} aktif</span></div>${relationRows(wars.slice(0, 10), (row) => `<button class="relation-row" data-route-action="battles"><span><strong>${escapeHtml(row.opponent_name)}</strong><small>${row.war_role === "ATTACKER" ? "Saldıran taraf" : "Savunan taraf"} · Tur ${number(row.started_turn)} · ${escapeHtml(row.war_goal || row.reason)}</small></span><em>${row.status === "ACTIVE" ? "Sürüyor" : `Bitti · Tur ${number(row.ended_turn)}`}</em></button>`, "Savaş kaydı bulunmuyor.")}</article><article class="card"><div class="card-head"><div><h3>İttifak ve vassallık</h3><p>Devletin siyasi bağlantıları</p></div></div>${relationRows(alliances.filter((row) => row.status === "ACTIVE"), (row) => `<button class="relation-row" data-related-country="${row.partner_id}"><span><strong>${escapeHtml(row.partner_name)}</strong><small>İttifak</small></span><em>Aktif</em></button>`, "Aktif ittifak bulunmuyor.")}${relationRows(vassalages.filter((row) => row.status === "ACTIVE"), (row) => `<button class="relation-row" data-related-country="${row.partner_id}"><span><strong>${escapeHtml(row.partner_name)}</strong><small>${row.relation_role === "VASSAL" ? "Bağlı vassal" : "Hâkim devlet"} · Tur ${number(row.started_turn)}</small></span><em>Aktif</em></button>`, "Aktif vassallık bulunmuyor.")}</article><article class="card"><div class="card-head"><div><h3>Paktlar ve ticaret</h3><p>Kurumsal ve ekonomik ilişkiler</p></div></div>${relationRows(pacts, (row) => `<div class="relation-row static"><span><strong>${escapeHtml(row.name)}</strong><small>${escapeHtml(row.purpose)}</small></span><em>Pakt</em></div>`, "Pakt üyeliği bulunmuyor.")}${relationRows(trades.filter((row) => row.status === "ACTIVE"), (row) => `<button class="relation-row" data-related-country="${row.partner_id}"><span><strong>${escapeHtml(row.partner_name)}</strong><small>${row.route === "SEA" ? "Deniz" : "Kara"} ticareti · ${escapeHtml(row.proposer_settlement_name)} → ${escapeHtml(row.receiver_settlement_name || "Bekliyor")}</small></span><em>${money(row.income_per_country)}</em></button>`, "Aktif ticaret anlaşması bulunmuyor.")}</article><article class="card"><div class="card-head"><div><h3>Son mali hareketler</h3><p>En yeni 30 hazine kaydı</p></div></div>${relationRows((data.transactions || []).slice(0, 10), (row) => `<div class="relation-row static"><span><strong>${escapeHtml(row.description)}</strong><small>Tur ${number(row.turn)}${row.settlement_name ? ` · ${escapeHtml(row.settlement_name)}` : ""}</small></span><em class="${Number(row.amount) < 0 ? "danger-text" : ""}">${signedMoney(row.amount)}</em></div>`, "Mali hareket bulunmuyor.")}</article></section>`;
+}
+
+function workspaceListMarkup() {
+  const favorites = readStoredList("favorites").slice(0, 4);
+  const recent = readStoredList("recent").slice(0, 4);
+  const group = (title, items, source) => `<div class="workspace-group"><div class="section-head"><strong>${title}</strong><span>${items.length}</span></div>${items.length ? items.map((item, index) => `<button class="workspace-link" data-workspace-source="${source}" data-workspace-index="${index}"><span><b>${escapeHtml(item.label)}</b><small>${escapeHtml(item.detail || searchTypeLabels[item.type] || item.type)}</small></span><em>${escapeHtml(searchTypeLabels[item.type] || item.type)}</em></button>`).join("") : `<p class="workspace-empty">${source === "favorites" ? "Arama sonuçlarındaki yıldızla kayıt ekleyebilirsin." : "Açtığın kayıtlar burada görünür."}</p>`}</div>`;
+  return `<div class="workspace-shortcuts">${group("Favoriler", favorites, "favorites")}${group("Son açılanlar", recent, "recent")}</div>`;
 }
 
 function pageScrollTop() {
@@ -188,14 +252,14 @@ async function overview() {
   page.innerHTML = `<section class="page-head overview-hero"><div><span class="overview-kicker">ANTİK MEDENİYETLER ROLE PLAY</span><h1>Oyun Kontrol Merkezi</h1><p>Canlı oyun durumunu izle, kritik mekaniklere ulaş ve yönetici işlemlerini tek merkezden yürüt.</p></div><div class="actions"><button class="button" data-open-army>＋ Yeni ordu</button><button class="button primary" data-route-action="audit">İşlem geçmişi</button></div></section>
     <section class="kpi-grid"><div class="card kpi"><span>Aktif devlet</span><strong>${number(data.counts.countries)}</strong><small class="muted">${number(data.counts.settlements)} yerleşke</small></div><div class="card kpi"><span>Aktif savaş</span><strong>${number(data.counts.battles)}</strong><small class="muted">Devam eden tüm cepheler</small></div><div class="card kpi"><span>Ordu ve filo</span><strong>${number(data.counts.armies + data.counts.fleets)}</strong><small class="muted">${number(data.counts.armies)} ordu · ${number(data.counts.fleets)} filo</small></div><div class="card kpi"><span>Son 24 saat</span><strong>${number(data.counts.reviews)}</strong><small class="muted">Denetim kaydı</small></div></section>
     <section class="content-grid"><div class="card"><div class="card-head"><div><h2>Devlet durumu</h2><p>Askerî hareketliliğe göre öne çıkan kayıtlar</p></div><button class="button" data-route-action="countries">Tümünü gör</button></div><div class="data-list">${data.countries.map((country) => `<div class="data-row"><div><strong>${escapeHtml(country.name)}</strong><small>${number(country.settlement_count)} yerleşke · ${number(country.army_count)} ordu</small></div><span>${number(country.personnel)} asker</span><span>${money(country.treasury)}</span><button class="button" data-country="${country.id}">Aç</button></div>`).join("")}</div></div>
-    <aside class="card"><div class="card-head"><div><h3>Hızlı işlemler</h3><p>Sık kullanılan GM araçları</p></div></div><div class="quick-actions"><button class="button" data-open-army>⚔ Yeni ordu oluştur</button><button class="button" data-route-action="countries">♜ Devlet ve şehirleri aç</button><button class="button" data-route-action="audit">↶ Son değişiklikleri incele</button></div><hr><div class="card-head"><div><h3>Son kayıtlar</h3></div></div>${auditRows(data.audit, 5)}</aside></section>`;
+    <aside class="card"><div class="card-head"><div><h3>Hızlı işlemler</h3><p>Sık kullanılan GM araçları</p></div></div><div class="quick-actions"><button class="button" data-open-army>⚔ Yeni ordu oluştur</button><button class="button" data-route-action="health">♥ Oyun sağlığını denetle</button><button class="button" data-route-action="countries">♜ Devlet ve şehirleri aç</button><button class="button" data-route-action="audit">↶ Son değişiklikleri incele</button></div><hr>${workspaceListMarkup()}<hr><div class="card-head"><div><h3>Son kayıtlar</h3></div></div>${auditRows(data.audit, 5)}</aside></section>`;
   bindPageActions();
 }
 
 async function countries() {
   setActiveRoute("countries"); loading();
   state.countries = await api("/api/countries");
-  page.innerHTML = `<div class="page-head"><div><h1>Devletler</h1><p>Aktif ve yok edilmiş bütün devlet kayıtları</p></div><button class="button primary" data-open-army>＋ Yeni ordu</button></div><section class="card table-wrap"><table><thead><tr><th>Devlet</th><th>Durum</th><th>Yerleşke</th><th>Ordu</th><th>Filo</th><th>Hazine</th><th></th></tr></thead><tbody>${state.countries.map((country) => `<tr data-country-id="${country.id}"><td><strong>${escapeHtml(country.name)}</strong></td><td><span class="pill ${country.status === "ACTIVE" ? "" : "neutral"}">${escapeHtml(countryStatusLabels[country.status] || country.status)}</span></td><td>${number(country.settlement_count)}</td><td>${number(country.army_count)}</td><td>${number(country.fleet_count)}</td><td>${money(country.treasury)}</td><td>${country.status === "ACTIVE" ? `<button class="button compact" data-edit-country="${country.id}">Düzenle</button>` : ""}</td></tr>`).join("")}</tbody></table></section>`;
+  page.innerHTML = `<div class="page-head"><div><h1>Devletler</h1><p>Aktif ve yok edilmiş bütün devlet kayıtları</p></div><button class="button primary" data-open-army>＋ Yeni ordu</button></div><section class="card table-wrap"><table><thead><tr><th>Devlet</th><th>Durum</th><th>Yerleşke</th><th>Ordu</th><th>Filo</th><th>Hazine</th><th></th></tr></thead><tbody>${state.countries.map((country) => `<tr data-country-id="${country.id}" data-record-type="COUNTRY" data-record-id="${country.id}"><td><strong>${escapeHtml(country.name)}</strong></td><td><span class="pill ${country.status === "ACTIVE" ? "" : "neutral"}">${escapeHtml(countryStatusLabels[country.status] || country.status)}</span></td><td>${number(country.settlement_count)}</td><td>${number(country.army_count)}</td><td>${number(country.fleet_count)}</td><td>${money(country.treasury)}</td><td>${country.status === "ACTIVE" ? `<button class="button compact" data-edit-country="${country.id}">Düzenle</button>` : ""}</td></tr>`).join("")}</tbody></table></section>`;
   bindPageActions();
   document.querySelectorAll("tr[data-country-id]").forEach((row) => row.addEventListener("click", () => {
     countryDetail(row.dataset.countryId).catch(showPageError);
@@ -204,6 +268,7 @@ async function countries() {
     event.stopPropagation();
     openCountryEditor(state.countries.find((item) => item.id === button.dataset.editCountry));
   }));
+  revealFocusedRecord();
 }
 
 async function countryDetail(id) {
@@ -211,41 +276,69 @@ async function countryDetail(id) {
   const [data, catalog] = await Promise.all([api(`/api/countries/${id}`), state.characterCatalog ? Promise.resolve(state.characterCatalog) : api("/api/catalog/characters")]);
   state.characterCatalog = catalog;
   state.selectedCountry = data;
+  recordRecent({ type: "COUNTRY", id: data.country.id, label: data.country.name, detail: countryStatusLabels[data.country.status] || data.country.status });
   const totalPopulation = data.settlements.reduce((sum, item) => sum + Number(item.population) + Number(item.slave_population), 0);
   const totalArmy = data.armies.reduce((sum, item) => sum + Number(item.total), 0);
-  page.innerHTML = `<div class="page-head"><div><span class="pill">${escapeHtml(countryStatusLabels[data.country.status] || data.country.status)}</span><h1 style="margin-top:10px">${escapeHtml(data.country.name)}</h1><p>${number(data.settlements.length)} yerleşke · ${number(data.armies.length)} ordu · ${number(data.fleets.length)} filo</p></div><div class="actions"><button class="button" data-back-countries>← Devletler</button><button class="button primary" data-open-army data-default-country="${data.country.id}">＋ Ordu oluştur</button></div></div>
+  page.innerHTML = `<div class="page-head"><div><span class="pill">${escapeHtml(countryStatusLabels[data.country.status] || data.country.status)}</span><h1 style="margin-top:10px">${escapeHtml(data.country.name)}</h1><p>${number(data.settlements.length)} yerleşke · ${number(data.armies.length)} ordu · ${number(data.fleets.length)} filo</p></div><div class="actions"><button class="button" data-back-countries>← Devletler</button><button class="button" data-edit-country-detail>Düzenle</button><button class="button primary" data-open-army data-default-country="${data.country.id}">＋ Ordu oluştur</button></div></div>
     <section class="detail-grid"><div class="detail-cell"><span>Hazine</span><strong>${money(data.country.treasury)}</strong></div><div class="detail-cell"><span>Toplam nüfus</span><strong>${number(totalPopulation)}</strong></div><div class="detail-cell"><span>Ordu mevcudu</span><strong>${number(totalArmy)}</strong></div><div class="detail-cell"><span>Seferberlik</span><strong>${escapeHtml(mobilizationLabels[data.country.mobilization] || data.country.mobilization)}</strong></div></section>
     <div class="section-title"><h2>Yerleşkeler</h2><span>${number(data.settlements.length)} kayıt</span></div>
-    <section class="card table-wrap"><table><thead><tr><th>Yerleşke</th><th>Nüfus</th><th>Köle</th><th>Hazine</th><th>Kaynak</th><th>Din</th><th>Kara ticareti</th><th>Asker</th><th>Gemi</th></tr></thead><tbody>${data.settlements.map((settlement) => `<tr><td><strong>${escapeHtml(settlement.name)}</strong>${settlement.is_conquered ? '<small class="muted"> · Fethedildi</small>' : ""}</td><td>${number(settlement.population)}</td><td>${number(settlement.slave_population)}</td><td>${money(settlement.local_treasury)}</td><td>${escapeHtml(settlement.resource_label || settlement.resource_type || "—")}</td><td>${religionDistribution(settlement)}</td><td>${money(settlement.base_land_trade_income)}</td><td>${number(settlement.army_stock)}</td><td>${number(settlement.ships)}</td></tr>`).join("") || '<tr><td colspan="9" class="empty">Yerleşke bulunmuyor.</td></tr>'}</tbody></table></section>
+    <section class="card table-wrap"><table><thead><tr><th>Yerleşke</th><th>Nüfus</th><th>Köle</th><th>Hazine</th><th>Kaynak</th><th>Din</th><th>Kara ticareti</th><th>Asker</th><th>Gemi</th></tr></thead><tbody>${data.settlements.map((settlement) => `<tr data-open-settlement="${settlement.id}"><td><strong>${escapeHtml(settlement.name)}</strong>${settlement.is_conquered ? '<small class="muted"> · Fethedildi</small>' : ""}</td><td>${number(settlement.population)}</td><td>${number(settlement.slave_population)}</td><td>${money(settlement.local_treasury)}</td><td>${escapeHtml(settlement.resource_label || settlement.resource_type || "—")}</td><td>${religionDistribution(settlement)}</td><td>${money(settlement.base_land_trade_income)}</td><td>${number(settlement.army_stock)}</td><td>${number(settlement.ships)}</td></tr>`).join("") || '<tr><td colspan="9" class="empty">Yerleşke bulunmuyor.</td></tr>'}</tbody></table></section>
     <section class="content-grid"><div class="card"><div class="card-head"><div><h3>Ordular</h3><p>Birlik ve komutan durumu</p></div></div>${data.armies.map((army) => `<div class="data-row"><div><strong>${escapeHtml(army.name)}</strong><small>${escapeHtml(army.commander_name || "Komutan atanmamış")}</small></div><span>${number(army.total)} asker</span><span>Tur ${number(army.created_turn)}</span><span class="pill neutral">Aktif</span></div>`).join("") || '<div class="empty">Henüz ordu yok.</div>'}</div><aside class="card"><div class="card-head"><div><h3>Filolar</h3><p>Gemi ve amiral durumu</p></div></div>${data.fleets.map((fleet) => `<div class="audit-item"><span class="audit-dot"></span><div><strong>${escapeHtml(fleet.name)}</strong><span>${escapeHtml(fleet.commander_name || "Amiral atanmamış")} · ${number(fleet.total)} gemi</span></div></div>`).join("") || '<div class="empty">Henüz filo yok.</div>'}</aside></section>
-    <section class="card section-gap"><div class="card-head"><div><h3>Karakterler</h3><p>Uzmanlık, görev ve durum kayıtları</p></div></div><div class="compact-grid">${data.characters.map((character) => `<div class="record-card"><strong>${escapeHtml(character.name)}</strong><span>${escapeHtml(roleLabel(character))} · Sv${number(character.level)} · +${number(character.skill_bonus)}</span><small>${escapeHtml(characterStatusLabel(character.status))} · ${escapeHtml(assignmentLabel(character.assignment))}${character.assigned_settlement_name ? ` · ${escapeHtml(character.assigned_settlement_name)}` : ""}${character.death_settlement_name ? ` · Ölüm: ${escapeHtml(character.death_settlement_name)}` : ""}</small></div>`).join("") || '<div class="empty">Karakter yok.</div>'}</div></section>`;
+    <section class="card section-gap"><div class="card-head"><div><h3>Karakterler</h3><p>Uzmanlık, görev ve durum kayıtları</p></div></div><div class="compact-grid">${data.characters.map((character) => `<div class="record-card"><strong>${escapeHtml(character.name)}</strong><span>${escapeHtml(roleLabel(character))} · Sv${number(character.level)} · +${number(character.skill_bonus)}</span><small>${escapeHtml(characterStatusLabel(character.status))} · ${escapeHtml(assignmentLabel(character.assignment))}${character.assigned_settlement_name ? ` · ${escapeHtml(character.assigned_settlement_name)}` : ""}${character.death_settlement_name ? ` · Ölüm: ${escapeHtml(character.death_settlement_name)}` : ""}</small></div>`).join("") || '<div class="empty">Karakter yok.</div>'}</div></section>${countryRelationsPanel(data)}`;
   bindPageActions();
   document.querySelector("[data-back-countries]").addEventListener("click", countries);
+  document.querySelector("[data-edit-country-detail]").addEventListener("click", () => openCountryEditor(data.country));
+  document.querySelectorAll("[data-open-settlement]").forEach((row) => row.addEventListener("click", () => settlementDetail(row.dataset.openSettlement).catch(showPageError)));
+  document.querySelectorAll("[data-related-country]").forEach((button) => button.addEventListener("click", () => countryDetail(button.dataset.relatedCountry).catch(showPageError)));
 }
 
 async function settlementsPage() {
   setActiveRoute("settlements"); loading();
   const [rows, religions] = await Promise.all([api("/api/settlements"), state.religionCatalog ? Promise.resolve(state.religionCatalog) : api("/api/catalog/religions")]);
   state.religionCatalog = religions;
-  page.innerHTML = `<div class="page-head"><div><h1>Yerleşkeler</h1><p>Nüfus, ekonomi, din, vergi oranı, kaynak ve askerî stokların tamamı</p></div><span class="pill neutral">${number(rows.length)} yerleşke</span></div><section class="card table-wrap"><table><thead><tr><th>Yerleşke</th><th>Devlet</th><th>Nüfus / Köle</th><th>Din dağılımı</th><th>Yerel hazine</th><th>Vergi</th><th>Kara ticareti</th><th>Asker / Gemi</th><th>Durum</th><th></th></tr></thead><tbody>${rows.map((row) => `<tr data-country-id="${row.country_id}"><td><strong>${escapeHtml(row.name)}</strong><small>${escapeHtml(row.resource_label || row.resource_type)} · ${escapeHtml(row.culture_label || row.culture_group)} · ${row.is_coastal ? "Kıyı" : "İç bölge"}</small></td><td>${escapeHtml(row.country_name)}</td><td>${number(row.population)} / ${number(row.slave_population)}</td><td>${religionDistribution(row)}</td><td>${money(row.local_treasury)}</td><td>%${number(row.tax_rate_percent)}</td><td>${money(row.base_land_trade_income)}</td><td>${number(row.army_stock)} / ${number(row.ships)}</td><td><span class="pill ${row.ruin_stage > 0 || row.is_conquered ? "warning" : "neutral"}">${row.ruin_stage > 0 ? `Harap ${number(row.ruin_stage)}` : row.is_conquered ? "Fethedildi" : "Normal"}</span></td><td>${row.country_status === "ACTIVE" ? `<button class="button compact" data-edit-settlement="${row.id}">Düzenle</button>` : ""}</td></tr>`).join("") || '<tr><td colspan="10" class="empty">Yerleşke bulunmuyor.</td></tr>'}</tbody></table></section>`;
-  bindCountryRows();
+  page.innerHTML = `<div class="page-head"><div><h1>Yerleşkeler</h1><p>Nüfus, ekonomi, din, vergi oranı, kaynak ve askerî stokların tamamı</p></div><span class="pill neutral">${number(rows.length)} yerleşke</span></div><section class="card table-wrap"><table><thead><tr><th>Yerleşke</th><th>Devlet</th><th>Nüfus / Köle</th><th>Din dağılımı</th><th>Yerel hazine</th><th>Vergi</th><th>Kara ticareti</th><th>Asker / Gemi</th><th>Durum</th><th></th></tr></thead><tbody>${rows.map((row) => `<tr data-country-id="${row.country_id}" data-record-type="SETTLEMENT" data-record-id="${row.id}"><td><strong>${escapeHtml(row.name)}</strong><small>${escapeHtml(row.resource_label || row.resource_type)} · ${escapeHtml(row.culture_label || row.culture_group)} · ${row.is_coastal ? "Kıyı" : "İç bölge"}</small></td><td>${escapeHtml(row.country_name)}</td><td>${number(row.population)} / ${number(row.slave_population)}</td><td>${religionDistribution(row)}</td><td>${money(row.local_treasury)}</td><td>%${number(row.tax_rate_percent)}</td><td>${money(row.base_land_trade_income)}</td><td>${number(row.army_stock)} / ${number(row.ships)}</td><td><span class="pill ${row.ruin_stage > 0 || row.is_conquered ? "warning" : "neutral"}">${row.ruin_stage > 0 ? `Harap ${number(row.ruin_stage)}` : row.is_conquered ? "Fethedildi" : "Normal"}</span></td><td>${row.country_status === "ACTIVE" ? `<button class="button compact" data-edit-settlement="${row.id}">Düzenle</button>` : ""}</td></tr>`).join("") || '<tr><td colspan="10" class="empty">Yerleşke bulunmuyor.</td></tr>'}</tbody></table></section>`;
+  document.querySelectorAll('[data-record-type="SETTLEMENT"]').forEach((row) => row.addEventListener("click", () => settlementDetail(row.dataset.recordId).catch(showPageError)));
   document.querySelectorAll("[data-edit-settlement]").forEach((button) => button.addEventListener("click", (event) => {
     event.stopPropagation();
     openSettlementEditor(rows.find((item) => item.id === button.dataset.editSettlement));
   }));
+  revealFocusedRecord();
+}
+
+async function settlementDetail(id) {
+  setActiveRoute("settlements"); loading();
+  const [data, religions] = await Promise.all([
+    api(`/api/settlements/${id}`),
+    state.religionCatalog ? Promise.resolve(state.religionCatalog) : api("/api/catalog/religions")
+  ]);
+  state.religionCatalog = religions;
+  const settlement = data.settlement;
+  recordRecent({ type: "SETTLEMENT", id: settlement.id, label: settlement.name, detail: settlement.country_name });
+  const income = Number(settlement.tax_income || 0) + Number(settlement.land_trade_income || 0) + Number(settlement.sea_trade_income || 0);
+  const garrisonTotal = data.units.reduce((sum, row) => sum + Number(row.quantity), 0);
+  const armyTotal = data.armyAllocations.reduce((sum, row) => sum + Number(row.quantity), 0);
+  const shipTotal = data.ships.reduce((sum, row) => sum + Number(row.quantity), 0) + data.fleetAllocations.reduce((sum, row) => sum + Number(row.quantity), 0);
+  const rowsOrEmpty = (items, render, empty) => items.length ? items.map(render).join("") : `<div class="compact-empty muted">${empty}</div>`;
+  page.innerHTML = `<div class="page-head"><div><span class="pill ${settlement.ruin_stage > 0 || settlement.is_conquered ? "warning" : ""}">${settlement.ruin_stage > 0 ? `Harap ${number(settlement.ruin_stage)}` : settlement.is_conquered ? "Fethedildi" : "Aktif yerleşke"}</span><h1 style="margin-top:10px">${escapeHtml(settlement.name)}</h1><p>${escapeHtml(settlement.country_name)} · ${escapeHtml(settlement.culture_label || settlement.culture_group)} · ${escapeHtml(settlement.resource_label || settlement.resource_type)}</p></div><div class="actions"><button class="button" data-back-settlements>← Yerleşkeler</button><button class="button" data-open-country="${settlement.country_id}">Devleti aç</button><button class="button primary" data-edit-settlement-detail>Düzenle</button></div></div><section class="detail-grid"><div class="detail-cell"><span>Toplam nüfus</span><strong>${number(Number(settlement.population) + Number(settlement.slave_population))}</strong><small>${number(settlement.population)} özgür · ${number(settlement.slave_population)} köle</small></div><div class="detail-cell"><span>Yerel hazine</span><strong>${money(settlement.local_treasury)}</strong><small>Vergi oranı %${number(settlement.tax_rate_percent)}</small></div><div class="detail-cell"><span>Tur geliri</span><strong>${money(income)}</strong><small>Vergi ${money(settlement.tax_income)} · Kara ${money(settlement.land_trade_income)} · Deniz ${money(settlement.sea_trade_income)}</small></div><div class="detail-cell"><span>Askerî varlık</span><strong>${number(garrisonTotal + armyTotal)} asker · ${number(shipTotal)} gemi</strong><small>${number(armyTotal)} asker ordulara tahsisli</small></div></section><section class="relation-grid"><article class="card"><div class="card-head"><div><h3>Binalar</h3><p>Seviye ve inşa durumu</p></div><span class="pill neutral">${number(data.buildings.length)}</span></div>${rowsOrEmpty(data.buildings, (row) => `<div class="relation-row static"><span><strong>${escapeHtml(humanKey(row.building_type))}</strong><small>${row.status === "BUILDING" ? `İnşaat · Tur ${number(row.completion_turn)}` : "Kullanımda"}</small></span><em>Sv${number(row.level)}${row.target_level ? ` → ${number(row.target_level)}` : ""}</em></div>`, "Bina kaydı bulunmuyor.")}</article><article class="card"><div class="card-head"><div><h3>Politikalar</h3><p>Yerleşke yönetim kararları</p></div></div>${rowsOrEmpty(data.policies, (row) => `<div class="relation-row static"><span><strong>${escapeHtml(humanKey(row.policy_key))}</strong><small>${row.status === "ACTIVE" ? "Etkin" : `Tur ${number(row.activation_turn)} tarihinde etkinleşecek`}</small></span><em>${number(row.slot)}. yuva</em></div>`, "Etkin politika bulunmuyor.")}</article><article class="card"><div class="card-head"><div><h3>Kara birlikleri</h3><p>Yerleşke stoku ve ordu tahsisleri</p></div></div>${rowsOrEmpty(data.units, (row) => `<div class="relation-row static"><span><strong>${escapeHtml(humanKey(row.unit_type))}</strong><small>${escapeHtml(humanKey(row.force_type))} · ${escapeHtml(humanKey(row.status))}</small></span><em>${number(row.quantity)}</em></div>`, "Yerleşke stokunda asker bulunmuyor.")}${rowsOrEmpty(data.armyAllocations, (row) => `<button class="relation-row" data-open-army-detail="${row.army_id}"><span><strong>${escapeHtml(row.army_name)}</strong><small>${escapeHtml(humanKey(row.unit_type))}</small></span><em>${number(row.quantity)}</em></button>`, "Ordulara tahsis edilmiş asker bulunmuyor.")}</article><article class="card"><div class="card-head"><div><h3>Donanma</h3><p>Rezerv ve filo gemileri</p></div></div>${rowsOrEmpty(data.ships, (row) => `<div class="relation-row static"><span><strong>${escapeHtml(humanKey(row.ship_type))}</strong><small>${escapeHtml(humanKey(row.status))}</small></span><em>${number(row.quantity)}</em></div>`, "Yerleşke rezervinde gemi bulunmuyor.")}${rowsOrEmpty(data.fleetAllocations, (row) => `<div class="relation-row static"><span><strong>${escapeHtml(row.fleet_name)}</strong><small>${escapeHtml(humanKey(row.ship_type))}</small></span><em>${number(row.quantity)}</em></div>`, "Filoya tahsis edilmiş gemi bulunmuyor.")}</article></section><div class="section-title"><h2>Ekonomi ve olay geçmişi</h2><span>İlişkili son kayıtlar</span></div><section class="relation-grid"><article class="card"><div class="card-head"><div><h3>Ticaret yolları</h3><p>Bu yerleşkeye bağlı anlaşmalar</p></div></div>${rowsOrEmpty(data.trades, (row) => `<div class="relation-row static"><span><strong>${escapeHtml(row.proposer_country_name)} ↔ ${escapeHtml(row.receiver_country_name)}</strong><small>${escapeHtml(row.proposer_settlement_name)} → ${escapeHtml(row.receiver_settlement_name || "Bekliyor")} · ${row.route === "SEA" ? "Deniz" : "Kara"}</small></span><em>${row.status === "ACTIVE" ? money(row.income_per_country) : escapeHtml(humanKey(row.status))}</em></div>`, "Ticaret yolu bulunmuyor.")}</article><article class="card"><div class="card-head"><div><h3>Son mali hareketler</h3><p>Yerleşke kaynaklı işlemler</p></div></div>${rowsOrEmpty(data.transactions.slice(0, 12), (row) => `<div class="relation-row static"><span><strong>${escapeHtml(row.description)}</strong><small>Tur ${number(row.turn)} · ${escapeHtml(humanKey(row.kind))}</small></span><em class="${Number(row.amount) < 0 ? "danger-text" : ""}">${signedMoney(row.amount)}</em></div>`, "Mali hareket bulunmuyor.")}</article><article class="card relation-span"><div class="card-head"><div><h3>Yerleşke olayları</h3><p>Son 25 olay ve tetiklenme sonucu</p></div></div>${rowsOrEmpty(data.events, (row) => `<div class="relation-row static"><span><strong>${escapeHtml(humanKey(row.event_type))}</strong><small>Tur ${number(row.turn)} · Şans %${number(row.chance)} · Zar ${number(row.roll)}</small></span><em class="${row.triggered ? "danger-text" : ""}">${row.triggered ? "Tetiklendi" : "Gerçekleşmedi"}</em></div>`, "Yerleşke olayı bulunmuyor.")}</article></section>`;
+  bindPageActions();
+  document.querySelector("[data-back-settlements]").addEventListener("click", () => settlementsPage().catch(showPageError));
+  document.querySelector("[data-open-country]").addEventListener("click", (event) => countryDetail(event.currentTarget.dataset.openCountry).catch(showPageError));
+  document.querySelector("[data-edit-settlement-detail]").addEventListener("click", () => openSettlementEditor(settlement));
+  document.querySelectorAll("[data-open-army-detail]").forEach((button) => button.addEventListener("click", () => openArmyEditor(button.dataset.openArmyDetail).catch((error) => toast(error.message, "error"))));
 }
 
 async function forcesPage() {
   setActiveRoute("armies"); loading();
   const data = await api("/api/forces");
   page.innerHTML = `<div class="page-head"><div><h1>Ordular & Filolar</h1><p>Kalıcı kuvvetlerin mevcudu, konumu ve komuta durumu</p></div><button class="button primary" data-open-army>＋ Yeni ordu</button></div>
-    <div class="section-title"><h2>Ordular</h2><span>${number(data.armies.length)} kayıt</span></div><section class="card table-wrap"><table><thead><tr><th>Ordu</th><th>Devlet</th><th>Komutan</th><th>Mevcut</th><th>Köken</th><th>Kuruluş</th><th></th></tr></thead><tbody>${data.armies.map((row) => `<tr data-country-id="${row.country_id}"><td><strong>${escapeHtml(row.name)}</strong></td><td>${escapeHtml(row.country_name)}</td><td>${escapeHtml(row.commander_name || "Atanmamış")}</td><td>${number(row.total)}</td><td>${number(row.origin_count)} yerleşke</td><td>Tur ${number(row.created_turn)}</td><td><button class="button compact" data-edit-army="${row.id}">Düzenle</button></td></tr>`).join("") || '<tr><td colspan="7" class="empty">Ordu bulunmuyor.</td></tr>'}</tbody></table></section>
-    <div class="section-title"><h2>Filolar</h2><span>${number(data.fleets.length)} kayıt</span></div><section class="card table-wrap"><table><thead><tr><th>Filo</th><th>Devlet</th><th>Amiral</th><th>Hazır gemi</th><th>Hasarlı gemi</th><th>Kuruluş</th></tr></thead><tbody>${data.fleets.map((row) => `<tr data-country-id="${row.country_id}"><td><strong>${escapeHtml(row.name)}</strong></td><td>${escapeHtml(row.country_name)}</td><td>${escapeHtml(row.commander_name || "Atanmamış")}</td><td>${number(Number(row.ready_ships) + Number(row.tracked_ships) - Number(row.damaged_ships))}</td><td>${number(row.damaged_ships)}</td><td>Tur ${number(row.created_turn)}</td></tr>`).join("") || '<tr><td colspan="6" class="empty">Filo bulunmuyor.</td></tr>'}</tbody></table></section>`;
+    <div class="section-title"><h2>Ordular</h2><span>${number(data.armies.length)} kayıt</span></div><section class="card table-wrap"><table><thead><tr><th>Ordu</th><th>Devlet</th><th>Komutan</th><th>Mevcut</th><th>Köken</th><th>Kuruluş</th><th></th></tr></thead><tbody>${data.armies.map((row) => `<tr data-country-id="${row.country_id}" data-record-type="ARMY" data-record-id="${row.id}"><td><strong>${escapeHtml(row.name)}</strong></td><td>${escapeHtml(row.country_name)}</td><td>${escapeHtml(row.commander_name || "Atanmamış")}</td><td>${number(row.total)}</td><td>${number(row.origin_count)} yerleşke</td><td>Tur ${number(row.created_turn)}</td><td><button class="button compact" data-edit-army="${row.id}">Düzenle</button></td></tr>`).join("") || '<tr><td colspan="7" class="empty">Ordu bulunmuyor.</td></tr>'}</tbody></table></section>
+    <div class="section-title"><h2>Filolar</h2><span>${number(data.fleets.length)} kayıt</span></div><section class="card table-wrap"><table><thead><tr><th>Filo</th><th>Devlet</th><th>Amiral</th><th>Hazır gemi</th><th>Hasarlı gemi</th><th>Kuruluş</th></tr></thead><tbody>${data.fleets.map((row) => `<tr data-country-id="${row.country_id}" data-record-type="FLEET" data-record-id="${row.id}"><td><strong>${escapeHtml(row.name)}</strong></td><td>${escapeHtml(row.country_name)}</td><td>${escapeHtml(row.commander_name || "Atanmamış")}</td><td>${number(Number(row.ready_ships) + Number(row.tracked_ships) - Number(row.damaged_ships))}</td><td>${number(row.damaged_ships)}</td><td>Tur ${number(row.created_turn)}</td></tr>`).join("") || '<tr><td colspan="6" class="empty">Filo bulunmuyor.</td></tr>'}</tbody></table></section>`;
   bindPageActions(); bindCountryRows();
   document.querySelectorAll("[data-edit-army]").forEach((button) => button.addEventListener("click", (event) => {
     event.stopPropagation();
     openArmyEditor(button.dataset.editArmy).catch((error) => toast(error.message, "error"));
   }));
+  revealFocusedRecord();
 }
 
 async function charactersPage() {
@@ -253,12 +346,13 @@ async function charactersPage() {
   const [rows, catalog] = await Promise.all([api("/api/characters"), state.characterCatalog ? Promise.resolve(state.characterCatalog) : api("/api/catalog/characters")]);
   state.characterCatalog = catalog;
   const alive = rows.filter((row) => row.character_status === "ACTIVE").length;
-  page.innerHTML = `<div class="page-head"><div><h1>Karakterler</h1><p>Karakter adları, puanları, uzmanlıkları ve doktrinleri</p></div><div class="actions"><span class="pill">${number(alive)} aktif</span><span class="pill neutral">${number(rows.length - alive)} ölü/görevden alınmış</span></div></div><section class="card table-wrap"><table><thead><tr><th>Karakter</th><th>Devlet</th><th>Rol</th><th>Seviye / Bonus</th><th>Uzmanlık</th><th>Durum</th><th></th></tr></thead><tbody>${rows.map((row) => `<tr data-country-id="${row.country_id}"><td><strong>${escapeHtml(row.name)}</strong><small>${escapeHtml(row.trained_settlement_name || "Köken bilinmiyor")}</small></td><td>${escapeHtml(row.country_name)}</td><td>${escapeHtml(roleLabel(row))}</td><td>Sv${number(row.specialization_level)} / +${number(row.skill_bonus)}</td><td>${escapeHtml(developmentLabel(row.specialization || row.admiral_specialization))}<small>${escapeHtml(row.doctrine || row.admiral_doctrine ? developmentLabel(row.doctrine || row.admiral_doctrine) : "Doktrin yok")}</small></td><td><span class="pill ${row.character_status === "ACTIVE" ? "" : "neutral"}">${escapeHtml(characterStatusLabel(row.character_status))}</span>${row.death_settlement_name ? `<small>Ölüm: ${escapeHtml(row.death_settlement_name)}</small>` : ""}</td><td>${row.character_status === "ACTIVE" ? `<button class="button compact" data-edit-character="${row.id}">Düzenle</button>` : ""}</td></tr>`).join("") || '<tr><td colspan="7" class="empty">Karakter bulunmuyor.</td></tr>'}</tbody></table></section>`;
+  page.innerHTML = `<div class="page-head"><div><h1>Karakterler</h1><p>Karakter adları, puanları, uzmanlıkları ve doktrinleri</p></div><div class="actions"><span class="pill">${number(alive)} aktif</span><span class="pill neutral">${number(rows.length - alive)} ölü/görevden alınmış</span></div></div><section class="card table-wrap"><table><thead><tr><th>Karakter</th><th>Devlet</th><th>Rol</th><th>Seviye / Bonus</th><th>Uzmanlık</th><th>Durum</th><th></th></tr></thead><tbody>${rows.map((row) => `<tr data-country-id="${row.country_id}" data-record-type="CHARACTER" data-record-id="${row.id}"><td><strong>${escapeHtml(row.name)}</strong><small>${escapeHtml(row.trained_settlement_name || "Köken bilinmiyor")}</small></td><td>${escapeHtml(row.country_name)}</td><td>${escapeHtml(roleLabel(row))}</td><td>Sv${number(row.specialization_level)} / +${number(row.skill_bonus)}</td><td>${escapeHtml(developmentLabel(row.specialization || row.admiral_specialization))}<small>${escapeHtml(row.doctrine || row.admiral_doctrine ? developmentLabel(row.doctrine || row.admiral_doctrine) : "Doktrin yok")}</small></td><td><span class="pill ${row.character_status === "ACTIVE" ? "" : "neutral"}">${escapeHtml(characterStatusLabel(row.character_status))}</span>${row.death_settlement_name ? `<small>Ölüm: ${escapeHtml(row.death_settlement_name)}</small>` : ""}</td><td>${row.character_status === "ACTIVE" ? `<button class="button compact" data-edit-character="${row.id}">Düzenle</button>` : ""}</td></tr>`).join("") || '<tr><td colspan="7" class="empty">Karakter bulunmuyor.</td></tr>'}</tbody></table></section>`;
   bindCountryRows();
   document.querySelectorAll("[data-edit-character]").forEach((button) => button.addEventListener("click", (event) => {
     event.stopPropagation();
     openCharacterEditor(rows.find((item) => item.id === button.dataset.editCharacter)).catch((error) => toast(error.message, "error"));
   }));
+  revealFocusedRecord();
 }
 
 async function dynastiesPage() {
@@ -1452,6 +1546,20 @@ async function dataControlPage() {
   document.querySelector("[data-data-next]")?.addEventListener("click", () => { state.dataOffset += 25; refreshKeepingScroll(dataControlPage).catch(showPageError); });
 }
 
+async function gameHealthPage() {
+  setActiveRoute("health"); loading();
+  const data = await api("/api/game-health");
+  const severityLabel = { CRITICAL: "Kritik", WARNING: "Uyarı", INFO: "Bilgi" };
+  const issueRows = data.issues.map((issue, index) => `<article class="health-issue ${issue.severity.toLowerCase()}"><div class="health-icon">${issue.severity === "CRITICAL" ? "!" : issue.severity === "WARNING" ? "△" : "i"}</div><div><div class="health-meta"><span>${escapeHtml(issue.category)}</span><span>•</span><span>${escapeHtml(severityLabel[issue.severity] || issue.severity)}</span></div><h3>${escapeHtml(issue.title)}</h3><p>${escapeHtml(issue.detail)}</p></div><div class="health-actions"><span class="pill ${issue.severity === "CRITICAL" ? "danger" : issue.severity === "WARNING" ? "warning" : "neutral"}">${number(issue.count)} kayıt</span>${issue.targetId ? `<button class="button compact" data-health-issue="${index}">Kayda git</button>` : `<button class="button compact" data-route-action="${issue.route}">İncele</button>`}</div></article>`).join("");
+  page.innerHTML = `<div class="page-head"><div><span class="pill ${data.summary.critical ? "danger" : data.summary.warning ? "warning" : ""}">${data.summary.total ? `${number(data.summary.total)} bulgu` : "Sistem sağlıklı"}</span><h1 style="margin-top:10px">Oyun Sağlığı</h1><p>Verilerdeki tutarsızlıkları oyun akışına müdahale etmeden denetler.</p></div><button class="button" data-refresh-health>↻ Yeniden tara</button></div><section class="health-summary"><div class="card kpi health-critical"><span>Kritik</span><strong>${number(data.summary.critical)}</strong><small>Oyun akışını bozabilir</small></div><div class="card kpi health-warning"><span>Uyarı</span><strong>${number(data.summary.warning)}</strong><small>Yönetici incelemesi gerekir</small></div><div class="card kpi"><span>Bilgi</span><strong>${number(data.summary.info)}</strong><small>Takip edilebilir kayıt</small></div><div class="card kpi"><span>Son tarama</span><strong class="health-time">${date(data.checkedAt)}</strong><small>Tur ${number(data.guild.current_turn)} · ${escapeHtml(turnPhaseLabels[data.guild.turn_phase] || data.guild.turn_phase)}</small></div></section><section class="card health-panel"><div class="card-head"><div><h2>Denetim bulguları</h2><p>Yerleşkesiz devlet, geçersiz kuvvet, karakter, mareşal, filo tamiri ve vassallık kontrolleri</p></div></div><div class="health-list">${issueRows || '<div class="health-clean"><span>✓</span><div><h3>Tutarsızlık bulunmadı</h3><p>Kontrol edilen temel oyun kayıtları birbiriyle uyumlu.</p></div></div>'}</div></section>`;
+  document.querySelector("[data-refresh-health]").addEventListener("click", () => refreshKeepingScroll(gameHealthPage).catch(showPageError));
+  document.querySelectorAll("[data-health-issue]").forEach((button) => button.addEventListener("click", () => {
+    const issue = data.issues[Number(button.dataset.healthIssue)];
+    openWorkspaceRecord({ type: issue.targetType, id: issue.targetId, label: issue.targetLabel || issue.title, detail: issue.detail }).catch(showPageError);
+  }));
+  bindPageActions();
+}
+
 async function auditPage() {
   setActiveRoute("audit"); loading();
   const rows = await api("/api/audit?limit=150");
@@ -1463,6 +1571,10 @@ function bindPageActions() {
   document.querySelectorAll("[data-open-army]").forEach((button) => button.addEventListener("click", () => openArmyModal(button.dataset.defaultCountry)));
   document.querySelectorAll("[data-country]").forEach((button) => button.addEventListener("click", () => countryDetail(button.dataset.country)));
   document.querySelectorAll("[data-route-action]").forEach((button) => button.addEventListener("click", () => navigate(button.dataset.routeAction)));
+  document.querySelectorAll("[data-workspace-source]").forEach((button) => button.addEventListener("click", () => {
+    const row = readStoredList(button.dataset.workspaceSource)[Number(button.dataset.workspaceIndex)];
+    openWorkspaceRecord(row).catch(showPageError);
+  }));
 }
 
 async function navigate(route) {
@@ -1478,6 +1590,7 @@ async function navigate(route) {
     if (route === "assignments") return assignmentsPage();
     if (route === "battles") return battlesPage();
     if (route === "rebellions") return rebellionsPage();
+    if (route === "health") return gameHealthPage();
     if (route === "data-control") return dataControlPage();
     if (route === "audit") return auditPage();
     return overview();
@@ -1551,24 +1664,86 @@ async function confirmArmy() {
   finally { button.disabled = false; button.textContent = "Onayla ve oluştur"; }
 }
 
+const paletteCommands = [
+  { route: "overview", label: "Genel Bakış", detail: "Oyun kontrol merkezini aç" },
+  { route: "countries", label: "Devletler", detail: "Devlet kayıtlarını yönet" },
+  { route: "settlements", label: "Yerleşkeler", detail: "Nüfus, ekonomi, kültür ve dini incele" },
+  { route: "armies", label: "Ordular & Filolar", detail: "Kuvvetleri ve komutanları yönet" },
+  { route: "characters", label: "Karakterler", detail: "Karakter ve uzmanlık kayıtlarını aç" },
+  { route: "battles", label: "Savaşlar", detail: "Aktif savaş ve kuşatmaları aç" },
+  { route: "rebellions", label: "İsyanlar", detail: "İsyan durumlarını incele" },
+  { route: "health", label: "Oyun Sağlığı", detail: "Veri tutarlılığı taramasını çalıştır" },
+  { route: "data-control", label: "Tam Yetki", detail: "Tüm oyun mekaniklerine eriş" },
+  { route: "audit", label: "İşlem Geçmişi", detail: "Yönetici değişikliklerini incele" }
+];
+const searchInput = document.getElementById("global-search");
+const searchResults = document.getElementById("search-results");
+
+function bindPaletteResults() {
+  searchResults.querySelectorAll("[data-command-route]").forEach((button) => button.addEventListener("click", () => {
+    searchResults.hidden = true; searchInput.value = ""; navigate(button.dataset.commandRoute);
+  }));
+  searchResults.querySelectorAll("[data-palette-index]").forEach((button) => button.addEventListener("click", () => {
+    const row = state.paletteRows[Number(button.dataset.paletteIndex)];
+    searchResults.hidden = true; searchInput.value = ""; openWorkspaceRecord(row).catch(showPageError);
+  }));
+  searchResults.querySelectorAll("[data-palette-source]").forEach((button) => button.addEventListener("click", () => {
+    const row = readStoredList(button.dataset.paletteSource)[Number(button.dataset.paletteSourceIndex)];
+    searchResults.hidden = true; searchInput.value = ""; openWorkspaceRecord(row).catch(showPageError);
+  }));
+  searchResults.querySelectorAll("[data-palette-favorite]").forEach((button) => button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const row = state.paletteRows[Number(button.dataset.paletteFavorite)];
+    const added = toggleFavorite(row);
+    button.textContent = added ? "★" : "☆";
+    button.title = added ? "Favorilerden çıkar" : "Favorilere ekle";
+  }));
+}
+
+function paletteStoredGroup(title, source) {
+  const items = readStoredList(source).slice(0, 5);
+  if (!items.length) return "";
+  return `<div class="palette-heading">${title}</div>${items.map((item, index) => `<button class="search-result" data-palette-source="${source}" data-palette-source-index="${index}"><span><strong>${escapeHtml(item.label)}</strong><small>${escapeHtml(item.detail || searchTypeLabels[item.type] || item.type)}</small></span><em>${escapeHtml(searchTypeLabels[item.type] || item.type)}</em></button>`).join("")}`;
+}
+
+function renderPaletteHome() {
+  searchResults.innerHTML = `${paletteStoredGroup("Favoriler", "favorites")}${paletteStoredGroup("Son açılanlar", "recent")}<div class="palette-heading">Hızlı geçiş</div>${paletteCommands.slice(0, 6).map((command) => `<button class="search-result" data-command-route="${command.route}"><span><strong>${escapeHtml(command.label)}</strong><small>${escapeHtml(command.detail)}</small></span><em>Sayfa</em></button>`).join("")}`;
+  searchResults.hidden = false;
+  bindPaletteResults();
+}
+
+function renderPaletteSearch(rows, query) {
+  const normalizedQuery = query.toLocaleLowerCase("tr-TR");
+  const commands = paletteCommands.filter((command) => `${command.label} ${command.detail}`.toLocaleLowerCase("tr-TR").includes(normalizedQuery));
+  state.paletteRows = rows;
+  const commandMarkup = commands.map((command) => `<button class="search-result" data-command-route="${command.route}"><span><strong>${escapeHtml(command.label)}</strong><small>${escapeHtml(command.detail)}</small></span><em>Komut</em></button>`).join("");
+  const rowMarkup = rows.map((row, index) => `<div class="search-result-row"><button class="search-result" data-palette-index="${index}"><span><strong>${escapeHtml(row.label)}</strong><small>${escapeHtml(row.detail)}</small></span><em>${escapeHtml(searchTypeLabels[row.type] || row.type)}</em></button><button class="favorite-button" data-palette-favorite="${index}" title="${isFavorite(row) ? "Favorilerden çıkar" : "Favorilere ekle"}">${isFavorite(row) ? "★" : "☆"}</button></div>`).join("");
+  searchResults.innerHTML = commandMarkup || rowMarkup ? `${commands.length ? '<div class="palette-heading">Komutlar</div>' : ""}${commandMarkup}${rows.length ? '<div class="palette-heading">Oyun kayıtları</div>' : ""}${rowMarkup}` : '<div class="empty">Sonuç bulunamadı.</div>';
+  searchResults.hidden = false;
+  bindPaletteResults();
+}
+
 let searchTimer;
-document.getElementById("global-search").addEventListener("input", (event) => {
+searchInput.addEventListener("focus", () => { if (!searchInput.value.trim()) renderPaletteHome(); });
+searchInput.addEventListener("input", (event) => {
   clearTimeout(searchTimer);
   const query = event.target.value.trim();
-  const results = document.getElementById("search-results");
-  if (query.length < 2) { results.hidden = true; return; }
+  if (!query) return renderPaletteHome();
+  if (query.length < 2) return renderPaletteSearch([], query);
   searchTimer = setTimeout(async () => {
-    try {
-      const rows = await api(`/api/search?q=${encodeURIComponent(query)}`);
-      results.innerHTML = rows.length ? rows.map((row) => `<button class="search-result" data-search-type="${row.type}" data-search-id="${row.id}"><span><strong>${escapeHtml(row.label)}</strong><br><small>${escapeHtml(row.detail)}</small></span><small>${escapeHtml(row.type)}</small></button>`).join("") : '<div class="empty">Sonuç bulunamadı.</div>';
-      results.hidden = false;
-      results.querySelectorAll("button").forEach((button) => button.addEventListener("click", () => {
-        results.hidden = true; event.target.value = "";
-        if (button.dataset.searchType === "COUNTRY") countryDetail(button.dataset.searchId);
-        else toast("Bu kayıt türünün ayrıntı ekranı sonraki panel paketinde açılacak.", "error");
-      }));
-    } catch (error) { toast(error.message, "error"); }
-  }, 250);
+    try { renderPaletteSearch(await api(`/api/search?q=${encodeURIComponent(query)}`), query); }
+    catch (error) { toast(error.message, "error"); }
+  }, 220);
+});
+document.addEventListener("keydown", (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase("tr-TR") === "k") {
+    event.preventDefault(); searchInput.focus(); searchInput.select(); renderPaletteHome();
+  } else if (event.key === "Escape" && !searchResults.hidden) {
+    searchResults.hidden = true; searchInput.blur();
+  }
+});
+document.addEventListener("click", (event) => {
+  if (!event.target.closest(".search-wrap")) searchResults.hidden = true;
 });
 
 document.querySelectorAll("[data-route]").forEach((button) => button.addEventListener("click", () => navigate(button.dataset.route)));

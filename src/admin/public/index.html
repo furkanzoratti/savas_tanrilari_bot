@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>AMRP GM Operasyon Masası</title>
-  <link rel="stylesheet" href="/app.css?v=20261013-navy-cream-v5">
+  <link rel="stylesheet" href="/app.css?v=20261013-relations-v7">
 </head>
 <body>
   <main id="login" class="login-shell" hidden>
@@ -35,6 +35,7 @@
         <button class="nav-item" data-route="battles"><span>🔥</span> Savaşlar</button>
         <button class="nav-item" data-route="rebellions"><span>⚑</span> İsyanlar</button>
         <span class="nav-section">Sistem</span>
+        <button class="nav-item" data-route="health"><span>♥</span> Oyun Sağlığı</button>
         <button class="nav-item" data-route="data-control"><span>⚙</span> Tam Yetki</button>
         <button class="nav-item" data-route="audit"><span>↶</span> İşlem Geçmişi</button>
       </nav>
@@ -44,7 +45,7 @@
     <section class="workspace">
       <header class="topbar">
         <div class="topbar-context"><small>GM OPERASYON MASASI</small><strong id="active-page-title">Genel Bakış</strong></div>
-        <div class="search-wrap"><span>⌕</span><input id="global-search" autocomplete="off" placeholder="Devlet, şehir, ordu veya karakter ara…"><div id="search-results" class="search-results" hidden></div></div>
+        <div class="search-wrap"><span>⌕</span><input id="global-search" autocomplete="off" placeholder="Ara veya komut çalıştır…"><kbd>Ctrl K</kbd><div id="search-results" class="search-results" hidden></div></div>
         <span id="turn-badge" class="status-badge">Yükleniyor…</span>
       </header>
       <div id="page" class="page" aria-live="polite"></div>
@@ -89,6 +90,6 @@
   </div>
 
   <div id="toast" class="toast" role="status" hidden></div>
-  <script src="/app.js?v=20261013-navy-cream-v5" defer></script>
+  <script src="/app.js?v=20261013-relations-v7" defer></script>
 </body>
 </html>
