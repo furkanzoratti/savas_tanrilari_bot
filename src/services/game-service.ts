@@ -30,6 +30,7 @@ import { fallbackReligionDistribution, loadReligionDistributions, loadSettlement
 import { applyCultureIncomeEffect, cultureMilitaryPopulation } from "../domain/culture-effects.js";
 import { syncCountryPrimaryCulture, syncGuildPrimaryCultures } from "./culture-service.js";
 import { processLastStandsForTurn, recordSettlementClaim, recoverLastStand, startLastStand, type LastStandEvent } from "./country-last-stand-service.js";
+import { cleanupEliminatedCountry } from "./character-duty-lifecycle-service.js";
 import { processStabilityTurn, type StabilityTurnResult } from "./stability-service.js";
 import {
   processRomanRepublicTurn,type RomanElectionOpenedDetail,type RomanFamilyTurnIncomeDetail,
@@ -1307,13 +1308,19 @@ export const gameService = {
       await client.query("UPDATE country_alliances SET status=CASE WHEN status='ACTIVE' THEN 'ENDED' ELSE 'CANCELLED' END,ended_at=NOW() WHERE status IN ('PENDING','ACTIVE') AND (proposer_country_id=$1 OR receiver_country_id=$1)", [country.id]);
       await client.query("UPDATE pact_invitations SET status='CANCELLED',responded_by=$2,responded_at=NOW() WHERE status='PENDING' AND (inviter_country_id=$1 OR receiver_country_id=$1)", [country.id, input.actorId]);
       await client.query("UPDATE trade_agreements SET status='ENDED',ended_at=NOW() WHERE status IN ('PENDING','ACTIVE') AND (proposer_country_id=$1 OR receiver_country_id=$1)", [country.id]);
-      await client.query("UPDATE country_vassalages SET status='ENDED',ended_turn=$2,ended_by=$3,ended_at=NOW() WHERE status='ACTIVE' AND (overlord_country_id=$1 OR vassal_country_id=$1)", [country.id, guild.current_turn, input.actorId]);
+      const cleanup=await cleanupEliminatedCountry(client,{
+        countryId:country.id,turn:guild.current_turn,actorId:input.actorId,
+        reason:"Devlet yok edildiği için karakter görevi sonlandırıldı."
+      });
       await client.query("DELETE FROM country_members WHERE country_id=$1", [country.id]);
       await client.query(
         "UPDATE countries SET status='YOK_EDİLDİ',destroyed_turn=$2,destroyed_reason=$3,destroyed_by=$4,destroyed_at=NOW(),discord_role_id=NULL WHERE id=$1",
         [country.id, guild.current_turn, reason, input.actorId]
       );
-      await audit(client, input.guildId, input.actorId, "COUNTRY_DESTROY", "country", country.id, { name: country.name, turn: guild.current_turn, reason });
+      await audit(client, input.guildId, input.actorId, "COUNTRY_DESTROY", "country", country.id, {
+        name:country.name,turn:guild.current_turn,reason,
+        dismissedCharacters:cleanup.dismissedCharacters,releasedVassals:cleanup.releasedVassalCountryIds
+      });
       return { name: country.name, turn: guild.current_turn, discordRoleId: country.discord_role_id };
     });
   },

@@ -124,6 +124,7 @@ import { mountedArcherSeparationMigration } from "./mounted-archer-separation-mi
 import { movementRuntimeRetirementMigration } from "./movement-runtime-retirement-migration.js";
 import { missionaryRollPercentRepairMigration } from "./missionary-roll-percent-repair-migration.js";
 import { espionageCaptivitiesMigration } from "./espionage-captivities-migration.js";
+import { characterDutyLifecycleRepairMigration } from "./character-duty-lifecycle-repair-migration.js";
 
 export const migrations = [
   {
@@ -2465,5 +2466,6 @@ export const migrations = [
   mountedArcherSeparationMigration,
   movementRuntimeRetirementMigration,
   missionaryRollPercentRepairMigration,
-  espionageCaptivitiesMigration
+  espionageCaptivitiesMigration,
+  characterDutyLifecycleRepairMigration
 ] as const;

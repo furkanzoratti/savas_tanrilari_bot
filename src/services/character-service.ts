@@ -1149,7 +1149,11 @@ export async function processCharacterTurn(
     }
     await client.query(
       `UPDATE diplomat_operations SET status='ACTIVE',updated_at=NOW()
-        WHERE guild_id=$1 AND status='TRAVELING' AND arrival_turn<=$2`,
+        WHERE guild_id=$1 AND status='TRAVELING' AND arrival_turn<=$2
+          AND EXISTS (SELECT 1 FROM countries owner WHERE owner.id=diplomat_operations.country_id AND owner.status='ACTIVE')
+          AND (target_country_id IS NULL OR EXISTS (
+            SELECT 1 FROM countries target WHERE target.id=diplomat_operations.target_country_id AND target.status='ACTIVE'
+          ))`,
       [guildId,turn]
     );
     const arrivedDiplomats = await client.query<{
@@ -1165,7 +1169,8 @@ export async function processCharacterTurn(
          LEFT JOIN countries target_country ON target_country.id=operation.target_country_id
          LEFT JOIN settlements target_settlement ON target_settlement.id=operation.target_settlement_id
         WHERE operation.guild_id=$1 AND operation.status='ACTIVE' AND operation.arrival_turn<=$2
-          AND operation.last_resolved_turn IS NULL`,
+          AND operation.last_resolved_turn IS NULL AND owner.status='ACTIVE'
+          AND (operation.target_country_id IS NULL OR target_country.status='ACTIVE')`,
       [guildId,turn]
     );
     for (const arrived of arrivedDiplomats.rows) {
@@ -1310,6 +1315,8 @@ export async function processCharacterTurn(
          LEFT JOIN settlements target_settlement ON target_settlement.id=operation.target_settlement_id
         WHERE operation.guild_id=$1 AND operation.status='ACTIVE' AND operation.arrival_turn<=$2
           AND (operation.last_resolved_turn IS NULL OR operation.last_resolved_turn<$2)
+          AND owner.status='ACTIVE'
+          AND (operation.target_country_id IS NULL OR target_country.status='ACTIVE')
         ORDER BY operation.created_at FOR UPDATE OF operation`,
       [guildId,turn]
     )).rows;

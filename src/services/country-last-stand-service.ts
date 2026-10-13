@@ -1,4 +1,5 @@
 import type { DbClient } from "../db/pool.js";
+import { cleanupEliminatedCountry } from "./character-duty-lifecycle-service.js";
 
 export const LAST_STAND_DURATION_TURNS=3;
 
@@ -106,7 +107,10 @@ async function eliminateCountry(
   await client.query("UPDATE pact_invitations SET status='CANCELLED',responded_by='SYSTEM',responded_at=NOW() WHERE status='PENDING' AND (inviter_country_id=$1 OR receiver_country_id=$1)",[input.countryId]);
   await client.query("DELETE FROM pact_memberships WHERE country_id=$1",[input.countryId]);
   await client.query("DELETE FROM diplomatic_pacts WHERE founder_country_id=$1",[input.countryId]);
-  await client.query("UPDATE country_vassalages SET status='ENDED',ended_turn=$2,ended_by='SYSTEM',ended_at=NOW() WHERE status='ACTIVE' AND (overlord_country_id=$1 OR vassal_country_id=$1)",[input.countryId,input.turn]);
+  const cleanup=await cleanupEliminatedCountry(client,{
+    countryId:input.countryId,turn:input.turn,actorId:"SYSTEM",
+    reason:"Devlet yok olduğu için karakter görevi sonlandırıldı."
+  });
   await client.query("UPDATE mercenary_contracts SET status=CASE WHEN status='PENDING' THEN 'CANCELLED' ELSE 'DESTROYED' END,updated_at=NOW() WHERE country_id=$1 AND status IN('PENDING','ACTIVE','UNPAID')",[input.countryId]);
   await client.query("DELETE FROM army_units WHERE army_id IN(SELECT id FROM armies WHERE country_id=$1)",[input.countryId]);
   await client.query("DELETE FROM army_siege_assets WHERE army_id IN(SELECT id FROM armies WHERE country_id=$1)",[input.countryId]);
@@ -124,7 +128,10 @@ async function eliminateCountry(
   await client.query(
     `INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details)
       VALUES($1,$2,'COUNTRY_LAST_STAND_FAILED','country',$3,$4::jsonb)`,
-    [input.guildId,input.actorId,input.countryId,JSON.stringify({countryName:input.countryName,turn:input.turn,reason:input.reason})]
+    [input.guildId,input.actorId,input.countryId,JSON.stringify({
+      countryName:input.countryName,turn:input.turn,reason:input.reason,
+      dismissedCharacters:cleanup.dismissedCharacters,releasedVassals:cleanup.releasedVassalCountryIds
+    })]
   );
   return{
     kind:"FAILED",countryId:input.countryId,countryName:input.countryName,startedTurn:input.turn,

@@ -5,7 +5,9 @@ import type { NavalUnitType } from "../domain/battle.js";
 import { NAVAL_HULL_STATS } from "../domain/naval-hulls.js";
 import type { EspionageSeverity, EspionageTarget } from "../domain/espionage.js";
 import { markCharacterDead } from "./character-death-service.js";
+import { terminateCharacterDuties } from "./character-duty-lifecycle-service.js";
 import { killDynastyMemberFromEspionage } from "./dynasty-service.js";
+import { ensureCountryMarshal } from "./marshal-service.js";
 
 export interface EspionageEffectOperation {
   attacker_country_id: string;
@@ -481,12 +483,20 @@ export async function applyEspionageEffect(
       });
       return "Hedef karakter kalıcı olarak öldürüldü; bütün görevleri sona erdi.";
     }
-    await client.query("UPDATE merchant_operations SET status='CANCELLED',updated_at=NOW() WHERE merchant_character_id=$1 AND status IN ('PENDING_ACCEPTANCE','TRAVELING','ACTIVE','CONTROLLED')",[operation.target_character_id]);
-    await client.query("UPDATE diplomat_operations SET status='CANCELLED',updated_at=NOW() WHERE diplomat_character_id=$1 AND status IN ('TRAVELING','ACTIVE','PAUSED')",[operation.target_character_id]);
-    await client.query("UPDATE missionary_operations SET status='CANCELLED',updated_at=NOW() WHERE missionary_character_id=$1 AND status IN ('TRAVELING','ACTIVE')",[operation.target_character_id]);
-    await client.query("UPDATE armies SET commander_character_id=NULL WHERE commander_character_id=$1",[operation.target_character_id]);
-    await client.query("UPDATE fleets SET commander_character_id=NULL WHERE commander_character_id=$1",[operation.target_character_id]);
-    await client.query("UPDATE country_characters SET assignment='CAPTURED',assigned_settlement_id=$1,unavailable_until_turn=$2,specialization_progress=CASE WHEN $3 THEN 0 ELSE specialization_progress END WHERE id=$4",[operation.target_settlement_id,duration>0?turn+duration:null,operation.target_type==="DISCREDIT"&&severity==="HEAVY",operation.target_character_id]);
+    const affected=(await client.query<{country_id:string;is_marshal:boolean}>(
+      "SELECT country_id,is_marshal FROM country_characters WHERE id=$1 FOR UPDATE",
+      [operation.target_character_id]
+    )).rows[0];
+    await terminateCharacterDuties(client,operation.target_character_id,"Karakter etkisiz hâle geldiği için devam eden görevi sonlandırıldı.");
+    await client.query(
+      `UPDATE country_characters
+          SET assignment='CAPTURED',assigned_settlement_id=$1,unavailable_until_turn=$2,
+              specialization_progress=CASE WHEN $3 THEN 0 ELSE specialization_progress END,
+              is_marshal=FALSE
+        WHERE id=$4`,
+      [operation.target_settlement_id,duration>0?turn+duration:null,operation.target_type==="DISCREDIT"&&severity==="HEAVY",operation.target_character_id]
+    );
+    if(affected?.is_marshal)await ensureCountryMarshal(client,affected.country_id,{allowAnyCommander:true});
     if (operation.target_type === "KIDNAP") return "Hedef karakter kaçırıldı; yönetici kararıyla serbest bırakılana veya infaz edilene kadar tutsak kalacak.";
     return "Hedef karakter "+duration+" tur kullanılamayacak.";
   }
