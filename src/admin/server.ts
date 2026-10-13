@@ -229,6 +229,14 @@ const server = createServer(async (request, response) => {
       const limit = Number(url.searchParams.get("limit") ?? 25);
       return json(response, 200, await adminDataControlService.rows(table, search, offset, limit));
     }
+    if (request.method === "GET" && url.pathname === "/api/admin-data/options") {
+      if (!requireSession(request, response)) return;
+      const table = url.searchParams.get("table") ?? "";
+      const column = url.searchParams.get("column") ?? "";
+      const search = url.searchParams.get("search") ?? "";
+      const current = url.searchParams.get("current") ?? undefined;
+      return json(response, 200, await adminDataControlService.options(table, column, search, current));
+    }
     if (request.method === "POST" && url.pathname === "/api/admin-data/mutate") {
       const session = requireMutation(request, response);
       if (!session) return;

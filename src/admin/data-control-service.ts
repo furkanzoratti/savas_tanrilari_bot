@@ -68,7 +68,85 @@ function tableCategory(name: string): string {
 }
 
 function tableLabel(name: string): string {
-  return name.split("_").map((part) => part ? `${part[0]!.toLocaleUpperCase("tr-TR")}${part.slice(1)}` : part).join(" ");
+  const labels: Record<string, string> = {
+    countries: "Devletler",
+    settlements: "Yerleşkeler",
+    country_alliances: "İttifaklar",
+    country_vassalages: "Vassallıklar",
+    country_port_access: "Liman Erişimleri",
+    trade_agreements: "Ticaret Anlaşmaları",
+    diplomatic_pacts: "Diplomatik Paktlar",
+    pact_memberships: "Pakt Üyelikleri",
+    pact_invitations: "Pakt Davetleri",
+    armies: "Ordular",
+    army_units: "Ordu Birlikleri",
+    fleets: "Filolar",
+    fleet_units: "Filo Gemileri",
+    unit_stacks: "Yerleşke Asker Havuzları",
+    buildings: "Binalar",
+    country_characters: "Karakterler",
+    dynasties: "Hanedanlar",
+    dynasty_members: "Hanedan Üyeleri",
+    roman_families: "Roma Aileleri",
+    roman_family_members: "Roma Aile Üyeleri",
+    state_wars: "Devlet Savaşları",
+    battles: "Savaş Formları",
+    rebellions: "İsyanlar",
+    recruitment_orders: "Asker Alım Emirleri",
+    naval_orders: "Gemi Üretim Emirleri",
+    academy_characters: "Akademi Karakterleri",
+    missionary_assignments: "Misyoner Görevleri",
+    diplomat_assignments: "Diplomat Görevleri",
+    espionage_operations: "Casusluk Operasyonları",
+    merchant_operations: "Tüccar Görevleri",
+    audit_logs: "İşlem Geçmişi"
+  };
+  if (labels[name]) return labels[name]!;
+  const words: Record<string, string> = {
+    academy: "Akademi", actions: "İşlemleri", ai: "Yapay Zekâ", alliances: "İttifakları", army: "Ordu", armies: "Ordular",
+    assignments: "Atamaları", assimilation: "Asimilasyon", auction: "Müzayede", auctions: "Müzayedeleri", ballots: "Oyları",
+    battle: "Savaş", battles: "Savaşlar", bets: "Bahisleri", bids: "Teklifleri", birth: "Doğum", blockades: "Ablukaları",
+    bombardments: "Bombardımanları", border: "Sınır", buildings: "Binalar", captivities: "Esaretleri", casualty: "Kayıp",
+    character: "Karakter", characters: "Karakterleri", christian: "Hristiyan", commander: "Komutan", confederations: "Konfederasyonları",
+    conscriptions: "Zorunlu Alımları", contracts: "Sözleşmeleri", country: "Devlet", countries: "Devletler", couple: "Çift",
+    coupon: "Kupon", coupons: "Kuponları", culture: "Kültür", damage: "Hasarları", diplomat: "Diplomat", diplomatic: "Diplomatik",
+    disembark: "Tahliye", dynasty: "Hanedan", elections: "Seçimleri", entries: "Katılımları", espionage: "Casusluk",
+    events: "Olayları", family: "Aile", fleet: "Filo", fleets: "Filolar", formations: "Kuruluşları", games: "Oyunlar",
+    garrison: "Garnizon", gladiator: "Gladyatör", gladiators: "Gladyatörleri", governance: "Yönetimi", governorships: "Valilikleri",
+    great: "Büyük", hegemony: "Hanlar Hanlığı", holdings: "Mülkleri", income: "Gelir", intelligence: "İstihbarat",
+    internal: "İç", invitations: "Davetleri", kurultay: "Kurultay", land: "Kara", law: "Yasa", laws: "Yasaları",
+    ledger: "Defteri", loans: "Borçları", logs: "Kayıtları", marriage: "Evlilik", matches: "Karşılaşmaları", members: "Üyeleri",
+    memberships: "Üyelikleri", mercenary: "Paralı Asker", merchant: "Tüccar", missionary: "Misyoner", money: "Parası",
+    naval: "Deniz", npc: "NPC", office: "Makam", operations: "Operasyonları", orders: "Emirleri", ownership: "Mülkiyet",
+    pact: "Pakt", pacts: "Paktları", pantheon: "Panteon", participants: "Katılımcıları", peace: "Barış", player: "Oyuncu",
+    points: "Puanları", policies: "Politikaları", political: "Siyasi", positions: "Konumları", power: "Güç", profiles: "Profilleri",
+    progress: "İlerlemesi", proposals: "Teklifleri", raids: "Yağmaları", recruitment: "Asker Alımı", religion: "Din",
+    repair: "Tamir", reports: "Raporları", republic: "Cumhuriyet", resolutions: "Sonuçları", responses: "Yanıtları",
+    rolls: "Zarları", roman: "Roma", rounds: "Turları", senate: "Senato", settlement: "Yerleşke", settlements: "Yerleşkeler",
+    ships: "Gemileri", siege: "Kuşatma", sides: "Tarafları", snapshots: "Anlık Görüntüleri", special: "Özel", stability: "İstikrar",
+    state: "Devlet", steppe: "Bozkır", title: "Unvan", titles: "Unvanları", trade: "Ticaret", training: "Eğitim",
+    transactions: "İşlemler", transfer: "Aktarım", transfers: "Aktarımları", treasury: "Hazine", tribute: "Haraç",
+    units: "Birlikleri", unlocks: "Yetkileri", usage: "Kullanımı", vassalages: "Vassallıkları", victories: "Zaferleri",
+    votes: "Oyları", wallet: "Cüzdan", wallets: "Cüzdanları", war: "Savaş", wars: "Savaşları"
+  };
+  return name.split("_").map((part) => words[part] ?? (part ? `${part[0]!.toLocaleUpperCase("tr-TR")}${part.slice(1)}` : part)).join(" ");
+}
+
+function referenceForColumn(table: TableMeta, columnName: string): ForeignKeyMeta | null {
+  return table.foreignKeys.find((foreignKey) => foreignKey.column === columnName) ?? null;
+}
+
+function labelColumns(table: TableMeta): string[] {
+  const preferred = ["name", "display_name", "title", "full_name", "label", "unit_type", "code", "status"];
+  const available = preferred.filter((name) => table.columns.some((column) => column.name === name));
+  return available.length ? available.slice(0, 2) : table.primaryKey.slice(0, 1);
+}
+
+function referenceLabelSql(table: TableMeta, alias: string): string {
+  const columns = labelColumns(table);
+  if (!columns.length) return `'Kayıt'`;
+  if (columns.length === 1) return `COALESCE(NULLIF(${alias}.${quoteIdentifier(columns[0]!)}::text,''),'Kayıt')`;
+  return `concat_ws(' · ',NULLIF(${alias}.${quoteIdentifier(columns[0]!)}::text,''),NULLIF(${alias}.${quoteIdentifier(columns[1]!)}::text,''))`;
 }
 
 async function schema(force = false): Promise<SchemaMeta> {
@@ -242,6 +320,71 @@ async function audit(client: AdminDbClient, actorId: string, action: string, tab
   );
 }
 
+async function referenceLabels(meta: SchemaMeta, table: TableMeta, rows: Record<string, unknown>[]): Promise<Map<string, Map<string, string>>> {
+  const resolved = new Map<string, Map<string, string>>();
+  for (const foreignKey of table.foreignKeys) {
+    const foreignTable = meta.tables.get(foreignKey.foreignTable);
+    if (!foreignTable) continue;
+    const values = [...new Set(rows.map((row) => row[foreignKey.column]).filter((value) => value !== null && value !== undefined).map(String))];
+    if (!values.length) continue;
+    const params: unknown[] = [...values];
+    const placeholders = values.map((_, index) => `$${index + 1}`).join(",");
+    const scope = scopeExpression(meta, foreignTable.name, "ref_row", params.length + 1);
+    if (scope) params.push(adminConfig.guildId);
+    const result = await adminPool.query<{ value: string; label: string }>(
+      `SELECT ref_row.${quoteIdentifier(foreignKey.foreignColumn)}::text AS value,
+              ${referenceLabelSql(foreignTable, "ref_row")} AS label
+         FROM ${quoteIdentifier(foreignTable.name)} ref_row
+        WHERE ref_row.${quoteIdentifier(foreignKey.foreignColumn)} IN (${placeholders})${scope ? ` AND ${scope}` : ""}`,
+      params
+    );
+    resolved.set(foreignKey.column, new Map(result.rows.map((row) => [String(row.value), row.label])));
+  }
+
+  const actorColumns = table.columns.filter((column) => /(^|_)(offered|responded|created|updated|ended|destroyed)_by$/u.test(column.name) || column.name === "actor_user_id");
+  const actorIds = [...new Set(actorColumns.flatMap((column) => rows.map((row) => row[column.name])).filter((value) => typeof value === "string" && value).map(String))];
+  if (actorIds.length && meta.tables.has("country_members") && meta.tables.has("countries")) {
+    const placeholders = actorIds.map((_, index) => `$${index + 1}`).join(",");
+    const result = await adminPool.query<{ value: string; label: string }>(
+      `SELECT member.discord_user_id AS value,string_agg(DISTINCT country.name,', ' ORDER BY country.name) AS label
+         FROM country_members member JOIN countries country ON country.id=member.country_id
+        WHERE member.discord_user_id IN (${placeholders}) AND country.guild_id=$${actorIds.length + 1}
+        GROUP BY member.discord_user_id`, [...actorIds, adminConfig.guildId]
+    );
+    const labels = new Map(result.rows.map((row) => [String(row.value), `${row.label} oyuncusu`]));
+    for (const column of actorColumns) resolved.set(column.name, labels);
+  }
+  return resolved;
+}
+
+async function relationOptions(meta: SchemaMeta, table: TableMeta, columnName: string, search: string, current?: string) {
+  const relation = referenceForColumn(table, columnName);
+  if (!relation) throw new Error("Bu alan seçim listesiyle yönetilemiyor.");
+  const foreignTable = assertTable(meta, relation.foreignTable);
+  const params: unknown[] = [];
+  const filters: string[] = [];
+  const scope = scopeExpression(meta, foreignTable.name, "ref_row", params.length + 1);
+  if (scope) { params.push(adminConfig.guildId); filters.push(scope); }
+  if (search.trim()) {
+    params.push(`%${search.trim()}%`);
+    filters.push(`${referenceLabelSql(foreignTable, "ref_row")} ILIKE $${params.length}`);
+  }
+  if (current) {
+    params.push(current);
+    const normalFilter = filters.length ? `(${filters.join(" AND ")})` : "TRUE";
+    filters.length = 0;
+    filters.push(`(${normalFilter} OR ref_row.${quoteIdentifier(relation.foreignColumn)}::text=$${params.length})`);
+  }
+  const where = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
+  const result = await adminPool.query<{ value: string; label: string }>(
+    `SELECT ref_row.${quoteIdentifier(relation.foreignColumn)}::text AS value,
+            ${referenceLabelSql(foreignTable, "ref_row")} AS label
+       FROM ${quoteIdentifier(foreignTable.name)} ref_row ${where}
+      ORDER BY label LIMIT 1000`, params
+  );
+  return result.rows;
+}
+
 export const adminDataControlService = {
   async catalog() {
     const meta = await schema();
@@ -253,7 +396,14 @@ export const adminDataControlService = {
         mutable: table.mutable,
         primaryKey: table.primaryKey,
         scoped: findScopePath(meta, table.name) !== null,
-        columns: table.columns.map((column) => ({ ...column, editable: table.mutable && !column.generated && !column.primary }))
+        columns: table.columns.map((column) => {
+          const relation = referenceForColumn(table, column.name);
+          return {
+            ...column,
+            editable: table.mutable && !column.generated && !column.primary,
+            reference: relation ? { table: relation.foreignTable, column: relation.foreignColumn } : null
+          };
+        })
       }))
       .sort((left, right) => left.category.localeCompare(right.category, "tr") || left.label.localeCompare(right.label, "tr"));
   },
@@ -279,6 +429,7 @@ export const adminDataControlService = {
        ORDER BY target.${quoteIdentifier(orderColumn)} DESC NULLS LAST LIMIT $${rowParams.length - 1} OFFSET $${rowParams.length}`,
       rowParams
     );
+    const labels = await referenceLabels(meta, table, result.rows);
     return {
       table: tableName,
       offset: safeOffset,
@@ -287,9 +438,20 @@ export const adminDataControlService = {
       rows: result.rows.map((row) => {
         const values = { ...row };
         delete values.__ctid;
-        return { key: rowKey(table, row), values };
+        const displayValues = Object.fromEntries(Object.entries(values).map(([name, value]) => {
+          const label = value === null || value === undefined ? null : labels.get(name)?.get(String(value));
+          return [name, label ?? value];
+        }));
+        return { key: rowKey(table, row), values, displayValues };
       })
     };
+  },
+
+  async options(tableName: string, columnName: string, search: string, current?: string) {
+    const meta = await schema();
+    const table = assertTable(meta, tableName);
+    if (!table.columns.some((column) => column.name === columnName)) throw new Error("Alan bulunamadı.");
+    return relationOptions(meta, table, columnName, search, current);
   },
 
   async mutate(actorId: string, rawInput: unknown) {

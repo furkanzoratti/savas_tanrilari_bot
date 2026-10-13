@@ -1244,11 +1244,51 @@ async function submitEditor(event) {
   finally { button.disabled = false; button.textContent = "Değişiklikleri kaydet"; }
 }
 
-const dataColumnLabel = (name) => String(name || "").split("_").map((part) => part ? `${part[0].toLocaleUpperCase("tr-TR")}${part.slice(1)}` : part).join(" ");
+const dataFieldLabels = {
+  id: "Kayıt kimliği", guild_id: "Discord sunucusu", country_id: "Devlet", settlement_id: "Yerleşke",
+  proposer_country_id: "Teklif eden devlet", receiver_country_id: "Teklif alan devlet",
+  requester_country_id: "Talep eden devlet", grantor_country_id: "İzin veren devlet",
+  overlord_country_id: "Hâkim devlet", vassal_country_id: "Vassal devlet",
+  attacker_country_id: "Saldıran devlet", defender_country_id: "Savunan devlet",
+  army_id: "Ordu", fleet_id: "Filo", character_id: "Karakter", dynasty_id: "Hanedan",
+  status: "Durum", name: "Ad", title: "Başlık", treasury: "Hazine", population: "Nüfus",
+  quantity: "Miktar", unit_type: "Birlik türü", offered_by: "Teklif eden oyuncu",
+  responded_by: "Yanıtlayan oyuncu", created_by: "Oluşturan oyuncu", updated_by: "Güncelleyen oyuncu",
+  created_at: "Oluşturulma", updated_at: "Son güncelleme", responded_at: "Yanıtlanma", ended_at: "Sona erme",
+  channel_id: "Discord kanalı", message_id: "Discord mesajı", current_turn: "Güncel tur"
+};
+const dataValueLabels = {
+  ACTIVE: "Aktif", PENDING: "Bekliyor", REJECTED: "Reddedildi", ENDED: "Sona erdi", CANCELLED: "İptal edildi",
+  APPROVED: "Onaylandı", ACCEPTED: "Kabul edildi", DECLINED: "Reddedildi", PAUSED: "Duraklatıldı",
+  COMPLETED: "Tamamlandı", DRAFT: "Taslak", OPEN: "Açık", CLOSED: "Kapalı", ALIVE: "Hayatta", DEAD: "Ölü",
+  PEACE: "Barış", PARTIAL: "Kısmi seferberlik", GENERAL: "Genel seferberlik", true: "Evet", false: "Hayır"
+};
+const technicalDataColumns = new Set(["id", "guild_id", "discord_id", "channel_id", "message_id", "created_at", "updated_at", "created_by", "updated_by", "offered_by", "responded_by", "ended_by", "actor_user_id"]);
+const isTechnicalDataColumn = (column) => technicalDataColumns.has(column.name) || (column.name.endsWith("_id") && !column.reference);
+const dataFieldWords = {
+  action: "İşlem", active: "Aktif", age: "Yaş", amount: "Tutar", army: "Ordu", authority: "Otorite",
+  battle: "Savaş", bonus: "Bonus", candidate: "Aday", capacity: "Kapasite", character: "Karakter", commander: "Komutan",
+  cost: "Maliyet", country: "Devlet", culture: "Kültür", damage: "Hasar", defender: "Savunan", description: "Açıklama",
+  duration: "Süre", election: "Seçim", enabled: "Etkin", end: "Bitiş", event: "Olay", family: "Aile", fleet: "Filo",
+  gender: "Cinsiyet", health: "Sağlık", income: "Gelir", influence: "Nüfuz", level: "Seviye", limit: "Sınır",
+  loyalty: "Sadakat", member: "Üye", name: "Ad", operation: "Operasyon", owner: "Sahip", percent: "Yüzde",
+  points: "Puan", population: "Nüfus", progress: "İlerleme", quantity: "Miktar", reason: "Gerekçe", receiver: "Alan",
+  relation: "İlişki", religion: "Din", reputation: "İtibar", result: "Sonuç", scandal: "Skandal", seats: "Koltuk",
+  settlement: "Yerleşke", side: "Taraf", skill: "Yetenek", start: "Başlangıç", status: "Durum", target: "Hedef",
+  tax: "Vergi", title: "Unvan", total: "Toplam", trade: "Ticaret", treasury: "Hazine", turn: "Tur", type: "Tür",
+  unit: "Birlik", user: "Kullanıcı", value: "Değer", vote: "Oy", war: "Savaş"
+};
+const dataColumnLabel = (name) => dataFieldLabels[name] || String(name || "").split("_").map((part) => dataFieldWords[part] || (part ? `${part[0].toLocaleUpperCase("tr-TR")}${part.slice(1)}` : part)).join(" ");
 const dataValuePreview = (value) => {
   if (value === null || value === undefined) return "—";
   if (typeof value === "object") return JSON.stringify(value).slice(0, 180);
-  return String(value).slice(0, 180);
+  const raw = String(value);
+  if (dataValueLabels[raw]) return dataValueLabels[raw];
+  if (/^\d{4}-\d{2}-\d{2}T/u.test(raw)) {
+    try { return date(raw); } catch { /* Ham değeri göster. */ }
+  }
+  if (/^[0-9a-f]{8}-[0-9a-f-]{27,}$/iu.test(raw)) return "Teknik kayıt";
+  return raw.slice(0, 180);
 };
 
 function dataInputValue(column, value) {
@@ -1257,14 +1297,19 @@ function dataInputValue(column, value) {
   return String(value);
 }
 
-function dataField(column, value, insert) {
+function dataField(column, value, insert, options = []) {
   const identifier = `data-field-${column.name}`;
   const attributes = `data-data-column="${escapeHtml(column.name)}" data-data-type="${escapeHtml(column.dataType)}" data-nullable="${column.nullable}" data-default="${column.defaultValue ? "true" : "false"}"`;
   const hint = [column.dataType, column.nullable ? "boş olabilir" : "zorunlu", column.defaultValue ? `varsayılan: ${column.defaultValue}` : ""].filter(Boolean).join(" · ");
   const disabled = !insert && (column.primary || column.generated);
   const valueText = dataInputValue(column, value);
   let control;
-  if (column.dataType === "boolean") {
+  if (column.reference) {
+    const current = value === null || value === undefined ? "" : String(value);
+    const available = [...options];
+    if (current && !available.some((option) => String(option.value) === current)) available.unshift({ value: current, label: "Mevcut seçim" });
+    control = `<select id="${identifier}" ${attributes} ${disabled ? "disabled" : ""}>${column.nullable ? `<option value="" ${!current ? "selected" : ""}>Seçilmedi</option>` : `<option value="" ${!current ? "selected" : ""}>Seçin…</option>`}${available.map((option) => `<option value="${escapeHtml(option.value)}" ${String(option.value) === current ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}</select>`;
+  } else if (column.dataType === "boolean") {
     control = `<select id="${identifier}" ${attributes} ${disabled ? "disabled" : ""}>${column.nullable ? `<option value="" ${value === null ? "selected" : ""}>NULL</option>` : ""}<option value="true" ${value === true ? "selected" : ""}>true</option><option value="false" ${value === false ? "selected" : ""}>false</option></select>`;
   } else if (column.dataType === "json" || column.dataType === "jsonb" || column.dataType === "ARRAY") {
     control = `<textarea id="${identifier}" ${attributes} rows="4" ${disabled ? "disabled" : ""}>${escapeHtml(valueText)}</textarea>`;
@@ -1291,15 +1336,24 @@ function collectDataEditorValues(insert) {
   return values;
 }
 
-function openDataRecordEditor(table, record = null) {
+async function openDataRecordEditor(table, record = null) {
   const insert = !record;
   const values = record?.values || {};
   const columns = table.columns.filter((column) => insert ? !column.generated : true);
-  const fields = columns.map((column) => dataField(column, values[column.name], insert)).join("");
+  const optionEntries = await Promise.all(columns.filter((column) => column.reference).map(async (column) => {
+    const query = new URLSearchParams({ table: table.name, column: column.name });
+    if (values[column.name] !== null && values[column.name] !== undefined) query.set("current", String(values[column.name]));
+    return [column.name, await api(`/api/admin-data/options?${query}`)];
+  }));
+  const optionMap = new Map(optionEntries);
+  const mainColumns = columns.filter((column) => !isTechnicalDataColumn(column));
+  const technicalColumns = columns.filter(isTechnicalDataColumn);
+  const fields = mainColumns.map((column) => dataField(column, values[column.name], insert, optionMap.get(column.name) || [])).join("");
+  const technicalFields = technicalColumns.map((column) => dataField(column, values[column.name], insert, optionMap.get(column.name) || [])).join("");
   openEditor(
     insert ? "Yeni oyun kaydı" : "Oyun kaydını düzenle",
     `${table.category} · ${table.label} (${table.name})`,
-    `<div class="preview-warning"><strong>Gelişmiş tam yetki işlemi</strong><span>Bu ekran oyunun doğrudan kalıcı verisini değiştirir. Veritabanı kuralları uygulanır ve işlem önce/sonra görüntüsüyle denetim geçmişine yazılır.</span></div><div class="form-grid data-control-form">${fields}</div><label>Değişiklik gerekçesi<textarea id="data-change-reason" rows="2" minlength="3" maxlength="500" required placeholder="Bu değişikliğin oyun içi gerekçesi…"></textarea></label>${!insert && table.mutable ? '<button type="button" class="button danger" id="data-delete-record">Bu kaydı kalıcı olarak sil</button>' : ""}`,
+    `<div class="preview-warning"><strong>GM müdahalesi</strong><span>Devlet, yerleşke, karakter ve diğer bağlantılar adlarıyla seçilir. İşlem önce/sonra görüntüsüyle denetim geçmişine yazılır.</span></div><div class="form-grid data-control-form">${fields}</div>${technicalFields ? `<details class="data-technical"><summary>Teknik alanlar</summary><p>Discord ve sistem kimlikleri yalnızca zorunlu durumlarda değiştirilmelidir.</p><div class="form-grid data-control-form">${technicalFields}</div></details>` : ""}<label>Değişiklik gerekçesi<textarea id="data-change-reason" rows="2" minlength="3" maxlength="500" required placeholder="Bu değişikliğin oyun içi gerekçesi…"></textarea></label>${!insert && table.mutable ? '<button type="button" class="button danger" id="data-delete-record">Bu kaydı kalıcı olarak sil</button>' : ""}`,
     table.mutable ? async () => {
       const reason = document.getElementById("data-change-reason").value.trim();
       if (reason.length < 3) throw new Error("Değişiklik gerekçesi en az 3 karakter olmalıdır.");
@@ -1331,6 +1385,33 @@ function openDataRecordEditor(table, record = null) {
   });
 }
 
+function dataRecordTitle(table, row) {
+  const values = row.displayValues || row.values;
+  for (const key of ["name", "display_name", "title", "full_name"]) {
+    if (values[key]) return dataValuePreview(values[key]);
+  }
+  const relationValues = table.columns
+    .filter((column) => column.reference && !isTechnicalDataColumn(column))
+    .map((column) => values[column.name])
+    .filter((value) => value !== null && value !== undefined && value !== "")
+    .map(dataValuePreview)
+    .filter((value) => value !== "Teknik kayıt");
+  if (relationValues.length >= 2) return `${relationValues[0]} → ${relationValues[1]}`;
+  if (relationValues.length === 1) return relationValues[0];
+  const meaningful = table.columns.find((column) => !isTechnicalDataColumn(column) && !column.primary && values[column.name] !== null && values[column.name] !== undefined);
+  return meaningful ? `${table.label} · ${dataValuePreview(values[meaningful.name])}` : `${table.label} kaydı`;
+}
+
+function dataRecordCard(table, row, index) {
+  const values = row.displayValues || row.values;
+  const status = values.status ?? values.state ?? values.phase;
+  const details = table.columns
+    .filter((column) => !isTechnicalDataColumn(column) && !column.primary && !["name", "display_name", "title", "full_name", "status", "state", "phase"].includes(column.name))
+    .filter((column) => values[column.name] !== null && values[column.name] !== undefined && values[column.name] !== "")
+    .slice(0, 6);
+  return `<article class="data-record-card"><div class="data-record-head"><div><span class="data-record-kind">${escapeHtml(table.category)}</span><h3>${escapeHtml(dataRecordTitle(table, row))}</h3></div>${status ? `<span class="pill ${String(status) === "ACTIVE" ? "success" : "neutral"}">${escapeHtml(dataValuePreview(status))}</span>` : ""}</div><div class="data-record-details">${details.map((column) => `<div><span>${escapeHtml(dataColumnLabel(column.name))}</span><strong>${escapeHtml(dataValuePreview(values[column.name]))}</strong></div>`).join("") || '<p class="empty">Ek oyun alanı bulunmuyor.</p>'}</div><div class="data-record-actions"><span>${row.values.updated_at ? `Güncellendi: ${escapeHtml(dataValuePreview(row.values.updated_at))}` : row.values.created_at ? `Oluşturuldu: ${escapeHtml(dataValuePreview(row.values.created_at))}` : "Kimlikler arka planda yönetilir"}</span><button class="button compact" data-data-row="${index}">${table.mutable ? "Yönet" : "Görüntüle"}</button></div></article>`;
+}
+
 async function dataControlPage() {
   setActiveRoute("data-control"); loading();
   if (!state.dataCatalog) state.dataCatalog = await api("/api/admin-data/catalog");
@@ -1348,19 +1429,13 @@ async function dataControlPage() {
     categories.set(item.category, items);
   }
   const options = [...categories.entries()].map(([category, tables]) => `<optgroup label="${escapeHtml(category)}">${tables.map((item) => `<option value="${item.name}" ${item.name === table.name ? "selected" : ""}>${escapeHtml(item.label)}${item.mutable ? "" : " · salt okunur"}</option>`).join("")}</optgroup>`).join("");
-  const preferred = ["name", "display_name", "status", "country_id", "settlement_id", "guild_id", "current_turn", "created_at", "updated_at"];
-  const visibleColumns = [...table.columns].sort((left, right) => {
-    const leftScore = left.primary ? -100 : preferred.indexOf(left.name) >= 0 ? preferred.indexOf(left.name) : 100;
-    const rightScore = right.primary ? -100 : preferred.indexOf(right.name) >= 0 ? preferred.indexOf(right.name) : 100;
-    return leftScore - rightScore;
-  }).slice(0, 9);
-  const rows = data.rows.map((row, index) => `<tr>${visibleColumns.map((column) => `<td title="${escapeHtml(dataValuePreview(row.values[column.name]))}">${escapeHtml(dataValuePreview(row.values[column.name]))}</td>`).join("")}<td><button class="button compact" data-data-row="${index}">${table.mutable ? "Düzenle" : "Görüntüle"}</button></td></tr>`).join("");
+  const rows = data.rows.map((row, index) => dataRecordCard(table, row, index)).join("");
   const end = Math.min(data.total, data.offset + data.rows.length);
-  page.innerHTML = `<div class="page-head"><div><span class="pill danger">GM Tam Yetki</span><h1 style="margin-top:10px">Oyun Verileri</h1><p>Özel yönetim ekranlarında bulunmayan bütün mevcut ve gelecekteki mekanik kayıtlarına doğrudan, denetimli erişim.</p></div><div class="actions"><span class="pill neutral">${number(catalog.length)} tablo</span>${table.mutable ? '<button class="button primary" data-data-new>＋ Yeni kayıt</button>' : ""}</div></div><section class="card data-control-warning"><strong>⚠ Doğrudan kalıcı veri yönetimi</strong><p>Önce ilgili mekanizmanın özel panelini kullanın. Buradaki değişiklikler oyun kayıtlarını doğrudan etkiler; veritabanı bağlantıları ve kısıtları yine korunur. Her işlem gerekçe, eski değer ve yeni değerle kaydedilir.</p></section><section class="card data-control-toolbar"><label>Mekanik / veri tablosu<select id="data-table-select">${options}</select></label><form id="data-search-form"><label>Kayıtlarda ara<input id="data-search" value="${escapeHtml(state.dataSearch)}" placeholder="Ad, durum, kimlik veya JSON içeriği…"></label><button class="button" type="submit">Ara</button></form></section><div class="section-title"><h2>${escapeHtml(table.label)}</h2><span>${escapeHtml(table.category)} · ${number(data.total)} kayıt · ${table.scoped ? "sunucuya bağlı" : "küresel"}</span></div><section class="card table-wrap"><table><thead><tr>${visibleColumns.map((column) => `<th>${escapeHtml(dataColumnLabel(column.name))}</th>`).join("")}<th></th></tr></thead><tbody>${rows || `<tr><td colspan="${visibleColumns.length + 1}" class="empty">Kayıt bulunmuyor.</td></tr>`}</tbody></table></section><div class="data-pager"><button class="button" data-data-prev ${data.offset <= 0 ? "disabled" : ""}>← Önceki</button><span>${data.total ? `${number(data.offset + 1)}–${number(end)} / ${number(data.total)}` : "0 kayıt"}</span><button class="button" data-data-next ${end >= data.total ? "disabled" : ""}>Sonraki →</button></div>`;
+  page.innerHTML = `<div class="page-head"><div><span class="pill danger">GM Kontrol Merkezi</span><h1 style="margin-top:10px">Oyun Mekanikleri</h1><p>Teknik kimliklerle uğraşmadan devletleri, yerleşkeleri, orduları ve mekanik kayıtlarını doğrudan yönet.</p></div><div class="actions"><span class="pill neutral">${number(catalog.length)} mekanik tablosu</span>${table.mutable ? '<button class="button primary" data-data-new>＋ Yeni kayıt</button>' : ""}</div></div><section class="card data-control-warning"><strong>Adlarla ve seçimlerle tam kontrol</strong><p>Bağlantılı kayıtlar UUID yerine oyun içindeki adlarıyla gösterilir ve seçim kutusundan değiştirilir. Teknik alanlar düzenleme ekranında ayrı ve kapalı tutulur. Her işlem gerekçe, eski değer ve yeni değerle kaydedilir.</p></section><section class="card data-control-toolbar"><label>Yönetilecek mekanik<select id="data-table-select">${options}</select></label><form id="data-search-form"><label>Ad veya duruma göre ara<input id="data-search" value="${escapeHtml(state.dataSearch)}" placeholder="Örn. Roma, Atina, aktif, bekliyor…"></label><button class="button" type="submit">Ara</button></form></section><div class="section-title"><h2>${escapeHtml(table.label)}</h2><span>${escapeHtml(table.category)} · ${number(data.total)} kayıt · ${table.scoped ? "bu Discord sunucusu" : "oyun geneli"}</span></div><section class="data-record-grid">${rows || '<div class="card empty">Bu mekanikte henüz kayıt bulunmuyor.</div>'}</section><div class="data-pager"><button class="button" data-data-prev ${data.offset <= 0 ? "disabled" : ""}>← Önceki</button><span>${data.total ? `${number(data.offset + 1)}–${number(end)} / ${number(data.total)}` : "0 kayıt"}</span><button class="button" data-data-next ${end >= data.total ? "disabled" : ""}>Sonraki →</button></div>`;
   document.getElementById("data-table-select").addEventListener("change", (event) => { state.dataTable = event.target.value; state.dataOffset = 0; state.dataSearch = ""; dataControlPage().catch(showPageError); });
   document.getElementById("data-search-form").addEventListener("submit", (event) => { event.preventDefault(); state.dataSearch = document.getElementById("data-search").value.trim(); state.dataOffset = 0; dataControlPage().catch(showPageError); });
-  document.querySelector("[data-data-new]")?.addEventListener("click", () => openDataRecordEditor(table));
-  document.querySelectorAll("[data-data-row]").forEach((button) => button.addEventListener("click", () => openDataRecordEditor(table, state.dataRows[Number(button.dataset.dataRow)])));
+  document.querySelector("[data-data-new]")?.addEventListener("click", () => openDataRecordEditor(table).catch((error) => toast(error.message, "error")));
+  document.querySelectorAll("[data-data-row]").forEach((button) => button.addEventListener("click", () => openDataRecordEditor(table, state.dataRows[Number(button.dataset.dataRow)]).catch((error) => toast(error.message, "error"))));
   document.querySelector("[data-data-prev]")?.addEventListener("click", () => { state.dataOffset = Math.max(0, state.dataOffset - 25); refreshKeepingScroll(dataControlPage).catch(showPageError); });
   document.querySelector("[data-data-next]")?.addEventListener("click", () => { state.dataOffset += 25; refreshKeepingScroll(dataControlPage).catch(showPageError); });
 }
