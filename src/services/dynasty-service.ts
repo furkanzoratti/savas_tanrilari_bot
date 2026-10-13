@@ -1292,6 +1292,19 @@ export const dynastyService={
     });
   },
 
+  async pendingBirthContext(guildId:string,pendingBirthId:string):Promise<{countryId:string;dynastyId:string}|null>{
+    const row=(await pool.query<{country_id:string;dynasty_id:string}>(
+      `SELECT dynasty.country_id,session.dynasty_id
+         FROM dynasty_birth_sessions session
+         JOIN dynasties dynasty ON dynasty.id=session.dynasty_id
+         JOIN countries country ON country.id=dynasty.country_id
+        WHERE session.id=$1 AND dynasty.guild_id=$2 AND country.status='ACTIVE'
+        LIMIT 1`,
+      [pendingBirthId,guildId]
+    )).rows[0];
+    return row?{countryId:row.country_id,dynastyId:row.dynasty_id}:null;
+  },
+
   async setPublishedMessage(input:{dynastyId:string;channelId:string;messageId:string}):Promise<void>{
     await pool.query(
       "UPDATE dynasties SET published_channel_id=$1,published_message_id=$2,updated_at=NOW() WHERE id=$3",
