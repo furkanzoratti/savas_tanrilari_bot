@@ -9,6 +9,7 @@ describe("missionaries migration",()=>{
     expect(missionariesMigration.sql).toContain("CREATE TABLE IF NOT EXISTS missionary_operations");
     expect(missionariesMigration.sql).toContain("missionary_one_live_operation_per_settlement");
     expect(missionariesMigration.sql).toContain("CREATE TABLE IF NOT EXISTS missionary_rolls");
+    expect(missionariesMigration.sql).toContain("CHECK (converted_percent BETWEEN 0 AND 15)");
     expect(missionariesMigration.sql).toContain("'MISSIONARY_TRAVELING'");
     expect(missionariesMigration.sql).toContain("'MISSIONARY_CONVERSION'");
   });

@@ -55,7 +55,7 @@ export const missionariesMigration = {
       defense_roll SMALLINT NOT NULL CHECK (defense_roll BETWEEN 1 AND 20),
       defense_bonus SMALLINT NOT NULL,
       defense_total SMALLINT NOT NULL,
-      converted_percent NUMERIC(5,2) NOT NULL CHECK (converted_percent BETWEEN 0 AND 12),
+      converted_percent NUMERIC(5,2) NOT NULL CHECK (converted_percent BETWEEN 0 AND 15),
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       PRIMARY KEY(operation_id,game_turn)
     );
