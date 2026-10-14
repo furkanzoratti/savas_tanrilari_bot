@@ -7,7 +7,7 @@ export const kangjuHouseholdRepairMigration={
       FROM countries country JOIN guilds guild ON guild.discord_id=country.guild_id
      WHERE country.status='ACTIVE'
        AND (
-         country.primary_culture='KANGJU'
+         country.primary_culture_group='KANGJU'
          OR lower(country.name) IN (lower('Kangju Konfederasyonu'),lower('Kangkü Konfederasyonu'))
        );
 

@@ -5,7 +5,8 @@ import {kangjuHouseholdRepairMigration} from "./kangju-household-repair-migratio
 describe("Kangkü hanesi canlı veri onarımı",()=>{
   it("ülkeyi kültürden veya iki ad yazımından bulup eksik üyeleri tamamlar",()=>{
     expect(kangjuHouseholdRepairMigration.version).toBe(199);
-    expect(kangjuHouseholdRepairMigration.sql).toContain("country.primary_culture='KANGJU'");
+    expect(kangjuHouseholdRepairMigration.sql).toContain("country.primary_culture_group='KANGJU'");
+    expect(kangjuHouseholdRepairMigration.sql).not.toContain("country.primary_culture='");
     expect(kangjuHouseholdRepairMigration.sql).toContain("Kangju Konfederasyonu");
     expect(kangjuHouseholdRepairMigration.sql).toContain("Kangkü Konfederasyonu");
     expect(kangjuHouseholdRepairMigration.sql).toContain("Kangkü Kraliyet Hanesi");
