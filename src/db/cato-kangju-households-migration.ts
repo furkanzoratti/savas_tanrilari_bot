@@ -49,7 +49,7 @@ export const catoKangjuHouseholdsMigration={
     SELECT country.guild_id,country.id,'Kangju Kraliyet Hanesi','system:cato-kangju-households-v197'
       FROM countries country
      WHERE lower(country.name)=lower('Kangju Konfederasyonu') AND country.status='ACTIVE'
-    ON CONFLICT(country_id) DO NOTHING;
+    ON CONFLICT(country_id) WHERE steppe_title_id IS NULL DO NOTHING;
 
     CREATE TEMP TABLE kangju_dynasty_targets_v197 ON COMMIT DROP AS
     SELECT dynasty.id AS dynasty_id,guild.current_turn
