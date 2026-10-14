@@ -463,11 +463,15 @@ async function forcesPage() {
   const data = await api("/api/forces");
   page.innerHTML = `<div class="page-head"><div><h1>Ordular & Filolar</h1><p>Kalıcı kuvvetlerin mevcudu, konumu ve komuta durumu</p></div><button class="button primary" data-open-army>＋ Yeni ordu</button></div>
     <div class="section-title"><h2>Ordular</h2><span>${number(data.armies.length)} kayıt</span></div><section class="card table-wrap"><table><thead><tr><th>Ordu</th><th>Devlet</th><th>Komutan</th><th>Mevcut</th><th>Köken</th><th>Kuruluş</th><th></th></tr></thead><tbody>${data.armies.map((row) => `<tr data-country-id="${row.country_id}" data-record-type="ARMY" data-record-id="${row.id}"><td><strong>${escapeHtml(row.name)}</strong></td><td>${escapeHtml(row.country_name)}</td><td>${escapeHtml(row.commander_name || "Atanmamış")}</td><td>${number(row.total)}</td><td>${number(row.origin_count)} yerleşke</td><td>Tur ${number(row.created_turn)}</td><td><button class="button compact" data-edit-army="${row.id}">Düzenle</button></td></tr>`).join("") || '<tr><td colspan="7" class="empty">Ordu bulunmuyor.</td></tr>'}</tbody></table></section>
-    <div class="section-title"><h2>Filolar</h2><span>${number(data.fleets.length)} kayıt</span></div><section class="card table-wrap"><table><thead><tr><th>Filo</th><th>Devlet</th><th>Amiral</th><th>Hazır gemi</th><th>Hasarlı gemi</th><th>Kuruluş</th></tr></thead><tbody>${data.fleets.map((row) => `<tr data-country-id="${row.country_id}" data-record-type="FLEET" data-record-id="${row.id}"><td><strong>${escapeHtml(row.name)}</strong></td><td>${escapeHtml(row.country_name)}</td><td>${escapeHtml(row.commander_name || "Atanmamış")}</td><td>${number(Number(row.ready_ships) + Number(row.tracked_ships) - Number(row.damaged_ships))}</td><td>${number(row.damaged_ships)}</td><td>Tur ${number(row.created_turn)}</td></tr>`).join("") || '<tr><td colspan="6" class="empty">Filo bulunmuyor.</td></tr>'}</tbody></table></section>`;
+    <div class="section-title"><h2>Filolar</h2><span>${number(data.fleets.length)} kayıt</span></div><section class="card table-wrap"><table><thead><tr><th>Filo</th><th>Devlet</th><th>Amiral</th><th>Hazır gemi</th><th>Hasarlı gemi</th><th>Kuruluş</th><th></th></tr></thead><tbody>${data.fleets.map((row) => `<tr data-country-id="${row.country_id}" data-record-type="FLEET" data-record-id="${row.id}"><td><strong>${escapeHtml(row.name)}</strong></td><td>${escapeHtml(row.country_name)}</td><td>${escapeHtml(row.commander_name || "Atanmamış")}</td><td>${number(Number(row.ready_ships) + Number(row.tracked_ships) - Number(row.damaged_ships))}</td><td>${number(row.damaged_ships)}</td><td>Tur ${number(row.created_turn)}</td><td><button class="button compact" data-edit-fleet="${row.id}">Gemi canları</button></td></tr>`).join("") || '<tr><td colspan="7" class="empty">Filo bulunmuyor.</td></tr>'}</tbody></table></section>`;
   bindPageActions(); bindCountryRows();
   document.querySelectorAll("[data-edit-army]").forEach((button) => button.addEventListener("click", (event) => {
     event.stopPropagation();
     openArmyEditor(button.dataset.editArmy).catch((error) => toast(error.message, "error"));
+  }));
+  document.querySelectorAll("[data-edit-fleet]").forEach((button) => button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    openFleetHealthEditor(button.dataset.editFleet).catch((error) => toast(error.message, "error"));
   }));
   revealFocusedRecord();
 }
@@ -1781,6 +1785,45 @@ async function openArmyEditor(armyId) {
       toast(error.message, "error");
     }
   });
+}
+
+async function openFleetHealthEditor(fleetId) {
+  const data=await api(`/api/fleets/${fleetId}`);
+  const fleet=data.fleet;
+  const shipLabels={kerkouros:"Kerkouros",trireme:"Trireme",quinquereme:"Quinquereme"};
+  const statusLabels={HEALTHY:"Sağlam",DAMAGED:"Hasarlı",DISABLED:"İş göremez"};
+  const blockedReason=fleet.active_battle_id
+    ?"Bu filo etkin savaşa bağlı. Önce Savaşlar menüsünden savaş kadrosundan çıkarılmalıdır."
+    :fleet.active_blockade_id
+      ?"Bu filo etkin ablukaya bağlı. Önce abluka kaldırılmalıdır."
+      :fleet.pending_raid_id
+        ?"Bu filo sonuç bekleyen deniz yağmasına bağlıdır. Önce yağma sonuçlandırılmalıdır."
+        :null;
+  const rows=data.healthGroups.map((group,index)=>{
+    const percent=Math.round(Number(group.current_hp)*100/Number(group.max_hp));
+    return `<div class="army-unit-line"><div><strong>${number(group.quantity)} ${escapeHtml(shipLabels[group.ship_type]||group.ship_type)} · %${number(percent)}</strong><small>${escapeHtml(group.settlement_name)} · ${escapeHtml(statusLabels[group.status]||group.status)} · azami ${number(group.max_hp)} HP</small></div><input class="edit-fleet-hp" type="number" min="1" max="${Number(group.max_hp)}" step="1" value="${Number(group.current_hp)}" data-original="${Number(group.current_hp)}" data-index="${index}" aria-label="Yeni gemi canı ${index+1}" ${blockedReason?"disabled":""}></div>`;
+  }).join("")||'<div class="empty">Bu filoda düzenlenebilir gemi bulunmuyor.</div>';
+  openEditor(
+    "Filo gemi canlarını düzenle",
+    `${fleet.country_name} · ${fleet.name}`,
+    `${blockedReason?`<div class="preview-warning"><strong>Düzenleme şu anda kilitli</strong><span>${escapeHtml(blockedReason)}</span></div>`:'<div class="preview-warning"><strong>Doğrudan sağlamlık yönetimi</strong><span>Her satır aynı tür, liman ve can değerindeki gemileri temsil eder. Azami HP verilen hasar kayıtları kaldırılır ve belgeye %100 yansır.</span></div>'}<div class="section-title"><h2>Filo gemileri</h2><span>HP değerini doğrudan yaz</span></div><div class="army-unit-editor">${rows}</div><label>Değişiklik gerekçesi<textarea id="edit-fleet-health-reason" rows="2" minlength="3" maxlength="500" required placeholder="Örn. tamamlanan tamirin düzeltilmesi"></textarea></label>`,
+    blockedReason?null:async()=>{
+      const reason=document.getElementById("edit-fleet-health-reason").value.trim();
+      if(reason.length<3)throw new Error("Değişiklik gerekçesi en az 3 karakter olmalıdır.");
+      const changed=[...document.querySelectorAll(".edit-fleet-hp")].filter((input)=>Number(input.value)!==Number(input.dataset.original));
+      if(!changed.length)throw new Error("En az bir gemi grubunun canını değiştirin.");
+      for(const input of changed){
+        const group=data.healthGroups[Number(input.dataset.index)];
+        await api(`/api/admin/fleets/${fleetId}/health`,{method:"PATCH",body:JSON.stringify({
+          settlementId:group.settlement_id,shipType:group.ship_type,damageIds:group.damage_ids,
+          quantity:Number(group.quantity),currentHp:Number(input.value),reason
+        })});
+      }
+      closeEditor();toast(`${fleet.name} gemi canları güncellendi.`);
+      await refreshKeepingScroll(forcesPage);
+    }
+  );
+  editorModal.querySelector(".modal").classList.add("wide");
 }
 
 async function submitEditor(event) {

@@ -43,6 +43,7 @@ import { ROMAN_BUSINESSES } from "../domain/roman-republic.js";
 
 const usableUnitTypes = (Object.keys(BATTLE_UNIT_STATS) as BattleUnitType[]).filter((unitType) => unitType !== "militia");
 const usableUnitTypeSet = new Set<string>(usableUnitTypes);
+const navalUnitTypeSet = new Set<string>(Object.keys(NAVAL_HULL_STATS));
 const battleRosterForceTypeSet = new Set<string>([...Object.keys(BATTLE_UNIT_STATS), ...Object.keys(NAVAL_UNIT_STATS)]);
 const commanderDoctrineSet = new Set<string>(Object.keys(COMMANDER_DOCTRINES));
 const characterSpecializationSet = new Set<string>(Object.keys(CHARACTER_SPECIALIZATIONS));
@@ -203,6 +204,19 @@ const armyUnitUpdateSchema = z.object({
   unitType: z.string().refine((value) => usableUnitTypeSet.has(value), "Geçersiz birlik türü."),
   quantity: z.coerce.number().int().min(0).max(10_000_000),
   operation: z.enum(["SET", "ADD"]).default("SET")
+});
+
+const fleetHealthUpdateSchema = z.object({
+  settlementId: z.string().uuid(),
+  shipType: z.string().refine((value) => navalUnitTypeSet.has(value), "Geçersiz gemi türü."),
+  damageIds: z.array(z.string().uuid()).max(10_000),
+  quantity: z.coerce.number().int().positive().max(10_000),
+  currentHp: z.coerce.number().int().positive().max(10_000),
+  reason: z.string().trim().min(3).max(500)
+}).superRefine((value, context) => {
+  if (value.damageIds.length > 0 && value.damageIds.length !== value.quantity) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["quantity"], message: "Hasarlı gemi grubu miktarı kayıtlarla uyuşmuyor." });
+  }
 });
 
 const battleParticipantMutationSchema = z.object({
@@ -3018,6 +3032,74 @@ export const adminPanelService = {
     return { army, units: units.rows, settlements: settlements.rows, commanders: commanders.rows };
   },
 
+  async fleet(fleetId: string) {
+    if (!z.string().uuid().safeParse(fleetId).success) throw new Error("Geçersiz filo kimliği.");
+    const fleet = (await adminPool.query<{
+      id:string;country_id:string;name:string;country_name:string;commander_name:string|null;
+      active_battle_id:string|null;active_blockade_id:string|null;pending_raid_id:string|null;
+    }>(
+      `SELECT fleet.id,fleet.country_id,fleet.name,country.name AS country_name,
+              character.name AS commander_name,
+              (SELECT assignment.battle_id FROM battle_fleet_assignments assignment
+                JOIN battles battle ON battle.id=assignment.battle_id
+               WHERE assignment.fleet_id=fleet.id AND battle.status NOT IN ('FINISHED','CANCELLED')
+               ORDER BY battle.updated_at DESC LIMIT 1) AS active_battle_id,
+              (SELECT blockade.id FROM naval_blockades blockade
+               WHERE blockade.fleet_id=fleet.id AND blockade.status='ACTIVE' LIMIT 1) AS active_blockade_id,
+              (SELECT raid.id FROM naval_raids raid
+               WHERE raid.fleet_id=fleet.id AND raid.status='WAITING_ROLL' LIMIT 1) AS pending_raid_id
+         FROM fleets fleet
+         JOIN countries country ON country.id=fleet.country_id
+         LEFT JOIN country_characters character ON character.id=fleet.commander_character_id
+        WHERE fleet.id=$1 AND fleet.guild_id=$2`,
+      [fleetId,adminConfig.guildId]
+    )).rows[0];
+    if (!fleet) throw new Error("Filo bulunamadı.");
+
+    const [allocationsResult,damageResult] = await Promise.all([
+      adminPool.query<{settlement_id:string;settlement_name:string;ship_type:NavalUnitType;quantity:number}>(
+        `SELECT ships.settlement_id,settlement.name AS settlement_name,ships.ship_type,ships.quantity
+           FROM fleet_ships ships JOIN settlements settlement ON settlement.id=ships.settlement_id
+          WHERE ships.fleet_id=$1 ORDER BY settlement.name,ships.ship_type`,[fleetId]
+      ),
+      adminPool.query<{
+        settlement_id:string;settlement_name:string;ship_type:NavalUnitType;current_hp:number;max_hp:number;
+        status:"DAMAGED"|"DISABLED";quantity:number;damage_ids:string[];
+      }>(
+        `SELECT damage.settlement_id,settlement.name AS settlement_name,damage.ship_type,
+                damage.current_hp,damage.max_hp,damage.status,COUNT(*)::integer AS quantity,
+                ARRAY_AGG(damage.id ORDER BY damage.id) AS damage_ids
+           FROM naval_ship_damage damage JOIN settlements settlement ON settlement.id=damage.settlement_id
+          WHERE damage.fleet_id=$1 AND damage.status IN ('DAMAGED','DISABLED')
+          GROUP BY damage.settlement_id,settlement.name,damage.ship_type,damage.current_hp,damage.max_hp,damage.status
+          ORDER BY settlement.name,damage.ship_type,damage.current_hp DESC,damage.status`,[fleetId]
+      )
+    ]);
+    const damagedByAllocation = new Map<string,number>();
+    const healthGroups:Array<{
+      settlement_id:string;settlement_name:string;ship_type:NavalUnitType;current_hp:number;max_hp:number;
+      status:"HEALTHY"|"DAMAGED"|"DISABLED";quantity:number;damage_ids:string[];
+    }> = damageResult.rows.map((row) => {
+      const key=`${row.settlement_id}:${row.ship_type}`;
+      damagedByAllocation.set(key,(damagedByAllocation.get(key)??0)+Number(row.quantity));
+      return {...row,quantity:Number(row.quantity),damage_ids:row.damage_ids??[]};
+    });
+    for (const allocation of allocationsResult.rows) {
+      const key=`${allocation.settlement_id}:${allocation.ship_type}`;
+      const quantity=Math.max(0,Number(allocation.quantity)-(damagedByAllocation.get(key)??0));
+      if (!quantity) continue;
+      const maxHp=NAVAL_HULL_STATS[allocation.ship_type].maxHp;
+      healthGroups.push({
+        settlement_id:allocation.settlement_id,settlement_name:allocation.settlement_name,
+        ship_type:allocation.ship_type,current_hp:maxHp,max_hp:maxHp,status:"HEALTHY" as const,
+        quantity,damage_ids:[]
+      });
+    }
+    healthGroups.sort((left,right)=>left.settlement_name.localeCompare(right.settlement_name,"tr")
+      ||left.ship_type.localeCompare(right.ship_type)||Number(right.current_hp)-Number(left.current_hp));
+    return { fleet, allocations:allocationsResult.rows, healthGroups };
+  },
+
   async activeBattles() {
     const [battleRows, participantRows, armyRows, fleetRows] = await Promise.all([
       adminPool.query(
@@ -4303,6 +4385,86 @@ export const adminPanelService = {
         reason: input.reason
       };
       await writeAdminAudit(client, actorId, "admin.panel.army.delete", "army", army.id, result);
+      return result;
+    });
+  },
+
+  async updateFleetHealth(actorId: string, fleetId: string, rawInput: unknown) {
+    if (!z.string().uuid().safeParse(fleetId).success) throw new Error("Geçersiz filo kimliği.");
+    const input=fleetHealthUpdateSchema.parse(rawInput);
+    const shipType=input.shipType as NavalUnitType;
+    const hull=NAVAL_HULL_STATS[shipType];
+    if (input.currentHp>hull.maxHp) throw new Error(`${hull.label} için can ${hull.maxHp} değerini aşamaz.`);
+    return withAdminTransaction(async(client)=>{
+      const fleet=(await client.query<{id:string;country_id:string;name:string;country_name:string}>(
+        `SELECT fleet.id,fleet.country_id,fleet.name,country.name AS country_name
+           FROM fleets fleet JOIN countries country ON country.id=fleet.country_id
+          WHERE fleet.id=$1 AND fleet.guild_id=$2 FOR UPDATE OF fleet`,[fleetId,adminConfig.guildId]
+      )).rows[0];
+      if(!fleet)throw new Error("Filo bulunamadı.");
+      if((await client.query(
+        `SELECT 1 FROM battle_fleet_assignments assignment JOIN battles battle ON battle.id=assignment.battle_id
+          WHERE assignment.fleet_id=$1 AND battle.status NOT IN ('FINISHED','CANCELLED') LIMIT 1`,[fleet.id]
+      )).rowCount)throw new Error("Etkin savaşa bağlı filonun gemi canı değiştirilemez. Önce filoyu savaş kadrosundan çıkarın.");
+      if((await client.query("SELECT 1 FROM naval_blockades WHERE fleet_id=$1 AND status='ACTIVE' LIMIT 1",[fleet.id])).rowCount)
+        throw new Error("Etkin abluka filosunun gemi canı değiştirilemez. Önce ablukayı kaldırın.");
+      if((await client.query("SELECT 1 FROM naval_raids WHERE fleet_id=$1 AND status='WAITING_ROLL' LIMIT 1",[fleet.id])).rowCount)
+        throw new Error("Deniz yağması sonucu bekleyen filonun gemi canı değiştirilemez.");
+
+      const allocation=(await client.query<{quantity:number;settlement_name:string}>(
+        `SELECT ships.quantity,settlement.name AS settlement_name
+           FROM fleet_ships ships JOIN settlements settlement ON settlement.id=ships.settlement_id
+          WHERE ships.fleet_id=$1 AND ships.settlement_id=$2 AND ships.ship_type=$3 FOR UPDATE OF ships`,
+        [fleet.id,input.settlementId,shipType]
+      )).rows[0];
+      if(!allocation)throw new Error("Bu gemi grubu artık filoda bulunmuyor.");
+
+      let previousHp=hull.maxHp;
+      if(input.damageIds.length){
+        const records=(await client.query<{id:string;current_hp:number;max_hp:number}>(
+          `SELECT id,current_hp,max_hp FROM naval_ship_damage
+            WHERE id=ANY($1::uuid[]) AND fleet_id=$2 AND settlement_id=$3 AND ship_type=$4
+              AND status IN ('DAMAGED','DISABLED') FOR UPDATE`,
+          [input.damageIds,fleet.id,input.settlementId,shipType]
+        )).rows;
+        if(records.length!==input.damageIds.length)throw new Error("Gemi can kayıtları bu sırada değişti. Filo penceresini yenileyip tekrar deneyin.");
+        previousHp=Number(records[0]?.current_hp??hull.maxHp);
+        if(input.currentHp===hull.maxHp){
+          await client.query("DELETE FROM naval_ship_damage WHERE id=ANY($1::uuid[])",[input.damageIds]);
+        }else{
+          const status=input.currentHp<=hull.disabledAtHp?"DISABLED":"DAMAGED";
+          await client.query(
+            `UPDATE naval_ship_damage SET current_hp=$1,max_hp=$2,status=$3,updated_at=NOW()
+              WHERE id=ANY($4::uuid[])`,[input.currentHp,hull.maxHp,status,input.damageIds]
+          );
+        }
+      }else{
+        const damaged=Number((await client.query<{quantity:number}>(
+          `SELECT COUNT(*)::integer AS quantity FROM naval_ship_damage
+            WHERE fleet_id=$1 AND settlement_id=$2 AND ship_type=$3 AND status IN ('DAMAGED','DISABLED')`,
+          [fleet.id,input.settlementId,shipType]
+        )).rows[0]?.quantity??0);
+        const healthyAvailable=Math.max(0,Number(allocation.quantity)-damaged);
+        if(input.quantity>healthyAvailable)throw new Error("Sağlam gemi grubu bu sırada değişti. Filo penceresini yenileyip tekrar deneyin.");
+        if(input.currentHp<hull.maxHp){
+          const status=input.currentHp<=hull.disabledAtHp?"DISABLED":"DAMAGED";
+          await client.query(
+            `INSERT INTO naval_ship_damage(
+               guild_id,country_id,settlement_id,fleet_id,ship_type,max_hp,current_hp,status
+             )
+             SELECT $1,$2,$3,$4,$5,$6,$7,$8 FROM generate_series(1,$9)`,
+            [adminConfig.guildId,fleet.country_id,input.settlementId,fleet.id,shipType,hull.maxHp,input.currentHp,status,input.quantity]
+          );
+        }
+      }
+      await client.query("UPDATE fleets SET updated_at=NOW() WHERE id=$1",[fleet.id]);
+      const result={
+        fleetId:fleet.id,fleetName:fleet.name,countryId:fleet.country_id,countryName:fleet.country_name,
+        settlementId:input.settlementId,settlementName:allocation.settlement_name,shipType,
+        shipLabel:hull.label,quantity:input.quantity,previousHp,currentHp:input.currentHp,maxHp:hull.maxHp,
+        restoredToFullHealth:input.currentHp===hull.maxHp,reason:input.reason
+      };
+      await writeAdminAudit(client,actorId,"admin.panel.fleet.health.update","fleet",fleet.id,result);
       return result;
     });
   },

@@ -128,6 +128,7 @@ import { characterDutyLifecycleRepairMigration } from "./character-duty-lifecycl
 import { romanElectionNpcScoreMigration } from "./roman-election-npc-score-migration.js";
 import { catoKangjuHouseholdsMigration } from "./cato-kangju-households-migration.js";
 import { navalReadyRepairReconciliationMigration } from "./naval-ready-repair-reconciliation-migration.js";
+import { kangjuHouseholdRepairMigration } from "./kangju-household-repair-migration.js";
 
 export const migrations = [
   {
@@ -2473,5 +2474,6 @@ export const migrations = [
   characterDutyLifecycleRepairMigration,
   romanElectionNpcScoreMigration,
   catoKangjuHouseholdsMigration,
-  navalReadyRepairReconciliationMigration
+  navalReadyRepairReconciliationMigration,
+  kangjuHouseholdRepairMigration
 ] as const;

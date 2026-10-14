@@ -244,6 +244,11 @@ const server = createServer(async (request, response) => {
       if (!requireSession(request, response)) return;
       return json(response, 200, await adminPanelService.army(armyDetailMatch[1]!));
     }
+    const fleetDetailMatch = request.method === "GET" ? url.pathname.match(/^\/api\/fleets\/([0-9a-f-]+)$/iu) : null;
+    if (fleetDetailMatch) {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await adminPanelService.fleet(fleetDetailMatch[1]!));
+    }
     const settlementDetailMatch = request.method === "GET" ? url.pathname.match(/^\/api\/settlements\/([0-9a-f-]+)$/iu) : null;
     if (settlementDetailMatch) {
       if (!requireSession(request, response)) return;
@@ -531,6 +536,12 @@ const server = createServer(async (request, response) => {
       const session = requireMutation(request, response);
       if (!session) return;
       return json(response, 200, await adminPanelService.deleteArmy(session.sub, armyDeleteMatch[1]!, await body(request)));
+    }
+    const fleetHealthMatch = request.method === "PATCH" ? url.pathname.match(/^\/api\/admin\/fleets\/([0-9a-f-]+)\/health$/iu) : null;
+    if (fleetHealthMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.updateFleetHealth(session.sub, fleetHealthMatch[1]!, await body(request)));
     }
     if (request.method === "POST" && url.pathname === "/api/admin/army-units") {
       const session = requireMutation(request, response);
