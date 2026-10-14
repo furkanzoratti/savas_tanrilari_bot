@@ -329,8 +329,8 @@ export const characterService = {
       await client.query("UPDATE settlements SET local_treasury=local_treasury-$1 WHERE id=$2",[MISSIONARY_PURCHASE_COST,source.id]);
       await syncCountryTreasury(client,input.countryId);
       await client.query(
-        "INSERT INTO transactions(country_id,turn,kind,amount,description) VALUES($1,$2,'MISSIONARY_PURCHASE',$3,$4)",
-        [input.countryId,state.current_turn,-MISSIONARY_PURCHASE_COST,source.name+": "+name+" adlı Misyoner"]
+        "INSERT INTO transactions(country_id,settlement_id,turn,kind,amount,description) VALUES($1,$2,$3,'MISSIONARY_PURCHASE',$4,$5)",
+        [input.countryId,source.id,state.current_turn,-MISSIONARY_PURCHASE_COST,source.name+": "+name+" adlı Misyoner"]
       );
       await client.query(
         `INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details)

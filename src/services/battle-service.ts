@@ -2259,7 +2259,7 @@ export const battleService = {
       await client.query("UPDATE battle_sides SET support_assets=$1::jsonb,support_targets=$2::jsonb,seal=$3 WHERE battle_id=$4 AND side_key='A'", [JSON.stringify(support), JSON.stringify(targets), seal, battle.id]);
       await client.query("UPDATE settlements SET local_treasury=local_treasury-$1 WHERE id=$2", [cost, settlement.id]);
       await client.query("UPDATE countries SET treasury=(SELECT COALESCE(SUM(local_treasury),0)::bigint FROM settlements WHERE country_id=$1) WHERE id=$1", [settlement.country_id]);
-      await client.query("INSERT INTO transactions(country_id,turn,kind,amount,description) SELECT $1,current_turn,'FIELD_SIEGE_PURCHASE',$2,$3 FROM guilds WHERE discord_id=$4", [settlement.country_id, -cost, `${settlement.name}: ${input.quantity} ${asset.name}`, input.guildId]);
+      await client.query("INSERT INTO transactions(country_id,settlement_id,turn,kind,amount,description) SELECT $1,$2,current_turn,'FIELD_SIEGE_PURCHASE',$3,$4 FROM guilds WHERE discord_id=$5", [settlement.country_id, settlement.id, -cost, `${settlement.name}: ${input.quantity} ${asset.name}`, input.guildId]);
       await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'battle.field_siege_purchase','battle',$3,$4::jsonb)", [input.guildId, input.actorId, battle.id, JSON.stringify({ assetType: input.assetType, quantity: input.quantity, cost, settlementId: settlement.id })]);
       return { view: await loadView(client, battle.id), cost, settlementName: settlement.name };
     });

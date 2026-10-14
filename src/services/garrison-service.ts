@@ -101,8 +101,8 @@ export async function scheduleMandatoryGarrisonReplenishment(
       deficit.archers, personnel, cost, input.currentTurn, completionTurn]
   )).rows[0]!;
   await client.query(
-    "INSERT INTO transactions(country_id,turn,kind,amount,description) VALUES($1,$2,'GARRISON_REPLENISHMENT',$3,$4)",
-    [settlement.country_id, input.currentTurn, -cost, `${settlement.name} zorunlu garnizon yenilemesi`]
+    "INSERT INTO transactions(country_id,settlement_id,turn,kind,amount,description) VALUES($1,$2,$3,'GARRISON_REPLENISHMENT',$4,$5)",
+    [settlement.country_id, settlement.id, input.currentTurn, -cost, `${settlement.name} zorunlu garnizon yenilemesi`]
   );
   await syncCountryTreasury(client, settlement.country_id);
   return {

@@ -375,6 +375,52 @@ textarea { resize: vertical; line-height: 1.45; }
 .economy-country-values small { margin-bottom: 4px; color: var(--muted); font-size: 10px; }
 .economy-country-values strong { font-size: 12px; }
 .economy-country-card > button { justify-self: start; }
+.diplomacy-priority-grid { display: grid; grid-template-columns: minmax(280px,.8fr) minmax(0,1.2fr); gap: 14px; margin-top: 14px; }
+.diplomacy-country-list { max-height: 430px; display: grid; overflow: auto; scrollbar-width: thin; }
+.diplomacy-country-row { width: 100%; display: grid; grid-template-columns: minmax(170px,1fr) repeat(3,72px); gap: 10px; align-items: center; padding: 11px 8px; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.diplomacy-country-row:last-child { border-bottom: 0; }
+.diplomacy-country-row:hover { border-radius: 8px; background: var(--surface-2); }
+.diplomacy-country-row > span,.diplomacy-country-row strong,.diplomacy-country-row small,.diplomacy-country-row b { min-width: 0; display: block; }
+.diplomacy-country-row > span strong,.diplomacy-country-row > span small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.diplomacy-country-row small { margin-top: 3px; color: var(--muted); font-size: 10px; }
+.diplomacy-country-row > div { padding: 7px; border-radius: 8px; background: var(--bg); text-align: center; }
+.diplomacy-country-row > div b { color: var(--navy); font-size: 14px; }
+.economy-ledger { display: grid; gap: 10px; }
+.economy-ledger-country { padding: 0; overflow: hidden; }
+.economy-ledger-country > summary { display: grid; grid-template-columns: minmax(210px,1.3fr) minmax(145px,.7fr) minmax(145px,.7fr) auto; gap: 18px; align-items: center; padding: 16px 18px; cursor: pointer; list-style: none; }
+.economy-ledger-country > summary::-webkit-details-marker { display: none; }
+.economy-ledger-country > summary:hover { background: rgba(128,82,56,.055); }
+.economy-ledger-country[open] > summary { border-bottom: 1px solid var(--line); background: linear-gradient(110deg,rgba(128,82,56,.08),rgba(34,52,85,.04)); }
+.economy-ledger-country summary h3 { margin: 5px 0 3px; font-size: 18px; }
+.economy-ledger-country summary small,.ledger-toolbar span { display: block; color: var(--muted); font-size: 11px; }
+.turn-chip { display: inline-flex; padding: 3px 7px; border-radius: 999px; background: rgba(128,82,56,.11); color: var(--brown); font-size: 9px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.ledger-main-value small,.ledger-main-value strong,.ledger-net small,.ledger-net strong { display: block; }
+.ledger-main-value strong,.ledger-net strong { margin-top: 5px; font-size: 16px; }
+.details-cue { padding: 6px 9px; border: 1px solid var(--line); border-radius: 999px; color: var(--brown); font-size: 10px; font-weight: 700; }
+.economy-ledger-country[open] .details-cue::after { content: "ı kapat"; }
+.economy-ledger-detail { display: grid; gap: 14px; padding: 18px; background: rgba(232,224,211,.36); }
+.ledger-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.finance-turn-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
+.finance-turn-grid.compact { margin: 10px 0; }
+.finance-turn-card { min-width: 0; padding: 11px; border: 1px solid var(--line); border-radius: 9px; background: rgba(248,243,235,.8); }
+.finance-turn-card span,.finance-turn-card strong,.finance-turn-card small,.finance-turn-card em { display: block; }
+.finance-turn-card span { color: var(--brown); font-size: 10px; font-weight: 800; text-transform: uppercase; }
+.finance-turn-card strong { margin: 6px 0 4px; font-size: 15px; }
+.finance-turn-card small,.finance-turn-card em { overflow: hidden; color: var(--muted); font-size: 10px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+.finance-turn-card em { margin-top: 4px; }
+.settlement-finance-list { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+.settlement-finance-card { min-width: 0; padding: 14px; border: 1px solid rgba(128,82,56,.22); border-radius: 11px; background: #f7f1e8; }
+.settlement-finance-card > header { display: flex; justify-content: space-between; gap: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.settlement-finance-card h4 { margin: 0 0 4px; font-size: 15px; }
+.settlement-finance-card header small { color: var(--muted); font-size: 10px; }
+.settlement-finance-card header > strong { flex: 0 0 auto; color: var(--navy); font-size: 13px; }
+.settlement-movements { display: grid; margin: 10px 0; }
+.settlement-movements > div { display: flex; justify-content: space-between; gap: 12px; padding: 7px 2px; border-bottom: 1px solid rgba(199,181,159,.65); }
+.settlement-movements > div:last-child { border-bottom: 0; }
+.settlement-movements span,.settlement-movements b,.settlement-movements small { min-width: 0; display: block; }
+.settlement-movements b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.settlement-movements small { margin-top: 3px; color: var(--muted); font-size: 9px; }
+.settlement-movements em { flex: 0 0 auto; font-size: 10px; font-style: normal; font-weight: 700; }
 .workspace-hero { padding: 24px; border: 1px solid rgba(128,82,56,.24); border-radius: 15px; background: linear-gradient(135deg,rgba(244,235,220,.94),rgba(215,201,181,.8)); }
 .workspace-dashboard { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; }
 .workspace-panel { min-width: 0; }
@@ -576,6 +622,8 @@ textarea { resize: vertical; line-height: 1.45; }
   .economy-country-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .workspace-dashboard { grid-template-columns: 1fr; }
   .reports-grid { grid-template-columns: 1fr; }
+  .diplomacy-priority-grid { grid-template-columns: 1fr; }
+  .settlement-finance-list { grid-template-columns: 1fr; }
   .activity-strip { grid-template-columns: repeat(4,minmax(0,1fr)); }
 }
 @media (max-width: 620px) {
@@ -620,6 +668,13 @@ textarea { resize: vertical; line-height: 1.45; }
   .bulk-preview-list > div { grid-template-columns: 1fr auto; }
   .bulk-preview-list > div > :nth-child(3) { display: none; }
   .mechanics-grid,.economy-country-grid { grid-template-columns: 1fr; }
+  .economy-ledger-country > summary { grid-template-columns: minmax(0,1fr) auto; gap: 10px; }
+  .ledger-net { display: none; }
+  .details-cue { grid-column: 2; grid-row: 1; }
+  .finance-turn-grid { grid-template-columns: 1fr; }
+  .diplomacy-country-row { grid-template-columns: minmax(0,1fr) repeat(3,48px); gap: 5px; }
+  .diplomacy-country-row > div { padding: 5px 3px; }
+  .ledger-toolbar { align-items: stretch; flex-direction: column; }
   .workspace-record-grid { grid-template-columns: 1fr; }
   .comparison-selectors { align-items: stretch; flex-direction: column; }
   .comparison-selectors select { min-width: 0; }

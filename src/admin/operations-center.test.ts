@@ -128,6 +128,12 @@ describe("GM operasyon merkezi", () => {
     expect(app).toContain("async function economyControlPage");
     expect(app).toContain("Hazineyi düzelt");
     expect(app).toContain("İlişkiyi sonlandır");
+    expect(app).toContain("Karar bekleyen teklifler");
+    expect(app).toContain("Devlet hazineleri");
+    expect(app).toContain("Son 3 tur");
+    expect(service).toContain("countryTurnHistory");
+    expect(service).toContain("settlementTurnHistory");
+    expect(service).toContain("diplomacyCountries");
   });
 
   it("kişisel GM çalışma alanı ve adlandırılmış filtre görünümleri sağlar", () => {
@@ -192,7 +198,8 @@ describe("GM operasyon merkezi", () => {
     expect(service).toContain("JOIN countries scoped_country");
     expect(service).toContain('scope !== "DIPLOMACY"');
     expect(css).toContain(".load-warning");
-    expect(html).toContain("menu-recovery-v19");
+    expect(app).toContain("const rowsOrEmpty =");
+    expect(html).toContain("finance-diplomacy-v20");
   });
 
   it("son güvenlik ve performans katmanını istek izleme ve canlı durumla tamamlar", () => {
@@ -218,6 +225,6 @@ describe("GM operasyon merkezi", () => {
     expect(app).toContain('Promise.all([api("/api/game-health"), api("/api/system-status")])');
     expect(app).toContain("Panel çalışma durumu");
     expect(css).toContain(".system-status-grid");
-    expect(html).toContain("menu-recovery-v19");
+    expect(html).toContain("finance-diplomacy-v20");
   });
 });

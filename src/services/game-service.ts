@@ -2462,8 +2462,8 @@ export const gameService = {
       await client.query("UPDATE settlements SET local_treasury=local_treasury+$1 WHERE id=$2", [refund, settlementId]);
       const treasury = await syncCountryTreasury(client, countryId);
       await client.query(
-        "INSERT INTO transactions(country_id,turn,kind,amount,description) VALUES($1,$2,'PURCHASE_REFUND',$3,$4)",
-        [countryId, guild.current_turn, refund, `${purchase.settlementName}: ${purchase.itemName} yönetici iptali ve iadesi`]
+        "INSERT INTO transactions(country_id,settlement_id,turn,kind,amount,description) VALUES($1,$2,$3,'PURCHASE_REFUND',$4,$5)",
+        [countryId, settlementId, guild.current_turn, refund, `${purchase.settlementName}: ${purchase.itemName} yönetici iptali ve iadesi`]
       );
       await audit(client, input.guildId, input.actorId, "ADMIN_PURCHASE_CANCEL", "purchase", entityId, {
         purchaseKey: input.purchaseKey, kind: purchase.kind, settlementId,
@@ -2644,7 +2644,7 @@ export const gameService = {
          ON CONFLICT(settlement_id,building_type) DO UPDATE SET target_level=$3,status='BUILDING',started_turn=$4,completion_turn=$5,construction_paid_amount=$6`,
         [settlement.id, input.buildingType, targetLevel, guild.current_turn, completionTurn, cost]
       );
-      await client.query("INSERT INTO transactions(country_id,turn,kind,amount,description) VALUES($1,$2,'BUILDING_PURCHASE',$3,$4)", [country.id, guild.current_turn, -cost, `${settlement.name}: ${definition.name} Sv${targetLevel}`]);
+      await client.query("INSERT INTO transactions(country_id,settlement_id,turn,kind,amount,description) VALUES($1,$2,$3,'BUILDING_PURCHASE',$4,$5)", [country.id, settlement.id, guild.current_turn, -cost, `${settlement.name}: ${definition.name} Sv${targetLevel}`]);
       await audit(client, input.guildId, input.actorId, "BUILDING_PURCHASE", "settlement", settlement.id, { buildingType: input.buildingType, targetLevel, cost, completionTurn });
       return { targetLevel, completionTurn, cost };
     });
@@ -2741,7 +2741,7 @@ export const gameService = {
         ON CONFLICT(settlement_id,acquisition_turn) DO UPDATE SET quantity=recruitment_usage.quantity+EXCLUDED.quantity`, [settlement.id, guild.current_turn, input.quantity]);
       await client.query("UPDATE settlements SET local_treasury=local_treasury-$1 WHERE id=$2",[cost,settlement.id]);
       await syncCountryTreasury(client, country.id);
-      await client.query("INSERT INTO transactions(country_id,turn,kind,amount,description) VALUES($1,$2,'UNIT_PURCHASE',$3,$4)", [country.id, guild.current_turn, -cost, `${settlement.name}: ${input.quantity} ${unit.name}`]);
+      await client.query("INSERT INTO transactions(country_id,settlement_id,turn,kind,amount,description) VALUES($1,$2,$3,'UNIT_PURCHASE',$4,$5)", [country.id, settlement.id, guild.current_turn, -cost, `${settlement.name}: ${input.quantity} ${unit.name}`]);
       await audit(client, input.guildId, input.actorId, "UNIT_PURCHASE", "settlement", settlement.id, { unitType: input.unitType, quantity: input.quantity, cost, waves, trainingCapacity });
       return { cost, waves };
     });
@@ -2790,7 +2790,7 @@ export const gameService = {
       );
       await client.query("UPDATE settlements SET local_treasury=local_treasury-$1 WHERE id=$2", [cost, settlement.id]);
       await syncCountryTreasury(client, country.id);
-      await client.query("INSERT INTO transactions(country_id,turn,kind,amount,description) VALUES($1,$2,'SIEGE_PURCHASE',$3,$4)", [country.id, guild.current_turn, -cost, `${settlement.name}: ${input.quantity} ${asset.name}`]);
+      await client.query("INSERT INTO transactions(country_id,settlement_id,turn,kind,amount,description) VALUES($1,$2,$3,'SIEGE_PURCHASE',$4,$5)", [country.id, settlement.id, guild.current_turn, -cost, `${settlement.name}: ${input.quantity} ${asset.name}`]);
       await audit(client, input.guildId, input.actorId, "SIEGE_PURCHASE", "settlement", settlement.id, { assetType: input.assetType, quantity: input.quantity, cost, completionTurn, slots });
       return { cost, completionTurn, slots };
     });
@@ -2883,7 +2883,7 @@ export const gameService = {
       await client.query(`INSERT INTO naval_orders(country_id,settlement_id,ship_type,quantity,paid_amount,ordered_turn,completion_turn) VALUES($1,$2,$3,$4,$5,$6,$7)`, [country.id, settlement.id, input.shipType, input.quantity, cost, guild.current_turn, completionTurn]);
       await client.query("UPDATE settlements SET local_treasury=local_treasury-$1 WHERE id=$2", [cost, settlement.id]);
       await syncCountryTreasury(client, country.id);
-      await client.query("INSERT INTO transactions(country_id,turn,kind,amount,description) VALUES($1,$2,'SHIP_PURCHASE',$3,$4)", [country.id, guild.current_turn, -cost, `${settlement.name}: ${input.quantity} ${ship.name}`]);
+      await client.query("INSERT INTO transactions(country_id,settlement_id,turn,kind,amount,description) VALUES($1,$2,$3,'SHIP_PURCHASE',$4,$5)", [country.id, settlement.id, guild.current_turn, -cost, `${settlement.name}: ${input.quantity} ${ship.name}`]);
       await audit(client, input.guildId, input.actorId, "SHIP_PURCHASE", "settlement", settlement.id, { shipType: input.shipType, quantity: input.quantity, cost, completionTurn });
       return { cost, completionTurn, harborUsed: harborUsed + requestedHarbor, harborCapacity };
     });
