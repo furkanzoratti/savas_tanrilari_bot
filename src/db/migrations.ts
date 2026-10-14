@@ -126,6 +126,7 @@ import { missionaryRollPercentRepairMigration } from "./missionary-roll-percent-
 import { espionageCaptivitiesMigration } from "./espionage-captivities-migration.js";
 import { characterDutyLifecycleRepairMigration } from "./character-duty-lifecycle-repair-migration.js";
 import { romanElectionNpcScoreMigration } from "./roman-election-npc-score-migration.js";
+import { catoKangjuHouseholdsMigration } from "./cato-kangju-households-migration.js";
 
 export const migrations = [
   {
@@ -2469,5 +2470,6 @@ export const migrations = [
   missionaryRollPercentRepairMigration,
   espionageCaptivitiesMigration,
   characterDutyLifecycleRepairMigration,
-  romanElectionNpcScoreMigration
+  romanElectionNpcScoreMigration,
+  catoKangjuHouseholdsMigration
 ] as const;

@@ -18,11 +18,11 @@ describe("Roma başlangıç siyasi aileleri",()=>{
     expect([...counts.values()]).toEqual(Array(8).fill(6));
   });
 
-  it("Nero, Scipio ve Magnus ailelerini verilen kadrolarla kurar",()=>{
+  it("Nero, Scipio, Magnus ve Cato ailelerini verilen kadrolarla kurar",()=>{
     const counts=new Map<string,number>();
     for(const member of ROMAN_PLAYER_FAMILY_MEMBERS)counts.set(member.familyName,(counts.get(member.familyName)??0)+1);
     expect(counts).toEqual(new Map([
-      ["Nero ailesi",8],["Scipio ailesi",9],["Magnus ailesi",6]
+      ["Nero ailesi",8],["Scipio ailesi",9],["Magnus ailesi",6],["Cato ailesi",8]
     ]));
     expect(ROMAN_PLAYER_FAMILY_MEMBERS).toContainEqual(expect.objectContaining({
       familyName:"Magnus ailesi",name:"Aurelia Marcia",position:"SPOUSE",age:40

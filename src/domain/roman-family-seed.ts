@@ -46,7 +46,15 @@ export const ROMAN_PLAYER_FAMILY_MEMBERS:DefaultRomanFamilyMemberSeed[]=[
   {familyName:"Magnus ailesi",key:"child_one",name:"Lucia Cornelia Magnus",gender:"FEMALE",age:19,position:"CHILD",relation:"Yöneticinin kızı",motherKey:"spouse",fatherKey:"head",sortOrder:3},
   {familyName:"Magnus ailesi",key:"child_two",name:"Lecilia Cordelia Magnus",gender:"FEMALE",age:18,position:"CHILD",relation:"Yöneticinin kızı",motherKey:"spouse",fatherKey:"head",sortOrder:4},
   {familyName:"Magnus ailesi",key:"child_three",name:"Gaius Cornelius Magnus",gender:"MALE",age:16,position:"CHILD",relation:"Yöneticinin oğlu",motherKey:"spouse",fatherKey:"head",sortOrder:5},
-  {familyName:"Magnus ailesi",key:"head_brother",name:"Marcus Cornelius Magnus",gender:"MALE",age:43,position:"HEAD_SIBLING",relation:"Yöneticinin erkek kardeşi",sortOrder:6}
+  {familyName:"Magnus ailesi",key:"head_brother",name:"Marcus Cornelius Magnus",gender:"MALE",age:43,position:"HEAD_SIBLING",relation:"Yöneticinin erkek kardeşi",sortOrder:6},
+  {familyName:"Cato ailesi",key:"head",name:"Marcus Porcius Cato",gender:"MALE",age:49,position:"HEAD",relation:"Pater Familias, Senatör",spouseKey:"spouse",motherKey:"head_mother",sortOrder:1},
+  {familyName:"Cato ailesi",key:"spouse",name:"Licinia Crassa",gender:"FEMALE",age:41,position:"SPOUSE",relation:"Yöneticinin eşi",spouseKey:"head",sortOrder:2},
+  {familyName:"Cato ailesi",key:"child_one",name:"Marcus Porcius Cato Licinianus",gender:"MALE",age:22,position:"CHILD",relation:"Yöneticinin oğlu ve varisi",motherKey:"spouse",fatherKey:"head",sortOrder:3},
+  {familyName:"Cato ailesi",key:"child_two",name:"Porcia Catonis",gender:"FEMALE",age:19,position:"CHILD",relation:"Yöneticinin kızı",motherKey:"spouse",fatherKey:"head",sortOrder:4},
+  {familyName:"Cato ailesi",key:"child_three",name:"Gaius Porcius Cato",gender:"MALE",age:16,position:"CHILD",relation:"Yöneticinin oğlu",motherKey:"spouse",fatherKey:"head",sortOrder:5},
+  {familyName:"Cato ailesi",key:"head_mother",name:"Porcia Maior",gender:"FEMALE",age:68,position:"PARENT",relation:"Yöneticinin annesi",sortOrder:6},
+  {familyName:"Cato ailesi",key:"head_brother",name:"Lucius Porcius Cato",gender:"MALE",age:45,position:"HEAD_SIBLING",relation:"Yöneticinin erkek kardeşi",motherKey:"head_mother",sortOrder:7},
+  {familyName:"Cato ailesi",key:"spouse_brother",name:"Publius Licinius Crassus",gender:"MALE",age:38,position:"SPOUSE_SIBLING",relation:"Yönetici eşinin erkek kardeşi",sortOrder:8}
 ];
 
 export const DEFAULT_ROMAN_FAMILIES:DefaultRomanFamilySeed[]=[
