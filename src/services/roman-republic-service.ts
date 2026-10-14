@@ -117,7 +117,9 @@ async function viewWithClient(client:DbClient,guildId:string,countryId?:string):
     spouse_name:string|null;mother_name:string|null;father_name:string|null;
     kidnapped:boolean;captor_country_name:string|null;captured_settlement_name:string|null;
   }>(`SELECT member.id,member.family_id,member.name,member.gender,member.age,member.position,member.relation,
-             spouse.name AS spouse_name,mother.name AS mother_name,father.name AS father_name,
+             COALESCE(spouse.name,dynasty_spouse.name) AS spouse_name,
+             COALESCE(mother.name,dynasty_mother.name) AS mother_name,
+             COALESCE(father.name,dynasty_father.name) AS father_name,
              (captivity.id IS NOT NULL) AS kidnapped,captor.name AS captor_country_name,
              captive_settlement.name AS captured_settlement_name
         FROM roman_family_members member
@@ -125,6 +127,9 @@ async function viewWithClient(client:DbClient,guildId:string,countryId?:string):
         LEFT JOIN roman_family_members spouse ON spouse.id=member.spouse_id
         LEFT JOIN roman_family_members mother ON mother.id=member.mother_id
         LEFT JOIN roman_family_members father ON father.id=member.father_id
+        LEFT JOIN dynasty_members dynasty_spouse ON dynasty_spouse.id=member.dynasty_spouse_id
+        LEFT JOIN dynasty_members dynasty_mother ON dynasty_mother.id=member.dynasty_mother_id
+        LEFT JOIN dynasty_members dynasty_father ON dynasty_father.id=member.dynasty_father_id
         LEFT JOIN LATERAL (
           SELECT held.id,held.captor_country_id,held.captured_settlement_id
             FROM espionage_captivities held

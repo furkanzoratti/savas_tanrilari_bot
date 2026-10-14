@@ -5,10 +5,14 @@ import {
 } from "discord.js";
 import {BIRTH_ATTEMPT_COOLDOWN_TURNS,DYNASTY_GENDER_LABELS,DYNASTY_HEALTH_LABELS,MINIMUM_MARRIAGE_AGE,type DynastyGender,type DynastyHealth} from "../domain/dynasty.js";
 import {dynastyService,type DynastyMarriageProposalView,type DynastyTurnResult,type DynastyView} from "../services/dynasty-service.js";
+import {
+  romanDynastyMarriageService,type CrossHouseBirthAttemptResult,type RomanDynastyMarriageProposalView
+} from "../services/roman-dynasty-marriage-service.js";
 import {gameService,GameError} from "../services/game-service.js";
 import {logger} from "../logger.js";
 import {isGameMaster,requireGameMaster,resolveCountry} from "./auth.js";
 import {playerMentionPayload} from "./player-mentions.js";
+import {syncRomanPublicPanel} from "./roman-republic-ui.js";
 import {
   dynastyViewAsset,type DynastyViewBannerKey,
   DYNASTY_MARRIAGE_BANNER_NAME,DYNASTY_MARRIAGE_BANNER_PATH,DYNASTY_MARRIAGE_BANNER_URL
@@ -29,7 +33,7 @@ export interface DynastyDeathLogPublishResult{
 
 const errorMessage=(error:unknown)=>error instanceof Error?error.message:String(error);
 
-function birthResultMessage(result:Awaited<ReturnType<typeof dynastyService.attemptBirth>>):string{
+function birthResultMessage(result:Awaited<ReturnType<typeof dynastyService.attemptBirth>>|CrossHouseBirthAttemptResult):string{
   const roll=result.attemptRoll+(result.ageModifier>=0?" + "+result.ageModifier:" − "+Math.abs(result.ageModifier));
   if(!result.success)return "🕯️ **Çocuk denemesi başarısız oldu.**\nDoğum zarı: **"+roll+" = "+(result.attemptRoll+result.ageModifier)+"** • Gerekli sonuç: **11**\nYeni deneme iki tur sonra yapılabilir.";
   const gender=result.childGender==="MALE"?"erkek":"kız";
@@ -53,7 +57,7 @@ export function dynastyBirthModalCustomId(pendingBirthId:string):string{
   return "dynasty_birth_modal|"+pendingBirthId;
 }
 
-function birthNameButton(result:Awaited<ReturnType<typeof dynastyService.attemptBirth>>):ActionRowBuilder<ButtonBuilder>[] {
+function birthNameButton(result:Awaited<ReturnType<typeof dynastyService.attemptBirth>>|CrossHouseBirthAttemptResult):ActionRowBuilder<ButtonBuilder>[] {
   if(!result.success||!result.pendingBirthId)return[];
   return[new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(dynastyBirthNameCustomId(result.pendingBirthId))
@@ -114,6 +118,23 @@ async function refreshMarriageProposalMessage(client:Client,proposal:DynastyMarr
   const message=await channel.messages.fetch(proposal.public_message_id).catch(()=>null);
   if(!message)return false;
   await message.edit({embeds:[marriageProposalEmbed(proposal)],components:marriageProposalButtons(proposal)});
+  return true;
+}
+
+async function refreshCrossMarriageProposalMessage(client:Client,proposal:RomanDynastyMarriageProposalView):Promise<boolean>{
+  if(!proposal.public_channel_id||!proposal.public_message_id)return false;
+  const channel=await client.channels.fetch(proposal.public_channel_id).catch(()=>null);
+  if(!channel?.isTextBased()||channel.isDMBased())return false;
+  const message=await channel.messages.fetch(proposal.public_message_id).catch(()=>null);
+  if(!message)return false;
+  const accepted=proposal.status==="ACCEPTED";
+  await message.edit({
+    embeds:[new EmbedBuilder().setColor(accepted?0x4f9d69:0xa33b3b)
+      .setTitle(accepted?"✅ Roma–Hanedan Evliliği Kabul Edildi":"❌ Roma–Hanedan Evliliği Reddedildi")
+      .setDescription("**"+proposal.roman_member_name+"** ("+proposal.proposer_family_name+") × **"+
+        proposal.dynasty_member_name+"** ("+proposal.target_country_name+" • "+proposal.target_dynasty_name+")")
+      .setImage(DYNASTY_MARRIAGE_BANNER_URL)],components:[]
+  });
   return true;
 }
 
@@ -207,7 +228,8 @@ function dynastyStats(view:DynastyView){
   const living=view.members.filter((member)=>member.status==="ALIVE");
   const localMarriage=living.filter(marriageOnly);
   const ownIds=new Set(view.members.map((member)=>member.id));
-  const externalSpouses=new Set(living.filter((member)=>member.spouse_id&&!ownIds.has(member.spouse_id)&&member.spouse_status!=="DEAD").map((member)=>member.spouse_id!));
+  const externalSpouses=new Set(living.filter((member)=>(member.roman_spouse_id||member.spouse_id&&!ownIds.has(member.spouse_id))&&member.spouse_status!=="DEAD")
+    .map((member)=>member.roman_spouse_id??member.spouse_id!));
   const generations=living.filter((member)=>!marriageOnly(member)).map((member)=>generationOf(view,member));
   return{
     living,dead:view.members.filter((member)=>member.status==="DEAD"),
@@ -229,6 +251,7 @@ function spouseText(view:DynastyView,member:DynastyMember):string{
 }
 
 function coupleAttempt(view:DynastyView,member:DynastyMember):number|null{
+  if(member.roman_spouse_id)return null;
   if(!member.spouse_id)return null;
   const first=member.id<member.spouse_id?member.id:member.spouse_id;
   const second=member.id<member.spouse_id?member.spouse_id:member.id;
@@ -273,12 +296,12 @@ function successionMembers(view:DynastyView):DynastyMember[]{
 
 function connectionLines(view:DynastyView):string[]{
   const seen=new Set<string>();const lines:string[]=[];
-  for(const member of view.members.filter((candidate)=>candidate.status==="ALIVE"&&candidate.spouse_id)){
+  for(const member of view.members.filter((candidate)=>candidate.status==="ALIVE"&&(candidate.spouse_id||candidate.roman_spouse_id))){
     const spouse=view.members.find((candidate)=>candidate.id===member.spouse_id);
     const originCountry=spouse?.birth_country_name??member.spouse_birth_country_name??member.spouse_country_name;
     const originDynasty=spouse?.birth_dynasty_name??member.spouse_birth_dynasty_name??member.spouse_dynasty_name;
     if(!originCountry||originCountry===view.country_name&&originDynasty===view.name)continue;
-    const key=[member.id,member.spouse_id].sort().join(":");if(seen.has(key))continue;seen.add(key);
+    const key=[member.id,member.spouse_id??member.roman_spouse_id!].sort().join(":");if(seen.has(key))continue;seen.add(key);
     lines.push("🤝 **"+originCountry+"** • "+(originDynasty??"Hanedan kaydı")+"\n↳ "+member.name+" × "+member.spouse_name);
   }
   return lines;
@@ -327,7 +350,7 @@ export function dynastyPersonEmbed(view:DynastyView,memberId:string):EmbedBuilde
     "**👶 Çocukları:**\n"+(children.length?children.map((child,index)=>(index===children.length-1?"└─ ":"├─ ")+memberName(child)+" "+(child.gender==="MALE"?"♂":"♀")).join("\n"):"└─ Çocuk yok"),"",
     "**📍 Bağlı Devlet:** "+view.country_name,"**🩸 Nesil:** "+generationOf(view,member)+". Nesil"
   ];
-  if(member.spouse_id)lines.push("","**👶 Çocuk Denemesi:** "+attemptStatus(view,member));
+  if(member.spouse_id||member.roman_spouse_id)lines.push("","**👶 Çocuk Denemesi:** "+attemptStatus(view,member));
   return new EmbedBuilder().setColor(member.status==="DEAD"?0x4b4d52:0xc59b45)
     .setTitle("👤 "+memberName(member).toLocaleUpperCase("tr-TR")).setDescription(fit(lines.join("\n"),3900)).setImage(dynastyViewAsset("person").url)
     .setFooter({text:view.country_name+" • "+view.name+" • Tur "+view.current_turn});
@@ -349,9 +372,12 @@ export function dynastySuccessionEmbed(view:DynastyView):EmbedBuilder{
 
 function marriageEntries(view:DynastyView):Array<{member:DynastyMember;children:DynastyMember[];block:string}>{
   const seen=new Set<string>();const entries:Array<{member:DynastyMember;children:DynastyMember[];block:string}>=[];
-  for(const member of view.members.filter((candidate)=>candidate.spouse_id&&candidate.spouse_name)){
-    const key=[member.id,member.spouse_id!].sort().join(":");if(seen.has(key))continue;seen.add(key);
-    const children=view.members.filter((child)=>[child.mother_id,child.father_id].includes(member.id)&&[child.mother_id,child.father_id].includes(member.spouse_id));
+  for(const member of view.members.filter((candidate)=>(candidate.spouse_id||candidate.roman_spouse_id)&&candidate.spouse_name)){
+    const spouseId=member.spouse_id??member.roman_spouse_id!;
+    const key=[member.id,spouseId].sort().join(":");if(seen.has(key))continue;seen.add(key);
+    const children=view.members.filter((child)=>member.roman_spouse_id
+      ?[child.mother_id,child.father_id].includes(member.id)&&[child.roman_mother_id,child.roman_father_id].includes(member.roman_spouse_id)
+      :[child.mother_id,child.father_id].includes(member.id)&&[child.mother_id,child.father_id].includes(member.spouse_id));
     const block="**"+memberName(member)+"**\n×\n**"+spouseText(view,member)+"**\n"+(children.length?children.map((child,index)=>(index===children.length-1?"└─ ":"├─ ")+memberName(child)).join("\n"):"└─ Çocuk yok");
     entries.push({member,children,block});
   }
@@ -466,9 +492,13 @@ export async function handleDynastyCommand(interaction:ChatInputCommandInteracti
       const bannerKey:DynastyViewBannerKey=sub==="soyagaci"?"familyTree":sub==="veraset"?"succession":sub==="evlilikler"?"marriages":sub==="cocuklar"?"children":sub==="olumler"?"deaths":sub==="gecmis"?"history":"status";
       await interaction.editReply({embeds:[embed],files:[dynastyViewAttachment(bannerKey)]});
     }else if(sub==="cocuk-dene"){
-      const result=await dynastyService.attemptBirth({
+      const parentMemberId=interaction.options.getString("ebeveyn");
+      const crossResult=parentMemberId?await romanDynastyMarriageService.attemptDynastyBirth({
+        guildId:interaction.guildId,actorId:interaction.user.id,dynastyMemberId:parentMemberId,dynastyId:view.id
+      }):null;
+      const result=crossResult??await dynastyService.attemptBirth({
         guildId:interaction.guildId,countryId:country.id,actorId:interaction.user.id,
-        parentMemberId:interaction.options.getString("ebeveyn"),dynastyId:view.id
+        parentMemberId,dynastyId:view.id
       });
       await interaction.editReply({content:birthResultMessage(result),components:birthNameButton(result)});
       await refreshDynastyCard(interaction.client,view.id);
@@ -502,8 +532,22 @@ export async function handleDynastyCommand(interaction:ChatInputCommandInteracti
       }
     }else if(sub==="evlilik-cevapla"){
       const decision=interaction.options.getString("karar",true) as "ACCEPT"|"REJECT";
+      const proposalId=interaction.options.getString("teklif",true);
+      const crossProposal=await romanDynastyMarriageService.proposalByIdOrNull(interaction.guildId,proposalId);
+      if(crossProposal){
+        const result=await romanDynastyMarriageService.respond({
+          guildId:interaction.guildId,proposalId,targetDynastyId:view.id,actorId:interaction.user.id,decision
+        });
+        await interaction.editReply(decision==="ACCEPT"
+          ?"💍 Evlilik teklifi kabul edildi. **"+result.roman_member_name+"** ile **"+result.dynasty_member_name+"** evlendi."
+          :"❌ Roma–hanedan evlilik teklifi reddedildi.");
+        await refreshDynastyCard(interaction.client,view.id).catch(()=>false);
+        await refreshCrossMarriageProposalMessage(interaction.client,result).catch(()=>false);
+        await syncRomanPublicPanel(interaction.client,interaction.guildId,result.roman_country_id).catch(()=>false);
+        return true;
+      }
       const result=await dynastyService.respondMarriage({
-        guildId:interaction.guildId,responderCountryId:country.id,proposalId:interaction.options.getString("teklif",true),
+        guildId:interaction.guildId,responderCountryId:country.id,proposalId,
         actorId:interaction.user.id,decision,responderDynastyId:view.id
       });
       const accepted=decision==="ACCEPT";
@@ -514,13 +558,16 @@ export async function handleDynastyCommand(interaction:ChatInputCommandInteracti
       await refreshMarriageProposalMessage(interaction.client,result.proposal).catch(()=>false);
     }else if(sub==="evlilik-teklifleri"){
       const proposals=await dynastyService.listMarriageProposalsByDynasty(interaction.guildId,view.id);
-      if(!proposals.length){await interaction.editReply("Bu devlet için bekleyen evlilik teklifi bulunmuyor.");return true;}
+      const crossProposals=await romanDynastyMarriageService.listForDynasty(interaction.guildId,view.id);
+      if(!proposals.length&&!crossProposals.length){await interaction.editReply("Bu devlet için bekleyen evlilik teklifi bulunmuyor.");return true;}
       await interaction.editReply({embeds:[new EmbedBuilder().setColor(0xc59b45).setTitle("💍 "+country.name+" • Bekleyen Evlilik Teklifleri").setImage(DYNASTY_MARRIAGE_BANNER_URL)
-        .setDescription(proposals.map((proposal)=>{
+        .setDescription([...proposals.map((proposal)=>{
           const direction=proposal.target_country_id===country.id?"📥 Gelen":"📤 Giden";
           return direction+" • **"+proposal.proposer_member_name+"** ("+proposal.proposer_country_name+") × **"+
             proposal.target_member_name+"** ("+proposal.target_country_name+")\n`"+proposal.id+"`";
-        }).join("\n\n").slice(0,4000))],files:[new AttachmentBuilder(DYNASTY_MARRIAGE_BANNER_PATH,{name:DYNASTY_MARRIAGE_BANNER_NAME})]});
+        }),...crossProposals.map((proposal)=>"📥 Roma ailesinden • **"+proposal.roman_member_name+"** ("+proposal.proposer_family_name+") × **"+
+          proposal.dynasty_member_name+"** ("+proposal.target_dynasty_name+")\n`"+proposal.id+"`")].join("\n\n").slice(0,4000))],
+        files:[new AttachmentBuilder(DYNASTY_MARRIAGE_BANNER_PATH,{name:DYNASTY_MARRIAGE_BANNER_NAME})]});
     }else if(sub==="evlilik-geri-cek"){
       const proposal=await dynastyService.withdrawMarriage({
         guildId:interaction.guildId,proposerCountryId:country.id,proposalId:interaction.options.getString("teklif",true),actorId:interaction.user.id,
@@ -592,9 +639,13 @@ export async function handleDynastyCommand(interaction:ChatInputCommandInteracti
   const view=await dynastyService.viewByCountry(country.id);
   if(!view)throw new GameError("Bu devlet için önce `/hanedan-yonetim olustur` kullanılmalıdır.");
   if(sub==="cocuk-dene"){
-    const result=await dynastyService.attemptBirth({
+    const parentMemberId=interaction.options.getString("ebeveyn",true);
+    const crossResult=await romanDynastyMarriageService.attemptDynastyBirth({
+      guildId:interaction.guildId,actorId:interaction.user.id,dynastyMemberId:parentMemberId,dynastyId:view.id
+    });
+    const result=crossResult??await dynastyService.attemptBirth({
       guildId:interaction.guildId,countryId:country.id,actorId:interaction.user.id,
-      parentMemberId:interaction.options.getString("ebeveyn",true),allowAnyMarriedMember:true
+      parentMemberId,allowAnyMarriedMember:true
     });
     await interaction.editReply({content:birthResultMessage(result),components:birthNameButton(result)});
     await refreshDynastyCard(interaction.client,view.id);
@@ -698,6 +749,18 @@ export async function handleDynastyModal(interaction:ModalSubmitInteraction):Pro
   const pendingBirthId=parts.at(-1);
   if(!interaction.guildId||!pendingBirthId)throw new GameError("Doğum isimlendirme formu geçersiz.");
   await interaction.deferReply({flags:MessageFlags.Ephemeral});
+  const crossContext=await romanDynastyMarriageService.pendingBirthContext(interaction.guildId,pendingBirthId);
+  if(crossContext){
+    const result=await romanDynastyMarriageService.nameBirth({
+      guildId:interaction.guildId,sessionId:pendingBirthId,actorId:interaction.user.id,
+      childName:interaction.fields.getTextInputValue("child_name"),allowManager:isGameMaster(interaction)
+    });
+    await interaction.editReply("👶 **"+result.childName+"** adlı "+(result.childGender==="MALE"?"erkek":"kız")+" çocuk hanedana kaydedildi.\n"+
+      "Anne: **"+result.motherName+"** • Baba: **"+result.fatherName+"**");
+    if(interaction.message?.editable)await interaction.message.edit({components:[]}).catch(()=>undefined);
+    if(result.dynastyId)await refreshDynastyCard(interaction.client,result.dynastyId);
+    return true;
+  }
   const context=await dynastyService.pendingBirthContext(interaction.guildId,pendingBirthId);
   if(!context)throw new GameError("İsimlendirilecek doğum kaydı bulunamadı.");
   const result=await dynastyService.nameBirth({
@@ -726,11 +789,17 @@ export async function handleDynastyAutocomplete(interaction:AutocompleteInteract
   if(focused.name==="teklif"&&(sub==="evlilik-cevapla"||sub==="evlilik-geri-cek")){
     const context=await playerDynastyContext(interaction);
     const proposals=context?await dynastyService.listMarriageProposalsByDynasty(interaction.guildId,context.view.id):[];
-    await interaction.respond(proposals.filter((proposal)=>sub==="evlilik-cevapla"?proposal.target_dynasty_id===context?.view.id:proposal.proposer_dynasty_id===context?.view.id)
+    const nativeChoices=proposals.filter((proposal)=>sub==="evlilik-cevapla"?proposal.target_dynasty_id===context?.view.id:proposal.proposer_dynasty_id===context?.view.id)
       .filter((proposal)=>!query||(proposal.proposer_member_name+" "+proposal.target_member_name+" "+proposal.proposer_country_name).toLocaleLowerCase("tr-TR").includes(query))
-      .slice(0,25).map((proposal)=>({
+      .map((proposal)=>({
         name:(proposal.proposer_country_name+": "+proposal.proposer_member_name+" × "+proposal.target_member_name).slice(0,100),value:proposal.id
-      })));
+      }));
+    const crossProposals=sub==="evlilik-cevapla"&&context
+      ?await romanDynastyMarriageService.listForDynasty(interaction.guildId,context.view.id):[];
+    const crossChoices=crossProposals.filter((proposal)=>!query||
+      (proposal.roman_member_name+" "+proposal.dynasty_member_name+" "+proposal.proposer_family_name).toLocaleLowerCase("tr-TR").includes(query)
+    ).map((proposal)=>({name:(proposal.proposer_family_name+": "+proposal.roman_member_name+" × "+proposal.dynasty_member_name).slice(0,100),value:proposal.id}));
+    await interaction.respond([...nativeChoices,...crossChoices].slice(0,25));
     return true;
   }
   if(focused.name==="ebeveyn"&&sub==="cocuk-dene"){
@@ -738,7 +807,7 @@ export async function handleDynastyAutocomplete(interaction:AutocompleteInteract
     const view=context?.view??null;
     const monarch=view?.members.find((member)=>member.status==="ALIVE"&&member.is_monarch);
     const candidates=(view?.members??[]).filter((member)=>{
-      if(member.status!=="ALIVE"||!member.spouse_id)return false;
+      if(member.status!=="ALIVE"||(!member.spouse_id&&!member.roman_spouse_id))return false;
       if(interaction.commandName==="hanedan-yonetim")return true;
       return member.id!==monarch?.id&&(member.mother_id===monarch?.id||member.father_id===monarch?.id);
     });
@@ -781,7 +850,7 @@ export async function handleDynastyAutocomplete(interaction:AutocompleteInteract
     }
     const selectedMember=interaction.options.getString("uye");
     const candidates=(externalCandidates??view?.members??[]).filter((member)=>member.status==="ALIVE"&&member.id!==selectedMember)
-      .filter((member)=>!marriageSelection||(member.age!==null&&member.age>=MINIMUM_MARRIAGE_AGE&&!member.spouse_id));
+      .filter((member)=>!marriageSelection||(member.age!==null&&member.age>=MINIMUM_MARRIAGE_AGE&&!member.spouse_id&&!member.roman_spouse_id));
     await interaction.respond(candidates.filter((member)=>!query||(member.name+" "+member.title+("dynasty_name" in member?" "+member.dynasty_name:"")).toLocaleLowerCase("tr-TR").includes(query)).slice(0,25).map((member)=>({
       name:(member.title+" "+member.name+("dynasty_name" in member?" • "+member.dynasty_name:"")+" • "+age(member.age)).slice(0,100),value:member.id
     })));

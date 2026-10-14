@@ -47,6 +47,7 @@ function fixture(){
       return{rows:[member(left)],rowCount:1};
     }
     if(sql.includes("SELECT 1 FROM dynasty_marriage_proposals"))return{rows:[],rowCount:0};
+    if(sql.includes("SELECT 1 FROM roman_dynasty_marriage_proposals"))return{rows:[],rowCount:0};
     if(sql.includes("SELECT current_turn FROM guilds"))return{rows:[{current_turn:28}],rowCount:1};
     if(sql.includes("INSERT INTO dynasty_marriage_proposals"))return{rows:[{id:ids.proposal}],rowCount:1};
     if(sql.includes("FROM dynasty_marriage_proposals proposal"))return{rows:[proposal],rowCount:1};

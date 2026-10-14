@@ -55,7 +55,7 @@ describe("yerleşke geliştirme ve politika dengesi", () => {
     expect(incomeTotal(result.gross)).toBe(2_240);
   });
 
-  it("Agora tüccar atamasını şehir gelirine yüzde on olarak işler", () => {
+  it("Agora tüccar atamasına genel tüccar getirisi artışını uygular", () => {
     const result = calculateCategorizedIncome({
       ...base,
       taxIncome: 1_000,
@@ -63,8 +63,8 @@ describe("yerleşke geliştirme ve politika dengesi", () => {
       buildings: [{ buildingType: "agora", level: 2 }],
       assignedMerchant: true
     });
-    expect(result.gross.building).toBe(1_575);
-    expect(incomeTotal(result.gross)).toBe(3_575);
+    expect(result.gross.building).toBe(1_607);
+    expect(incomeTotal(result.gross)).toBe(3_607);
   });
 
   it("Tüccarın her özellik puanını Agora gelirine iki yüzde puan ekler", () => {
@@ -76,8 +76,8 @@ describe("yerleşke geliştirme ve politika dengesi", () => {
       assignedMerchant: true,
       merchantSkillBonus: 1
     });
-    expect(result.gross.building).toBe(1_640);
-    expect(incomeTotal(result.gross)).toBe(3_640);
+    expect(result.gross.building).toBe(1_672);
+    expect(incomeTotal(result.gross)).toBe(3_672);
   });
 
   it("Tersane Sv3 bonusunu yalnızca deniz ticaretine uygular", () => {

@@ -31,4 +31,17 @@ describe("GM paneli filo gemi canı yönetimi",()=>{
     expect(app).toContain("edit-fleet-hp");
     expect(app).toContain("Azami HP verilen hasar kayıtları kaldırılır");
   });
+
+  it("filoyu açık onay, operasyon kilitleri ve hasarlı gemi korumasıyla silebilir",()=>{
+    const service=read("./service.ts");
+    const server=read("./server.ts");
+    const app=read("./public/app.js");
+    expect(service).toContain('confirmation: z.literal("FILOYU SIL")');
+    expect(service).toContain("async deleteFleet(");
+    expect(service).toContain("Bu filoda hasarlı gemiler var");
+    expect(service).toContain('"admin.panel.fleet.delete"');
+    expect(server).toContain("adminPanelService.deleteFleet");
+    expect(app).toContain('id="delete-fleet"');
+    expect(app).toContain('confirmation!=="FILOYU SIL"');
+  });
 });

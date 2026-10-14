@@ -537,6 +537,12 @@ const server = createServer(async (request, response) => {
       if (!session) return;
       return json(response, 200, await adminPanelService.deleteArmy(session.sub, armyDeleteMatch[1]!, await body(request)));
     }
+    const fleetDeleteMatch = request.method === "DELETE" ? url.pathname.match(/^\/api\/admin\/fleets\/([0-9a-f-]+)$/iu) : null;
+    if (fleetDeleteMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.deleteFleet(session.sub, fleetDeleteMatch[1]!, await body(request)));
+    }
     const fleetHealthMatch = request.method === "PATCH" ? url.pathname.match(/^\/api\/admin\/fleets\/([0-9a-f-]+)\/health$/iu) : null;
     if (fleetHealthMatch) {
       const session = requireMutation(request, response);

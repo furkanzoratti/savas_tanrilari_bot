@@ -1792,6 +1792,7 @@ async function openFleetHealthEditor(fleetId) {
   const fleet=data.fleet;
   const shipLabels={kerkouros:"Kerkouros",trireme:"Trireme",quinquereme:"Quinquereme"};
   const statusLabels={HEALTHY:"Sağlam",DAMAGED:"Hasarlı",DISABLED:"İş göremez"};
+  const hasDamaged=data.healthGroups.some((group)=>Number(group.current_hp)<Number(group.max_hp));
   const blockedReason=fleet.active_battle_id
     ?"Bu filo etkin savaşa bağlı. Önce Savaşlar menüsünden savaş kadrosundan çıkarılmalıdır."
     :fleet.active_blockade_id
@@ -1806,7 +1807,7 @@ async function openFleetHealthEditor(fleetId) {
   openEditor(
     "Filo gemi canlarını düzenle",
     `${fleet.country_name} · ${fleet.name}`,
-    `${blockedReason?`<div class="preview-warning"><strong>Düzenleme şu anda kilitli</strong><span>${escapeHtml(blockedReason)}</span></div>`:'<div class="preview-warning"><strong>Doğrudan sağlamlık yönetimi</strong><span>Her satır aynı tür, liman ve can değerindeki gemileri temsil eder. Azami HP verilen hasar kayıtları kaldırılır ve belgeye %100 yansır.</span></div>'}<div class="section-title"><h2>Filo gemileri</h2><span>HP değerini doğrudan yaz</span></div><div class="army-unit-editor">${rows}</div><label>Değişiklik gerekçesi<textarea id="edit-fleet-health-reason" rows="2" minlength="3" maxlength="500" required placeholder="Örn. tamamlanan tamirin düzeltilmesi"></textarea></label>`,
+    `${blockedReason?`<div class="preview-warning"><strong>Düzenleme şu anda kilitli</strong><span>${escapeHtml(blockedReason)}</span></div>`:'<div class="preview-warning"><strong>Doğrudan sağlamlık yönetimi</strong><span>Her satır aynı tür, liman ve can değerindeki gemileri temsil eder. Azami HP verilen hasar kayıtları kaldırılır ve belgeye %100 yansır.</span></div>'}<div class="section-title"><h2>Filo gemileri</h2><span>HP değerini doğrudan yaz</span></div><div class="army-unit-editor">${rows}</div><label>Değişiklik gerekçesi<textarea id="edit-fleet-health-reason" rows="2" minlength="3" maxlength="500" required placeholder="Örn. tamamlanan tamirin düzeltilmesi"></textarea></label><div class="card danger-zone"><div class="card-head"><div><h3>Filoyu sil</h3><p>${blockedReason?escapeHtml(blockedReason):hasDamaged?"Hasarlı gemiler azami HP'ye çıkarılmadan filo silinemez.":"Filo kaydı ve gemi tahsisleri kaldırılır; gemiler kaynak limanlarına döner ve Amiral serbest bırakılır."}</p></div><button id="delete-fleet" class="button danger" type="button" ${blockedReason||hasDamaged?"disabled":""}>Kalıcı olarak sil</button></div></div>`,
     blockedReason?null:async()=>{
       const reason=document.getElementById("edit-fleet-health-reason").value.trim();
       if(reason.length<3)throw new Error("Değişiklik gerekçesi en az 3 karakter olmalıdır.");
@@ -1824,6 +1825,19 @@ async function openFleetHealthEditor(fleetId) {
     }
   );
   editorModal.querySelector(".modal").classList.add("wide");
+  document.getElementById("delete-fleet")?.addEventListener("click",async()=>{
+    const confirmation=window.prompt("Bu filoyu kalıcı olarak silmek için FILOYU SIL yazın.");
+    if(confirmation!=="FILOYU SIL")return;
+    const reason=window.prompt("Silme gerekçesini yazın.");
+    if(!reason?.trim())return;
+    try{
+      const result=await api(`/api/admin/fleets/${fleetId}`,{
+        method:"DELETE",body:JSON.stringify({confirmation,reason:reason.trim()})
+      });
+      closeEditor();toast(`${fleet.name} silindi; ${number(result.releasedShips)} gemi kaynak limanlarına döndü.`);
+      await refreshKeepingScroll(forcesPage);
+    }catch(error){toast(error.message,"error");}
+  });
 }
 
 async function submitEditor(event) {

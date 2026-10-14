@@ -28,6 +28,7 @@ interface RepublicRow{id:string;country_id:string;current_turn:number}
 interface FamilyMemberRow{
   id:string;family_id:string;family_name:string;name:string;gender:DynastyGender;age:number;
   position:string;relation:string;spouse_id:string|null;status:"ALIVE"|"DEAD";
+  dynasty_spouse_id:string|null;
   health:"HEALTHY"|"SICK";sick_until_turn:number|null;
   kidnapped:boolean;
 }
@@ -45,7 +46,7 @@ async function republic(client:DbClient,guildId:string,countryId:string,lock=fal
 async function member(client:DbClient,republicId:string,value:string,lock=false):Promise<FamilyMemberRow>{
   const row=(await client.query<FamilyMemberRow>(`
     SELECT member.id,member.family_id,family.name AS family_name,member.name,member.gender,member.age,
-           member.position,member.relation,member.spouse_id,member.status,member.health,member.sick_until_turn,
+           member.position,member.relation,member.spouse_id,member.dynasty_spouse_id,member.status,member.health,member.sick_until_turn,
            EXISTS(SELECT 1 FROM espionage_captivities captivity
              WHERE captivity.captive_type='ROMAN_FAMILY' AND captivity.captive_id=member.id AND captivity.status='HELD') AS kidnapped
       FROM roman_family_members member JOIN roman_families family ON family.id=member.family_id
@@ -69,7 +70,7 @@ function requireMarriageEligibility(item:FamilyMemberRow):void{
   if(item.status!=="ALIVE")throw new GameError(item.name+" hayatta değil.");
   if(item.kidnapped)throw new GameError(item.name+" kaçırılmış durumda olduğu için evlendirilemez.");
   if(item.age<MINIMUM_MARRIAGE_AGE)throw new GameError(item.name+" henüz "+MINIMUM_MARRIAGE_AGE+" yaşını doldurmadı.");
-  if(item.spouse_id)throw new GameError(item.name+" zaten evli.");
+  if(item.spouse_id||item.dynasty_spouse_id)throw new GameError(item.name+" zaten evli.");
 }
 
 async function loadProposal(
@@ -155,6 +156,11 @@ export const romanFamilyLifeService={
         [[proposer.id,target.id]]
       );
       if(pending.rowCount)throw new GameError("Seçilen üyelerden biri için zaten bekleyen bir evlilik teklifi bulunuyor.");
+      const crossPending=await client.query(
+        `SELECT 1 FROM roman_dynasty_marriage_proposals WHERE status='PENDING'
+          AND roman_member_id=ANY($1::uuid[]) LIMIT 1`,[[proposer.id,target.id]]
+      );
+      if(crossPending.rowCount)throw new GameError("Seçilen üyelerden biri için zaten bekleyen bir Roma–hanedan evlilik teklifi bulunuyor.");
       const created=(await client.query<{id:string}>(
         `INSERT INTO roman_family_marriage_proposals(
            republic_id,proposer_family_id,target_family_id,proposer_member_id,target_member_id,created_turn,created_by

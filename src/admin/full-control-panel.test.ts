@@ -92,4 +92,16 @@ describe("GM paneli tam yetki veri katmanı", () => {
     expect(app).toContain('id="delete-army"');
     expect(app).toContain('method: "DELETE"');
   });
+
+  it("filoları açık onay ve deniz operasyonu korumalarıyla panelden silebilir", () => {
+    const service = read("./service.ts");
+    const server = read("./server.ts");
+    const app = read("./public/app.js");
+    expect(service).toContain('confirmation: z.literal("FILOYU SIL")');
+    expect(service).toContain("async deleteFleet(");
+    expect(service).toContain("Önce ablukayı kaldırın");
+    expect(service).toContain("bekleyen deniz yağmasını önce sonuçlandırın");
+    expect(server).toContain("adminPanelService.deleteFleet");
+    expect(app).toContain('id="delete-fleet"');
+  });
 });

@@ -129,6 +129,8 @@ import { romanElectionNpcScoreMigration } from "./roman-election-npc-score-migra
 import { catoKangjuHouseholdsMigration } from "./cato-kangju-households-migration.js";
 import { navalReadyRepairReconciliationMigration } from "./naval-ready-repair-reconciliation-migration.js";
 import { kangjuHouseholdRepairMigration } from "./kangju-household-repair-migration.js";
+import { romanDynastyMarriageBridgeMigration } from "./roman-dynasty-marriage-bridge-migration.js";
+import { dynastyWidowRemarriageMigration } from "./dynasty-widow-remarriage-migration.js";
 
 export const migrations = [
   {
@@ -2475,5 +2477,7 @@ export const migrations = [
   romanElectionNpcScoreMigration,
   catoKangjuHouseholdsMigration,
   navalReadyRepairReconciliationMigration,
-  kangjuHouseholdRepairMigration
+  kangjuHouseholdRepairMigration,
+  romanDynastyMarriageBridgeMigration,
+  dynastyWidowRemarriageMigration
 ] as const;

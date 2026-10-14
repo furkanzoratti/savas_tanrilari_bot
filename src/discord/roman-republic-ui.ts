@@ -13,6 +13,10 @@ import {MINIMUM_MARRIAGE_AGE} from "../domain/dynasty.js";
 import { gameService,GameError } from "../services/game-service.js";
 import { romanRepublicService,type RomanFamilyView,type RomanRepublicView } from "../services/roman-republic-service.js";
 import {romanFamilyLifeService,type RomanFamilyBirthAttemptResult,type RomanFamilyMarriageProposalView} from "../services/roman-family-life-service.js";
+import {dynastyService} from "../services/dynasty-service.js";
+import {
+  romanDynastyMarriageService,type CrossHouseBirthAttemptResult,type RomanDynastyMarriageProposalView
+} from "../services/roman-dynasty-marriage-service.js";
 import {romanPoliticsService,type RomanPoliticsView} from "../services/roman-politics-service.js";
 import { isGameMaster,requireGameMaster } from "./auth.js";
 import {romanViewAsset,type RomanViewBannerKey} from "./assets.js";
@@ -58,6 +62,27 @@ function marriageProposalButtons(proposal:RomanFamilyMarriageProposalView):Actio
   )];
 }
 
+function crossMarriageProposalEmbed(proposal:RomanDynastyMarriageProposalView):EmbedBuilder{
+  const pending=proposal.status==="PENDING";
+  const accepted=proposal.status==="ACCEPTED";
+  return new EmbedBuilder().setColor(pending?0xc59b45:accepted?0x4f9d69:proposal.status==="REJECTED"?0xa33b3b:0x747f8d)
+    .setTitle(pending?"💍 Roma–Hanedan Evliliği Teklifi":accepted?"✅ Roma–Hanedan Evliliği Kabul Edildi":"Roma–Hanedan Evliliği Sonuçlandı")
+    .setDescription([
+      `**${proposal.proposer_family_name}** ailesinden **${proposal.roman_member_name}**`,
+      `**${proposal.target_country_name}** • **${proposal.target_dynasty_name}** hanedanından **${proposal.dynasty_member_name}** ile evlenmek üzere teklif edildi.`,
+      "",pending?"Hedef devletin oyuncusu veya oyun yöneticisi aşağıdaki düğmelerden cevap verebilir.":
+        accepted?"Teklif kabul edildi; kişiler kendi kayıt sistemlerinde kalacak biçimde evlilik bağı kuruldu.":"Teklif kapatıldı."
+    ].join("\n")).setImage(romanViewAsset("family").url);
+}
+
+function crossMarriageProposalButtons(proposal:RomanDynastyMarriageProposalView):ActionRowBuilder<ButtonBuilder>[] {
+  if(proposal.status!=="PENDING")return[];
+  return[new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(`roman-dynasty-marriage-accept|${proposal.id}`).setLabel("Kabul Et").setEmoji("✅").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`roman-dynasty-marriage-reject|${proposal.id}`).setLabel("Reddet").setEmoji("❌").setStyle(ButtonStyle.Danger)
+  )];
+}
+
 async function refreshMarriageProposalMessage(client:Client,proposal:RomanFamilyMarriageProposalView):Promise<boolean>{
   if(!proposal.public_channel_id||!proposal.public_message_id)return false;
   const channel=await client.channels.fetch(proposal.public_channel_id).catch(()=>null);
@@ -68,7 +93,7 @@ async function refreshMarriageProposalMessage(client:Client,proposal:RomanFamily
   return true;
 }
 
-function birthResultMessage(result:RomanFamilyBirthAttemptResult):string{
+function birthResultMessage(result:RomanFamilyBirthAttemptResult|CrossHouseBirthAttemptResult):string{
   const roll=`🎲 **1d20:** ${result.attemptRoll}${result.ageModifier>=0?" + ":" - "}${Math.abs(result.ageModifier)} = **${result.attemptRoll+result.ageModifier}**`;
   if(!result.success)return `${roll}\n❌ **${result.motherName}** ile **${result.fatherName}** için çocuk denemesi başarısız oldu.`;
   const gender=result.childGender==="MALE"?"Erkek":"Kız";
@@ -493,6 +518,18 @@ export async function handleRomanRepublicAutocomplete(interaction:AutocompleteIn
   if(!view){await interaction.respond([]);return true;}
   const ownFamily=view.families.find((family)=>family.id===access?.familyId)
     ??view.families.find((family)=>family.playerIds.includes(interaction.user.id));
+  if(focused.name==="hedef"&&action==="evlilik-teklif"){
+    if(interaction.options.getString("hedef-turu")==="DYNASTY"){
+      const countries=await gameService.listCountries(interaction.guildId);
+      await interaction.respond(countries.filter((item)=>!query||item.name.toLocaleLowerCase("tr-TR").includes(query))
+        .slice(0,25).map((item)=>({name:item.name.slice(0,100),value:item.name})));
+    }else{
+      await interaction.respond(view.families.filter((family)=>family.id!==ownFamily?.id)
+        .filter((family)=>!query||family.name.toLocaleLowerCase("tr-TR").includes(query))
+        .slice(0,25).map((family)=>({name:`${family.name} • ${family.senateSeats} koltuk`.slice(0,100),value:family.id})));
+    }
+    return true;
+  }
   if(focused.name==="aile"||focused.name==="hedef-aile"){
     const families=focused.name==="hedef-aile"?view.families.filter((family)=>family.id!==ownFamily?.id):view.families;
     await interaction.respond(families.filter((family)=>!query||family.name.toLocaleLowerCase("tr-TR").includes(query))
@@ -547,7 +584,18 @@ export async function handleRomanRepublicAutocomplete(interaction:AutocompleteIn
     return true;
   }
   if(focused.name==="hedef-uye"){
-    const selected=interaction.options.getString("hedef-aile")?.trim().toLocaleLowerCase("tr-TR");
+    const target=interaction.options.getString("hedef");
+    if(interaction.options.getString("hedef-turu")==="DYNASTY"){
+      const targetCountryName=target;
+      const targetCountry=targetCountryName?await gameService.countryByName(interaction.guildId,targetCountryName):null;
+      const candidates=targetCountry?await dynastyService.marriageCandidatesForCountry(interaction.guildId,targetCountry.id):[];
+      await interaction.respond(candidates
+        .filter((item)=>item.age!==null&&item.age>=MINIMUM_MARRIAGE_AGE&&!item.spouse_id&&!item.roman_spouse_id)
+        .filter((item)=>!query||`${item.name} ${item.title} ${item.dynasty_name}`.toLocaleLowerCase("tr-TR").includes(query))
+        .slice(0,25).map((item)=>({name:`${item.title} ${item.name} • ${item.dynasty_name} • ${item.age} yaş`.slice(0,100),value:item.id})));
+      return true;
+    }
+    const selected=target?.trim().toLocaleLowerCase("tr-TR");
     const families=selected
       ?view.families.filter((family)=>family.id===selected||family.name.toLocaleLowerCase("tr-TR")===selected)
       :view.families.filter((family)=>family.id!==ownFamily?.id);
@@ -568,14 +616,20 @@ export async function handleRomanRepublicAutocomplete(interaction:AutocompleteIn
       return true;
     }
     const proposals=await romanFamilyLifeService.listProposals(interaction.guildId,view.countryId,interaction.user.id,isGameMaster(interaction));
+    const crossProposals=ownFamily
+      ?await romanDynastyMarriageService.listForRomanFamily(interaction.guildId,view.id,ownFamily.id):[];
     const directional=action==="evlilik-cevapla"&&ownFamily
       ?proposals.filter((proposal)=>proposal.target_family_id===ownFamily.id)
       :proposals;
-    await interaction.respond(directional.filter((proposal)=>!query||
+    const nativeChoices=directional.filter((proposal)=>!query||
       `${proposal.proposer_member_name} ${proposal.target_member_name} ${proposal.proposer_family_name} ${proposal.target_family_name}`.toLocaleLowerCase("tr-TR").includes(query)
-    ).slice(0,25).map((proposal)=>({
+    ).map((proposal)=>({
       name:`${proposal.proposer_member_name} → ${proposal.target_member_name}`.slice(0,100),value:proposal.id
-    })));
+    }));
+    const crossChoices=crossProposals.filter((item)=>!query||
+      `${item.roman_member_name} ${item.dynasty_member_name} ${item.target_country_name}`.toLocaleLowerCase("tr-TR").includes(query)
+    ).map((item)=>({name:`${item.roman_member_name} → ${item.dynasty_member_name} (${item.target_country_name})`.slice(0,100),value:item.id}));
+    await interaction.respond([...nativeChoices,...crossChoices].slice(0,25));
     return true;
   }
   await interaction.respond([]);
@@ -654,7 +708,32 @@ export async function handleRomanRepublicCommand(interaction:ChatInputCommandInt
       return true;
     }
     if(action==="evlilik-teklif"){
-      const targetFamilyValue=interaction.options.getString("hedef-aile",true).trim().toLocaleLowerCase("tr-TR");
+      const targetType=interaction.options.getString("hedef-turu",true);
+      const targetValue=interaction.options.getString("hedef",true);
+      if(targetType==="DYNASTY"){
+        const targetCountryName=targetValue;
+        const targetCountry=await gameService.countryByName(interaction.guildId,targetCountryName);
+        if(!targetCountry)throw new GameError("Hedef devlet bulunamadı.");
+        const proposal=await romanDynastyMarriageService.propose({
+          guildId:interaction.guildId,countryId:country.id,actorId:interaction.user.id,
+          romanMemberId:interaction.options.getString("uye",true),targetCountryId:targetCountry.id,
+          dynastyMemberId:interaction.options.getString("hedef-uye",true),gameMaster:isGameMaster(interaction)
+        });
+        await interaction.editReply(`💍 Roma–hanedan evlilik teklifi gönderildi: **${proposal.roman_member_name}** → **${proposal.dynasty_member_name}** (${proposal.target_country_name}).\nTeklif kimliği: \`${proposal.id}\``);
+        const channel=interaction.channel;
+        if(channel?.isTextBased()&&!channel.isDMBased()){
+          const players=await gameService.playerIds(targetCountry.id);
+          const notification=playerMentionPayload(players,`**${targetCountry.name}** • Oyuncu atanmamış; oyun yöneticisi yanıtlayabilir.`);
+          const message=await channel.send({
+            content:notification.content,allowedMentions:notification.allowedMentions,
+            embeds:[crossMarriageProposalEmbed(proposal)],components:crossMarriageProposalButtons(proposal),files:romanFiles("family")
+          }).catch(()=>null);
+          if(message)await romanDynastyMarriageService.setProposalMessage({guildId:interaction.guildId,proposalId:proposal.id,channelId:channel.id,messageId:message.id});
+        }
+        return true;
+      }
+      if(targetType!=="ROMAN_FAMILY")throw new GameError("Evlilik hedef türü geçersiz.");
+      const targetFamilyValue=targetValue.trim().toLocaleLowerCase("tr-TR");
       const targetFamily=view.families.find((family)=>family.id===targetFamilyValue||family.name.toLocaleLowerCase("tr-TR")===targetFamilyValue);
       if(!targetFamily)throw new GameError("Hedef Roma siyasi ailesi bulunamadı.");
       const targetMemberValue=interaction.options.getString("hedef-uye",true);
@@ -680,10 +759,27 @@ export async function handleRomanRepublicCommand(interaction:ChatInputCommandInt
     }
     if(action==="evlilik-cevapla"){
       const decision=interaction.options.getString("karar",true) as "ACCEPT"|"REJECT"|"WITHDRAW";
+      const proposalId=interaction.options.getString("teklif",true);
+      const crossProposal=await romanDynastyMarriageService.proposalByIdOrNull(interaction.guildId,proposalId);
+      if(crossProposal){
+        if(decision!=="WITHDRAW")throw new GameError("Roma–hanedan teklifini hedef devlet kabul veya reddeder; teklif sahibi yalnızca geri çekebilir.");
+        const proposal=await romanDynastyMarriageService.withdraw({
+          guildId:interaction.guildId,proposalId,familyId:ownFamily.id,actorId:interaction.user.id,gameMaster:isGameMaster(interaction)
+        });
+        await interaction.editReply("↩️ Roma–hanedan evlilik teklifi geri çekildi.");
+        if(proposal.public_channel_id&&proposal.public_message_id){
+          const channel=await interaction.client.channels.fetch(proposal.public_channel_id).catch(()=>null);
+          if(channel?.isTextBased()&&!channel.isDMBased()){
+            const message=await channel.messages.fetch(proposal.public_message_id).catch(()=>null);
+            await message?.edit({embeds:[crossMarriageProposalEmbed(proposal)],components:[]}).catch(()=>undefined);
+          }
+        }
+        return true;
+      }
       if(decision==="WITHDRAW"){
         const proposal=await romanFamilyLifeService.withdrawMarriage({
           guildId:interaction.guildId,countryId:country.id,actorId:interaction.user.id,
-          proposalId:interaction.options.getString("teklif",true),gameMaster:isGameMaster(interaction)
+          proposalId,gameMaster:isGameMaster(interaction)
         });
         await interaction.editReply("↩️ Roma aile evliliği teklifi geri çekildi.");
         await refreshMarriageProposalMessage(interaction.client,proposal).catch(()=>false);
@@ -691,7 +787,7 @@ export async function handleRomanRepublicCommand(interaction:ChatInputCommandInt
       }
       const proposal=await romanFamilyLifeService.respondMarriage({
         guildId:interaction.guildId,countryId:country.id,actorId:interaction.user.id,
-        proposalId:interaction.options.getString("teklif",true),decision,gameMaster:isGameMaster(interaction)
+        proposalId,decision,gameMaster:isGameMaster(interaction)
       });
       await interaction.editReply(decision==="ACCEPT"
         ?`💍 Teklif kabul edildi. **${proposal.proposer_member_name}** ile **${proposal.target_member_name}** evlendi.`
@@ -702,18 +798,22 @@ export async function handleRomanRepublicCommand(interaction:ChatInputCommandInt
     }
     if(action==="evlilik-teklifleri"){
       const proposals=await romanFamilyLifeService.listProposals(interaction.guildId,country.id,interaction.user.id,isGameMaster(interaction));
-      if(!proposals.length){await interaction.editReply("Aileniz için bekleyen Roma aile evliliği teklifi bulunmuyor.");return true;}
+      const crossProposals=await romanDynastyMarriageService.listForRomanFamily(interaction.guildId,view.id,ownFamily.id);
+      if(!proposals.length&&!crossProposals.length){await interaction.editReply("Aileniz için bekleyen evlilik teklifi bulunmuyor.");return true;}
       await interaction.editReply({embeds:[new EmbedBuilder().setColor(0xc59b45).setTitle("💍 Roma • Bekleyen Aile Evlilikleri")
-        .setDescription(proposals.map((proposal)=>{
+        .setDescription([...proposals.map((proposal)=>{
           const direction=proposal.target_family_id===ownFamily.id?"📥 Gelen":"📤 Giden";
           return `${direction} • **${proposal.proposer_member_name}** (${proposal.proposer_family_name}) × **${proposal.target_member_name}** (${proposal.target_family_name})\n\`${proposal.id}\``;
-        }).join("\n\n").slice(0,4000)).setImage(romanViewAsset("family").url)],files:romanFiles("family")});
+        }),...crossProposals.map((proposal)=>`📤 Hanedana • **${proposal.roman_member_name}** (${proposal.proposer_family_name}) × **${proposal.dynasty_member_name}** (${proposal.target_country_name} / ${proposal.target_dynasty_name})\n\`${proposal.id}\``)]
+          .join("\n\n").slice(0,4000)).setImage(romanViewAsset("family").url)],files:romanFiles("family")});
       return true;
     }
     if(action==="cocuk-dene"){
-      const result=await romanFamilyLifeService.attemptBirth({
-        guildId:interaction.guildId,countryId:country.id,actorId:interaction.user.id,
-        parentMember:interaction.options.getString("ebeveyn",true),gameMaster:isGameMaster(interaction)
+      const parentMember=interaction.options.getString("ebeveyn",true);
+      const result=await romanDynastyMarriageService.attemptRomanBirth({
+        guildId:interaction.guildId,actorId:interaction.user.id,romanMemberId:parentMember,gameMaster:isGameMaster(interaction)
+      })??await romanFamilyLifeService.attemptBirth({
+        guildId:interaction.guildId,countryId:country.id,actorId:interaction.user.id,parentMember,gameMaster:isGameMaster(interaction)
       });
       await interaction.editReply({content:birthResultMessage(result),components:birthNameButton(country.id,result)});
       return true;
@@ -986,8 +1086,32 @@ export async function handleRomanRepublicSelect(interaction:StringSelectMenuInte
 export async function handleRomanRepublicButton(interaction:ButtonInteraction):Promise<boolean>{
   if(!interaction.customId.startsWith("roman-vote|")&&!interaction.customId.startsWith("roman-senate-vote|")&&!interaction.customId.startsWith("rsv|")&&
     !interaction.customId.startsWith("roman-public-refresh|")&&!interaction.customId.startsWith("roman-birth-name|")&&
-    !interaction.customId.startsWith("roman-marriage-accept|")&&!interaction.customId.startsWith("roman-marriage-reject|"))return false;
+    !interaction.customId.startsWith("roman-marriage-accept|")&&!interaction.customId.startsWith("roman-marriage-reject|")&&
+    !interaction.customId.startsWith("roman-dynasty-marriage-accept|")&&!interaction.customId.startsWith("roman-dynasty-marriage-reject|"))return false;
   if(!interaction.guildId)throw new GameError("Sunucu bulunamadı.");
+  const crossMarriageMatch=/^roman-dynasty-marriage-(accept|reject)\|(.+)$/.exec(interaction.customId);
+  if(crossMarriageMatch){
+    await interaction.deferReply({flags:MessageFlags.Ephemeral});
+    const proposal=await romanDynastyMarriageService.proposalById(interaction.guildId,crossMarriageMatch[2]!);
+    if(proposal.status!=="PENDING")throw new GameError("Bu Roma–hanedan evlilik teklifi daha önce sonuçlandırılmış.");
+    if(!isGameMaster(interaction)){
+      const country=await gameService.countryForUser(interaction.guildId,interaction.user.id);
+      const steppeView=await dynastyService.viewForSteppeTitleHolder(interaction.guildId,interaction.user.id);
+      if(country?.id!==proposal.target_country_id&&steppeView?.id!==proposal.target_dynasty_id)
+        throw new GameError("Bu teklifi yalnızca hedef devletin veya hanenin yöneticisi yanıtlayabilir.");
+    }
+    const decision=crossMarriageMatch[1]==="accept"?"ACCEPT":"REJECT";
+    const result=await romanDynastyMarriageService.respond({
+      guildId:interaction.guildId,proposalId:proposal.id,targetDynastyId:proposal.target_dynasty_id,
+      actorId:interaction.user.id,decision
+    });
+    await interaction.message.edit({embeds:[crossMarriageProposalEmbed(result)],components:[]}).catch(()=>undefined);
+    await interaction.editReply(decision==="ACCEPT"
+      ?`✅ Teklif kabul edildi. **${result.roman_member_name}** ile **${result.dynasty_member_name}** evlendi.`
+      :"❌ Roma–hanedan evlilik teklifi reddedildi.");
+    await syncRomanPublicPanel(interaction.client,interaction.guildId,proposal.roman_country_id).catch(()=>false);
+    return true;
+  }
   const marriageMatch=/^roman-marriage-(accept|reject)\|(.+)$/.exec(interaction.customId);
   if(marriageMatch){
     await interaction.deferReply({flags:MessageFlags.Ephemeral});
@@ -1067,6 +1191,16 @@ export async function handleRomanRepublicModal(interaction:ModalSubmitInteractio
   const [,countryId,sessionId]=interaction.customId.split("|");
   if(!countryId||!sessionId)throw new GameError("Roma çocuk adlandırma formu bozuk.");
   await interaction.deferReply({flags:MessageFlags.Ephemeral});
+  const crossContext=await romanDynastyMarriageService.pendingBirthContext(interaction.guildId,sessionId);
+  if(crossContext){
+    const result=await romanDynastyMarriageService.nameBirth({
+      guildId:interaction.guildId,sessionId,actorId:interaction.user.id,
+      childName:interaction.fields.getTextInputValue("child-name"),allowManager:isGameMaster(interaction)
+    });
+    await interaction.editReply(`👶 **${result.childName}**, ${result.householdType==="ROMAN_FAMILY"?"Roma siyasi ailesine":"devlet hanedanına"} kaydedildi.`);
+    await syncRomanPublicPanel(interaction.client,interaction.guildId,countryId);
+    return true;
+  }
   const result=await romanFamilyLifeService.nameBirth({
     guildId:interaction.guildId,countryId,actorId:interaction.user.id,sessionId,
     childName:interaction.fields.getTextInputValue("child-name"),gameMaster:isGameMaster(interaction)

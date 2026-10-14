@@ -10,6 +10,9 @@ describe("Roma siyaset Discord komutları",()=>{
       "evlilik-teklif","evlilik-cevapla","evlilik-teklifleri","cocuk-dene"
     ]));
     expect(names.length).toBeLessThanOrEqual(25);
+    const marriage=command?.options?.find((option)=>option.name==="evlilik-teklif");
+    expect(marriage?.options?.map((option)=>option.name)).toEqual(["uye","hedef-turu","hedef","hedef-uye","ulke"]);
+    expect(marriage?.options?.find((option)=>option.name==="hedef")).toMatchObject({required:true,autocomplete:true});
     for(const [subcommand,options] of Object.entries({
       "aile-bilgi":["aile","ulke"],"isletme-al":["yerleske","ulke"],"aday-ol":["aday","ulke"],
       "oy-ver":["aday","ulke"],"vali-ata":["yerleske","aile","vali","ulke"],"vali-kaldir":["yerleske","ulke"],

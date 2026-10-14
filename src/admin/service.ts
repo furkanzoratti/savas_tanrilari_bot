@@ -18,6 +18,7 @@ import {
 } from "../domain/characters.js";
 import { CULTURE_GROUPS, type CultureGroup } from "../domain/cultures.js";
 import { MINIMUM_MARRIAGE_AGE,automaticDynastyRelations } from "../domain/dynasty.js";
+import {fallbackDynastyCandidateSql,lineageAwareDynastyCandidateSql} from "../services/dynasty-succession.js";
 import { settlementTransferPolicy, type SettlementTransferType } from "../domain/settlement-transfer.js";
 import { MERCENARY_COMPANIES, type MercenaryCompanyKey } from "../domain/mercenaries.js";
 import { RESOURCES, type ResourceType } from "../domain/resources.js";
@@ -195,6 +196,11 @@ const armyUpdateSchema = z.object({
 
 const armyRemovalSchema = z.object({
   confirmation: z.literal("ORDUYU SIL"),
+  reason: z.string().trim().min(3).max(500)
+});
+
+const fleetRemovalSchema = z.object({
+  confirmation: z.literal("FILOYU SIL"),
   reason: z.string().trim().min(3).max(500)
 });
 
@@ -450,7 +456,8 @@ async function validateDynastyRelation(
 
 async function reconcileAdminDynastySuccession(
   client: AdminDbClient,
-  dynasty: { id: string; country_name: string; current_turn: number }
+  dynasty: { id: string; country_name: string; current_turn: number },
+  formerMonarchId: string | null = null
 ) {
   let monarch = (await client.query<{ id: string; name: string; gender: "MALE" | "FEMALE" }>(
     "SELECT id,name,gender FROM dynasty_members WHERE dynasty_id=$1 AND status='ALIVE' AND is_monarch=TRUE LIMIT 1 FOR UPDATE",
@@ -458,11 +465,8 @@ async function reconcileAdminDynastySuccession(
   )).rows[0];
   if (!monarch) {
     const successor = (await client.query<{ id: string; name: string; gender: "MALE" | "FEMALE" }>(
-      `SELECT id,name,gender FROM dynasty_members
-        WHERE dynasty_id=$1 AND status='ALIVE' AND (is_heir=TRUE OR succession_rank IS NOT NULL)
-        ORDER BY CASE WHEN gender='MALE' THEN 0 ELSE 1 END,
-                 is_heir DESC,succession_rank NULLS LAST,age DESC,created_at LIMIT 1 FOR UPDATE`,
-      [dynasty.id]
+      formerMonarchId ? lineageAwareDynastyCandidateSql : fallbackDynastyCandidateSql,
+      [dynasty.id, formerMonarchId]
     )).rows[0];
     if (!successor) {
       await dynastyEvent(client, dynasty.id, dynasty.current_turn, "SUCCESSION_CRISIS", null, {
@@ -486,10 +490,7 @@ async function reconcileAdminDynastySuccession(
     [dynasty.id, monarch.id]
   )).rows[0];
   const heir = (await client.query<{ id: string; name: string }>(
-    `SELECT id,name FROM dynasty_members
-      WHERE dynasty_id=$1 AND status='ALIVE' AND id<>$2 AND (is_heir=TRUE OR succession_rank IS NOT NULL)
-      ORDER BY CASE WHEN gender='MALE' THEN 0 ELSE 1 END,
-               is_heir DESC,succession_rank NULLS LAST,age DESC,created_at LIMIT 1 FOR UPDATE`,
+    lineageAwareDynastyCandidateSql,
     [dynasty.id, monarch.id]
   )).rows[0];
   if (heir) {
@@ -4071,7 +4072,9 @@ export const adminPanelService = {
         name: member.name, age: member.age, reason: input.reason,
         wasMonarch: member.is_monarch, wasHeir: member.is_heir, actorId, source: "ADMIN_PANEL"
       });
-      if (member.is_monarch || member.is_heir) await reconcileAdminDynastySuccession(client, dynasty);
+      if (member.is_monarch || member.is_heir) await reconcileAdminDynastySuccession(
+        client, dynasty, member.is_monarch ? member.id : null
+      );
       const result = {
         id: member.id, dynastyId: dynasty.id, name: member.name, countryName: dynasty.country_name,
         diedTurn: dynasty.current_turn, reason: input.reason
@@ -4385,6 +4388,62 @@ export const adminPanelService = {
         reason: input.reason
       };
       await writeAdminAudit(client, actorId, "admin.panel.army.delete", "army", army.id, result);
+      return result;
+    });
+  },
+
+  async deleteFleet(actorId: string, fleetId: string, rawInput: unknown) {
+    if (!z.string().uuid().safeParse(fleetId).success) throw new Error("Geçersiz filo kimliği.");
+    const input=fleetRemovalSchema.parse(rawInput);
+    return withAdminTransaction(async(client)=>{
+      const fleet=(await client.query<{
+        id:string;country_id:string;name:string;commander_character_id:string|null;country_name:string;
+        active_battle_id:string|null;active_blockade_id:string|null;pending_raid_id:string|null;
+      }>(
+        `SELECT fleet.id,fleet.country_id,fleet.name,fleet.commander_character_id,country.name AS country_name,
+                (SELECT assignment.battle_id FROM battle_fleet_assignments assignment
+                  JOIN battles battle ON battle.id=assignment.battle_id
+                 WHERE assignment.fleet_id=fleet.id AND battle.status NOT IN ('FINISHED','CANCELLED')
+                 ORDER BY battle.updated_at DESC LIMIT 1) AS active_battle_id,
+                (SELECT blockade.id FROM naval_blockades blockade
+                 WHERE blockade.fleet_id=fleet.id AND blockade.status='ACTIVE' LIMIT 1) AS active_blockade_id,
+                (SELECT raid.id FROM naval_raids raid
+                 WHERE raid.fleet_id=fleet.id AND raid.status='WAITING_ROLL' LIMIT 1) AS pending_raid_id
+           FROM fleets fleet JOIN countries country ON country.id=fleet.country_id
+          WHERE fleet.id=$1 AND fleet.guild_id=$2 FOR UPDATE OF fleet`,[fleetId,adminConfig.guildId]
+      )).rows[0];
+      if(!fleet)throw new Error("Silinecek filo bulunamadı.");
+      if(fleet.active_battle_id)throw new Error("Bu filo etkin bir savaşa bağlı. Önce Savaşlar menüsünden filoyu savaş kadrosundan çıkarın.");
+      if(fleet.active_blockade_id)throw new Error("Bu filo etkin bir abluka yürütüyor. Önce ablukayı kaldırın.");
+      if(fleet.pending_raid_id)throw new Error("Bu filonun bekleyen deniz yağmasını önce sonuçlandırın veya iptal edin.");
+
+      const allocations=(await client.query<{settlement_id:string;settlement_name:string;ship_type:NavalUnitType;quantity:number}>(
+        `SELECT ships.settlement_id,settlement.name AS settlement_name,ships.ship_type,ships.quantity
+           FROM fleet_ships ships JOIN settlements settlement ON settlement.id=ships.settlement_id
+          WHERE ships.fleet_id=$1 ORDER BY settlement.name,ships.ship_type FOR UPDATE OF ships`,[fleet.id]
+      )).rows;
+      const damaged=Number((await client.query<{quantity:number}>(
+        `SELECT COUNT(*)::integer AS quantity FROM naval_ship_damage
+          WHERE fleet_id=$1 AND status IN ('DAMAGED','DISABLED')`,[fleet.id]
+      )).rows[0]?.quantity??0);
+      if(damaged>0)throw new Error("Bu filoda hasarlı gemiler var. Önce Gemi canları bölümünden hepsini azami HP'ye çıkarın.");
+
+      await client.query("DELETE FROM fleets WHERE id=$1",[fleet.id]);
+      if(fleet.commander_character_id){
+        await client.query(
+          `UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL
+            WHERE id=$1 AND NOT EXISTS(SELECT 1 FROM armies WHERE commander_character_id=$1)
+              AND NOT EXISTS(SELECT 1 FROM fleets WHERE commander_character_id=$1)`,[fleet.commander_character_id]
+        );
+      }
+      const releasedShips=allocations.reduce((sum,row)=>sum+Number(row.quantity),0);
+      const result={
+        id:fleet.id,name:fleet.name,countryId:fleet.country_id,countryName:fleet.country_name,
+        releasedShips,releasedAllocations:allocations.map((row)=>({
+          settlementId:row.settlement_id,settlementName:row.settlement_name,shipType:row.ship_type,quantity:Number(row.quantity)
+        })),reason:input.reason
+      };
+      await writeAdminAudit(client,actorId,"admin.panel.fleet.delete","fleet",fleet.id,result);
       return result;
     });
   },

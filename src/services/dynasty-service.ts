@@ -10,6 +10,7 @@ import {
   dynastyMemberCanMarry,newbornGender,orderedDynastyCoupleIds,type DynastyGender,type DynastyHealth,type DynastyMemberStatus
 } from "../domain/dynasty.js";
 import {GameError} from "./game-service.js";
+import {fallbackDynastyCandidateSql,lineageAwareDynastyCandidateSql} from "./dynasty-succession.js";
 
 export interface DynastyMemberView{
   id:string;name:string;gender:DynastyGender;age:number|null;title:string;relation:string;
@@ -19,6 +20,8 @@ export interface DynastyMemberView{
   spouse_id:string|null;spouse_name:string|null;spouse_title:string|null;spouse_age:number|null;spouse_country_name:string|null;
   spouse_dynasty_name:string|null;spouse_birth_dynasty_name:string|null;spouse_birth_country_name:string|null;
   spouse_status:DynastyMemberStatus|null;
+  roman_spouse_id:string|null;
+  roman_mother_id:string|null;roman_father_id:string|null;
   mother_id:string|null;mother_name:string|null;
   father_id:string|null;father_name:string|null;born_turn:number|null;died_turn:number|null;death_reason:string|null;
   kidnapped:boolean;captor_country_name:string|null;captured_settlement_name:string|null;
@@ -114,16 +117,23 @@ async function dynastyForContext(
 
 async function memberForDynasty(client:DbClient,dynastyId:string,memberId:string,lock=false):Promise<DynastyMemberView>{
   const row=(await client.query<DynastyMemberView>(
-    `SELECT member.*,spouse.name AS spouse_name,spouse.title AS spouse_title,spouse.age AS spouse_age,
-            spouse_country.name AS spouse_country_name,spouse_dynasty.name AS spouse_dynasty_name,
+    `SELECT member.*,COALESCE(spouse.name,roman_spouse.name) AS spouse_name,
+            COALESCE(spouse.title,roman_spouse.position) AS spouse_title,COALESCE(spouse.age,roman_spouse.age) AS spouse_age,
+            COALESCE(spouse_country.name,roman_spouse_country.name) AS spouse_country_name,
+            COALESCE(spouse_dynasty.name,roman_spouse_family.name) AS spouse_dynasty_name,
             birth_dynasty.name AS birth_dynasty_name,birth_country.name AS birth_country_name,
             spouse_birth_dynasty.name AS spouse_birth_dynasty_name,
             spouse_birth_country.name AS spouse_birth_country_name,
-            spouse.status AS spouse_status,mother.name AS mother_name,father.name AS father_name,
+            COALESCE(spouse.status,roman_spouse.status) AS spouse_status,
+            COALESCE(mother.name,roman_mother.name) AS mother_name,COALESCE(father.name,roman_father.name) AS father_name,
             (captivity.id IS NOT NULL) AS kidnapped,captor.name AS captor_country_name,
             captive_settlement.name AS captured_settlement_name
        FROM dynasty_members member
        LEFT JOIN dynasty_members spouse ON spouse.id=member.spouse_id
+       LEFT JOIN roman_family_members roman_spouse ON roman_spouse.id=member.roman_spouse_id
+       LEFT JOIN roman_families roman_spouse_family ON roman_spouse_family.id=roman_spouse.family_id
+       LEFT JOIN roman_republics roman_spouse_republic ON roman_spouse_republic.id=roman_spouse_family.republic_id
+       LEFT JOIN countries roman_spouse_country ON roman_spouse_country.id=roman_spouse_republic.country_id
        LEFT JOIN dynasties spouse_dynasty ON spouse_dynasty.id=spouse.dynasty_id
        LEFT JOIN countries spouse_country ON spouse_country.id=spouse_dynasty.country_id
        LEFT JOIN dynasties birth_dynasty ON birth_dynasty.id=COALESCE(member.birth_dynasty_id,member.dynasty_id)
@@ -132,6 +142,8 @@ async function memberForDynasty(client:DbClient,dynastyId:string,memberId:string
        LEFT JOIN countries spouse_birth_country ON spouse_birth_country.id=spouse_birth_dynasty.country_id
        LEFT JOIN dynasty_members mother ON mother.id=member.mother_id
        LEFT JOIN dynasty_members father ON father.id=member.father_id
+       LEFT JOIN roman_family_members roman_mother ON roman_mother.id=member.roman_mother_id
+       LEFT JOIN roman_family_members roman_father ON roman_father.id=member.roman_father_id
        LEFT JOIN LATERAL (
          SELECT held.id,held.captor_country_id,held.captured_settlement_id
            FROM espionage_captivities held
@@ -149,12 +161,15 @@ async function memberForDynasty(client:DbClient,dynastyId:string,memberId:string
 
 async function memberAcrossGuild(client:DbClient,guildId:string,memberId:string,lock=false):Promise<DynastyMarriageMember>{
   const row=(await client.query<DynastyMarriageMember>(
-    `SELECT member.*,spouse.name AS spouse_name,spouse.title AS spouse_title,spouse.age AS spouse_age,
-            spouse_country.name AS spouse_country_name,spouse_dynasty.name AS spouse_dynasty_name,
+    `SELECT member.*,COALESCE(spouse.name,roman_spouse.name) AS spouse_name,
+            COALESCE(spouse.title,roman_spouse.position) AS spouse_title,COALESCE(spouse.age,roman_spouse.age) AS spouse_age,
+            COALESCE(spouse_country.name,roman_spouse_country.name) AS spouse_country_name,
+            COALESCE(spouse_dynasty.name,roman_spouse_family.name) AS spouse_dynasty_name,
             birth_dynasty.name AS birth_dynasty_name,birth_country.name AS birth_country_name,
             spouse_birth_dynasty.name AS spouse_birth_dynasty_name,
             spouse_birth_country.name AS spouse_birth_country_name,
-            spouse.status AS spouse_status,mother.name AS mother_name,father.name AS father_name,
+            COALESCE(spouse.status,roman_spouse.status) AS spouse_status,
+            COALESCE(mother.name,roman_mother.name) AS mother_name,COALESCE(father.name,roman_father.name) AS father_name,
             (captivity.id IS NOT NULL) AS kidnapped,captor.name AS captor_country_name,
             captive_settlement.name AS captured_settlement_name,
             dynasty.id AS dynasty_id,dynasty.guild_id,dynasty.country_id,dynasty.name AS dynasty_name,
@@ -163,6 +178,10 @@ async function memberAcrossGuild(client:DbClient,guildId:string,memberId:string,
        JOIN dynasties dynasty ON dynasty.id=member.dynasty_id
        JOIN countries country ON country.id=dynasty.country_id
        LEFT JOIN dynasty_members spouse ON spouse.id=member.spouse_id
+       LEFT JOIN roman_family_members roman_spouse ON roman_spouse.id=member.roman_spouse_id
+       LEFT JOIN roman_families roman_spouse_family ON roman_spouse_family.id=roman_spouse.family_id
+       LEFT JOIN roman_republics roman_spouse_republic ON roman_spouse_republic.id=roman_spouse_family.republic_id
+       LEFT JOIN countries roman_spouse_country ON roman_spouse_country.id=roman_spouse_republic.country_id
        LEFT JOIN dynasties spouse_dynasty ON spouse_dynasty.id=spouse.dynasty_id
        LEFT JOIN countries spouse_country ON spouse_country.id=spouse_dynasty.country_id
        LEFT JOIN dynasties birth_dynasty ON birth_dynasty.id=COALESCE(member.birth_dynasty_id,member.dynasty_id)
@@ -171,6 +190,8 @@ async function memberAcrossGuild(client:DbClient,guildId:string,memberId:string,
        LEFT JOIN countries spouse_birth_country ON spouse_birth_country.id=spouse_birth_dynasty.country_id
        LEFT JOIN dynasty_members mother ON mother.id=member.mother_id
        LEFT JOIN dynasty_members father ON father.id=member.father_id
+       LEFT JOIN roman_family_members roman_mother ON roman_mother.id=member.roman_mother_id
+       LEFT JOIN roman_family_members roman_father ON roman_father.id=member.roman_father_id
        LEFT JOIN LATERAL (
          SELECT held.id,held.captor_country_id,held.captured_settlement_id
            FROM espionage_captivities held
@@ -191,8 +212,8 @@ function requireMarriageEligibility(member:DynastyMemberView,label:string):void{
   if(member.kidnapped)throw new GameError(label+" kaçırılmış durumda olduğu için evlendirilemez.");
   if(member.age===null)throw new GameError(label+" için yaş bilgisi girilmeden evlilik yapılamaz.");
   if(member.age<MINIMUM_MARRIAGE_AGE)throw new GameError(label+" henüz "+MINIMUM_MARRIAGE_AGE+" yaşını doldurmadı.");
-  if(member.spouse_id)throw new GameError(label+" zaten evli.");
-  if(!dynastyMemberCanMarry(member.age,member.status,member.spouse_id))throw new GameError(label+" evlilik koşullarını karşılamıyor.");
+  if(member.spouse_id||member.roman_spouse_id)throw new GameError(label+" zaten evli.");
+  if(!dynastyMemberCanMarry(member.age,member.status,member.spouse_id??member.roman_spouse_id??null))throw new GameError(label+" evlilik koşullarını karşılamıyor.");
 }
 
 async function lockMarriageMembers(client:DbClient,memberIds:string[]):Promise<void>{
@@ -277,7 +298,7 @@ async function addEvent(
 }
 
 async function reconcileSuccession(
-  client:DbClient,dynastyId:string,turn:number,countryName:string,eventTexts:string[]
+  client:DbClient,dynastyId:string,turn:number,countryName:string,eventTexts:string[],formerMonarchId:string|null=null
 ):Promise<void>{
   const steppeTitle=(await client.query<{title_name:string;tier:"KHAN"|"LANDHOLDER"}>(`
     SELECT title.title_name,title.tier FROM dynasties dynasty
@@ -288,10 +309,8 @@ async function reconcileSuccession(
   )).rows[0];
   if(!monarch){
     const successor=(await client.query<{id:string;name:string;gender:DynastyGender}>(
-      `SELECT id,name,gender FROM dynasty_members
-        WHERE dynasty_id=$1 AND status='ALIVE' AND (is_heir=TRUE OR succession_rank IS NOT NULL)
-        ORDER BY CASE WHEN gender='MALE' THEN 0 ELSE 1 END,
-                 is_heir DESC,succession_rank NULLS LAST,age DESC,created_at LIMIT 1 FOR UPDATE`,[dynastyId]
+      formerMonarchId?lineageAwareDynastyCandidateSql:fallbackDynastyCandidateSql,
+      [dynastyId,formerMonarchId]
     )).rows[0];
     if(!successor){
       await addEvent(client,dynastyId,turn,"SUCCESSION_CRISIS",null,{countryName,reason:"Yaşayan hanedan üyesi bulunmuyor"});
@@ -323,10 +342,7 @@ async function reconcileSuccession(
     [dynastyId,monarch.id]
   )).rows[0];
   const next=(await client.query<{id:string;name:string}>(
-    `SELECT id,name FROM dynasty_members
-      WHERE dynasty_id=$1 AND status='ALIVE' AND id<>$2 AND (is_heir=TRUE OR succession_rank IS NOT NULL)
-      ORDER BY CASE WHEN gender='MALE' THEN 0 ELSE 1 END,
-               is_heir DESC,succession_rank NULLS LAST,age DESC,created_at LIMIT 1 FOR UPDATE`,
+    lineageAwareDynastyCandidateSql,
     [dynastyId,monarch.id]
   )).rows[0];
   if(next){
@@ -371,7 +387,9 @@ async function killMember(
   await addEvent(client,dynastyId,turn,"DEATH",member.id,{name:member.name,age:member.age,reason,wasMonarch:member.is_monarch,wasHeir:member.is_heir});
   const ageText=member.age===null?"yaşı bilinmiyorken":member.age+" yaşında";
   eventTexts.push("⚰️ **"+countryName+"** • **"+member.name+"**, "+ageText+" hayatını kaybetti. Sebep: **"+reason+"**.");
-  if(member.is_monarch||member.is_heir)await reconcileSuccession(client,dynastyId,turn,countryName,eventTexts);
+  if(member.is_monarch||member.is_heir)await reconcileSuccession(
+    client,dynastyId,turn,countryName,eventTexts,member.is_monarch?member.id:null
+  );
 }
 
 export async function killDynastyMemberFromEspionage(
@@ -624,7 +642,7 @@ async function processNpcMarriages(
       WHERE dynasty.guild_id=$1 AND country.status='ACTIVE' AND COALESCE(country.is_system_faction,FALSE)=FALSE
         AND ((dynasty.steppe_title_id IS NULL AND NOT EXISTS(SELECT 1 FROM country_members player WHERE player.country_id=country.id))
           OR (dynasty.steppe_title_id IS NOT NULL AND steppe_title.holder_user_id IS NULL))
-        AND member.status='ALIVE' AND member.spouse_id IS NULL AND member.age>=$2
+        AND member.status='ALIVE' AND member.spouse_id IS NULL AND member.roman_spouse_id IS NULL AND member.age>=$2
         AND NOT EXISTS(SELECT 1 FROM espionage_captivities captivity
           WHERE captivity.captive_type='DYNASTY' AND captivity.captive_id=member.id AND captivity.status='HELD')
       ORDER BY country.name,member.age DESC,member.name`,[guildId,MINIMUM_MARRIAGE_AGE]
@@ -652,8 +670,8 @@ async function processNpcMarriages(
     await lockMarriageMembers(client,[match.man.id,match.woman.id]);
     const man=await memberAcrossGuild(client,guildId,match.man.id,true);
     const woman=await memberAcrossGuild(client,guildId,match.woman.id,true);
-    if(!dynastyMemberCanMarry(man.age,man.status,man.spouse_id)||
-      !dynastyMemberCanMarry(woman.age,woman.status,woman.spouse_id))continue;
+    if(!dynastyMemberCanMarry(man.age,man.status,man.spouse_id??man.roman_spouse_id??null)||
+      !dynastyMemberCanMarry(woman.age,woman.status,woman.spouse_id??woman.roman_spouse_id??null))continue;
     const proposal=(await client.query<{id:string}>(
       `INSERT INTO dynasty_marriage_proposals(
          guild_id,proposer_country_id,target_country_id,proposer_member_id,target_member_id,
@@ -724,14 +742,21 @@ async function loadViewByClause(column:"country_id"|"id"|"steppe_title_id",value
   )).rows[0];
   if(!dynasty)return null;
   const storedMembers=(await pool.query<DynastyMemberView>(
-    `SELECT member.*,spouse.name AS spouse_name,spouse.title AS spouse_title,spouse.age AS spouse_age,
-            spouse_country.name AS spouse_country_name,spouse_dynasty.name AS spouse_dynasty_name,
+    `SELECT member.*,COALESCE(spouse.name,roman_spouse.name) AS spouse_name,
+            COALESCE(spouse.title,roman_spouse.position) AS spouse_title,COALESCE(spouse.age,roman_spouse.age) AS spouse_age,
+            COALESCE(spouse_country.name,roman_spouse_country.name) AS spouse_country_name,
+            COALESCE(spouse_dynasty.name,roman_spouse_family.name) AS spouse_dynasty_name,
             birth_dynasty.name AS birth_dynasty_name,birth_country.name AS birth_country_name,
             spouse_birth_dynasty.name AS spouse_birth_dynasty_name,
             spouse_birth_country.name AS spouse_birth_country_name,
-            spouse.status AS spouse_status,mother.name AS mother_name,father.name AS father_name
+            COALESCE(spouse.status,roman_spouse.status) AS spouse_status,
+            COALESCE(mother.name,roman_mother.name) AS mother_name,COALESCE(father.name,roman_father.name) AS father_name
        FROM dynasty_members member
        LEFT JOIN dynasty_members spouse ON spouse.id=member.spouse_id
+       LEFT JOIN roman_family_members roman_spouse ON roman_spouse.id=member.roman_spouse_id
+       LEFT JOIN roman_families roman_spouse_family ON roman_spouse_family.id=roman_spouse.family_id
+       LEFT JOIN roman_republics roman_spouse_republic ON roman_spouse_republic.id=roman_spouse_family.republic_id
+       LEFT JOIN countries roman_spouse_country ON roman_spouse_country.id=roman_spouse_republic.country_id
        LEFT JOIN dynasties spouse_dynasty ON spouse_dynasty.id=spouse.dynasty_id
        LEFT JOIN countries spouse_country ON spouse_country.id=spouse_dynasty.country_id
        LEFT JOIN dynasties birth_dynasty ON birth_dynasty.id=COALESCE(member.birth_dynasty_id,member.dynasty_id)
@@ -740,6 +765,8 @@ async function loadViewByClause(column:"country_id"|"id"|"steppe_title_id",value
        LEFT JOIN countries spouse_birth_country ON spouse_birth_country.id=spouse_birth_dynasty.country_id
        LEFT JOIN dynasty_members mother ON mother.id=member.mother_id
        LEFT JOIN dynasty_members father ON father.id=member.father_id
+       LEFT JOIN roman_family_members roman_mother ON roman_mother.id=member.roman_mother_id
+       LEFT JOIN roman_family_members roman_father ON roman_father.id=member.roman_father_id
       WHERE member.dynasty_id=$1
       ORDER BY CASE WHEN member.status='ALIVE' THEN 0 ELSE 1 END,member.is_monarch DESC,member.is_heir DESC,
                member.succession_rank NULLS LAST,member.age DESC,member.created_at`,[dynasty.id]
@@ -777,9 +804,9 @@ export const dynastyService={
 
   async marriageCandidatesForCountry(guildId:string,countryId:string,excludeDynastyId?:string|null){
     return (await pool.query<{
-      id:string;name:string;title:string;age:number|null;status:DynastyMemberStatus;spouse_id:string|null;
+      id:string;name:string;title:string;age:number|null;status:DynastyMemberStatus;spouse_id:string|null;roman_spouse_id:string|null;
       dynasty_id:string;dynasty_name:string;
-    }>(`SELECT member.id,member.name,member.title,member.age,member.status,member.spouse_id,
+    }>(`SELECT member.id,member.name,member.title,member.age,member.status,member.spouse_id,member.roman_spouse_id,
                dynasty.id AS dynasty_id,dynasty.name AS dynasty_name
           FROM dynasties dynasty JOIN dynasty_members member ON member.dynasty_id=dynasty.id
          WHERE dynasty.guild_id=$1 AND dynasty.country_id=$2 AND member.status='ALIVE'
@@ -965,6 +992,11 @@ export const dynastyService={
         [[proposer.id,target.id]]
       );
       if(pending.rowCount)throw new GameError("Seçilen üyelerden biri için zaten bekleyen bir evlilik teklifi bulunuyor.");
+      const crossPending=await client.query(
+        `SELECT 1 FROM roman_dynasty_marriage_proposals WHERE status='PENDING'
+          AND dynasty_member_id=ANY($1::uuid[]) LIMIT 1`,[[proposer.id,target.id]]
+      );
+      if(crossPending.rowCount)throw new GameError("Seçilen üyelerden biri için zaten bekleyen bir Roma–hanedan evlilik teklifi bulunuyor.");
       const turn=await currentTurn(client,input.guildId);
       const created=(await client.query<{id:string}>(
         `INSERT INTO dynasty_marriage_proposals(
