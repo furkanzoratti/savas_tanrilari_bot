@@ -15,4 +15,19 @@ describe("Operasyon Masası Roma Siyaseti sayfası",()=>{
     expect(service).toContain("roman_election_ballots vote");
     expect(service).not.toContain("roman_election_votes vote");
   });
+
+  it("aile işletmelerini ve senatör bazlı oy dökümünü yönetir",()=>{
+    const service=read("./service.ts");
+    const server=read("./server.ts");
+    const app=read("./public/app.js");
+    expect(service).toContain("roman_family_businesses business");
+    expect(service).toContain("purchaseRomanFamilyBusiness");
+    expect(service).toContain("'senatorName'");
+    expect(service).toContain("'npcScore'");
+    expect(server).toContain("/businesses$");
+    expect(app).toContain("data-buy-roman-business");
+    expect(app).toContain("NPC oyu kapanışta");
+    expect(app).toContain("romanElectionVoterRows");
+    expect(app).toContain("romanProposalVoterRows");
+  });
 });

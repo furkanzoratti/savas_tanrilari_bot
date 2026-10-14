@@ -506,26 +506,64 @@ function romanSenateSeats(families, totalSeats) {
   return seats.slice(0, Number(totalSeats || 100)).join("");
 }
 
-function romanRepublicPanel(republic, currentTurn) {
+const romanVoteLabels = { YES: "Evet", NO: "Hayır", ABSTAIN: "Çekimser" };
+
+function romanVoteSource(vote) {
+  return vote?.votedBy === "NPC" || vote?.npcScore !== null && vote?.npcScore !== undefined ? "NPC otomatik" : "Oyuncu";
+}
+
+function romanElectionVoterRows(republic, election) {
+  const ballots = election.ballots || [];
+  const byFamily = new Map(ballots.map((ballot) => [ballot.voterFamilyId, ballot]));
+  return republic.families.map((family) => {
+    const ballot = byFamily.get(family.id);
+    const senator = ballot?.senatorName || (family.members || []).find((member) => member.position === "HEAD" && member.status === "ALIVE")?.name || family.name;
+    if (!ballot) return `<div class="roman-ballot-row pending"><div><strong>${escapeHtml(family.name)}</strong><small>Senatör: ${escapeHtml(senator)}</small></div><span class="pill neutral">${Number(family.player_count) ? "Oyuncu oyu bekleniyor" : election.status === "OPEN" ? "NPC oyu kapanışta" : "Oy kullanılmadı"}</span></div>`;
+    return `<div class="roman-ballot-row"><div><strong>${escapeHtml(family.name)} · ${escapeHtml(senator)}</strong><small>${escapeHtml(romanVoteSource(ballot))}${ballot.npcScore === null || ballot.npcScore === undefined ? "" : ` · Karar puanı ${number(ballot.npcScore)}`}</small></div><div><b>${escapeHtml(ballot.candidateName)}</b><small>${escapeHtml(ballot.candidateFamilyName)} · ${number(ballot.seatWeight)} koltuk + ${number(ballot.influenceSpent)} nüfuz = ${number(ballot.totalWeight)}</small></div></div>`;
+  }).join("");
+}
+
+function romanProposalVoterRows(republic, proposal) {
+  const votes = proposal.votes || [];
+  const byFamily = new Map(votes.map((vote) => [vote.familyId, vote]));
+  return republic.families.map((family) => {
+    const vote = byFamily.get(family.id);
+    const senator = vote?.senatorName || (family.members || []).find((member) => member.position === "HEAD" && member.status === "ALIVE")?.name || family.name;
+    if (!vote) return `<div class="roman-ballot-row pending"><div><strong>${escapeHtml(family.name)}</strong><small>Senatör: ${escapeHtml(senator)}</small></div><span class="pill neutral">${Number(family.player_count) ? "Oyuncu oyu bekleniyor" : proposal.status === "OPEN" ? "NPC oyu kapanışta" : "Oy kullanılmadı"}</span></div>`;
+    return `<div class="roman-ballot-row"><div><strong>${escapeHtml(family.name)} · ${escapeHtml(senator)}</strong><small>${escapeHtml(romanVoteSource(vote))}${vote.npcScore === null || vote.npcScore === undefined ? "" : ` · Karar puanı ${number(vote.npcScore)}`}</small></div><div><b>${escapeHtml(romanVoteLabels[vote.choice] || vote.choice)}</b><small>${number(vote.seatWeight)} koltuk + ${number(vote.influenceSpent)} nüfuz = ${number(vote.totalWeight)}</small></div></div>`;
+  }).join("");
+}
+
+function romanRepublicPanel(republic, currentTurn, businessCatalog = []) {
   const consul = republic.families.find((family) => family.is_consul);
   const allocated = republic.families.reduce((sum, family) => sum + Number(family.senate_seats || 0), 0);
   const election = republic.election;
-  const electionCandidates = election?.candidates || [];
   const familyCards = republic.families.map((family, index) => {
     const members = family.members || [];
+    const businesses = family.businesses || [];
+    const activeBusinesses = businesses.filter((business) => business.status === "ACTIVE");
+    const businessIncome = activeBusinesses.reduce((sum, business) => sum + Number(business.turnIncome || 0), 0);
     return `<article class="card roman-family-card ${romanFamilyColorKey(family.name, index)}">
-      <div class="roman-family-head"><div><span class="roman-color-dot"></span><strong>${escapeHtml(family.name)}</strong><small>${escapeHtml(romanBlocLabels[family.political_bloc] || family.political_bloc)}</small></div><div class="roman-family-actions">${family.is_consul ? '<span class="pill">Konsül ailesi</span>' : `<span class="pill neutral">${number(family.senate_seats)} koltuk</span>`}<button class="button compact" data-edit-roman-family="${family.id}">Aileyi yönet</button><button class="button primary compact" data-add-roman-member="${family.id}">＋ Üye ekle</button></div></div>
+      <div class="roman-family-head"><div><span class="roman-color-dot"></span><strong>${escapeHtml(family.name)}</strong><small>${escapeHtml(romanBlocLabels[family.political_bloc] || family.political_bloc)}</small></div><div class="roman-family-actions">${family.is_consul ? '<span class="pill">Konsül ailesi</span>' : `<span class="pill neutral">${number(family.senate_seats)} koltuk</span>`}<button class="button compact" data-edit-roman-family="${family.id}">Aileyi yönet</button><button class="button compact" data-buy-roman-business="${family.id}">＋ İşletme al</button><button class="button primary compact" data-add-roman-member="${family.id}">＋ Üye ekle</button></div></div>
       <div class="roman-family-stats"><span><small>Aile hazinesi</small><strong>${money(family.treasury)}</strong></span><span><small>Siyasi nüfuz</small><strong>${number(family.political_influence)}</strong></span><span><small>İtibar / Skandal</small><strong>${number(family.reputation)} / ${number(family.scandal)}</strong></span><span><small>Oyuncu</small><strong>${number(family.player_count)}</strong></span></div>
+      <div class="roman-businesses"><div class="roman-subhead"><strong>Aile işletmeleri</strong><span>${number(activeBusinesses.length)} işletme · tur geliri ${money(businessIncome)}</span></div><div class="roman-business-list">${activeBusinesses.map((business) => { const definition = businessCatalog.find((item) => item.value === business.businessType); return `<span class="roman-business-chip"><b>${escapeHtml(business.settlementName)}</b><small>${escapeHtml(definition ? `${definition.emoji} ${definition.label}` : business.businessType.replaceAll("_", " "))} · ${money(business.turnIncome)}/tur</small></span>`; }).join("") || '<span class="muted">Aktif işletme bulunmuyor.</span>'}</div></div>
       <div class="roman-members">${members.length ? members.map((member) => `<div class="roman-member-row ${member.status === "DEAD" ? "dead" : ""}"><div class="roman-member-meta"><b>${escapeHtml(member.name)}</b><small>${number(member.age)} yaş · ${escapeHtml(dynastyGenderLabels[member.gender] || member.gender)} · ${escapeHtml(romanPositionLabels[member.position] || member.position)}</small><small>${escapeHtml(member.relation)}${member.spouseName ? ` · Eş: ${escapeHtml(member.spouseName)}` : ""}</small>${member.status === "DEAD" ? `<small class="danger-text">Ölü · Tur ${number(member.diedTurn)} · ${escapeHtml(member.deathReason || "Neden belirtilmedi")}</small>` : member.health === "SICK" ? `<small class="warning-text">Hasta · Tur ${number(member.sickUntilTurn)} sonuna kadar</small>` : ""}</div><div class="roman-member-actions"><button class="button compact" data-edit-roman-member="${member.id}" data-family-id="${family.id}">Düzenle</button>${member.status === "ALIVE" ? `<button class="button compact danger" data-kill-roman-member="${member.id}" data-family-id="${family.id}">Öldü</button>` : ""}<button class="button compact danger" data-remove-roman-member="${member.id}" data-family-id="${family.id}">Kaldır</button></div></div>`).join("") : '<span class="muted">Bu ailede kayıtlı üye bulunmuyor.</span>'}</div>
     </article>`;
   }).join("");
-  const proposalRows = republic.proposals.map((proposal) => `<div class="data-row roman-proposal"><div><strong>${escapeHtml(proposal.title)}</strong><small>${escapeHtml(proposal.proposer_family_name)} · Son Tur ${number(proposal.closes_turn)}</small></div><span class="pill ${proposal.status === "OPEN" ? "" : "neutral"}">${proposal.status === "OPEN" ? "Oylamada" : escapeHtml(proposal.status)}</span><span>Evet ${number(proposal.yes_weight)} / Hayır ${number(proposal.no_weight)}</span></div>`).join("");
+  const electionPanels = (republic.elections || (election ? [election] : [])).map((item, index) => `<details class="roman-vote-card" ${index === 0 ? "open" : ""}><summary><div><strong>${number(item.sequence)}. Konsül seçimi</strong><small>Tur ${number(item.started_turn)}–${number(item.closes_turn)}${item.winner_family_name ? ` · Kazanan ${escapeHtml(item.winner_family_name)}` : ""}</small></div><span class="pill ${item.status === "OPEN" ? "" : "neutral"}">${item.status === "OPEN" ? "Açık" : escapeHtml(item.status)}</span></summary><div class="roman-candidate-grid">${(item.candidates || []).map((candidate) => `<span><small>${escapeHtml(candidate.familyName)}</small><strong>${escapeHtml(candidate.candidateName)}</strong><b>${number(candidate.totalWeight)} oy ağırlığı</b></span>`).join("") || '<span class="muted">Aday bulunmuyor.</span>'}</div><div class="roman-ballot-list">${romanElectionVoterRows(republic, item)}</div></details>`).join("");
+  const proposalPanels = republic.proposals.map((proposal, index) => {
+    const votes = proposal.votes || [];
+    const liveYes = votes.filter((vote) => vote.choice === "YES").reduce((sum, vote) => sum + Number(vote.totalWeight || 0), 0);
+    const liveNo = votes.filter((vote) => vote.choice === "NO").reduce((sum, vote) => sum + Number(vote.totalWeight || 0), 0);
+    const liveAbstain = votes.filter((vote) => vote.choice === "ABSTAIN").length;
+    return `<details class="roman-vote-card" ${proposal.status === "OPEN" || index === 0 ? "open" : ""}><summary><div><strong>${escapeHtml(proposal.title)}</strong><small>${escapeHtml(proposal.proposer_family_name)} · Tur ${number(proposal.opened_turn)}–${number(proposal.closes_turn)} · eşik %${number(proposal.threshold_percent)}</small></div><span class="pill ${proposal.status === "OPEN" ? "" : "neutral"}">${proposal.status === "OPEN" ? "Oylamada" : escapeHtml(proposal.status)}</span></summary><p class="roman-proposal-description">${escapeHtml(proposal.description || "Açıklama bulunmuyor.")}</p><div class="roman-vote-totals"><span>Evet <strong>${number(liveYes)}</strong></span><span>Hayır <strong>${number(liveNo)}</strong></span><span>Çekimser <strong>${number(liveAbstain)}</strong></span></div><div class="roman-ballot-list">${romanProposalVoterRows(republic, proposal)}</div></details>`;
+  }).join("");
   return `<section class="roman-republic-section">
     <div class="page-head"><div><h1>🏛️ ${escapeHtml(republic.country_name)} · Roma Siyaseti</h1><p>Canlı konsül, seçim, Senato ve siyasi aile görünümü</p></div><div class="actions"><span class="pill">Tur ${number(currentTurn)}</span><span class="pill neutral">${number(republic.families.length)} aile</span></div></div>
     <section class="detail-grid"><div class="detail-cell"><span>Mevcut konsül ailesi</span><strong>${escapeHtml(consul?.name || "Belirlenmedi")}</strong></div><div class="detail-cell"><span>Görev dönemi</span><strong>${republic.term_started_turn === null ? "Başlamadı" : `Tur ${number(republic.term_started_turn)}–${number((republic.next_election_turn ?? republic.term_started_turn) - 1)}`}</strong></div><div class="detail-cell"><span>İlk / sonraki seçim</span><strong>${republic.next_election_turn === null ? "Belirlenmedi" : `Tur ${number(republic.next_election_turn)}`}</strong></div><div class="detail-cell"><span>Senato doluluğu</span><strong>${number(allocated)} / ${number(republic.senate_total_seats)}</strong></div></section>
     <section class="card roman-senate-card"><div class="card-head"><div><h2>100 Koltuklu Senato</h2><p>Her nokta bir koltuktur; aile renkleri Discord Senato formuyla aynıdır.</p></div><span class="pill neutral">${number(allocated)} dolu</span></div><div class="roman-seat-grid">${romanSenateSeats(republic.families, republic.senate_total_seats)}</div><div class="roman-legend">${republic.families.map((family, index) => `<span class="${romanFamilyColorKey(family.name, index)}"><i></i>${escapeHtml(family.name)} · ${number(family.senate_seats)}</span>`).join("")}</div></section>
     <div class="section-title"><h2>Siyasi aileler</h2><span>Hazine, nüfuz, koltuk, itibar ve aile kadroları</span></div><section class="roman-family-grid">${familyCards || '<div class="card empty">Roma siyasi ailesi bulunmuyor.</div>'}</section>
-    <section class="content-grid roman-bottom-grid"><div class="card"><div class="card-head"><div><h2>Konsül seçimi</h2><p>${election ? `${number(election.sequence)}. seçim · Tur ${number(election.started_turn)}–${number(election.closes_turn)}` : "Henüz seçim kaydı yok"}</p></div>${election ? `<span class="pill ${election.status === "OPEN" ? "" : "neutral"}">${election.status === "OPEN" ? "Açık" : escapeHtml(election.status)}</span>` : ""}</div>${electionCandidates.map((candidate) => `<div class="data-row roman-election-row"><div><strong>${escapeHtml(candidate.candidateName)}</strong><small>${escapeHtml(candidate.familyName)}</small></div><span>${number(Number(candidate.seatWeight) + Number(candidate.influenceSupport))} ağırlık</span></div>`).join("") || '<div class="empty compact-empty">Aday bulunmuyor.</div>'}</div><div class="card"><div class="card-head"><div><h2>Senato teklifleri</h2><p>Açık ve yakın dönem teklifleri</p></div></div>${proposalRows || '<div class="empty compact-empty">Teklif bulunmuyor.</div>'}</div></section>
+    <section class="roman-vote-panels"><div class="card"><div class="card-head"><div><h2>Konsül seçimleri</h2><p>Son dört seçimin aday ve aile bazlı oy dökümü</p></div></div>${electionPanels || '<div class="empty compact-empty">Henüz seçim kaydı yok.</div>'}</div><div class="card"><div class="card-head"><div><h2>Senato oylamaları</h2><p>Her ailenin senatörü, tercihi ve kullandığı siyasi nüfuz</p></div></div>${proposalPanels || '<div class="empty compact-empty">Teklif bulunmuyor.</div>'}</div></section>
   </section>`;
 }
 
@@ -534,7 +572,7 @@ async function romanPoliticsPage() {
   const data = await api("/api/roman-politics");
   data.republics.forEach((republic) => { republic.current_turn = data.currentTurn; });
   page.innerHTML = data.republics.length
-    ? data.republics.map((republic) => romanRepublicPanel(republic, data.currentTurn)).join("")
+    ? data.republics.map((republic) => romanRepublicPanel(republic, data.currentTurn, data.businessCatalog || [])).join("")
     : '<div class="page-head"><div><h1>Roma Siyaseti</h1><p>Roma Cumhuriyeti iç yönetimi</p></div></div><div class="card empty">Henüz Roma Cumhuriyeti kaydı bulunmuyor. Discord’da /roma-yonetim kur komutunu kullanın.</div>';
   const familyEntries = data.republics.flatMap((republic) => republic.families.map((family) => ({ republic, family })));
   const families = new Map(familyEntries.map((entry) => [entry.family.id, entry]));
@@ -545,6 +583,9 @@ async function romanPoliticsPage() {
   document.querySelectorAll("[data-add-roman-member]").forEach((button) => button.addEventListener("click", () => {
     const entry = families.get(button.dataset.addRomanMember); if (entry) openRomanFamilyMemberEditor(entry.republic, entry.family);
   }));
+  document.querySelectorAll("[data-buy-roman-business]").forEach((button) => button.addEventListener("click", () => {
+    const entry = families.get(button.dataset.buyRomanBusiness); if (entry) openRomanFamilyBusinessEditor(entry.republic, entry.family, data.businessCatalog || []);
+  }));
   document.querySelectorAll("[data-edit-roman-member]").forEach((button) => button.addEventListener("click", () => {
     const entry = members.get(button.dataset.editRomanMember); if (entry) openRomanFamilyMemberEditor(entry.republic, entry.family, entry.member);
   }));
@@ -554,6 +595,20 @@ async function romanPoliticsPage() {
   document.querySelectorAll("[data-remove-roman-member]").forEach((button) => button.addEventListener("click", () => {
     const entry = members.get(button.dataset.removeRomanMember); if (entry) openRomanFamilyMemberRemovalEditor(entry.republic, entry.family, entry.member);
   }));
+}
+
+function openRomanFamilyBusinessEditor(republic, family, catalog) {
+  const businessOptions = catalog.map((business) => `<option value="${business.value}">${escapeHtml(business.emoji)} ${escapeHtml(business.label)} · ${money(business.purchaseCost)}</option>`).join("");
+  const settlementOptions = (republic.settlements || []).map((settlement) => `<option value="${settlement.id}">${escapeHtml(settlement.name)}</option>`).join("");
+  const catalogCards = catalog.map((business) => `<span class="roman-business-option"><b>${escapeHtml(business.emoji)} ${escapeHtml(business.label)}</b><small>Alım ${money(business.purchaseCost)} · Gelir ${money(business.turnIncome)}/tur · Nüfuz +${number(business.influenceOnPurchase)} · Sınır ${number(business.familyLimit)}</small><small>${escapeHtml(business.description)}</small></span>`).join("");
+  openEditor("Aile işletmesi satın al", `${republic.country_name} · ${family.name}`, `<div class="preview-warning"><strong>NPC ve oyuncu ailelerinde aynı ekonomi kuralları uygulanır.</strong><span>Bedel aile hazinesinden düşer, işletme geliri sonraki uygun tur işlemlerine dahil edilir ve işlem denetim kaydına yazılır.</span></div><div class="roman-business-catalog">${catalogCards}</div><div class="form-grid"><label>İşletme<select id="roman-business-type" required>${businessOptions}</select></label><label>Yerleşke<select id="roman-business-settlement" required>${settlementOptions}</select></label></div><label>Satın alma gerekçesi<textarea id="roman-business-reason" minlength="2" maxlength="300" rows="3" required placeholder="Örn. NPC aile ekonomisini güçlendirme…"></textarea></label>`, async () => {
+    await api(`/api/admin/roman-families/${family.id}/businesses`, { method: "POST", body: JSON.stringify({
+      businessType: document.getElementById("roman-business-type").value,
+      settlementId: document.getElementById("roman-business-settlement").value,
+      reason: document.getElementById("roman-business-reason").value
+    }) });
+    closeEditor(); toast(`${family.name} ailesi için işletme satın alındı.`); await refreshKeepingScroll(romanPoliticsPage);
+  });
 }
 
 function openRomanFamilyEditor(republic, family) {

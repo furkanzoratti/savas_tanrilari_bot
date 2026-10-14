@@ -125,6 +125,7 @@ import { movementRuntimeRetirementMigration } from "./movement-runtime-retiremen
 import { missionaryRollPercentRepairMigration } from "./missionary-roll-percent-repair-migration.js";
 import { espionageCaptivitiesMigration } from "./espionage-captivities-migration.js";
 import { characterDutyLifecycleRepairMigration } from "./character-duty-lifecycle-repair-migration.js";
+import { romanElectionNpcScoreMigration } from "./roman-election-npc-score-migration.js";
 
 export const migrations = [
   {
@@ -2467,5 +2468,6 @@ export const migrations = [
   movementRuntimeRetirementMigration,
   missionaryRollPercentRepairMigration,
   espionageCaptivitiesMigration,
-  characterDutyLifecycleRepairMigration
+  characterDutyLifecycleRepairMigration,
+  romanElectionNpcScoreMigration
 ] as const;

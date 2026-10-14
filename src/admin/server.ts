@@ -413,6 +413,14 @@ const server = createServer(async (request, response) => {
       if (!session) return;
       return json(response, 200, await adminPanelService.updateRomanFamily(session.sub, romanFamilyUpdateMatch[1]!, await body(request)));
     }
+    const romanFamilyBusinessCreateMatch = request.method === "POST"
+      ? url.pathname.match(/^\/api\/admin\/roman-families\/([0-9a-f-]+)\/businesses$/iu)
+      : null;
+    if (romanFamilyBusinessCreateMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.purchaseRomanFamilyBusiness(session.sub, romanFamilyBusinessCreateMatch[1]!, await body(request)));
+    }
     const romanFamilyMemberCreateMatch = request.method === "POST"
       ? url.pathname.match(/^\/api\/admin\/roman-families\/([0-9a-f-]+)\/members$/iu)
       : null;

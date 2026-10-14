@@ -38,6 +38,8 @@ import { gameService } from "../services/game-service.js";
 import { diplomacyService } from "../services/diplomacy-service.js";
 import { warDeclarationService } from "../services/war-declaration-service.js";
 import { terminateCharacterDuties } from "../services/character-duty-lifecycle-service.js";
+import { romanRepublicService } from "../services/roman-republic-service.js";
+import { ROMAN_BUSINESSES } from "../domain/roman-republic.js";
 
 const usableUnitTypes = (Object.keys(BATTLE_UNIT_STATS) as BattleUnitType[]).filter((unitType) => unitType !== "militia");
 const usableUnitTypeSet = new Set<string>(usableUnitTypes);
@@ -158,6 +160,12 @@ const romanFamilyMemberUpdateSchema = z.object({
 const romanFamilyMemberDeathSchema = z.object({ reason: z.string().trim().min(2).max(200) });
 const romanFamilyMemberRemovalSchema = z.object({
   confirmation: z.literal("KALDIR"),
+  reason: z.string().trim().min(2).max(300)
+});
+
+const romanFamilyBusinessPurchaseSchema = z.object({
+  businessType: z.enum(["MARKET_STALL", "WORKSHOP", "BROTHEL", "BATHHOUSE", "LUDUS", "LATIFUNDIUM"]),
+  settlementId: z.string().uuid(),
   reason: z.string().trim().min(2).max(300)
 });
 
@@ -486,6 +494,7 @@ async function reconcileAdminDynastySuccession(
 type AdminRomanFamilyContext = {
   id: string;
   republic_id: string;
+  country_id: string;
   name: string;
   current_turn: number;
   senate_total_seats: number;
@@ -494,7 +503,7 @@ type AdminRomanFamilyContext = {
 
 async function adminRomanFamilyContext(client: AdminDbClient | typeof adminPool, familyId: string, lock = false) {
   const row = (await client.query<AdminRomanFamilyContext>(
-    `SELECT family.id,family.republic_id,family.name,guild.current_turn,republic.senate_total_seats,
+    `SELECT family.id,family.republic_id,republic.country_id,family.name,guild.current_turn,republic.senate_total_seats,
             country.name AS country_name
        FROM roman_families family
        JOIN roman_republics republic ON republic.id=family.republic_id
@@ -2002,6 +2011,14 @@ export const adminPanelService = {
                 (SELECT COUNT(*)::integer FROM roman_family_players player
                   WHERE player.family_id=family.id AND player.status='ACTIVE') AS player_count,
                 COALESCE((SELECT jsonb_agg(jsonb_build_object(
+                  'id',business.id,'businessType',business.business_type,'settlementId',business.settlement_id,
+                  'settlementName',settlement.name,'purchaseCost',business.purchase_cost,'turnIncome',business.turn_income,
+                  'acquiredTurn',business.acquired_turn,'status',business.status
+                ) ORDER BY business.acquired_turn DESC,business.created_at DESC)
+                  FROM roman_family_businesses business
+                  JOIN settlements settlement ON settlement.id=business.settlement_id
+                 WHERE business.family_id=family.id),'[]'::jsonb) AS businesses,
+                COALESCE((SELECT jsonb_agg(jsonb_build_object(
                   'id',member.id,'name',member.name,'gender',member.gender,'age',member.age,
                   'position',member.position,'relation',member.relation,'status',member.status,
                   'health',member.health,'sickUntilTurn',member.sick_until_turn,
@@ -2021,41 +2038,85 @@ export const adminPanelService = {
           ORDER BY family.senate_seats DESC,family.political_influence DESC,family.name`,
         [republic.id,republic.current_consul_family_id]
       )).rows;
-      const election=(await adminPool.query(
+      const settlements=(await adminPool.query(
+        "SELECT id,name FROM settlements WHERE country_id=$1 ORDER BY name",[republic.country_id]
+      )).rows;
+      const elections=(await adminPool.query(
         `SELECT election.id,election.sequence,election.started_turn,election.closes_turn,election.status,
                 election.winner_family_id,winner.name AS winner_family_name,
                 COALESCE((SELECT jsonb_agg(jsonb_build_object(
                   'id',candidate_stats.id,'candidateName',candidate_stats.candidate_name,
-                  'familyName',candidate_stats.family_name,'votes',candidate_stats.votes,
-                  'seatWeight',candidate_stats.seat_weight,'influenceSupport',candidate_stats.influence_support
+                  'familyId',candidate_stats.family_id,'familyName',candidate_stats.family_name,
+                  'votes',candidate_stats.votes,'seatWeight',candidate_stats.seat_weight,
+                  'influenceSupport',candidate_stats.influence_support,'totalWeight',candidate_stats.total_weight
                 ) ORDER BY candidate_stats.created_at)
                   FROM(
-                    SELECT candidate.id,candidate.candidate_name,family.name AS family_name,candidate.created_at,
+                    SELECT candidate.id,candidate.family_id,candidate.candidate_name,family.name AS family_name,candidate.created_at,
                            COUNT(vote.voter_family_id)::integer AS votes,
                            COALESCE(SUM(vote.seat_weight),0)::integer AS seat_weight,
-                           COALESCE(SUM(vote.influence_spent),0)::integer AS influence_support
+                           COALESCE(SUM(vote.influence_spent),0)::integer AS influence_support,
+                           COALESCE(SUM(vote.total_weight),0)::integer AS total_weight
                       FROM roman_election_candidates candidate
                       JOIN roman_families family ON family.id=candidate.family_id
                       LEFT JOIN roman_election_ballots vote ON vote.candidate_id=candidate.id
                      WHERE candidate.election_id=election.id
-                     GROUP BY candidate.id,candidate.candidate_name,family.name,candidate.created_at
-                  ) candidate_stats),'[]'::jsonb) AS candidates
+                     GROUP BY candidate.id,candidate.family_id,candidate.candidate_name,family.name,candidate.created_at
+                  ) candidate_stats),'[]'::jsonb) AS candidates,
+                COALESCE((SELECT jsonb_agg(jsonb_build_object(
+                  'voterFamilyId',ballot.voter_family_id,'voterFamilyName',voter.name,
+                  'senatorName',COALESCE((SELECT member.name FROM roman_family_members member
+                    WHERE member.family_id=voter.id AND member.position='HEAD' AND member.status='ALIVE'
+                    ORDER BY member.sort_order,member.age DESC LIMIT 1),voter.name),
+                  'candidateId',ballot.candidate_id,'candidateName',candidate.candidate_name,
+                  'candidateFamilyName',candidate_family.name,'seatWeight',ballot.seat_weight,
+                  'influenceSpent',ballot.influence_spent,'totalWeight',ballot.total_weight,
+                  'votedBy',ballot.voted_by,'npcScore',ballot.npc_score
+                ) ORDER BY voter.name)
+                  FROM roman_election_ballots ballot
+                  JOIN roman_families voter ON voter.id=ballot.voter_family_id
+                  JOIN roman_election_candidates candidate ON candidate.id=ballot.candidate_id
+                  JOIN roman_families candidate_family ON candidate_family.id=candidate.family_id
+                 WHERE ballot.election_id=election.id),'[]'::jsonb) AS ballots
            FROM roman_elections election
            LEFT JOIN roman_families winner ON winner.id=election.winner_family_id
-          WHERE election.republic_id=$1 ORDER BY election.sequence DESC LIMIT 1`,[republic.id]
-      )).rows[0]??null;
+          WHERE election.republic_id=$1 ORDER BY election.sequence DESC LIMIT 4`,[republic.id]
+      )).rows;
       const proposals=(await adminPool.query(
-        `SELECT proposal.id,proposal.title,proposal.description,proposal.status,proposal.threshold_percent,
-                proposal.closes_turn,proposal.yes_weight,proposal.no_weight,proposal.abstain_families,
-                family.name AS proposer_family_name
+        `SELECT proposal.id,proposal.proposal_type,proposal.category,proposal.title,proposal.description,
+                proposal.status,proposal.threshold_percent,proposal.opened_turn,proposal.closes_turn,proposal.resolved_turn,
+                proposal.yes_weight,proposal.no_weight,proposal.abstain_families,family.name AS proposer_family_name,
+                COALESCE((SELECT jsonb_agg(jsonb_build_object(
+                  'familyId',vote.family_id,'familyName',voter.name,
+                  'senatorName',COALESCE((SELECT member.name FROM roman_family_members member
+                    WHERE member.family_id=voter.id AND member.position='HEAD' AND member.status='ALIVE'
+                    ORDER BY member.sort_order,member.age DESC LIMIT 1),voter.name),
+                  'choice',vote.choice,'seatWeight',vote.seat_weight,'influenceSpent',vote.influence_spent,
+                  'totalWeight',vote.total_weight,'npcScore',vote.npc_score,'votedBy',vote.voted_by
+                ) ORDER BY voter.name)
+                  FROM roman_senate_votes vote JOIN roman_families voter ON voter.id=vote.family_id
+                 WHERE vote.proposal_id=proposal.id),'[]'::jsonb) AS votes
            FROM roman_senate_proposals proposal
            JOIN roman_families family ON family.id=proposal.proposed_by_family_id
           WHERE proposal.republic_id=$1
           ORDER BY CASE WHEN proposal.status='OPEN' THEN 0 ELSE 1 END,proposal.created_at DESC LIMIT 12`,[republic.id]
       )).rows;
-      result.push({...republic,families,election,proposals});
+      result.push({...republic,families,settlements,election:elections[0]??null,elections,proposals});
     }
-    return{currentTurn:Number(guild.current_turn),republics:result};
+    return{
+      currentTurn:Number(guild.current_turn),
+      businessCatalog:Object.entries(ROMAN_BUSINESSES).map(([value,business])=>({value,...business})),
+      republics:result
+    };
+  },
+
+  async purchaseRomanFamilyBusiness(actorId:string,familyId:string,rawInput:unknown){
+    const input=romanFamilyBusinessPurchaseSchema.parse(rawInput);
+    const family=await adminRomanFamilyContext(adminPool,familyId);
+    return romanRepublicService.purchaseBusiness({
+      guildId:adminConfig.guildId,countryId:family.country_id,actorId,
+      businessType:input.businessType,settlement:input.settlementId,
+      gameMaster:true,targetFamilyId:family.id,reason:input.reason
+    });
   },
 
   async updateRomanFamily(actorId: string, familyId: string, rawInput: unknown) {

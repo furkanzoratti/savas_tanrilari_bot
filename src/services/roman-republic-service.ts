@@ -471,7 +471,7 @@ export const romanRepublicService={
     });
   },
 
-  async purchaseBusiness(input:{guildId:string;countryId:string;actorId:string;businessType:string;settlement:string;gameMaster:boolean}):Promise<{family:RomanFamilyView;cost:number;influence:number}>{
+  async purchaseBusiness(input:{guildId:string;countryId:string;actorId:string;businessType:string;settlement:string;gameMaster:boolean;targetFamilyId?:string;reason?:string}):Promise<{family:RomanFamilyView;cost:number;influence:number}>{
     return withTransaction(async(client)=>{
       if(!isRomanBusinessType(input.businessType))throw new GameError("Geçersiz işletme türü.");
       const definition=ROMAN_BUSINESSES[input.businessType];
@@ -479,7 +479,7 @@ export const romanRepublicService={
       if(!republic)throw new GameError("Bu devlet Roma Cumhuriyeti aile sistemini kullanmıyor.");
       const membership=await romanFamilyMembership(client,republic.id,input.actorId);
       if(!membership&&!input.gameMaster)throw new GameError("Bir Roma siyasi ailesine atanmış değilsiniz.");
-      const targetFamilyId=membership?.familyId??republic.current_consul_family_id;
+      const targetFamilyId=input.gameMaster&&input.targetFamilyId?input.targetFamilyId:(membership?.familyId??republic.current_consul_family_id);
       if(!targetFamilyId)throw new GameError("Yönetici alımı için önce konsül ailesini belirleyin.");
       const family=(await client.query<{id:string;name:string;treasury:number;political_influence:number;leader_user_id:string|null}>(
         "SELECT id,name,treasury,political_influence,leader_user_id FROM roman_families WHERE id=$1 AND republic_id=$2 AND status='ACTIVE' FOR UPDATE",
@@ -514,9 +514,9 @@ export const romanRepublicService={
         `INSERT INTO roman_family_ledger(family_id,game_turn,entry_type,amount,influence_delta,business_id,actor_user_id,description,details)
          VALUES($1,$2,'BUSINESS_PURCHASE',$3,$4,$5,$6,$7,$8::jsonb)`,
         [family.id,turn,-definition.purchaseCost,definition.influenceOnPurchase,business.id,input.actorId,
-          `${settlement.name} yerleşkesinde ${definition.label} satın alındı`,JSON.stringify({businessType:input.businessType,settlementId:settlement.id})]
+          `${settlement.name} yerleşkesinde ${definition.label} satın alındı`,JSON.stringify({businessType:input.businessType,settlementId:settlement.id,reason:input.reason??null})]
       );
-      await audit(client,input.guildId,input.actorId,"ROMAN_BUSINESS_PURCHASE","roman_family_business",business.id,{familyId:family.id,businessType:input.businessType,settlementId:settlement.id});
+      await audit(client,input.guildId,input.actorId,"ROMAN_BUSINESS_PURCHASE","roman_family_business",business.id,{familyId:family.id,businessType:input.businessType,settlementId:settlement.id,reason:input.reason??null});
       const view=(await viewWithClient(client,input.guildId,input.countryId))!;
       return{family:view.families.find((item)=>item.id===family.id)!,cost:definition.purchaseCost,influence:definition.influenceOnPurchase};
     });

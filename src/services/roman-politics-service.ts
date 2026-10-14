@@ -193,12 +193,12 @@ async function castNpcProposalVotes(client:DbClient,proposalId:string,turn:numbe
     const influenceSpent=choice==="ABSTAIN"?0:Math.min(Number(family.political_influence),Math.abs(score)>=35?3:Math.abs(score)>=24?1:0);
     const seatWeight=Number(family.senate_seats);
     const totalWeight=choice==="ABSTAIN"?0:seatWeight+influenceSpent;
-    await client.query(
+    const inserted=await client.query(
       `INSERT INTO roman_senate_votes(proposal_id,family_id,choice,seat_weight,influence_spent,total_weight,npc_score)
-       VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`,
+       VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING RETURNING family_id`,
       [proposal.id,family.id,choice,seatWeight,influenceSpent,totalWeight,score]
     );
-    if(influenceSpent){
+    if(inserted.rowCount&&influenceSpent){
       await client.query("UPDATE roman_families SET political_influence=political_influence-$2,updated_at=NOW() WHERE id=$1",[family.id,influenceSpent]);
       await client.query(
         `INSERT INTO roman_family_ledger(family_id,game_turn,entry_type,influence_delta,description,details)
@@ -325,11 +325,12 @@ export async function ensureNpcElectionParticipation(client:DbClient,republicId:
     const selected=ranked[0]!;
     const influenceSpent=Math.min(Number(family.political_influence),selected.score>=35?2:0);
     const seatWeight=Math.max(1,Number(family.senate_seats));
-    await client.query(
-      `INSERT INTO roman_election_ballots(election_id,voter_family_id,candidate_id,seat_weight,influence_spent,total_weight,voted_by)
-       VALUES($1,$2,$3,$4,$5,$6,'NPC')`,
-      [election.id,family.id,selected.candidateId,seatWeight,influenceSpent,seatWeight+influenceSpent]
+    const inserted=await client.query(
+      `INSERT INTO roman_election_ballots(election_id,voter_family_id,candidate_id,seat_weight,influence_spent,total_weight,voted_by,npc_score)
+       VALUES($1,$2,$3,$4,$5,$6,'NPC',$7) ON CONFLICT DO NOTHING RETURNING voter_family_id`,
+      [election.id,family.id,selected.candidateId,seatWeight,influenceSpent,seatWeight+influenceSpent,selected.score]
     );
+    if(!inserted.rowCount)continue;
     if(influenceSpent)await client.query("UPDATE roman_families SET political_influence=political_influence-$2 WHERE id=$1",[family.id,influenceSpent]);
     await adjustRelation(client,{republicId,left:family.id,right:selected.candidateFamilyId,turn,score:2,trust:1,rivalry:0,
       reason:"Konsül seçiminde destek verdi",details:{electionId:election.id,candidateId:selected.candidateId,npcScore:selected.score}});

@@ -566,6 +566,15 @@ textarea { resize: vertical; line-height: 1.45; }
 .roman-family-stats small,.roman-family-stats strong { display: block; }
 .roman-family-stats small { margin-bottom: 4px; color: var(--muted); font-size: 10px; }
 .roman-family-stats strong { font-size: 12px; }
+.roman-subhead { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.roman-subhead span { color: var(--muted); font-size: 11px; }
+.roman-businesses { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: color-mix(in srgb,var(--bg) 80%,transparent); }
+.roman-business-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.roman-business-chip { display: inline-grid; gap: 2px; min-width: 150px; padding: 7px 9px; border-radius: 8px; background: var(--bg); border: 1px solid var(--line); }
+.roman-business-chip b { font-size: 11px; }.roman-business-chip small { color: var(--muted); font-size: 9px; }
+.roman-business-catalog { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 7px; margin-bottom: 12px; }
+.roman-business-option { display: grid; gap: 4px; padding: 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.roman-business-option small { color: var(--muted); font-size: 10px; }
 .roman-members { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; }
 .roman-members > span,.roman-member-row { min-width: 0; padding: 8px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
 .roman-members b,.roman-members small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -581,6 +590,24 @@ textarea { resize: vertical; line-height: 1.45; }
 .roman-bottom-grid { align-items: start; }
 .roman-election-row { grid-template-columns: minmax(160px,1fr) auto; }
 .roman-proposal { grid-template-columns: minmax(190px,1fr) auto auto; }
+.roman-vote-panels { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); align-items: start; gap: 14px; margin-top: 14px; }
+.roman-vote-card { overflow: hidden; margin-top: 8px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg); }
+.roman-vote-card > summary { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 11px; cursor: pointer; list-style: none; }
+.roman-vote-card > summary::-webkit-details-marker { display: none; }
+.roman-vote-card > summary div,.roman-vote-card > summary strong,.roman-vote-card > summary small { display: block; }
+.roman-vote-card > summary small { margin-top: 3px; color: var(--muted); font-size: 10px; }
+.roman-vote-card[open] > summary { border-bottom: 1px solid var(--line); background: color-mix(in srgb,var(--surface-2) 55%,transparent); }
+.roman-candidate-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; padding: 10px; }
+.roman-candidate-grid > span { display: grid; gap: 3px; padding: 8px; border-radius: 7px; background: var(--surface); }
+.roman-candidate-grid small { color: var(--muted); font-size: 9px; }.roman-candidate-grid strong { font-size: 11px; }.roman-candidate-grid b { font-size: 10px; color: var(--accent); }
+.roman-ballot-list { display: grid; gap: 1px; padding: 0 10px 10px; }
+.roman-ballot-row { display: grid; grid-template-columns: minmax(0,1fr) minmax(130px,.8fr); align-items: center; gap: 10px; padding: 8px; border-top: 1px solid var(--line); }
+.roman-ballot-row > div:last-child { text-align: right; }.roman-ballot-row strong,.roman-ballot-row b,.roman-ballot-row small { display: block; }
+.roman-ballot-row strong,.roman-ballot-row b { font-size: 11px; }.roman-ballot-row small { margin-top: 2px; color: var(--muted); font-size: 9px; }
+.roman-ballot-row.pending { opacity: .76; }.roman-ballot-row.pending > span { justify-self: end; }
+.roman-proposal-description { margin: 0; padding: 10px 11px 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.roman-vote-totals { display: grid; grid-template-columns: repeat(3,1fr); gap: 6px; padding: 10px; }
+.roman-vote-totals span { display: flex; justify-content: space-between; gap: 6px; padding: 7px; border-radius: 7px; background: var(--surface); font-size: 10px; }
 .scipio { --roman-family:#d4af37; }.magnus { --roman-family:#b91c1c; }.cato { --roman-family:#f3f0df; }.nero { --roman-family:#312e81; }
 .julius { --roman-family:#7c3aed; }.aemilius { --roman-family:#2563eb; }.fabius { --roman-family:#16a34a; }.valerius { --roman-family:#ea580c; }
 .licinius { --roman-family:#06b6d4; }.junius { --roman-family:#db2777; }.servilius { --roman-family:#92400e; }.caecilius { --roman-family:#64748b; }
@@ -610,6 +637,7 @@ textarea { resize: vertical; line-height: 1.45; }
   .rebellion-detail-grid { grid-template-columns: 1fr; }
   .dynasty-grid { grid-template-columns: 1fr; }
   .roman-family-grid { grid-template-columns: 1fr; }
+  .roman-vote-panels { grid-template-columns: 1fr; }
   .ai-plan-two-columns { grid-template-columns: 1fr; }
   .data-control-toolbar { grid-template-columns: 1fr; }
   .data-record-grid { grid-template-columns: 1fr; }
