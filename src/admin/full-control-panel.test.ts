@@ -6,7 +6,7 @@ const read = (relative: string) => readFileSync(new URL(relative, import.meta.ur
 describe("GM paneli tam yetki veri katmanı", () => {
   it("panel menüsünü, istemci rotasını ve güvenli API rotalarını birlikte sunar", () => {
     expect(read("./public/index.html")).toContain('data-route="data-control"');
-    expect(read("./public/app.js")).toContain('if (route === "data-control") return dataControlPage()');
+    expect(read("./public/app.js")).toContain('if (route === "data-control") return await dataControlPage()');
     const server = read("./server.ts");
     expect(server).toContain('url.pathname === "/api/admin-data/catalog"');
     expect(server).toContain('url.pathname === "/api/admin-data/rows"');

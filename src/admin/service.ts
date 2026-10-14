@@ -47,6 +47,23 @@ const characterSpecializationSet = new Set<string>(Object.keys(CHARACTER_SPECIAL
 const admiralDoctrineSet = new Set<string>(Object.keys(ADMIRAL_DOCTRINES));
 const admiralSpecializationSet = new Set<string>(Object.keys(ADMIRAL_SPECIALIZATIONS));
 
+type AdminSectionResult = { rows: any[] };
+
+async function settleAdminSections(tasks: Array<() => Promise<AdminSectionResult>>, concurrency = 3): Promise<Array<PromiseSettledResult<AdminSectionResult>>> {
+  const results = new Array<PromiseSettledResult<AdminSectionResult>>(tasks.length);
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < tasks.length) {
+      const index = cursor;
+      cursor += 1;
+      try { results[index] = { status: "fulfilled", value: await tasks[index]!() }; }
+      catch (reason) { results[index] = { status: "rejected", reason }; }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, tasks.length) }, () => worker()));
+  return results;
+}
+
 const countryUpdateSchema = z.object({
   name: z.string().trim().min(2).max(80),
   treasury: z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
@@ -1019,10 +1036,10 @@ export const adminPanelService = {
     const labels = ["Oyun durumu", "Devlet ekonomileri", "Bina inşaatları", "Asker alımları", "Gemi üretimleri", "İttifaklar", "Vassallıklar", "Savaşlar", "Ticaret yolları", "Diplomatik paktlar", "Liman erişimleri"];
     const loadEconomy = scope !== "DIPLOMACY";
     const loadDiplomacy = scope !== "ECONOMY";
-    const skippedQuery = () => Promise.resolve({ rows: [] });
-    const settled = await Promise.allSettled([
-      adminPool.query("SELECT current_turn,turn_phase FROM guilds WHERE discord_id=$1", [adminConfig.guildId]),
-      loadEconomy ? adminPool.query(
+    const skippedQuery = async (): Promise<AdminSectionResult> => ({ rows: [] });
+    const settled = await settleAdminSections([
+      () => adminPool.query("SELECT current_turn,turn_phase FROM guilds WHERE discord_id=$1", [adminConfig.guildId]),
+      loadEconomy ? () => adminPool.query(
         `SELECT country.id,country.name,country.mobilization,
                 COUNT(settlement.id)::integer AS settlement_count,
                 COALESCE(SUM(settlement.local_treasury),country.treasury)::bigint AS treasury,
@@ -1033,8 +1050,8 @@ export const adminPanelService = {
            FROM countries country LEFT JOIN settlements settlement ON settlement.country_id=country.id
           WHERE country.guild_id=$1 AND country.status='ACTIVE' AND country.is_system_faction=FALSE
           GROUP BY country.id ORDER BY country.name`, [adminConfig.guildId]
-      ) : skippedQuery(),
-      loadEconomy ? adminPool.query(
+      ) : skippedQuery,
+      loadEconomy ? () => adminPool.query(
         `SELECT building.id,building.building_type,building.level,building.target_level,
                 building.started_turn,building.completion_turn,settlement.id AS settlement_id,
                 settlement.name AS settlement_name,country.id AS country_id,country.name AS country_name
@@ -1042,8 +1059,8 @@ export const adminPanelService = {
            JOIN countries country ON country.id=settlement.country_id
           WHERE country.guild_id=$1 AND country.status='ACTIVE' AND building.status='BUILDING'
           ORDER BY building.completion_turn,country.name,settlement.name LIMIT 200`, [adminConfig.guildId]
-      ) : skippedQuery(),
-      loadEconomy ? adminPool.query(
+      ) : skippedQuery,
+      loadEconomy ? () => adminPool.query(
         `SELECT recruitment.id,recruitment.unit_type,recruitment.total_quantity,recruitment.remaining_quantity,
                 recruitment.ordered_turn,MIN(wave.due_turn) FILTER(WHERE wave.processed_at IS NULL) AS next_due_turn,
                 settlement.id AS settlement_id,settlement.name AS settlement_name,
@@ -1053,8 +1070,8 @@ export const adminPanelService = {
            LEFT JOIN recruitment_waves wave ON wave.order_id=recruitment.id
           WHERE country.guild_id=$1 AND country.status='ACTIVE' AND recruitment.status='TRAINING'
           GROUP BY recruitment.id,settlement.id,country.id ORDER BY next_due_turn,country.name LIMIT 200`, [adminConfig.guildId]
-      ) : skippedQuery(),
-      loadEconomy ? adminPool.query(
+      ) : skippedQuery,
+      loadEconomy ? () => adminPool.query(
         `SELECT naval.id,naval.ship_type,naval.quantity,naval.ordered_turn,naval.completion_turn,
                 settlement.id AS settlement_id,settlement.name AS settlement_name,
                 country.id AS country_id,country.name AS country_name
@@ -1062,30 +1079,30 @@ export const adminPanelService = {
            JOIN countries country ON country.id=naval.country_id
           WHERE country.guild_id=$1 AND country.status='ACTIVE' AND naval.status='BUILDING'
           ORDER BY naval.completion_turn,country.name LIMIT 200`, [adminConfig.guildId]
-      ) : skippedQuery(),
-      loadDiplomacy ? adminPool.query(
+      ) : skippedQuery,
+      loadDiplomacy ? () => adminPool.query(
         `SELECT alliance.id,alliance.status,proposer.id AS proposer_country_id,proposer.name AS proposer_name,
                 receiver.id AS receiver_country_id,receiver.name AS receiver_name,alliance.created_at
            FROM country_alliances alliance JOIN countries proposer ON proposer.id=alliance.proposer_country_id
            JOIN countries receiver ON receiver.id=alliance.receiver_country_id
           WHERE alliance.guild_id=$1 AND alliance.status IN ('PENDING','ACTIVE')
           ORDER BY CASE alliance.status WHEN 'PENDING' THEN 0 ELSE 1 END,alliance.created_at DESC`, [adminConfig.guildId]
-      ) : skippedQuery(),
-      loadDiplomacy ? adminPool.query(
+      ) : skippedQuery,
+      loadDiplomacy ? () => adminPool.query(
         `SELECT relation.id,relation.started_turn,overlord.id AS overlord_country_id,overlord.name AS overlord_name,
                 vassal.id AS vassal_country_id,vassal.name AS vassal_name
            FROM country_vassalages relation JOIN countries overlord ON overlord.id=relation.overlord_country_id
            JOIN countries vassal ON vassal.id=relation.vassal_country_id
           WHERE relation.guild_id=$1 AND relation.status='ACTIVE' ORDER BY overlord.name,vassal.name`, [adminConfig.guildId]
-      ) : skippedQuery(),
-      loadDiplomacy ? adminPool.query(
+      ) : skippedQuery,
+      loadDiplomacy ? () => adminPool.query(
         `SELECT war.id,war.started_turn,war.reason,attacker.id AS attacker_country_id,attacker.name AS attacker_name,
                 defender.id AS defender_country_id,defender.name AS defender_name
            FROM state_wars war JOIN countries attacker ON attacker.id=war.attacker_country_id
            JOIN countries defender ON defender.id=war.defender_country_id
           WHERE war.guild_id=$1 AND war.status='ACTIVE' ORDER BY war.started_turn DESC`, [adminConfig.guildId]
-      ) : skippedQuery(),
-      adminPool.query(
+      ) : skippedQuery,
+      () => adminPool.query(
         `SELECT trade.id,trade.status,trade.route,trade.income_per_country,
                 proposer_country.name AS proposer_country_name,receiver_country.name AS receiver_country_name,
                 proposer.name AS proposer_settlement_name,receiver.name AS receiver_settlement_name
@@ -1096,21 +1113,21 @@ export const adminPanelService = {
           WHERE trade.guild_id=$1 AND trade.status IN ('PENDING','ACTIVE')
           ORDER BY CASE trade.status WHEN 'PENDING' THEN 0 ELSE 1 END,trade.created_at DESC LIMIT 200`, [adminConfig.guildId]
       ),
-      loadDiplomacy ? adminPool.query(
+      loadDiplomacy ? () => adminPool.query(
         `SELECT pact.id,pact.name,pact.purpose,founder.name AS founder_name,
                 COUNT(member.country_id)::integer AS member_count
            FROM diplomatic_pacts pact JOIN countries founder ON founder.id=pact.founder_country_id
            LEFT JOIN pact_memberships member ON member.pact_id=pact.id
           WHERE pact.guild_id=$1 GROUP BY pact.id,founder.name ORDER BY pact.name`, [adminConfig.guildId]
-      ) : skippedQuery(),
-      loadDiplomacy ? adminPool.query(
+      ) : skippedQuery,
+      loadDiplomacy ? () => adminPool.query(
         `SELECT access.id,access.status,requester.name AS requester_name,grantor.name AS grantor_name,access.created_at
            FROM country_port_access access JOIN countries requester ON requester.id=access.requester_country_id
            JOIN countries grantor ON grantor.id=access.grantor_country_id
           WHERE access.guild_id=$1 AND access.status IN ('PENDING','ACTIVE')
           ORDER BY CASE access.status WHEN 'PENDING' THEN 0 ELSE 1 END,access.created_at DESC`, [adminConfig.guildId]
-      ) : skippedQuery()
-    ]);
+      ) : skippedQuery
+    ], 3);
     const warnings = settled.flatMap((result, index) => result.status === "rejected"
       ? [`${labels[index]} şu anda yüklenemedi${result.reason && typeof result.reason === "object" && "code" in result.reason ? ` (${String((result.reason as { code?: unknown }).code)})` : ""}.`]
       : []);
@@ -1119,9 +1136,9 @@ export const adminPanelService = {
       navalOrders = { rows: [] }, alliances = { rows: [] }, vassalages = { rows: [] }, wars = { rows: [] },
       trades = { rows: [] }, pacts = { rows: [] }, portAccess = { rows: [] }
     ] = settled.map((result) => result.status === "fulfilled" ? result.value : { rows: [] });
-    if (!guild.rows[0]) throw new Error("Oyun durumu bulunamadı.");
+    const guildState = guild.rows[0] ?? { current_turn: 0, turn_phase: "UNKNOWN" };
     return {
-      guild: guild.rows[0], countries: countries.rows, buildings: buildings.rows,
+      guild: guildState, countries: countries.rows, buildings: buildings.rows,
       recruitments: recruitments.rows, navalOrders: navalOrders.rows,
       alliances: alliances.rows, vassalages: vassalages.rows, wars: wars.rows,
       trades: trades.rows, pacts: pacts.rows, portAccess: portAccess.rows, warnings
@@ -1129,30 +1146,34 @@ export const adminPanelService = {
   },
 
   async reporting() {
-    const guild = (await adminPool.query<{ current_turn: number; turn_phase: string }>(
-      "SELECT current_turn,turn_phase FROM guilds WHERE discord_id=$1", [adminConfig.guildId]
-    )).rows[0];
-    if (!guild) throw new Error("Oyun durumu bulunamadı.");
-    const firstTurn = Math.max(0, Number(guild.current_turn) - 7);
-    const labels = ["Devlet karşılaştırması", "Mali akış", "Yönetim etkinliği", "İşlem türleri"];
-    const settled = await Promise.allSettled([
-      adminPool.query(
+    const labels = ["Oyun durumu", "Devlet karşılaştırması", "Mali akış", "Yönetim etkinliği", "İşlem türleri"];
+    const settled = await settleAdminSections([
+      () => adminPool.query<{ current_turn: number; turn_phase: string }>(
+        "SELECT current_turn,turn_phase FROM guilds WHERE discord_id=$1", [adminConfig.guildId]
+      ),
+      () => adminPool.query(
         `WITH settlement_stats AS (
            SELECT settlement.country_id,COUNT(*)::integer AS settlements,
                   COALESCE(SUM(settlement.population+settlement.slave_population),0)::bigint AS population,
                   COALESCE(SUM(settlement.local_treasury),0)::bigint AS treasury,
                   COALESCE(SUM(settlement.tax_income+settlement.land_trade_income+settlement.sea_trade_income),0)::bigint AS turn_income
-             FROM settlements settlement GROUP BY settlement.country_id
+             FROM settlements settlement JOIN countries scoped_country ON scoped_country.id=settlement.country_id
+            WHERE scoped_country.guild_id=$1 GROUP BY settlement.country_id
          ), army_stats AS (
            SELECT army.country_id,COALESCE(SUM(unit.quantity),0)::bigint AS field_army
-             FROM armies army JOIN army_units unit ON unit.army_id=army.id GROUP BY army.country_id
+             FROM armies army JOIN countries scoped_country ON scoped_country.id=army.country_id
+             JOIN army_units unit ON unit.army_id=army.id
+            WHERE scoped_country.guild_id=$1 GROUP BY army.country_id
          ), garrison_stats AS (
            SELECT settlement.country_id,COALESCE(SUM(stack.quantity),0)::bigint AS garrison
-             FROM settlements settlement JOIN unit_stacks stack ON stack.settlement_id=settlement.id
-            WHERE stack.force_type='GARRISON' GROUP BY settlement.country_id
+             FROM settlements settlement JOIN countries scoped_country ON scoped_country.id=settlement.country_id
+             JOIN unit_stacks stack ON stack.settlement_id=settlement.id
+            WHERE scoped_country.guild_id=$1 AND stack.force_type='GARRISON' GROUP BY settlement.country_id
          ), naval_stats AS (
            SELECT settlement.country_id,COALESCE(SUM(ship.quantity),0)::bigint AS ships
-             FROM settlements settlement JOIN naval_units ship ON ship.settlement_id=settlement.id GROUP BY settlement.country_id
+             FROM settlements settlement JOIN countries scoped_country ON scoped_country.id=settlement.country_id
+             JOIN naval_units ship ON ship.settlement_id=settlement.id
+            WHERE scoped_country.guild_id=$1 GROUP BY settlement.country_id
          ), war_stats AS (
            SELECT participant.country_id,COUNT(*)::integer AS active_wars
              FROM (
@@ -1179,18 +1200,19 @@ export const adminPanelService = {
           WHERE country.guild_id=$1 AND country.status='ACTIVE' AND country.is_system_faction=FALSE
           ORDER BY country.name`, [adminConfig.guildId]
       ),
-      adminPool.query(
+      () => adminPool.query(
         `SELECT tx.country_id,country.name AS country_name,tx.turn,
                 COALESCE(SUM(tx.amount) FILTER(WHERE tx.amount>0),0)::bigint AS income,
                 ABS(COALESCE(SUM(tx.amount) FILTER(WHERE tx.amount<0),0))::bigint AS expense,
                 COALESCE(SUM(tx.amount),0)::bigint AS net,
                 COUNT(*)::integer AS transaction_count
            FROM transactions tx JOIN countries country ON country.id=tx.country_id
-          WHERE country.guild_id=$1 AND tx.turn>=$2
+          WHERE country.guild_id=$1
+            AND tx.turn>=GREATEST(0,(SELECT current_turn FROM guilds WHERE discord_id=$1)-7)
           GROUP BY tx.country_id,country.name,tx.turn
-          ORDER BY tx.turn, country.name`, [adminConfig.guildId, firstTurn]
+          ORDER BY tx.turn, country.name`, [adminConfig.guildId]
       ),
-      adminPool.query(
+      () => adminPool.query(
         `SELECT created_at::date AS day,
                 COUNT(*)::integer AS total,
                 COUNT(*) FILTER(WHERE action LIKE 'admin.panel.%' OR action LIKE 'ADMIN_DATA_%')::integer AS panel,
@@ -1198,20 +1220,23 @@ export const adminPanelService = {
            FROM audit_logs WHERE guild_id=$1 AND created_at>=CURRENT_DATE-INTERVAL '13 days'
           GROUP BY created_at::date ORDER BY day`, [adminConfig.guildId]
       ),
-      adminPool.query(
+      () => adminPool.query(
         `SELECT tx.kind,COUNT(*)::integer AS count,
                 COALESCE(SUM(tx.amount),0)::bigint AS net
            FROM transactions tx JOIN countries country ON country.id=tx.country_id
-          WHERE country.guild_id=$1 AND tx.turn>=$2
-          GROUP BY tx.kind ORDER BY COUNT(*) DESC,tx.kind LIMIT 12`, [adminConfig.guildId, firstTurn]
+          WHERE country.guild_id=$1
+            AND tx.turn>=GREATEST(0,(SELECT current_turn FROM guilds WHERE discord_id=$1)-7)
+          GROUP BY tx.kind ORDER BY COUNT(*) DESC,tx.kind LIMIT 12`, [adminConfig.guildId]
       )
-    ]);
+    ], 3);
     const warnings = settled.flatMap((result, index) => result.status === "rejected"
       ? [`${labels[index]} şu anda yüklenemedi${result.reason && typeof result.reason === "object" && "code" in result.reason ? ` (${String((result.reason as { code?: unknown }).code)})` : ""}.`]
       : []);
     const [
-      countries = { rows: [] }, financialHistory = { rows: [] }, activity = { rows: [] }, transactionKinds = { rows: [] }
+      guildResult = { rows: [] }, countries = { rows: [] }, financialHistory = { rows: [] }, activity = { rows: [] }, transactionKinds = { rows: [] }
     ] = settled.map((result) => result.status === "fulfilled" ? result.value : { rows: [] });
+    const guild = guildResult.rows[0] ?? { current_turn: 0, turn_phase: "UNKNOWN" };
+    const firstTurn = Math.max(0, Number(guild.current_turn) - 7);
     return {
       guild, firstTurn, countries: countries.rows, financialHistory: financialHistory.rows,
       activity: activity.rows, transactionKinds: transactionKinds.rows, warnings, generatedAt: new Date().toISOString()

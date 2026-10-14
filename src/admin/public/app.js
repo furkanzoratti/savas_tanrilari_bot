@@ -1,4 +1,4 @@
-const state = { session: null, csrf: "", countries: [], catalog: [], characterCatalog: null, religionCatalog: null, rebellionData: null, guidedOperations: null, previewToken: null, selectedCountry: null, editor: null, pendingPageScrollTop: null, dataCatalog: null, dataTable: null, dataRows: [], dataOffset: 0, dataSearch: "", auditRows: [], auditOffset: 0, auditSearch: "", auditSource: "ALL", auditKind: "ALL", auditFrom: "", auditTo: "", activeRoute: "overview", focusTarget: null };
+const state = { session: null, csrf: "", countries: [], catalog: [], characterCatalog: null, religionCatalog: null, rebellionData: null, guidedOperations: null, previewToken: null, selectedCountry: null, editor: null, pendingPageScrollTop: null, dataCatalog: null, dataTable: null, dataRows: [], dataOffset: 0, dataSearch: "", auditRows: [], auditOffset: 0, auditSearch: "", auditSource: "ALL", auditKind: "ALL", auditFrom: "", auditTo: "", activeRoute: "overview", focusTarget: null, navigationId: 0, navigationController: null };
 const page = document.getElementById("page");
 const app = document.getElementById("app");
 const login = document.getElementById("login");
@@ -135,10 +135,15 @@ function api(path, options = {}) {
   const execute = async () => {
     const headers = { ...(options.body ? { "content-type": "application/json" } : {}), ...(options.headers || {}) };
     if (method !== "GET") headers["x-csrf-token"] = state.csrf;
-    const controller = method === "GET" && !options.signal ? new AbortController() : null;
+    const controller = method === "GET" ? new AbortController() : null;
+    const abortFromCaller = () => controller?.abort();
+    if (controller && options.signal) {
+      if (options.signal.aborted) controller.abort();
+      else options.signal.addEventListener("abort", abortFromCaller, { once: true });
+    }
     const timeout = controller ? setTimeout(() => controller.abort(), 16_000) : null;
     try {
-      const response = await fetch(path, { ...options, method, headers, signal: options.signal || controller?.signal });
+      const response = await fetch(path, { ...options, method, headers, signal: controller?.signal || options.signal });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         const suffix = payload.requestId ? ` · İşlem ${String(payload.requestId).slice(0, 8)}` : "";
@@ -148,11 +153,16 @@ function api(path, options = {}) {
       }
       return payload;
     } catch (error) {
+      if (error?.name === "AbortError" && options.signal?.aborted) throw error;
       if (error?.name === "AbortError") throw new Error("Panel verisi 16 saniye içinde yüklenemedi. Bağlantıyı kontrol edip yeniden deneyin.");
       throw error;
-    } finally { if (timeout) clearTimeout(timeout); }
+    } finally {
+      if (timeout) clearTimeout(timeout);
+      if (options.signal) options.signal.removeEventListener("abort", abortFromCaller);
+    }
   };
   if (method !== "GET") return execute();
+  if (options.signal) return execute();
   if (inflightGets.has(path)) return inflightGets.get(path);
   const pending = execute().finally(() => inflightGets.delete(path));
   inflightGets.set(path, pending);
@@ -305,9 +315,9 @@ function downloadReportCsv(data) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-async function reportsPage() {
+async function reportsPage(signal) {
   setActiveRoute("reports"); loading();
-  const data = await api("/api/reports");
+  const data = await api("/api/reports", { signal });
   const totalTreasury = data.countries.reduce((sum, row) => sum + Number(row.treasury || 0), 0);
   const totalPopulation = data.countries.reduce((sum, row) => sum + Number(row.population || 0), 0);
   const totalMilitary = data.countries.reduce((sum, row) => sum + Number(row.field_army || 0) + Number(row.garrison || 0), 0);
@@ -1072,9 +1082,9 @@ function loadWarningsMarkup(warnings) {
   return `<section class="load-warning"><div><strong>Bazı alt bölümler yüklenemedi</strong><span>${warnings.map((warning) => escapeHtml(warning)).join(" · ")}</span></div><button class="button compact" data-retry-page>Yeniden dene</button></section>`;
 }
 
-async function diplomacyControlPage() {
+async function diplomacyControlPage(signal) {
   setActiveRoute("diplomacy-control"); loading();
-  const data = await api("/api/mechanics-control?scope=DIPLOMACY");
+  const data = await api("/api/mechanics-control?scope=DIPLOMACY", { signal });
   const activeAlliances = data.alliances.filter((row) => row.status === "ACTIVE");
   const pendingAlliances = data.alliances.filter((row) => row.status === "PENDING");
   const activeTrades = data.trades.filter((row) => row.status === "ACTIVE");
@@ -1091,9 +1101,9 @@ async function diplomacyControlPage() {
   document.querySelector("[data-open-ports]").addEventListener("click", () => openMechanicDataTable("country_port_access"));
 }
 
-async function economyControlPage() {
+async function economyControlPage(signal) {
   setActiveRoute("economy-control"); loading();
-  const data = await api("/api/mechanics-control?scope=ECONOMY");
+  const data = await api("/api/mechanics-control?scope=ECONOMY", { signal });
   const totalTreasury = data.countries.reduce((sum, row) => sum + Number(row.treasury || 0), 0);
   const totalIncome = data.countries.reduce((sum, row) => sum + Number(row.tax_income || 0) + Number(row.land_trade_income || 0) + Number(row.sea_trade_income || 0), 0);
   const productionCount = data.buildings.length + data.recruitments.length + data.navalOrders.length;
@@ -1967,29 +1977,38 @@ function bindPageActions() {
 }
 
 async function navigate(route) {
+  const navigationId = ++state.navigationId;
+  state.navigationController?.abort();
+  const controller = new AbortController();
+  state.navigationController = controller;
   try {
-    if (route === "overview") return overview();
-    if (route === "workspace") return workspacePage();
-    if (route === "countries") return countries();
-    if (route === "settlements") return settlementsPage();
-    if (route === "armies") return forcesPage();
-    if (route === "characters") return charactersPage();
-    if (route === "dynasties") return dynastiesPage();
-    if (route === "roman-politics") return romanPoliticsPage();
-    if (route === "steppe-politics") return steppePoliticsPage();
-    if (route === "diplomacy-control") return diplomacyControlPage();
-    if (route === "assignments") return assignmentsPage();
-    if (route === "gm-operations") return guidedOperationsPage();
-    if (route === "bulk-operations") return bulkOperationsPage();
-    if (route === "economy-control") return economyControlPage();
-    if (route === "battles") return battlesPage();
-    if (route === "rebellions") return rebellionsPage();
-    if (route === "reports") return reportsPage();
-    if (route === "health") return gameHealthPage();
-    if (route === "data-control") return dataControlPage();
-    if (route === "audit") return auditPage();
-    return overview();
-  } catch (error) { showPageError(error); }
+    if (route === "overview") return await overview();
+    if (route === "workspace") return await workspacePage();
+    if (route === "countries") return await countries();
+    if (route === "settlements") return await settlementsPage();
+    if (route === "armies") return await forcesPage();
+    if (route === "characters") return await charactersPage();
+    if (route === "dynasties") return await dynastiesPage();
+    if (route === "roman-politics") return await romanPoliticsPage();
+    if (route === "steppe-politics") return await steppePoliticsPage();
+    if (route === "diplomacy-control") return await diplomacyControlPage(controller.signal);
+    if (route === "assignments") return await assignmentsPage();
+    if (route === "gm-operations") return await guidedOperationsPage();
+    if (route === "bulk-operations") return await bulkOperationsPage();
+    if (route === "economy-control") return await economyControlPage(controller.signal);
+    if (route === "battles") return await battlesPage();
+    if (route === "rebellions") return await rebellionsPage();
+    if (route === "reports") return await reportsPage(controller.signal);
+    if (route === "health") return await gameHealthPage();
+    if (route === "data-control") return await dataControlPage();
+    if (route === "audit") return await auditPage();
+    return await overview();
+  } catch (error) {
+    if (controller.signal.aborted || navigationId !== state.navigationId) return;
+    showPageError(error);
+  } finally {
+    if (navigationId === state.navigationId) state.navigationController = null;
+  }
 }
 
 function addUnitRow(unitType = "light_infantry", quantity = 100) {

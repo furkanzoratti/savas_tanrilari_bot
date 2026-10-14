@@ -173,7 +173,8 @@ describe("GM operasyon merkezi", () => {
     const html = read("./public/index.html");
     const css = read("./public/app.css");
 
-    expect(service).toContain("Promise.allSettled");
+    expect(service).toContain("settleAdminSections");
+    expect(service).toContain("], 3)");
     expect(service).toContain("warnings");
     expect(app).toContain("function loadWarningsMarkup");
     expect(app).toContain("Bazı alt bölümler yüklenemedi");
@@ -181,10 +182,17 @@ describe("GM operasyon merkezi", () => {
     expect(app).toContain("data-retry-page");
     expect(app).toContain("/api/mechanics-control?scope=DIPLOMACY");
     expect(app).toContain("/api/mechanics-control?scope=ECONOMY");
+    expect(app).toContain("state.navigationController?.abort()");
+    expect(app).toContain('return await diplomacyControlPage(controller.signal)');
+    expect(app).toContain('return await economyControlPage(controller.signal)');
+    expect(app).toContain('return await reportsPage(controller.signal)');
+    expect(app).toContain("if (options.signal) return execute()");
+    expect(app).toContain("if (controller.signal.aborted || navigationId !== state.navigationId) return");
     expect(service).toContain("WITH settlement_stats AS");
+    expect(service).toContain("JOIN countries scoped_country");
     expect(service).toContain('scope !== "DIPLOMACY"');
     expect(css).toContain(".load-warning");
-    expect(html).toContain("menu-split-v18");
+    expect(html).toContain("menu-recovery-v19");
   });
 
   it("son güvenlik ve performans katmanını istek izleme ve canlı durumla tamamlar", () => {
@@ -210,6 +218,6 @@ describe("GM operasyon merkezi", () => {
     expect(app).toContain('Promise.all([api("/api/game-health"), api("/api/system-status")])');
     expect(app).toContain("Panel çalışma durumu");
     expect(css).toContain(".system-status-grid");
-    expect(html).toContain("menu-split-v18");
+    expect(html).toContain("menu-recovery-v19");
   });
 });
