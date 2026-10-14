@@ -72,4 +72,39 @@ describe("casusluk etki hedefleri", () => {
     },"LIGHT",20);
     expect(result).toContain("yönetici kararıyla serbest bırakılana veya infaz edilene kadar");
   });
+
+  it("ordu firarı hedef kontrolünde var olmayan armies.status sütununu kullanmaz", async () => {
+    const queries: string[] = [];
+    const client = { query: async (sql: string) => {
+      queries.push(sql);
+      return { rows: [{ exists: true }], rowCount: 1 };
+    } } as unknown as DbClient;
+    await expect(espionageTargetExists(client, {
+      attacker_country_id:"attacker",target_country_id:"target",target_settlement_id:null,
+      target_character_id:null,target_noble_type:null,target_noble_id:null,target_noble_family_id:null,
+      target_army_id:null,spy_character_id:"spy",target_type:"DESERTION"
+    })).resolves.toBe(true);
+    expect(queries[0]).toContain("FROM armies army JOIN army_units unit");
+    expect(queries[0]).not.toContain("army.status");
+  });
+
+  it("ordu firarı uygulamasında yalnız gerçekten askeri bulunan ordulardan seçim yapar", async () => {
+    const queries: string[] = [];
+    const client = { query: async (sql: string) => {
+      queries.push(sql);
+      if (sql.includes("SELECT army.id,army.name")) return { rows: [{ id:"army-1", name:"Test Ordusu" }], rowCount:1 };
+      if (sql.includes("SELECT settlement_id,unit_type,quantity")) return {
+        rows: [{ settlement_id:"settlement-1", unit_type:"archer", quantity:100 }], rowCount:1
+      };
+      return { rows: [], rowCount: 1 };
+    } } as unknown as DbClient;
+    await expect(applyEspionageEffect(client, {
+      attacker_country_id:"attacker",target_country_id:"target",target_settlement_id:null,
+      target_character_id:null,target_noble_type:null,target_noble_id:null,target_noble_family_id:null,
+      target_army_id:null,spy_character_id:"spy",target_type:"DESERTION"
+    }, "LIGHT", 20)).resolves.toContain("Test Ordusu");
+    const selection = queries.find((sql) => sql.includes("SELECT army.id,army.name"));
+    expect(selection).toContain("EXISTS(SELECT 1 FROM army_units");
+    expect(selection).not.toContain("army.status");
+  });
 });

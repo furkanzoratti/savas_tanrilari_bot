@@ -9,7 +9,7 @@ vi.mock("../db/pool.js",()=>({
 }));
 vi.mock("./game-service.js",()=>({GameError:class GameError extends Error{}}));
 
-import { navalRepairService } from "./naval-repair-service.js";
+import { completeDueFleetRepairs,navalRepairService } from "./naval-repair-service.js";
 
 function unlocked(sql:string){
   return sql.includes("FROM battle_fleet_assignments")||sql.includes("FROM naval_blockades")||sql.includes("FROM naval_raids");
@@ -102,6 +102,7 @@ describe("naval repair scope and withdrawal",()=>{
         rows:[{id:"ready-trireme",settlement_id:"athens",ship_type:"trireme"}],rowCount:1
       };
       if(sql.startsWith("INSERT INTO fleet_ships")||sql.startsWith("DELETE FROM naval_ship_damage")||
+        sql.startsWith("UPDATE naval_ship_damage")||
         sql.startsWith("UPDATE fleet_repair_groups")||sql.startsWith("UPDATE fleets")||
         sql.includes("INSERT INTO audit_logs"))return {rows:[],rowCount:1};
       throw new Error(`Unexpected query: ${sql}`);
@@ -114,7 +115,29 @@ describe("naval repair scope and withdrawal",()=>{
 
     const selection=queries.find(({sql})=>sql.includes("SELECT id,settlement_id,ship_type FROM naval_ship_damage"));
     expect(selection?.params).toEqual(["repair-ready","READY"]);
+    const reconciliation=queries.find(({sql})=>sql.startsWith("UPDATE naval_ship_damage"));
+    expect(reconciliation?.sql).toContain("current_hp=max_hp");
+    expect(reconciliation?.params).toEqual(["repair-ready"]);
     expect(queries.some(({sql})=>sql.startsWith("DELETE FROM naval_ship_damage"))).toBe(true);
-    expect(queries.some(({sql})=>sql.startsWith("UPDATE naval_ship_damage"))).toBe(false);
+  });
+
+  it("tur sonunda tamamlanan bütün tamir kayıtlarını tam cana uzlaştırır",async()=>{
+    const queries:Array<{sql:string;params?:unknown[]}>=[];
+    const client={async query(sql:string,params?:unknown[]){
+      queries.push({sql,params});
+      if(sql.startsWith("UPDATE fleet_repair_groups"))return {rows:[{
+        id:"repair-1",country_name:"Akdeniz Ligi",name:"Akdeniz Filosu",settlement_name:"Atina"
+      }],rowCount:1};
+      if(sql.startsWith("UPDATE naval_ship_damage"))return {rows:[],rowCount:2};
+      if(sql.includes("SELECT COUNT(*)::integer"))return {rows:[{quantity:2}],rowCount:1};
+      throw new Error(`Unexpected query: ${sql}`);
+    }} as unknown as DbClient;
+
+    await expect(completeDueFleetRepairs(client,"guild-1",38)).resolves.toEqual([{
+      countryName:"Akdeniz Ligi",repairFleetName:"Akdeniz Filosu",settlementName:"Atina",ships:2
+    }]);
+    const healing=queries.find(({sql})=>sql.startsWith("UPDATE naval_ship_damage"));
+    expect(healing?.sql).toContain("current_hp=max_hp");
+    expect(healing?.sql).toContain("status IN ('REPAIRING','READY')");
   });
 });

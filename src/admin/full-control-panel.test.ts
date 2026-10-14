@@ -78,4 +78,18 @@ describe("GM paneli tam yetki veri katmanı", () => {
     expect(app).toContain("data-audit-prev");
     expect(app).toContain("data-audit-next");
   });
+
+  it("orduları açık onay ve aktif savaş korumasıyla panelden silebilir", () => {
+    const service = read("./service.ts");
+    const server = read("./server.ts");
+    const app = read("./public/app.js");
+    expect(service).toContain('confirmation: z.literal("ORDUYU SIL")');
+    expect(service).toContain("async deleteArmy(");
+    expect(service).toContain("Önce Savaşlar menüsünden orduyu savaş kadrosundan çıkarın");
+    expect(service).toContain('"admin.panel.army.delete"');
+    expect(server).toContain('request.method === "DELETE"');
+    expect(server).toContain("adminPanelService.deleteArmy");
+    expect(app).toContain('id="delete-army"');
+    expect(app).toContain('method: "DELETE"');
+  });
 });

@@ -526,6 +526,12 @@ const server = createServer(async (request, response) => {
       if (!session) return;
       return json(response, 200, await adminPanelService.updateArmy(session.sub, armyUpdateMatch[1]!, await body(request)));
     }
+    const armyDeleteMatch = request.method === "DELETE" ? url.pathname.match(/^\/api\/admin\/armies\/([0-9a-f-]+)$/iu) : null;
+    if (armyDeleteMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.deleteArmy(session.sub, armyDeleteMatch[1]!, await body(request)));
+    }
     if (request.method === "POST" && url.pathname === "/api/admin/army-units") {
       const session = requireMutation(request, response);
       if (!session) return;

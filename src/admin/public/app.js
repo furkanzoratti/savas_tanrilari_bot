@@ -1751,7 +1751,7 @@ async function openArmyEditor(armyId) {
   const commanderOptions = `<option value="">Atanmamış</option>${data.commanders.map((item) => `<option value="${item.id}" ${selected(item.id, army.commander_character_id)}>${escapeHtml(item.name)} (+${number(item.skill_bonus)})${item.army_name || item.fleet_name ? ` · ${escapeHtml(item.army_name || item.fleet_name)}` : ""}</option>`).join("")}`;
   const settlementOptions = data.settlements.map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("");
   const unitOptions = state.catalog.map((item) => `<option value="${item.value}">${escapeHtml(item.label)}</option>`).join("");
-  openEditor("Orduyu düzenle", `${army.country_name} · ${army.name}`, `<div class="form-grid"><label>Ordu adı<input id="edit-army-name" value="${escapeHtml(army.name)}" required minlength="2" maxlength="60"></label><label>Komutan<select id="edit-army-commander">${commanderOptions}</select></label></div>${active ? `<div class="preview-warning"><strong>Aktif ${escapeHtml(terrainLabels[army.active_battle_terrain] || army.active_battle_terrain)} savaşı</strong><span>Asker azaltmaları savaş formuna da anında işlenir. Aktif savaş bitmeden asker eklenemez.</span></div>` : ""}<div class="section-title"><h2>Birlikler</h2><span>Yeni toplam mevcudu yaz</span></div><div class="army-unit-editor">${data.units.map((unit, index) => `<div class="army-unit-line"><div><strong>${escapeHtml(state.catalog.find((item) => item.value === unit.unit_type)?.label || unit.unit_type)}</strong><small>${escapeHtml(unit.settlement_name || "Köken yok")}</small></div><input class="edit-army-unit" type="number" min="0" step="1" value="${Number(unit.quantity)}" data-original="${Number(unit.quantity)}" data-settlement="${unit.settlement_id}" data-unit="${unit.unit_type}" aria-label="Yeni toplam miktar ${index + 1}"></div>`).join("") || '<div class="empty">Bu orduda birlik yok.</div>'}</div>${active ? "" : `<div class="section-title"><h2>Yeni asker ekle</h2><span>Girilen miktar mevcut birliğe eklenir; eksik stok otomatik tamamlanır</span></div><div class="form-grid"><label>Köken yerleşke<select id="edit-army-new-settlement">${settlementOptions}</select></label><label>Birlik türü<select id="edit-army-new-unit">${unitOptions}</select></label><label>Eklenecek miktar<input id="edit-army-new-quantity" type="number" min="0" step="1" value="0"></label></div>`}`, async () => {
+  openEditor("Orduyu düzenle", `${army.country_name} · ${army.name}`, `<div class="form-grid"><label>Ordu adı<input id="edit-army-name" value="${escapeHtml(army.name)}" required minlength="2" maxlength="60"></label><label>Komutan<select id="edit-army-commander">${commanderOptions}</select></label></div>${active ? `<div class="preview-warning"><strong>Aktif ${escapeHtml(terrainLabels[army.active_battle_terrain] || army.active_battle_terrain)} savaşı</strong><span>Asker azaltmaları savaş formuna da anında işlenir. Aktif savaş bitmeden asker eklenemez.</span></div>` : ""}<div class="section-title"><h2>Birlikler</h2><span>Yeni toplam mevcudu yaz</span></div><div class="army-unit-editor">${data.units.map((unit, index) => `<div class="army-unit-line"><div><strong>${escapeHtml(state.catalog.find((item) => item.value === unit.unit_type)?.label || unit.unit_type)}</strong><small>${escapeHtml(unit.settlement_name || "Köken yok")}</small></div><input class="edit-army-unit" type="number" min="0" step="1" value="${Number(unit.quantity)}" data-original="${Number(unit.quantity)}" data-settlement="${unit.settlement_id}" data-unit="${unit.unit_type}" aria-label="Yeni toplam miktar ${index + 1}"></div>`).join("") || '<div class="empty">Bu orduda birlik yok.</div>'}</div>${active ? "" : `<div class="section-title"><h2>Yeni asker ekle</h2><span>Girilen miktar mevcut birliğe eklenir; eksik stok otomatik tamamlanır</span></div><div class="form-grid"><label>Köken yerleşke<select id="edit-army-new-settlement">${settlementOptions}</select></label><label>Birlik türü<select id="edit-army-new-unit">${unitOptions}</select></label><label>Eklenecek miktar<input id="edit-army-new-quantity" type="number" min="0" step="1" value="0"></label></div>`}<div class="card danger-zone"><div class="card-head"><div><h3>Orduyu sil</h3><p>${active ? "Etkin savaş kadrosundan çıkarılmadan silinemez." : "Ordu kaydı ve birlik tahsisleri kaldırılır; komutan serbest bırakılır."}</p></div><button id="delete-army" class="button danger" type="button" ${active ? "disabled" : ""}>Kalıcı olarak sil</button></div></div>`, async () => {
     await api(`/api/admin/armies/${armyId}`, { method: "PATCH", body: JSON.stringify({ name: document.getElementById("edit-army-name").value, commanderId: document.getElementById("edit-army-commander").value || null }) });
     for (const input of document.querySelectorAll(".edit-army-unit")) {
       const quantity = Number(input.value);
@@ -1762,6 +1762,24 @@ async function openArmyEditor(armyId) {
     closeEditor(); toast(active ? "Ordu ve aktif savaş mevcudu güncellendi." : "Ordu güncellendi.");
     const route = document.querySelector("[data-route].active")?.dataset.route || "armies";
     await refreshKeepingScroll(() => navigate(route));
+  });
+  document.getElementById("delete-army")?.addEventListener("click", async () => {
+    const confirmation = window.prompt("Bu orduyu kalıcı olarak silmek için ORDUYU SIL yazın.");
+    if (confirmation !== "ORDUYU SIL") return;
+    const reason = window.prompt("Silme gerekçesini yazın.");
+    if (!reason?.trim()) return;
+    try {
+      await api(`/api/admin/armies/${armyId}`, {
+        method: "DELETE",
+        body: JSON.stringify({ confirmation, reason: reason.trim() })
+      });
+      const route = document.querySelector("[data-route].active")?.dataset.route || "armies";
+      closeEditor();
+      toast(`${army.name} silindi; birlik tahsisleri serbest bırakıldı.`);
+      await refreshKeepingScroll(() => navigate(route));
+    } catch (error) {
+      toast(error.message, "error");
+    }
   });
 }
 

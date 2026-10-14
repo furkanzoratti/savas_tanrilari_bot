@@ -112,7 +112,7 @@ export async function completeDueFleetRepairs(
   const details:Array<{countryName:string;repairFleetName:string;settlementName:string;ships:number}>=[];
   for(const row of completed){
     await client.query(`UPDATE naval_ship_damage SET current_hp=max_hp,status='READY',updated_at=NOW()
-      WHERE repair_group_id=$1 AND status='REPAIRING'`,[row.id]);
+      WHERE repair_group_id=$1 AND status IN ('REPAIRING','READY')`,[row.id]);
     const ships=Number((await client.query<{quantity:number}>(
       "SELECT COUNT(*)::integer AS quantity FROM naval_ship_damage WHERE repair_group_id=$1",[row.id]
     )).rows[0]?.quantity??0);
@@ -253,6 +253,9 @@ export const navalRepairService={
         [input.targetFleetId,input.countryId,input.guildId])).rows[0];
       if(!target)throw new GameError("Hedef filo bulunamadı veya bu devlete ait değil.");
       await assertFleetCanChange(client,target.id);
+      if(repairWasReady)await client.query(`UPDATE naval_ship_damage
+        SET current_hp=max_hp,status='READY',updated_at=NOW()
+        WHERE repair_group_id=$1 AND (status<>'READY' OR current_hp<>max_hp)`,[repair.id]);
       const ships=(await client.query<{id:string;settlement_id:string;ship_type:NavalUnitType}>(
         `SELECT id,settlement_id,ship_type FROM naval_ship_damage
           WHERE repair_group_id=$1 AND status=$2
@@ -304,6 +307,9 @@ export const navalRepairService={
         [input.targetFleetId,input.countryId,input.guildId])).rows[0];
       if(!target)throw new GameError("Hedef filo bulunamadı veya bu devlete ait değil.");
       await assertFleetCanChange(client,target.id);
+      await client.query(`UPDATE naval_ship_damage
+        SET current_hp=max_hp,status='READY',updated_at=NOW()
+        WHERE repair_group_id=$1 AND (status<>'READY' OR current_hp<>max_hp)`,[repair.id]);
       const ships=(await client.query<{id:string;settlement_id:string;ship_type:NavalUnitType}>(
         "SELECT id,settlement_id,ship_type FROM naval_ship_damage WHERE repair_group_id=$1 AND status='READY' ORDER BY id FOR UPDATE",
         [repair.id])).rows;

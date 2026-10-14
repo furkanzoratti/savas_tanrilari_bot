@@ -89,7 +89,7 @@ export async function espionageTargetExists(client: DbClient, operation: Espiona
   }
   if (operation.target_type === "DESERTION") return Boolean((await client.query(
     `SELECT 1 FROM armies army JOIN army_units unit ON unit.army_id=army.id
-      WHERE army.country_id=$1 AND army.status='ACTIVE' AND unit.quantity>0 LIMIT 1`,
+      WHERE army.country_id=$1 AND unit.quantity>0 LIMIT 1`,
     [operation.target_country_id]
   )).rowCount);
   if (operation.target_type === "DISCREDIT") {
@@ -339,7 +339,7 @@ export async function applyEspionageEffect(
     const rate = percent(severity,3,7,15);
     const targetArmy=(await client.query<{id:string;name:string}>(
       `SELECT army.id,army.name FROM armies army
-        WHERE army.country_id=$1 AND army.status='ACTIVE'
+        WHERE army.country_id=$1
           AND EXISTS(SELECT 1 FROM army_units unit WHERE unit.army_id=army.id AND unit.quantity>0)
         ORDER BY random() LIMIT 1 FOR UPDATE OF army`,[operation.target_country_id]
     )).rows[0];

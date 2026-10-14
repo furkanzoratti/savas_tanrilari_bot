@@ -192,6 +192,11 @@ const armyUpdateSchema = z.object({
   commanderId: z.string().uuid().nullable()
 });
 
+const armyRemovalSchema = z.object({
+  confirmation: z.literal("ORDUYU SIL"),
+  reason: z.string().trim().min(3).max(500)
+});
+
 const armyUnitUpdateSchema = z.object({
   armyId: z.string().uuid(),
   settlementId: z.string().uuid(),
@@ -1676,7 +1681,7 @@ export const adminPanelService = {
         `SELECT repair.id,repair.name,country.name AS country_name,repair.completion_turn
            FROM fleet_repair_groups repair
            JOIN countries country ON country.id=repair.country_id
-          WHERE repair.guild_id=$1 AND repair.status='REPAIRING' AND repair.completion_turn<$2
+          WHERE repair.guild_id=$1 AND repair.status='REPAIRING' AND repair.completion_turn<=$2
           ORDER BY repair.completion_turn,repair.name`, [adminConfig.guildId, guild.current_turn]
       ),
       adminPool.query<{ id: string; name: string; country_name: string; force_type: string; character_name: string }>(
@@ -1789,7 +1794,7 @@ export const adminPanelService = {
         const repair = (await client.query<{ id: string; name: string; completion_turn: number }>(
           `SELECT repair.id,repair.name,repair.completion_turn FROM fleet_repair_groups repair
             WHERE repair.id=$1 AND repair.guild_id=$2 AND repair.status='REPAIRING'
-              AND repair.completion_turn<$3 FOR UPDATE`,
+              AND repair.completion_turn<=$3 FOR UPDATE`,
           [input.targetId, adminConfig.guildId, guild.current_turn]
         )).rows[0];
         if (!repair) throw new Error("Bu filo tamiri artık gecikmiş durumda değil.");
@@ -4231,6 +4236,74 @@ export const adminPanelService = {
       }
       await writeAdminAudit(client, actorId, "admin.panel.army.update", "army", armyId, { previous: army, updated });
       return updated;
+    });
+  },
+
+  async deleteArmy(actorId: string, armyId: string, rawInput: unknown) {
+    const input = armyRemovalSchema.parse(rawInput);
+    return withAdminTransaction(async (client) => {
+      const army = (await client.query<{
+        id: string; country_id: string; name: string; commander_character_id: string | null;
+        country_name: string; active_battle_id: string | null;
+      }>(
+        `SELECT army.id,army.country_id,army.name,army.commander_character_id,country.name AS country_name,
+                (SELECT assignment.battle_id FROM battle_army_assignments assignment
+                  JOIN battles battle ON battle.id=assignment.battle_id
+                 WHERE assignment.army_id=army.id AND battle.status NOT IN ('FINISHED','CANCELLED')
+                 ORDER BY battle.updated_at DESC LIMIT 1) AS active_battle_id
+           FROM armies army JOIN countries country ON country.id=army.country_id
+          WHERE army.id=$1 AND army.guild_id=$2 FOR UPDATE OF army`,
+        [armyId, adminConfig.guildId]
+      )).rows[0];
+      if (!army) throw new Error("Silinecek ordu bulunamadı.");
+      if (army.active_battle_id) {
+        throw new Error("Bu ordu etkin bir savaşa bağlı. Önce Savaşlar menüsünden orduyu savaş kadrosundan çıkarın.");
+      }
+
+      const destination = (await client.query<{ id: string; name: string }>(
+        "SELECT id,name FROM settlements WHERE country_id=$1 ORDER BY population DESC,id LIMIT 1 FOR UPDATE",
+        [army.country_id]
+      )).rows[0];
+      const displaced = (await client.query<{ unit_type: string; quantity: number }>(
+        `SELECT unit.unit_type,SUM(unit.quantity)::integer AS quantity
+           FROM army_units unit JOIN settlements origin ON origin.id=unit.settlement_id
+          WHERE unit.army_id=$1 AND origin.country_id<>$2
+          GROUP BY unit.unit_type`,
+        [army.id, army.country_id]
+      )).rows;
+      if (displaced.length && !destination) {
+        throw new Error("Orduda yabancı kökenli askerler var ancak dönebilecekleri bir devlet yerleşkesi bulunmuyor.");
+      }
+      for (const unit of displaced) {
+        await client.query(
+          `INSERT INTO unit_stacks(settlement_id,unit_type,quantity,status,force_type)
+           VALUES($1,$2,$3,'GARRISON','ARMY')
+           ON CONFLICT(settlement_id,unit_type,status,force_type)
+           DO UPDATE SET quantity=unit_stacks.quantity+EXCLUDED.quantity`,
+          [destination!.id, unit.unit_type, Number(unit.quantity)]
+        );
+      }
+
+      await client.query("DELETE FROM armies WHERE id=$1", [army.id]);
+      if (army.commander_character_id) {
+        await client.query(
+          `UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL
+            WHERE id=$1 AND NOT EXISTS(SELECT 1 FROM armies WHERE commander_character_id=$1)
+              AND NOT EXISTS(SELECT 1 FROM fleets WHERE commander_character_id=$1)`,
+          [army.commander_character_id]
+        );
+      }
+      const result = {
+        id: army.id,
+        name: army.name,
+        countryId: army.country_id,
+        countryName: army.country_name,
+        restoredDisplacedPersonnel: displaced.reduce((sum, row) => sum + Number(row.quantity), 0),
+        restoredSettlementId: destination?.id ?? null,
+        reason: input.reason
+      };
+      await writeAdminAudit(client, actorId, "admin.panel.army.delete", "army", army.id, result);
+      return result;
     });
   },
 
