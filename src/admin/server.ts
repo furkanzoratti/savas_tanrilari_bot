@@ -18,12 +18,8 @@ import { adminPanelService } from "./service.js";
 import { adminRebellionService } from "./rebellion-service.js";
 import { adminDataControlService } from "./data-control-service.js";
 import { aiCountryGovernanceService } from "../services/ai-country-governance-service.js";
-import {
-  npcAutoPurchaseService,
-  type NpcAutoPurchaseScope,
-  type NpcCountryOverrideStatus
-} from "../services/npc-auto-purchase-service.js";
-import type { NpcAutoPurchaseDoctrine } from "../domain/npc-auto-purchase.js";
+import { npcPanelPurchaseService } from "../services/npc-panel-purchase-service.js";
+import { GameError } from "../services/game-service.js";
 
 const logger = pino({ level: adminConfig.logLevel });
 const responseStartedAt = new WeakMap<ServerResponse, number>();
@@ -287,14 +283,22 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === "GET" && url.pathname === "/api/npc-purchases") {
       if (!requireSession(request, response)) return;
-      return json(response, 200, await npcAutoPurchaseService.dashboard(adminConfig.guildId));
+      return json(response, 200, await npcPanelPurchaseService.dashboard(adminConfig.guildId));
     }
     if (request.method === "POST" && url.pathname === "/api/npc-purchases/preview") {
       const session = requireMutation(request, response);
       if (!session) return;
-      const input = await body(request) as { countryId?: unknown };
+      const input = await body(request) as { countryId?: unknown; mode?: unknown };
       const countryId = typeof input.countryId === "string" && input.countryId ? input.countryId : undefined;
-      return json(response, 200, await npcAutoPurchaseService.preview(adminConfig.guildId,countryId));
+      const mode = typeof input.mode === "string" ? input.mode : "GENERAL";
+      return json(response, 200, await npcPanelPurchaseService.preview(adminConfig.guildId,mode,countryId));
+    }
+    const npcBuildingDashboardMatch = request.method === "GET"
+      ? url.pathname.match(/^\/api\/npc-purchases\/countries\/([0-9a-f-]+)\/buildings$/iu)
+      : null;
+    if (npcBuildingDashboardMatch) {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await npcPanelPurchaseService.buildingDashboard(adminConfig.guildId,npcBuildingDashboardMatch[1]!));
     }
     const aiObservationMatch = request.method === "GET" ? url.pathname.match(/^\/api\/ai-governance\/countries\/([0-9a-f-]+)\/observation$/iu) : null;
     if (aiObservationMatch) {
@@ -498,38 +502,26 @@ const server = createServer(async (request, response) => {
       if (!session) return;
       return json(response, 200, await aiCountryGovernanceService.setTestMode(session.sub, await body(request)));
     }
-    if (request.method === "PATCH" && url.pathname === "/api/admin/npc-purchases/config") {
-      const session = requireMutation(request, response);
-      if (!session) return;
-      const input = await body(request) as {
-        enabled: boolean; doctrine: NpcAutoPurchaseDoctrine; budgetPercent: number;
-        targetFillPercent: number; minimumReserve: number; scope: NpcAutoPurchaseScope;
-      };
-      return json(response, 200, await npcAutoPurchaseService.saveConfig({
-        guildId: adminConfig.guildId, actorId: session.sub,
-        enabled: input.enabled, doctrine: input.doctrine, budgetPercent: input.budgetPercent,
-        targetFillPercent: input.targetFillPercent, minimumReserve: input.minimumReserve, scope: input.scope
-      }));
-    }
-    const npcPurchaseCountryMatch = request.method === "PATCH"
-      ? url.pathname.match(/^\/api\/admin\/npc-purchases\/countries\/([0-9a-f-]+)$/iu)
-      : null;
-    if (npcPurchaseCountryMatch) {
-      const session = requireMutation(request, response);
-      if (!session) return;
-      const input = await body(request) as { status: NpcCountryOverrideStatus; doctrine: NpcAutoPurchaseDoctrine | null };
-      await npcAutoPurchaseService.setCountryOverride({
-        guildId: adminConfig.guildId, actorId: session.sub, countryId: npcPurchaseCountryMatch[1]!,
-        status: input.status, doctrine: input.doctrine ?? null
-      });
-      return json(response, 200, { ok: true });
-    }
     if (request.method === "POST" && url.pathname === "/api/admin/npc-purchases/execute") {
       const session = requireMutation(request, response);
       if (!session) return;
-      const input = await body(request) as { countryId?: unknown };
+      const input = await body(request) as { countryId?: unknown; mode?: unknown };
       const countryId = typeof input.countryId === "string" && input.countryId ? input.countryId : undefined;
-      return json(response, 200, await npcAutoPurchaseService.execute(adminConfig.guildId,session.sub,countryId));
+      const mode = typeof input.mode === "string" ? input.mode : "GENERAL";
+      return json(response, 200, await npcPanelPurchaseService.execute(adminConfig.guildId,session.sub,mode,countryId));
+    }
+    const npcBuildingPurchaseMatch = request.method === "POST"
+      ? url.pathname.match(/^\/api\/admin\/npc-purchases\/countries\/([0-9a-f-]+)\/buildings$/iu)
+      : null;
+    if (npcBuildingPurchaseMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      const input = await body(request) as { settlementId?: unknown; buildingType?: unknown };
+      if (typeof input.settlementId !== "string" || typeof input.buildingType !== "string") throw new GameError("Yerleşke ve bina seçimi zorunludur.");
+      return json(response, 200, await npcPanelPurchaseService.purchaseBuilding({
+        guildId: adminConfig.guildId, actorId: session.sub, countryId: npcBuildingPurchaseMatch[1]!,
+        settlementId: input.settlementId, buildingType: input.buildingType
+      }));
     }
     const aiDraftMatch = request.method === "POST" ? url.pathname.match(/^\/api\/admin\/ai-governance\/countries\/([0-9a-f-]+)\/generate-draft$/iu) : null;
     if (aiDraftMatch) {

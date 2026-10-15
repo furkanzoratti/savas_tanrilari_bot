@@ -620,7 +620,7 @@ textarea { resize: vertical; line-height: 1.45; }
 .npc-purchase-alert { display: flex; justify-content: space-between; align-items: center; gap: 18px; border-color: var(--warning); background: color-mix(in srgb,var(--warning) 8%,var(--surface)); }
 .npc-purchase-alert strong,.npc-purchase-alert span { display: block; }
 .npc-purchase-alert span { color: var(--muted); font-size: 11px; }
-.npc-purchase-toolbar { display: grid; grid-template-columns: minmax(220px,1fr) 220px minmax(230px,.8fr); align-items: end; gap: 14px; margin-bottom: 14px; }
+.npc-purchase-toolbar { display: grid; grid-template-columns: minmax(220px,1fr) minmax(230px,.8fr); align-items: end; gap: 14px; margin-bottom: 14px; }
 .npc-purchase-toolbar > div { padding: 9px 12px; border-left: 3px solid var(--accent); }
 .npc-purchase-toolbar > div span,.npc-purchase-toolbar > div small,.npc-purchase-toolbar > div strong { display: block; }
 .npc-purchase-toolbar > div span,.npc-purchase-toolbar > div small { color: var(--muted); font-size: 10px; }
@@ -655,6 +655,23 @@ textarea { resize: vertical; line-height: 1.45; }
 .npc-plan-line strong,.npc-plan-line em { font-size: 11px; font-style: normal; }
 .npc-plan-line.building strong::before { content: "🏗 "; }.npc-plan-line.ship strong::before { content: "🚢 "; }.npc-plan-line.unit strong::before { content: "⚔ "; }
 .npc-plan-card > footer { display: grid; gap: 3px; padding: 10px 13px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+.npc-mode-picker { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 10px; margin-bottom: 14px; }
+.npc-mode-card { display: flex; align-items: flex-start; gap: 11px; width: 100%; padding: 14px; color: var(--text); text-align: left; cursor: pointer; transition: transform .15s ease,border-color .15s ease,background .15s ease; }
+.npc-mode-card:hover { transform: translateY(-1px); border-color: var(--accent); }
+.npc-mode-card.active { border-color: var(--accent); background: color-mix(in srgb,var(--accent) 10%,var(--surface)); box-shadow: inset 0 0 0 1px color-mix(in srgb,var(--accent) 40%,transparent); }
+.npc-mode-card > span { display: grid; place-items: center; flex: 0 0 32px; height: 32px; border-radius: 9px; background: var(--navy); color: var(--cream); font-size: 16px; }
+.npc-mode-card strong,.npc-mode-card small { display: block; }
+.npc-mode-card small { margin-top: 5px; color: var(--muted); font-size: 9px; line-height: 1.35; }
+.npc-building-toolbar { display: grid; grid-template-columns: minmax(220px,1.4fr) repeat(3,minmax(120px,.65fr)); align-items: end; gap: 9px; margin: 14px 0; }
+.npc-building-toolbar > div { min-height: 48px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.npc-building-toolbar > div span,.npc-building-toolbar > div strong { display: block; }
+.npc-building-toolbar > div span { color: var(--muted); font-size: 9px; }
+.npc-building-toolbar > div strong { margin-top: 4px; font-size: 12px; }
+.npc-building-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; max-height: 52vh; overflow: auto; padding-right: 4px; }
+.npc-building-row { display: grid; grid-template-columns: minmax(130px,1fr) minmax(92px,.6fr) auto; align-items: center; gap: 9px; padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
+.npc-building-row.disabled { opacity: .65; }
+.npc-building-row strong,.npc-building-row small { display: block; }
+.npc-building-row small { margin-top: 3px; color: var(--muted); font-size: 9px; }
 @media (max-width: 900px) {
   .audit-toolbar { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .app-shell { grid-template-columns: 68px minmax(0, 1fr); }
@@ -693,6 +710,9 @@ textarea { resize: vertical; line-height: 1.45; }
   .settlement-finance-list { grid-template-columns: 1fr; }
   .activity-strip { grid-template-columns: repeat(4,minmax(0,1fr)); }
   .npc-country-grid { grid-template-columns: 1fr; }
+  .npc-mode-picker { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .npc-building-toolbar { grid-template-columns: 1fr 1fr; }
+  .npc-building-grid { grid-template-columns: 1fr; }
   .npc-purchase-toolbar { grid-template-columns: 1fr 1fr; }
   .npc-purchase-toolbar > div { grid-column: 1 / -1; }
 }
@@ -759,4 +779,8 @@ textarea { resize: vertical; line-height: 1.45; }
   .npc-plan-line { grid-template-columns: 1fr auto; }
   .npc-plan-line > strong { grid-column: 1; }
   .npc-plan-line > em { grid-column: 2; grid-row: 1 / span 2; }
+  .npc-mode-picker,.npc-building-toolbar { grid-template-columns: 1fr; }
+  .npc-building-row { grid-template-columns: 1fr auto; }
+  .npc-building-row > div:nth-child(2) { grid-column: 1; }
+  .npc-building-row > button { grid-column: 2; grid-row: 1 / span 2; }
 }

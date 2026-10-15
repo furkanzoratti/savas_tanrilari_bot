@@ -4,25 +4,35 @@ import { describe, expect, it } from "vitest";
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
 
 describe("NPC alım yönetim paneli", () => {
-  it("menü, veri ve yönetici işlem rotalarını sunar", () => {
+  it("menü, dört alım modu ve hızlı bina işlem rotalarını sunar", () => {
     const html = read("./public/index.html");
     const server = read("./server.ts");
     expect(html).toContain('data-route="npc-purchases"');
     expect(server).toContain('url.pathname === "/api/npc-purchases"');
     expect(server).toContain('url.pathname === "/api/npc-purchases/preview"');
-    expect(server).toContain('url.pathname === "/api/admin/npc-purchases/config"');
     expect(server).toContain('url.pathname === "/api/admin/npc-purchases/execute"');
-    expect(server).toContain("const npcPurchaseCountryMatch");
-    expect(server).toContain("npcAutoPurchaseService.setCountryOverride");
+    expect(server).toContain("const npcBuildingDashboardMatch");
+    expect(server).toContain("const npcBuildingPurchaseMatch");
+    expect(server).toContain("npcPanelPurchaseService.preview");
+    expect(server).not.toContain('/api/admin/npc-purchases/config');
+    expect(server).not.toContain("npcPurchaseCountryMatch");
   });
 
-  it("aynı otomatik alım planını bina, gemi ve asker ayrıntılarıyla önizler", () => {
+  it("otomatik alım türlerini ve yerleşke bazlı hızlı bina yönetimini gösterir", () => {
     const app = read("./public/app.js");
     expect(app).toContain("async function npcPurchasesPage()");
     expect(app).toContain("openNpcPurchasePreview");
-    expect(app).toContain("plan.buildingActions");
     expect(app).toContain("plan.shipActions");
     expect(app).toContain("plan.unitActions");
-    expect(app).toContain('action.targetLevel === 1 ? "Yeni bina" : "Seviye yükseltme"');
+    expect(app).toContain("openNpcBuildingManager");
+    expect(app).toContain("data-npc-buy-building");
+    expect(app).toContain('let npcPurchaseMode = "GENERAL"');
+  });
+
+  it("toplu önizlemeyi kontrollü eşzamanlı belge yüklemesiyle hızlandırır", () => {
+    const service = read("../services/npc-panel-purchase-service.ts");
+    expect(service).toContain("return mapConcurrent(ids, 6");
+    expect(service).toContain("planPlayerPurchases");
+    expect(service).toContain("PLAYER_AUTO_PURCHASE_MODES");
   });
 });
