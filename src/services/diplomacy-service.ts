@@ -98,6 +98,7 @@ export interface PactInvitationView {
 export interface PublicCountryProfile {
   id: string;
   name: string;
+  capital_name: string | null;
   status: "ACTIVE" | "YOK_EDİLDİ";
   destroyed_turn: number | null;
   destroyed_reason: string | null;
@@ -481,6 +482,15 @@ export const diplomacyService = {
         [integratedSettlements.map((settlement)=>settlement.id)]
       );
       await client.query("UPDATE settlements SET country_id=$2,is_conquered=FALSE,conquered_turn=NULL,rebellion_progress=0,rebellion_faction_type=NULL,rebellion_active=FALSE WHERE country_id=$1", [vassal.id, overlord.id]);
+      await client.query("UPDATE countries SET capital_settlement_id=NULL WHERE id=$1",[vassal.id]);
+      await client.query(
+        `UPDATE countries country SET capital_settlement_id=(
+           SELECT settlement.id FROM settlements settlement
+            WHERE settlement.country_id=country.id
+            ORDER BY settlement.population DESC,settlement.name,settlement.id LIMIT 1
+         ) WHERE country.id=$1 AND country.capital_settlement_id IS NULL`,
+        [overlord.id]
+      );
       for(const settlement of integratedSettlements){
         await client.query(
           `INSERT INTO settlement_ownership_history(guild_id,settlement_id,previous_country_id,new_country_id,acquired_turn,change_type,details)
@@ -531,8 +541,10 @@ export const diplomacyService = {
   async publicCountry(guildId: string, name: string): Promise<PublicCountryProfile> {
     const client = await pool.connect();
     try {
-      const country = (await client.query<CountryDiplomacyEntry & { status: "ACTIVE" | "YOK_EDİLDİ"; destroyed_turn: number | null; destroyed_reason: string | null }>(
-        "SELECT id,name,status,destroyed_turn,destroyed_reason FROM countries WHERE guild_id=$1 AND LOWER(name)=LOWER($2) LIMIT 1", [guildId, name.trim()]
+      const country = (await client.query<CountryDiplomacyEntry & { status: "ACTIVE" | "YOK_EDİLDİ"; destroyed_turn: number | null; destroyed_reason: string | null; capital_name:string|null }>(
+        `SELECT country.id,country.name,country.status,country.destroyed_turn,country.destroyed_reason,capital.name AS capital_name
+           FROM countries country LEFT JOIN settlements capital ON capital.id=country.capital_settlement_id
+          WHERE country.guild_id=$1 AND LOWER(country.name)=LOWER($2) LIMIT 1`, [guildId, name.trim()]
       )).rows[0];
       if (!country) throw new GameError("Belirtilen ülke bulunamadı.");
       const settlements = (await client.query<{ name: string; resource_type: ResourceType }>(

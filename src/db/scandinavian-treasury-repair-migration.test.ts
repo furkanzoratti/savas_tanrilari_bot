@@ -11,6 +11,6 @@ describe("İskandinav başlangıç hazinesi telafisi", () => {
     expect(scandinavianTreasuryRepairMigration.sql).toContain("ledger.details->>'source'='scandinavian-starting-assets-v206'");
     expect(scandinavianTreasuryRepairMigration.sql).toContain("local_treasury=settlement.local_treasury+repair.income_grant");
     expect(scandinavianTreasuryRepairMigration.sql).toContain("scandinavian-starting-treasury-repair-v208");
-    expect(migrations.at(-1)).toBe(scandinavianTreasuryRepairMigration);
+    expect(migrations).toContain(scandinavianTreasuryRepairMigration);
   });
 });

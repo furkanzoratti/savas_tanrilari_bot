@@ -31,6 +31,7 @@ describe("kültür ve yerleşke kartı", () => {
       fleets: [], repairFleets: [], mercenaries: [],
       settlements: [{
         id: "city", country_id: "country", name: "Roma", population: 100_000, slave_population: 0,
+        isCapital: true,
         base_income: 1_000, tax_income: 0, land_trade_income: 0, sea_trade_income: 0,
         base_population_growth: 100, manual_flat_income: 0, manual_income_percent: 0,
         ruin_stage: 0, resource_type: "GRAIN", culture_group: "ITALIC", garrison_level: 3, local_treasury: 500, base_land_trade_income: 2_000,
@@ -66,6 +67,9 @@ describe("kültür ve yerleşke kartı", () => {
     expect(fields.find((field) => field.name === "🏺 Kültür")?.value).toContain("Toplam gelir: **×0,80**");
     expect(fields.find((field) => field.name === "🏺 Kültür")?.value).toContain("hazırlık sürecinde • etkisiz");
     expect(countryFields.find((field) => field.name === "🏺 Ana Kültür")?.value).toContain("Helenik");
+    expect(countryFields.find((field) => field.name === "🏛️ Başkent")?.value).toContain("Roma");
+    expect(embeds[1]!.toJSON().title).toContain("👑 Roma");
+    expect(embeds[1]!.toJSON().description).toContain("Devlet Başkenti");
     expect(fields.find((field) => field.name === "🛡️ Garnizon")?.value).toContain("**200** Ağır Piyade");
     expect(fields.find((field) => field.name === "🏗️ Binalar ve İnşaatlar")?.value).toContain("Akademi Sv1");
     expect(fields.find((field) => field.name === "🏗️ Binalar ve İnşaatlar")?.value).not.toContain("Kamu ve Altyapı");

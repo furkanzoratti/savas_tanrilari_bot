@@ -126,6 +126,7 @@ export function renderDocument(document: CountryDocument,scope?:DocumentSettleme
   const remainingCapacity = Math.max(0, document.militaryLimit - document.militaryUsed);
   const primaryCulture = CULTURE_GROUPS[document.country.primary_culture_group]?.label ?? document.country.primary_culture_group;
   const formable = document.country.active_formable_key ? FORMABLE_COUNTRIES[document.country.active_formable_key] : null;
+  const capital=document.settlements.find((settlement)=>settlement.isCapital);
   const mercenarySummary = (document.mercenaries ?? []).length
     ? (document.mercenaries ?? []).map((contract) => {
         const company = MERCENARY_COMPANIES[contract.company_key];
@@ -148,6 +149,7 @@ export function renderDocument(document: CountryDocument,scope?:DocumentSettleme
         value:spacedSection(`Devletin toprağı kalmadı.\nSaha orduları kullanılabilir • Hazine: **0 Altın**\nSon gün: **Tur ${document.lastStand.deadlineTurn}** • Kalan: **${Math.max(0,document.lastStand.deadlineTurn-document.guild.current_turn+1)} tur**`)
       }]:[]),
       { name: "👑 Yönetim", value: spacedSection(document.playerIds.length ? document.playerIds.map((id) => `<@${id}>`).join(" • ") : "Oyuncu atanmamış.") },
+      { name: "🏛️ Başkent", value: spacedSection(capital?`**${capital.name}**\nGelir ve nüfus artışı: **+%1**`:"Başkent belirlenmemiş."), inline: true },
       { name: "🏺 Ana Kültür", value: spacedSection(`**${primaryCulture}**\nÖzgür nüfus çoğunluğuna göre otomatik belirlenir.`) },
       { name: "🏦 Hazine", value: spacedSection(`**${gold(document.country.treasury)}**`), inline: true },
       { name: "👥 Özgür Nüfus", value: spacedSection(`**${number(document.freePopulation)}**`), inline: true },
@@ -245,8 +247,9 @@ export function renderDocument(document: CountryDocument,scope?:DocumentSettleme
 
     const embed = new EmbedBuilder()
       .setColor(settlement.ruin_stage ? 0x9a5a2e : settlement.is_conquered ? 0x8c6d46 : 0x3f7f5f)
-      .setTitle(`🏛️ ${settlement.name} • Yerleşke Belgesi`)
+      .setTitle(`${settlement.isCapital?"👑":"🏛️"} ${settlement.name} • Yerleşke Belgesi`)
       .setDescription([
+        ...(settlement.isCapital?["👑 **Devlet Başkenti** • Gelir ve nüfus artışı **+%1**"]:[]),
         `**${ruinLabels[settlement.ruin_stage]}** • ${settlement.is_conquered ? `Fethedilmiş${settlement.conquered_turn !== null ? ` (Tur ${settlement.conquered_turn})` : ""}` : "Yerleşik Toprak"}`,
         ...(assimilationTurn === null ? [] : [`Asimilasyon: **Tur ${assimilationTurn}**${assimilationDiplomat ? ` • 🤝 ${assimilationDiplomat.name}` : ""}`]),
         `Bina: **${occupiedSlots}/${settlement.slotLimit} slot** • İnşaat: **${activeConstruction}/${settlement.constructionLimit ?? 2}**${settlement.is_coastal ? " • ⚓ Kıyı" : ""}`

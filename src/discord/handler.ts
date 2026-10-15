@@ -273,7 +273,7 @@ function renderCountryDetail(detail:CountryDetailView,document:CountryDocument):
     ].join("\n"))
     .setImage(STATE_DETAIL_BANNER_URL)
     .addFields(
-      {name:"🏛️ Devlet Yapısı",value:[`**Yerleşke Sayısı:** ${number(detail.settlementCount)}`,`**Özgür Nüfus:** ${number(detail.totalPopulation)}`,`**Ana Kültür:** ${CULTURE_GROUPS[detail.country.primaryCultureGroup]?.label??detail.country.primaryCultureGroup}`].join("\n"),inline:true},
+      {name:"🏛️ Devlet Yapısı",value:[`**Başkent:** ${detail.country.capitalSettlementName??"Belirlenmedi"}`,`**Yerleşke Sayısı:** ${number(detail.settlementCount)}`,`**Özgür Nüfus:** ${number(detail.totalPopulation)}`,`**Ana Kültür:** ${CULTURE_GROUPS[detail.country.primaryCultureGroup]?.label??detail.country.primaryCultureGroup}`].join("\n"),inline:true},
       {name:"👑 Ülke Yönetimi",value:document.playerIds.length?document.playerIds.map((id)=>`<@${id}>`).join(" • "):"Oyuncu atanmamış.",inline:true},
       {name:"🏰 Yönetici Hanedan",value:dynasty},
       {name:"🏦 Devlet Ekonomisi",value:[`**Hazine:** ${gold(detail.totalTreasury)}`,`**Dönem Geliri:** ${gold(document.totalPayableIncome)}`,`**Toplam Bakım:** −${gold(document.totalUpkeep)}`,`**Net Gelir:** ${document.netIncome>=0?"+":""}${gold(document.netIncome)}`].join("\n"),inline:true},

@@ -55,6 +55,7 @@ export function renderPublicCountryProfile(profile: PublicCountryProfile): Embed
     .setImage(STATE_PROFILE_BANNER_URL)
     .addFields(
       { name: "📌 Devlet Durumu", value: embedValue(status) },
+      { name: "🏛️ Başkent", value: embedValue(profile.capital_name ? `**${profile.capital_name}**` : "Başkent belirlenmemiş.") },
       { name: "🗺️ Yerleşkeler ve Hammaddeler", value: embedValue(settlements) },
       { name: "🤝 Müttefikler", value: embedValue(allies) },
       { name: "👑 Vassal Devletler", value: embedValue(vassals) },

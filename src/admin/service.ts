@@ -74,6 +74,11 @@ const countryUpdateSchema = z.object({
   mobilization: z.enum(["PEACE", "PARTIAL", "GENERAL"])
 });
 
+const countryCapitalUpdateSchema = z.object({
+  settlementId: z.string().uuid(),
+  reason: z.string().trim().min(2).max(300)
+});
+
 const settlementUpdateSchema = z.object({
   name: z.string().trim().min(2).max(80),
   population: z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
@@ -1878,10 +1883,13 @@ export const adminPanelService = {
   async countries() {
     return (await adminPool.query(
       `SELECT country.id,country.name,country.status,country.treasury,country.mobilization,
+              country.capital_settlement_id,capital.name AS capital_name,
               (SELECT COUNT(*)::integer FROM settlements WHERE country_id=country.id) AS settlement_count,
               (SELECT COUNT(*)::integer FROM armies WHERE country_id=country.id) AS army_count,
               (SELECT COUNT(*)::integer FROM fleets WHERE country_id=country.id) AS fleet_count
-         FROM countries country WHERE country.guild_id=$1 AND country.is_system_faction=FALSE
+         FROM countries country
+         LEFT JOIN settlements capital ON capital.id=country.capital_settlement_id
+        WHERE country.guild_id=$1 AND country.is_system_faction=FALSE
         ORDER BY CASE WHEN country.status='ACTIVE' THEN 0 ELSE 1 END,country.name`,
       [adminConfig.guildId]
     )).rows;
@@ -2791,7 +2799,10 @@ export const adminPanelService = {
   async country(countryId: string) {
     if (!z.string().uuid().safeParse(countryId).success) throw new Error("Geçersiz devlet kimliği.");
     const country = (await adminPool.query(
-      "SELECT * FROM countries WHERE id=$1 AND guild_id=$2",
+      `SELECT country.*,capital.name AS capital_name
+         FROM countries country
+         LEFT JOIN settlements capital ON capital.id=country.capital_settlement_id
+        WHERE country.id=$1 AND country.guild_id=$2`,
       [countryId, adminConfig.guildId]
     )).rows[0];
     if (!country) throw new Error("Devlet bulunamadı.");
@@ -2814,6 +2825,7 @@ export const adminPanelService = {
     )).rows as Array<Record<string, unknown> & { resource_type: ResourceType; culture_group: CultureGroup; religion_key: ReligionKey }>;
     const settlements = settlementRows.map((row) => ({
       ...row,
+      is_capital: row.id === country.capital_settlement_id,
       resource_label: RESOURCES[row.resource_type]?.label ?? row.resource_type,
       culture_label: CULTURE_GROUPS[row.culture_group]?.label ?? row.culture_group,
       religion_label: RELIGIONS[row.religion_key]?.label ?? row.religion_key,
@@ -4099,6 +4111,55 @@ export const adminPanelService = {
       )).rows[0];
       await writeAdminAudit(client, actorId, "admin.panel.country.update", "country", countryId, { previous, updated });
       return updated;
+    });
+  },
+
+  async updateCountryCapital(actorId: string, countryId: string, rawInput: unknown) {
+    if (!z.string().uuid().safeParse(countryId).success) throw new Error("Geçersiz devlet kimliği.");
+    const input = countryCapitalUpdateSchema.parse(rawInput);
+    return withAdminTransaction(async (client) => {
+      const country = (await client.query<{
+        id: string;
+        name: string;
+        capital_settlement_id: string | null;
+        capital_name: string | null;
+      }>(
+        `SELECT country.id,country.name,country.capital_settlement_id,capital.name AS capital_name
+           FROM countries country
+           LEFT JOIN settlements capital ON capital.id=country.capital_settlement_id
+          WHERE country.id=$1 AND country.guild_id=$2 AND country.status='ACTIVE'
+          FOR UPDATE OF country`,
+        [countryId, adminConfig.guildId]
+      )).rows[0];
+      if (!country) throw new Error("Aktif devlet bulunamadı.");
+
+      const newCapital = (await client.query<{ id: string; name: string }>(
+        `SELECT settlement.id,settlement.name
+           FROM settlements settlement
+          WHERE settlement.id=$1 AND settlement.country_id=$2
+          FOR UPDATE`,
+        [input.settlementId, country.id]
+      )).rows[0];
+      if (!newCapital) throw new Error("Yeni başkent olarak yalnızca bu devlete ait bir yerleşke seçilebilir.");
+      if (country.capital_settlement_id === newCapital.id) throw new Error(`${newCapital.name} zaten devletin başkentidir.`);
+
+      await client.query(
+        "UPDATE countries SET capital_settlement_id=$1 WHERE id=$2",
+        [newCapital.id, country.id]
+      );
+      const result = {
+        countryId: country.id,
+        countryName: country.name,
+        previousCapitalId: country.capital_settlement_id,
+        previousCapitalName: country.capital_name,
+        newCapitalId: newCapital.id,
+        newCapitalName: newCapital.name,
+        incomeBonusPercent: 1,
+        populationGrowthBonusPercent: 1,
+        changeReason: input.reason
+      };
+      await writeAdminAudit(client, actorId, "admin.panel.country.capital.update", "country", country.id, result);
+      return result;
     });
   },
 

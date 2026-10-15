@@ -138,6 +138,7 @@ import { scandinavianNavalDoctrineMigration } from "./scandinavian-naval-doctrin
 import { scandinavianStartingAssetsMigration } from "./scandinavian-starting-assets-migration.js";
 import { scandinavianDynastiesRepairMigration } from "./scandinavian-dynasties-repair-migration.js";
 import { scandinavianTreasuryRepairMigration } from "./scandinavian-treasury-repair-migration.js";
+import { capitalCitiesMigration } from "./capital-cities-migration.js";
 
 export const migrations = [
   {
@@ -2493,5 +2494,6 @@ export const migrations = [
   scandinavianNavalDoctrineMigration,
   scandinavianStartingAssetsMigration,
   scandinavianDynastiesRepairMigration,
-  scandinavianTreasuryRepairMigration
+  scandinavianTreasuryRepairMigration,
+  capitalCitiesMigration
 ] as const;

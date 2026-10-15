@@ -16,6 +16,7 @@ describe("GM panel audit presenter", () => {
     expect(auditActionLabel("admin.panel.dynasty.local_noble_marriage")).toBe("Yerel soylu evliliği yapıldı");
     expect(auditActionLabel("admin.panel.roman.family.update")).toBe("Roma siyasi ailesi güncellendi");
     expect(auditActionLabel("admin.panel.roman.member.remove")).toBe("Roma aile üyesi kayıttan kaldırıldı");
+    expect(auditActionLabel("admin.panel.country.capital.update")).toBe("Başkent değiştirildi");
   });
 
   it("Roma ailesi siyasi değerlerindeki değişiklikleri açıkça özetler", () => {
@@ -53,5 +54,15 @@ describe("GM panel audit presenter", () => {
     }, new Map());
     expect(summary).toBe("Ad: Eski ad → Yeni ad • Hazine: 1.000 → 1.500");
     expect(summary).not.toContain(unresolvedId);
+  });
+
+  it("başkent değişikliğini teknik kimlikler yerine şehir adları ve bonuslarla özetler", () => {
+    expect(auditDetailsSummary({
+      previousCapitalName: "Roma",
+      newCapitalName: "Capua",
+      incomeBonusPercent: 1,
+      populationGrowthBonusPercent: 1,
+      changeReason: "Yönetim merkezi taşındı"
+    }, new Map())).toBe("Eski başkent: Roma • Yeni başkent: Capua • Gelir bonusu (%): 1 • Nüfus artışı bonusu (%): 1 • Gerekçe: Yönetim merkezi taşındı");
   });
 });

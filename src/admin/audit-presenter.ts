@@ -1,5 +1,6 @@
 const ACTION_LABELS: Record<string, string> = {
   "admin.panel.country.update": "Devlet bilgileri güncellendi",
+  "admin.panel.country.capital.update": "Başkent değiştirildi",
   "admin.panel.settlement.update": "Yerleşke bilgileri güncellendi",
   "admin.panel.character.update": "Karakter bilgileri güncellendi",
   "admin.panel.character.assignment.cancel": "Karakter görevi iptal edildi",
@@ -132,6 +133,9 @@ const FIELD_LABELS: Record<string, string> = {
   dynastyId: "Hanedan", title: "Unvan", relation: "Akrabalık", age: "Yaş", health: "Sağlık",
   diedTurn: "Ölüm turu", reason: "Ölüm nedeni", memberName: "Hanedan üyesi",
   spouseName: "Yerel soylu eş", spouseAge: "Eşin yaşı", authority: "Otorite",
+  previousCapitalName: "Eski başkent", newCapitalName: "Yeni başkent",
+  incomeBonusPercent: "Gelir bonusu (%)", populationGrowthBonusPercent: "Nüfus artışı bonusu (%)",
+  changeReason: "Gerekçe",
   loyalty: "Sadakat", relationScore: "İlişki", holderName: "Makam sahibi", holderUserId: "Discord kullanıcısı",
   politicalInfluence: "Siyasi nüfuz", political_influence: "Siyasi nüfuz", senateSeats: "Senato koltuğu",
   senate_seats: "Senato koltuğu", reputation: "İtibar", scandal: "Skandal", politicalBloc: "Siyasi blok",

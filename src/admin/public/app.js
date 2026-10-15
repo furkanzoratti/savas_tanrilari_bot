@@ -391,7 +391,7 @@ async function overview() {
 async function countries() {
   setActiveRoute("countries"); loading();
   state.countries = await api("/api/countries");
-  page.innerHTML = `<div class="page-head"><div><h1>Devletler</h1><p>Aktif ve yok edilmiş bütün devlet kayıtları</p></div><button class="button primary" data-open-army>＋ Yeni ordu</button></div><section class="card table-wrap"><table><thead><tr><th>Devlet</th><th>Durum</th><th>Yerleşke</th><th>Ordu</th><th>Filo</th><th>Hazine</th><th></th></tr></thead><tbody>${state.countries.map((country) => `<tr data-country-id="${country.id}" data-record-type="COUNTRY" data-record-id="${country.id}"><td><strong>${escapeHtml(country.name)}</strong></td><td><span class="pill ${country.status === "ACTIVE" ? "" : "neutral"}">${escapeHtml(countryStatusLabels[country.status] || country.status)}</span></td><td>${number(country.settlement_count)}</td><td>${number(country.army_count)}</td><td>${number(country.fleet_count)}</td><td>${money(country.treasury)}</td><td>${country.status === "ACTIVE" ? `<button class="button compact" data-edit-country="${country.id}">Düzenle</button>` : ""}</td></tr>`).join("")}</tbody></table></section>`;
+  page.innerHTML = `<div class="page-head"><div><h1>Devletler</h1><p>Aktif ve yok edilmiş bütün devlet kayıtları</p></div><button class="button primary" data-open-army>＋ Yeni ordu</button></div><section class="card table-wrap"><table><thead><tr><th>Devlet</th><th>Durum</th><th>Başkent</th><th>Yerleşke</th><th>Ordu</th><th>Filo</th><th>Hazine</th><th></th></tr></thead><tbody>${state.countries.map((country) => `<tr data-country-id="${country.id}" data-record-type="COUNTRY" data-record-id="${country.id}"><td><strong>${escapeHtml(country.name)}</strong></td><td><span class="pill ${country.status === "ACTIVE" ? "" : "neutral"}">${escapeHtml(countryStatusLabels[country.status] || country.status)}</span></td><td>${escapeHtml(country.capital_name || "Atanmamış")}</td><td>${number(country.settlement_count)}</td><td>${number(country.army_count)}</td><td>${number(country.fleet_count)}</td><td>${money(country.treasury)}</td><td>${country.status === "ACTIVE" ? `<button class="button compact" data-edit-country="${country.id}">Düzenle</button>` : ""}</td></tr>`).join("")}</tbody></table></section>`;
   bindPageActions();
   document.querySelectorAll("tr[data-country-id]").forEach((row) => row.addEventListener("click", () => {
     countryDetail(row.dataset.countryId).catch(showPageError);
@@ -411,15 +411,16 @@ async function countryDetail(id) {
   recordRecent({ type: "COUNTRY", id: data.country.id, label: data.country.name, detail: countryStatusLabels[data.country.status] || data.country.status });
   const totalPopulation = data.settlements.reduce((sum, item) => sum + Number(item.population) + Number(item.slave_population), 0);
   const totalArmy = data.armies.reduce((sum, item) => sum + Number(item.total), 0);
-  page.innerHTML = `<div class="page-head"><div><span class="pill">${escapeHtml(countryStatusLabels[data.country.status] || data.country.status)}</span><h1 style="margin-top:10px">${escapeHtml(data.country.name)}</h1><p>${number(data.settlements.length)} yerleşke · ${number(data.armies.length)} ordu · ${number(data.fleets.length)} filo</p></div><div class="actions"><button class="button" data-back-countries>← Devletler</button><button class="button" data-edit-country-detail>Düzenle</button><button class="button primary" data-open-army data-default-country="${data.country.id}">＋ Ordu oluştur</button></div></div>
-    <section class="detail-grid"><div class="detail-cell"><span>Hazine</span><strong>${money(data.country.treasury)}</strong></div><div class="detail-cell"><span>Toplam nüfus</span><strong>${number(totalPopulation)}</strong></div><div class="detail-cell"><span>Ordu mevcudu</span><strong>${number(totalArmy)}</strong></div><div class="detail-cell"><span>Seferberlik</span><strong>${escapeHtml(mobilizationLabels[data.country.mobilization] || data.country.mobilization)}</strong></div></section>
+  page.innerHTML = `<div class="page-head"><div><span class="pill">${escapeHtml(countryStatusLabels[data.country.status] || data.country.status)}</span><h1 style="margin-top:10px">${escapeHtml(data.country.name)}</h1><p>${number(data.settlements.length)} yerleşke · ${number(data.armies.length)} ordu · ${number(data.fleets.length)} filo</p></div><div class="actions"><button class="button" data-back-countries>← Devletler</button><button class="button" data-edit-country-detail>Düzenle</button>${data.country.status === "ACTIVE" && data.settlements.length > 1 ? '<button class="button" data-change-capital>♜ Başkent değiştir</button>' : ""}<button class="button primary" data-open-army data-default-country="${data.country.id}">＋ Ordu oluştur</button></div></div>
+    <section class="detail-grid"><div class="detail-cell"><span>Hazine</span><strong>${money(data.country.treasury)}</strong></div><div class="detail-cell"><span>Başkent</span><strong>${escapeHtml(data.country.capital_name || "Atanmamış")}</strong><small>Gelir ve nüfus artışı +%1</small></div><div class="detail-cell"><span>Toplam nüfus</span><strong>${number(totalPopulation)}</strong></div><div class="detail-cell"><span>Ordu mevcudu</span><strong>${number(totalArmy)}</strong></div><div class="detail-cell"><span>Seferberlik</span><strong>${escapeHtml(mobilizationLabels[data.country.mobilization] || data.country.mobilization)}</strong></div></section>
     <div class="section-title"><h2>Yerleşkeler</h2><span>${number(data.settlements.length)} kayıt</span></div>
-    <section class="card table-wrap"><table><thead><tr><th>Yerleşke</th><th>Nüfus</th><th>Köle</th><th>Hazine</th><th>Kaynak</th><th>Din</th><th>Kara ticareti</th><th>Asker</th><th>Gemi</th></tr></thead><tbody>${data.settlements.map((settlement) => `<tr data-open-settlement="${settlement.id}"><td><strong>${escapeHtml(settlement.name)}</strong>${settlement.is_conquered ? '<small class="muted"> · Fethedildi</small>' : ""}</td><td>${number(settlement.population)}</td><td>${number(settlement.slave_population)}</td><td>${money(settlement.local_treasury)}</td><td>${escapeHtml(settlement.resource_label || settlement.resource_type || "—")}</td><td>${religionDistribution(settlement)}</td><td>${money(settlement.base_land_trade_income)}</td><td>${number(settlement.army_stock)}</td><td>${number(settlement.ships)}</td></tr>`).join("") || '<tr><td colspan="9" class="empty">Yerleşke bulunmuyor.</td></tr>'}</tbody></table></section>
+    <section class="card table-wrap"><table><thead><tr><th>Yerleşke</th><th>Nüfus</th><th>Köle</th><th>Hazine</th><th>Kaynak</th><th>Din</th><th>Kara ticareti</th><th>Asker</th><th>Gemi</th></tr></thead><tbody>${data.settlements.map((settlement) => `<tr data-open-settlement="${settlement.id}"><td><strong>${escapeHtml(settlement.name)}</strong>${settlement.is_capital ? '<small class="muted"> · ♜ Başkent</small>' : ""}${settlement.is_conquered ? '<small class="muted"> · Fethedildi</small>' : ""}</td><td>${number(settlement.population)}</td><td>${number(settlement.slave_population)}</td><td>${money(settlement.local_treasury)}</td><td>${escapeHtml(settlement.resource_label || settlement.resource_type || "—")}</td><td>${religionDistribution(settlement)}</td><td>${money(settlement.base_land_trade_income)}</td><td>${number(settlement.army_stock)}</td><td>${number(settlement.ships)}</td></tr>`).join("") || '<tr><td colspan="9" class="empty">Yerleşke bulunmuyor.</td></tr>'}</tbody></table></section>
     <section class="content-grid"><div class="card"><div class="card-head"><div><h3>Ordular</h3><p>Birlik ve komutan durumu</p></div></div>${data.armies.map((army) => `<div class="data-row"><div><strong>${escapeHtml(army.name)}</strong><small>${escapeHtml(army.commander_name || "Komutan atanmamış")}</small></div><span>${number(army.total)} asker</span><span>Tur ${number(army.created_turn)}</span><span class="pill neutral">Aktif</span></div>`).join("") || '<div class="empty">Henüz ordu yok.</div>'}</div><aside class="card"><div class="card-head"><div><h3>Filolar</h3><p>Gemi ve amiral durumu</p></div></div>${data.fleets.map((fleet) => `<div class="audit-item"><span class="audit-dot"></span><div><strong>${escapeHtml(fleet.name)}</strong><span>${escapeHtml(fleet.commander_name || "Amiral atanmamış")} · ${number(fleet.total)} gemi</span></div></div>`).join("") || '<div class="empty">Henüz filo yok.</div>'}</aside></section>
     <section class="card section-gap"><div class="card-head"><div><h3>Karakterler</h3><p>Uzmanlık, görev ve durum kayıtları</p></div></div><div class="compact-grid">${data.characters.map((character) => `<div class="record-card"><strong>${escapeHtml(character.name)}</strong><span>${escapeHtml(roleLabel(character))} · Sv${number(character.level)} · +${number(character.skill_bonus)}</span><small>${escapeHtml(characterStatusLabel(character.status))} · ${escapeHtml(assignmentLabel(character.assignment))}${character.assigned_settlement_name ? ` · ${escapeHtml(character.assigned_settlement_name)}` : ""}${character.death_settlement_name ? ` · Ölüm: ${escapeHtml(character.death_settlement_name)}` : ""}</small></div>`).join("") || '<div class="empty">Karakter yok.</div>'}</div></section>${countryRelationsPanel(data)}`;
   bindPageActions();
   document.querySelector("[data-back-countries]").addEventListener("click", countries);
   document.querySelector("[data-edit-country-detail]").addEventListener("click", () => openCountryEditor(data.country));
+  document.querySelector("[data-change-capital]")?.addEventListener("click", () => openCapitalEditor(data.country, data.settlements));
   document.querySelectorAll("[data-open-settlement]").forEach((row) => row.addEventListener("click", () => settlementDetail(row.dataset.openSettlement).catch(showPageError)));
   document.querySelectorAll("[data-related-country]").forEach((button) => button.addEventListener("click", () => countryDetail(button.dataset.relatedCountry).catch(showPageError)));
 }
@@ -1720,6 +1721,36 @@ function openCountryEditor(country) {
     await api(`/api/admin/countries/${country.id}`, { method: "PATCH", body: JSON.stringify({ name: document.getElementById("edit-country-name").value, treasury: Number(document.getElementById("edit-country-treasury").value), mobilization: document.getElementById("edit-country-mobilization").value }) });
     closeEditor(); toast("Devlet bilgileri güncellendi."); await refreshKeepingScroll(countries);
   });
+}
+
+function openCapitalEditor(country, settlements) {
+  if (!country || !Array.isArray(settlements)) return;
+  const candidates = settlements.filter((settlement) => settlement.id !== country.capital_settlement_id);
+  if (!candidates.length) {
+    toast("Başkent olarak seçilebilecek başka bir yerleşke bulunmuyor.", "error");
+    return;
+  }
+  const currentCapital = settlements.find((settlement) => settlement.id === country.capital_settlement_id);
+  const options = candidates
+    .map((settlement) => `<option value="${settlement.id}">${escapeHtml(settlement.name)} · ${number(Number(settlement.population) + Number(settlement.slave_population))} nüfus</option>`)
+    .join("");
+  openEditor(
+    "Başkent değiştir",
+    `${country.name} · Mevcut başkent: ${currentCapital?.name || "Atanmamış"}`,
+    `<div class="preview-warning"><strong>Başkent bonusları anında taşınır.</strong><span>${escapeHtml(currentCapital?.name || "Eski başkent")} gelir ve nüfus artışı +%1 bonusunu kaybeder; seçilen yeni başkent iki bonusu da kazanır. Nüfus veya hazine değerleri doğrudan değiştirilmez.</span></div><label>Yeni başkent<select id="edit-country-capital" required>${options}</select></label><label>Yönetici işlem gerekçesi<textarea id="edit-country-capital-reason" required minlength="2" maxlength="300" placeholder="Başkent değişikliğinin kısa gerekçesi"></textarea></label>`,
+    async () => {
+      const settlementId = document.getElementById("edit-country-capital").value;
+      const reason = document.getElementById("edit-country-capital-reason").value.trim();
+      if (reason.length < 2) throw new Error("Başkent değişikliği için kısa bir gerekçe yazın.");
+      const result = await api(`/api/admin/countries/${country.id}/capital`, {
+        method: "POST",
+        body: JSON.stringify({ settlementId, reason })
+      });
+      closeEditor();
+      toast(`${result.newCapitalName} yeni başkent oldu; +%1 bonuslar taşındı.`);
+      await refreshKeepingScroll(() => countryDetail(country.id));
+    }
+  );
 }
 
 function openSettlementEditor(settlement) {

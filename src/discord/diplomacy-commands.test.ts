@@ -51,6 +51,7 @@ describe("ittifak, pakt ve herkese açık devlet profili", () => {
   it("herkese açık devlet kartında yalnızca diplomatik ve yerleşke bilgilerini gösterir", () => {
     const embed = renderPublicCountryProfile({
       id: "roma", name: "Roma",
+      capital_name: "Roma",
       status: "ACTIVE", destroyed_turn: null, destroyed_reason: null,
       settlements: [{ name: "Roma", resource_type: "IRON" }, { name: "Neapolis", resource_type: "GRAIN" }],
       allies: [{ id: "kartaca", name: "Kartaca" }],
@@ -61,7 +62,7 @@ describe("ittifak, pakt ve herkese açık devlet profili", () => {
     const fields = embed.fields ?? [];
     const combined = JSON.stringify(embed);
     expect(fields.map((field) => field.name)).toEqual([
-      "📌 Devlet Durumu", "🗺️ Yerleşkeler ve Hammaddeler", "🤝 Müttefikler", "👑 Vassal Devletler", "🏛️ Üye Olunan Paktlar", "⚔️ Savaşta Olduğu Devletler"
+      "📌 Devlet Durumu", "🏛️ Başkent", "🗺️ Yerleşkeler ve Hammaddeler", "🤝 Müttefikler", "👑 Vassal Devletler", "🏛️ Üye Olunan Paktlar", "⚔️ Savaşta Olduğu Devletler"
     ]);
     expect(combined).toContain("Demir");
     expect(combined).toContain("Tahıl");
@@ -77,6 +78,7 @@ describe("ittifak, pakt ve herkese açık devlet profili", () => {
   it("yok edilen devletin kaydını ve yok edilme açıklamasını kamu kartında korur", () => {
     const embed = renderPublicCountryProfile({
       id: "eski", name: "Eski Krallık", status: "YOK_EDİLDİ", destroyed_turn: 12, destroyed_reason: "Son yerleşkesini kaybetti.",
+      capital_name: null,
       settlements: [], allies: [], pacts: [], wars: [], vassals: []
     }).toJSON();
     expect(embed.title).toContain("🏴");

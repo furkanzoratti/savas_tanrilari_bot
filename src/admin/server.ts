@@ -338,6 +338,18 @@ const server = createServer(async (request, response) => {
       if (!session) return;
       return json(response, 200, await adminDataControlService.undo(session.sub, await body(request)));
     }
+    const countryCapitalUpdateMatch = request.method === "POST"
+      ? url.pathname.match(/^\/api\/admin\/countries\/([0-9a-f-]+)\/capital$/iu)
+      : null;
+    if (countryCapitalUpdateMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.updateCountryCapital(
+        session.sub,
+        countryCapitalUpdateMatch[1]!,
+        await body(request)
+      ));
+    }
     const countryUpdateMatch = request.method === "PATCH" ? url.pathname.match(/^\/api\/admin\/countries\/([0-9a-f-]+)$/iu) : null;
     if (countryUpdateMatch) {
       const session = requireMutation(request, response);
