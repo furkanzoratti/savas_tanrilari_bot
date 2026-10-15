@@ -23,6 +23,20 @@ describe("din sistemi",()=>{
     expect(RELIGIONS.QIANG_MOUNTAIN_FAITH.label).toBe("Qiang Dağ ve Gök İnancı");
     expect(SECONDARY_RELIGIONS.QIANG_MOUNTAIN_FAITH.label).toBe("Beyaz Taş ve Dağ Kültü");
   });
+  it("İskandinav inançlarını ve ikincil geleneklerini tanımlar",()=>{
+    expect(RELIGIONS.NORTH_GERMANIC_FAITH.label).toBe("Kuzey Cermen İnancı");
+    expect(SECONDARY_RELIGIONS.NORTH_GERMANIC_FAITH.label).toBe("Tyr–Wodan Savaşçı Kültü");
+    expect(RELIGIONS.NERTHUS_FAITH.label).toBe("Nerthus İnancı");
+    expect(SECONDARY_RELIGIONS.NERTHUS_FAITH.label).toBe("Kutsal Koru Geleneği");
+    expect(religionModifiers("NORTH_GERMANIC_FAITH",80,"NORTH_GERMANIC_FAITH")).toMatchObject({
+      seaTradeIncomePercent:.08,shipPurchaseDiscount:.05,shipUpkeepDiscount:.05
+    });
+    const northGermanicMinority=religionModifiers("NORTH_GERMANIC_FAITH",75,null);
+    expect(religionUnitDiscount(northGermanicMinority.unitPurchaseDiscounts,"heavy_infantry")).toBeCloseTo(.03);
+    expect(religionModifiers("NERTHUS_FAITH",75,"NERTHUS_FAITH")).toMatchObject({
+      populationGrowthPercent:.03,unrestReduction:5,buildingCostDiscount:.05
+    });
+  });
   it("ülke etkisini özgür nüfusun en az yüzde 75'i aynı dine bağlıysa açar",()=>{
     expect(dominantReligion([
       {religion_key:"HELLENIC_FAITH",religion_adherence_percent:75,population:100_000}

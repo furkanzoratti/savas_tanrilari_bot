@@ -58,6 +58,7 @@ export interface BattleParticipantRow {
   composition: BattleComposition; initial_composition: BattleComposition;
   dismounted_composition: BattleComposition;
   is_steppe_confederation?: boolean;
+  is_scandinavian_state?: boolean;
 }
 
 export interface BattleParticipantChoice {
@@ -483,7 +484,7 @@ async function battleSideCompositionProfile(
   battleId: string,
   side: BattleSideKey
 ): Promise<ArmyCompositionProfile> {
-  const row = (await client.query<{ total: string; steppe: string }>(`
+  const row = (await client.query<{ total: string; steppe: string; scandinavian: string }>(`
     WITH side_countries AS (
       SELECT country_id,steppe_title_id FROM battle_sides WHERE battle_id=$1 AND side_key=$2 AND country_id IS NOT NULL
       UNION
@@ -491,12 +492,16 @@ async function battleSideCompositionProfile(
       JOIN battle_sides side_record ON side_record.battle_id=participant.battle_id AND side_record.side_key=participant.side_key
       WHERE participant.battle_id=$1 AND participant.side_key=$2
     )
-    SELECT COUNT(*)::text AS total,COUNT(*) FILTER(WHERE country.is_steppe_state)::text AS steppe
+    SELECT COUNT(*)::text AS total,
+           COUNT(*) FILTER(WHERE country.is_steppe_state)::text AS steppe,
+           COUNT(*) FILTER(WHERE country.is_scandinavian_state)::text AS scandinavian
       FROM side_countries side_country
       JOIN countries country ON country.id=side_country.country_id
       `, [battleId, side])).rows[0];
   const total = Number(row?.total ?? 0);
-  return total > 0 && Number(row?.steppe ?? 0) === total ? "STEPPE" : "STANDARD";
+  if (total > 0 && Number(row?.steppe ?? 0) === total) return "STEPPE";
+  if (total > 0 && Number(row?.scandinavian ?? 0) === total) return "SCANDINAVIAN";
+  return "STANDARD";
 }
 
 async function loadView(client: DbClient, battleId: string, lock = false): Promise<BattleView> {
@@ -516,7 +521,8 @@ async function loadView(client: DbClient, battleId: string, lock = false): Promi
   const participants = (await client.query<BattleParticipantRow>(
     `SELECT bsp.*,COALESCE(rebel.display_name,steppe_title.title_name,c.name) AS country_name,source.name AS source_settlement_name,
             embarked_army.name AS embarked_army_name,
-            c.is_steppe_state AS is_steppe_confederation
+            c.is_steppe_state AS is_steppe_confederation,
+            c.is_scandinavian_state
        FROM battle_side_participants bsp JOIN countries c ON c.id=bsp.country_id
       JOIN battle_sides side_record ON side_record.battle_id=bsp.battle_id AND side_record.side_key=bsp.side_key
       LEFT JOIN rebel_factions rebel ON rebel.id=side_record.rebel_faction_id AND bsp.country_id=side_record.country_id
@@ -533,7 +539,9 @@ async function loadView(client: DbClient, battleId: string, lock = false): Promi
     row.country_names = sideParticipants.map((participant) => participant.country_name);
     row.country_name = row.country_names.join(" + ") || row.country_name;
     row.composition_profile = sideParticipants.length > 0 && sideParticipants.every((participant) => participant.is_steppe_confederation)
-      ? "STEPPE" : "STANDARD";
+      ? "STEPPE"
+      : sideParticipants.length > 0 && sideParticipants.every((participant) => participant.is_scandinavian_state)
+        ? "SCANDINAVIAN" : "STANDARD";
   }
   if(battle.terrain==="NAVAL"){
     if(battle.status!=="DRAFT")await initializeBattleShipHulls(client,battleId);

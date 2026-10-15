@@ -122,4 +122,22 @@ describe("ordu kompozisyonu ve güncel birlik dengesi", () => {
     const result = assessArmyComposition({ kurgan_shieldbearer: 6_000, oba_archer: 4_000 }, "SIEGE_RESTRICTED", "STEPPE");
     expect(result).toMatchObject({ tier: "STANDARD", label: "Bozkır Kuşatma Düzeni", clashMultiplier: 1, damageMultiplier: 1 });
   });
+
+  it("İskandinav birliklerini hareketli rol aramadan kendi doktriniyle değerlendirir", () => {
+    const result = assessArmyComposition({
+      scandinavian_berserker: 4_000,
+      scandinavian_spearmen: 3_500,
+      scandinavian_hunters: 2_500
+    }, "FIELD", "SCANDINAVIAN");
+    expect(result).toMatchObject({ tier: "EXCELLENT", label: "Büyük Kalkan Duvarı", clashMultiplier: 1.15, damageMultiplier: 1.08 });
+    expect(result.roleShares.mobile).toBe(0);
+  });
+
+  it("İskandinav ordusuna standart birlik karıştırılmasını cezalandırır", () => {
+    expect(assessArmyComposition({
+      scandinavian_berserker: 4_000,
+      scandinavian_spearmen: 3_000,
+      heavy_infantry: 3_000
+    }, "FIELD", "SCANDINAVIAN").tier).toBe("MONOTYPE");
+  });
 });

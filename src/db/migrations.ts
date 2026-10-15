@@ -131,6 +131,9 @@ import { navalReadyRepairReconciliationMigration } from "./naval-ready-repair-re
 import { kangjuHouseholdRepairMigration } from "./kangju-household-repair-migration.js";
 import { romanDynastyMarriageBridgeMigration } from "./roman-dynasty-marriage-bridge-migration.js";
 import { dynastyWidowRemarriageMigration } from "./dynasty-widow-remarriage-migration.js";
+import { scandinavianCultureReligionMigration } from "./scandinavian-culture-religion-migration.js";
+import { scandinavianDynastiesMigration } from "./scandinavian-dynasties-migration.js";
+import { scandinavianArmyDoctrineMigration } from "./scandinavian-army-doctrine-migration.js";
 
 export const migrations = [
   {
@@ -2479,5 +2482,8 @@ export const migrations = [
   navalReadyRepairReconciliationMigration,
   kangjuHouseholdRepairMigration,
   romanDynastyMarriageBridgeMigration,
-  dynastyWidowRemarriageMigration
+  dynastyWidowRemarriageMigration,
+  scandinavianCultureReligionMigration,
+  scandinavianDynastiesMigration,
+  scandinavianArmyDoctrineMigration
 ] as const;

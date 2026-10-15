@@ -5,6 +5,9 @@ describe("kültürel NPC hanedan adları",()=>{
   it("kültür ve cinsiyete göre aday havuzu verir",()=>{
     expect(culturalDynastyNameCandidates("PUNIC","MALE")).toContain("Hanno");
     expect(culturalDynastyNameCandidates("ITALIC","FEMALE")).toContain("Julia");
+    expect(culturalDynastyNameCandidates("CIMBRIC","MALE")).toContain("Boiorix");
+    expect(culturalDynastyNameCandidates("CHAEDINIAN","FEMALE")).toContain("Signy");
+    expect(culturalDynastyNameCandidates("GAUT_SUIONIC","MALE")).toContain("Hygelac");
   });
 
   it("hanedanda kullanılan adı tekrar etmez",()=>{

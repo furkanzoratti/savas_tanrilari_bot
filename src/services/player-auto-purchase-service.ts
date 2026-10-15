@@ -4,6 +4,7 @@ import { isAcquisitionTurn } from "../domain/mobilization.js";
 import type { PurchasableUnitType } from "../domain/npc-auto-purchase.js";
 import { isSpecialUnitType } from "../domain/special-units.js";
 import { STEPPE_ARMY_UNIT_TYPES } from "../domain/steppe-army.js";
+import { SCANDINAVIAN_ARMY_UNIT_TYPES } from "../domain/scandinavian-army.js";
 import { pool } from "../db/pool.js";
 import { gameService, GameError } from "./game-service.js";
 import {
@@ -85,10 +86,12 @@ function uniqueUnits(units: readonly PurchasableUnitType[]): PurchasableUnitType
 export function playerArmyUnitCandidates(
   mode: Exclude<PlayerAutoPurchaseMode, "SHIPS">,
   unlockedSpecials: readonly PurchasableUnitType[],
-  steppe = false
+  steppe = false,
+  scandinavian = false
 ): PurchasableUnitType[] {
   const specials = uniqueUnits(unlockedSpecials.filter((unitType) => isSpecialUnitType(unitType)));
   if (steppe) return STEPPE_ARMY_UNIT_TYPES.filter((unitType) => specials.includes(unitType)) as PurchasableUnitType[];
+  if (scandinavian) return SCANDINAVIAN_ARMY_UNIT_TYPES.filter((unitType) => specials.includes(unitType)) as PurchasableUnitType[];
   if (mode === "GENERAL") return uniqueUnits([...BASE_ARMY_UNITS, ...specials]);
   if (mode === "LIGHT") {
     return uniqueUnits([
@@ -150,7 +153,7 @@ export function planPlayerPurchases(
     base = planCountryPurchases(document, config, "NAVAL_FOCUS", 0, { unitCandidates: [] });
     base = { ...base, notes: base.notes.filter((note) => !note.includes("kişilik hedef") && !note.includes("Hedef askerî doluluk")) };
   } else {
-    const candidates = playerArmyUnitCandidates(mode, document.specialUnitUnlocks ?? [], document.isSteppeConfederation);
+    const candidates = playerArmyUnitCandidates(mode, document.specialUnitUnlocks ?? [], document.isSteppeConfederation, document.isScandinavianState);
     base = planCountryPurchases(document, config, "ARMY_ONLY", 0, {
       unitCandidates: candidates,
       compositionBaseline: "EMPTY",

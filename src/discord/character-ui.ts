@@ -254,6 +254,102 @@ export function charactersEmbed(
     .setFooter({ text: "Bu liste yalnızca ülke oyuncularına ve yöneticilere görünür." });
 }
 
+const CHARACTER_EMBED_DESCRIPTION_LIMIT = 3_900;
+
+function characterGroupEmbeds(input: {
+  countryName: string;
+  title: string;
+  intro?: string;
+  sections: Array<{ heading: string; rows: string[] }>;
+}): EmbedBuilder[] {
+  const pages: string[][] = [];
+  let current: string[] = input.intro ? [input.intro] : [];
+  let currentLength = current.join("\n\n").length;
+  const flush = (): void => {
+    if (!current.length) return;
+    pages.push(current);
+    current = [];
+    currentLength = 0;
+  };
+  const add = (block: string): void => {
+    const addedLength = (current.length ? 2 : 0) + block.length;
+    if (current.length && currentLength + addedLength > CHARACTER_EMBED_DESCRIPTION_LIMIT) flush();
+    current.push(block);
+    currentLength += (current.length > 1 ? 2 : 0) + block.length;
+  };
+
+  for (const section of input.sections) {
+    if (!section.rows.length) continue;
+    let started = false;
+    for (const row of section.rows) {
+      let block = (started ? "" : section.heading + "\n") + row;
+      if (current.length && currentLength + 2 + block.length > CHARACTER_EMBED_DESCRIPTION_LIMIT) {
+        flush();
+        block = section.heading + (started ? " • devam" : "") + "\n" + row;
+      }
+      add(block);
+      started = true;
+    }
+  }
+  flush();
+  if (!pages.length) pages.push(["Bu görev türünde kayıtlı karakter bulunmuyor."]);
+
+  return pages.map((blocks,index) => new EmbedBuilder()
+    .setColor(0xc59b45)
+    .setTitle("🎓 " + input.countryName + " • " + input.title + (pages.length > 1 ? ` (${index + 1}/${pages.length})` : ""))
+    .setDescription(blocks.join("\n\n"))
+    .setFooter({ text: "Bu liste yalnızca ülke oyuncularına ve yöneticilere görünür." }));
+}
+
+export function characterEmbeds(
+  countryName: string,
+  characters: CharacterView[],
+  capacity?: CharacterCapacitySummary
+): EmbedBuilder[] {
+  const living = characters.filter((character) => character.character_status !== "DEAD");
+  const intro = capacity
+    ? "**🏛️ Akademi Kapasitesi**\n"+
+      "Akademi: **"+capacity.academies+"** • Barındırılabilir karakter: **"+capacity.capacity+"**\n"+
+      "Mevcut karakter: **"+capacity.characters+"/"+capacity.capacity+"**"+
+      (capacity.pending>0 ? " • Eğitimde/bekleyen: **"+capacity.pending+"**" : "")
+    : undefined;
+  const result = characterGroupEmbeds({
+    countryName,
+    title:"Komuta Kadrosu",
+    ...(intro ? {intro} : {}),
+    sections:[
+      {heading:"**🎖️ Mareşal**",rows:living.filter((character)=>character.role==="COMMANDER"&&character.is_marshal).map(characterLine)},
+      {heading:"**⚔️ Komutanlar**",rows:living.filter((character)=>character.role==="COMMANDER"&&!character.is_marshal&&!character.is_admiral).map(characterLine)}
+    ]
+  });
+
+  const groups: Array<{title:string;heading:string;characters:CharacterView[]}> = [
+    {title:"Amiraller",heading:"**⚓ Amiraller**",characters:living.filter((character)=>character.role==="COMMANDER"&&character.is_admiral)},
+    {title:"Diplomatlar",heading:"**🤝 Diplomatlar**",characters:living.filter((character)=>character.role==="DIPLOMAT")},
+    {title:"Casuslar",heading:"**🕵️ Casuslar**",characters:living.filter((character)=>character.role==="SPY")},
+    {title:"Tüccarlar",heading:"**💰 Tüccarlar**",characters:living.filter((character)=>character.role==="MERCHANT")},
+    {title:"Misyonerler",heading:"**🕯️ Misyonerler**",characters:living.filter((character)=>character.role==="MISSIONARY")}
+  ];
+  for(const group of groups){
+    if(!group.characters.length)continue;
+    result.push(...characterGroupEmbeds({
+      countryName,title:group.title,
+      sections:[{heading:group.heading,rows:group.characters.map(characterLine)}]
+    }));
+  }
+
+  const dead = characters
+    .filter((character)=>character.character_status==="DEAD")
+    .sort((left,right)=>new Date(right.died_at??0).getTime()-new Date(left.died_at??0).getTime()||left.name.localeCompare(right.name,"tr"));
+  if(dead.length){
+    result.push(...characterGroupEmbeds({
+      countryName,title:"Ölü Karakterler",
+      sections:[{heading:"**💀 Ölü Karakterler**",rows:dead.map(deadCharacterLine)}]
+    }));
+  }
+  return result;
+}
+
 export type CharacterLogPublishState = "NO_LOGS" | "NO_CHANNEL" | "CHANNEL_UNAVAILABLE" | "PUBLISHED" | "FAILED";
 
 export interface CharacterLogPublishResult {
@@ -348,7 +444,11 @@ export async function handleCharacterCommand(interaction: ChatInputCommandIntera
     const [characters,capacity] = await Promise.all([
       characterService.list(country.id),cityService.academyCapacity(country.id)
     ]);
-    await interaction.editReply({ embeds: [charactersEmbed(country.name,characters,capacity)] });
+    const embeds=characterEmbeds(country.name,characters,capacity);
+    await interaction.editReply({ embeds: [embeds[0]!] });
+    for(const embed of embeds.slice(1)){
+      await interaction.followUp({embeds:[embed],flags:MessageFlags.Ephemeral});
+    }
     await logCharacterCommand(interaction,country.name,"Karakter listesini görüntüledi.");
     return true;
   }

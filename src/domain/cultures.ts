@@ -44,7 +44,10 @@ export const CULTURE_GROUPS = {
   TOCHARIAN: { label: "Tohar" },
   ZHANGZHUNG: { label: "Zhang Zhung" },
   TIBETAN: { label: "Tibetli" },
-  QIANG: { label: "Qiang" }
+  QIANG: { label: "Qiang" },
+  CIMBRIC: { label: "Kimbri" },
+  CHAEDINIAN: { label: "Hedin" },
+  GAUT_SUIONIC: { label: "Gaut–Suion" }
 } as const;
 
 export type CultureGroup = keyof typeof CULTURE_GROUPS;

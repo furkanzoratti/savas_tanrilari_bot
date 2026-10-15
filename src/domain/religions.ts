@@ -9,7 +9,8 @@ export type ReligionKey =
   | "JUDAISM" | "MESOPOTAMIAN_FAITH" | "EGYPTIAN_FAITH" | "KUSH_NUBIAN_FAITH"
   | "NABATAEAN_FAITH" | "SOUTH_ARABIAN_FAITH" | "ZOROASTRIANISM" | "HELLENO_IRANIAN_SYNCRETISM"
   | "BRAHMANISM" | "BUDDHISM" | "JAINISM" | "DRAVIDIAN_FAITHS" | "CHRISTIANITY"
-  | "INNER_ASIAN_SKY_FAITH" | "BON_FAITH" | "QIANG_MOUNTAIN_FAITH";
+  | "INNER_ASIAN_SKY_FAITH" | "BON_FAITH" | "QIANG_MOUNTAIN_FAITH"
+  | "NORTH_GERMANIC_FAITH" | "NERTHUS_FAITH";
 
 export type ReligionUnitType = keyof typeof UNITS;
 
@@ -140,7 +141,9 @@ export const RELIGIONS: Record<ReligionKey, ReligionDefinition> = {
   CHRISTIANITY: { label:"Hristiyanlık",localEffect:"Yerleşke toplam geliri +%5",nationalEffect:"Bina maliyeti -%5; Misyoner ve Diplomat görevlerine +1",local:{settlementIncomePercent:.05},national:{buildingCostDiscount:.05,diplomatTaskBonus:1,missionaryTaskBonus:1} },
   INNER_ASIAN_SKY_FAITH: { label:"İç Asya Gök İnancı",localEffect:"Atlı birlik alım maliyeti -%5",nationalEffect:"Kara yağması kazancı +%5",local:{unitPurchaseDiscounts:[{discount:.05,units:CAVALRY}]},national:{landRaidIncomePercent:.05} },
   BON_FAITH: { label:"Bön İnancı",localEffect:"Kuşatma erzak dayanıklılığı +1 tur",nationalEffect:"Olumsuz yerleşke olayı ihtimali -3 puan",local:{starvationBonus:1},national:{negativeEventRiskReduction:3} },
-  QIANG_MOUNTAIN_FAITH: { label:"Qiang Dağ ve Gök İnancı",localEffect:"Olumsuz yerleşke olayı ihtimali -5 puan",nationalEffect:"Mızraklı ve menzilli birlik bakımı -%3",local:{negativeEventRiskReduction:5},national:{unitUpkeepDiscounts:[{discount:.03,units:SPEAR_RANGED}]} }
+  QIANG_MOUNTAIN_FAITH: { label:"Qiang Dağ ve Gök İnancı",localEffect:"Olumsuz yerleşke olayı ihtimali -5 puan",nationalEffect:"Mızraklı ve menzilli birlik bakımı -%3",local:{negativeEventRiskReduction:5},national:{unitUpkeepDiscounts:[{discount:.03,units:SPEAR_RANGED}]} },
+  NORTH_GERMANIC_FAITH: { label:"Kuzey Cermen İnancı",localEffect:"Liman geliri +%8",nationalEffect:"Gemi alım ve bakım maliyeti -%5",local:{seaTradeIncomePercent:.08},national:{shipPurchaseDiscount:.05,shipUpkeepDiscount:.05} },
+  NERTHUS_FAITH: { label:"Nerthus İnancı",localEffect:"Nüfus artışı +%6",nationalEffect:"Ülke genelinde isyan direnci +5 puan",local:{populationGrowthPercent:.06},national:{unrestReduction:5} }
 };
 
 export const SECONDARY_RELIGIONS: Record<ReligionKey, SecondaryReligionDefinition> = {
@@ -176,7 +179,9 @@ export const SECONDARY_RELIGIONS: Record<ReligionKey, SecondaryReligionDefinitio
   CHRISTIANITY: { key:"CHRISTIAN_CATHOLICISM",label:"Katoliklik",effect:"Olumsuz yerleşke olayı ihtimali -5 puan",modifiers:{negativeEventRiskReduction:5} },
   INNER_ASIAN_SKY_FAITH: { key:"INNER_ASIAN_ANCESTOR_SHAMANISM",label:"Atalar ve Kam Geleneği",effect:"Yerleşke huzursuzluğu -2 puan",modifiers:{unrestReduction:2} },
   BON_FAITH: { key:"BON_MOUNTAIN_ANCESTOR_CULT",label:"Dağ ve Atalar Kültü",effect:"Yerleşke huzursuzluğu -2 puan",modifiers:{unrestReduction:2} },
-  QIANG_MOUNTAIN_FAITH: { key:"QIANG_WHITE_STONE_CULT",label:"Beyaz Taş ve Dağ Kültü",effect:"Yerleşke huzursuzluğu -2 puan",modifiers:{unrestReduction:2} }
+  QIANG_MOUNTAIN_FAITH: { key:"QIANG_WHITE_STONE_CULT",label:"Beyaz Taş ve Dağ Kültü",effect:"Yerleşke huzursuzluğu -2 puan",modifiers:{unrestReduction:2} },
+  NORTH_GERMANIC_FAITH: { key:"NORTH_GERMANIC_TYR_WODAN_CULT",label:"Tyr–Wodan Savaşçı Kültü",effect:"Kara birimi alım maliyeti -%3",modifiers:{unitPurchaseDiscounts:[{discount:.03,units:ALL_LAND}]} },
+  NERTHUS_FAITH: { key:"NERTHUS_SACRED_GROVE_TRADITION",label:"Kutsal Koru Geleneği",effect:"Bina inşa maliyeti -%5",modifiers:{buildingCostDiscount:.05} }
 };
 
 export type SecondaryReligionKey = (typeof SECONDARY_RELIGIONS)[ReligionKey]["key"];
@@ -378,7 +383,8 @@ export function defaultReligionForCulture(culture: CultureGroup): ReligionKey {
     ANDHRA:"BRAHMANISM",TAMIL:"DRAVIDIAN_FAITHS",SOUTHEAST_ASIAN:"BUDDHISM",MALAYIC:"BUDDHISM",
     DINGLING:"INNER_ASIAN_SKY_FAITH",XIANBEI:"INNER_ASIAN_SKY_FAITH",XIONGNU:"INNER_ASIAN_SKY_FAITH",
     KANGJU:"SCYTHO_SARMATIAN_FAITH",WUSUN:"INNER_ASIAN_SKY_FAITH",TARIM_SAKA:"SCYTHO_SARMATIAN_FAITH",
-    TOCHARIAN:"BUDDHISM",ZHANGZHUNG:"BON_FAITH",TIBETAN:"BON_FAITH",QIANG:"QIANG_MOUNTAIN_FAITH"
+    TOCHARIAN:"BUDDHISM",ZHANGZHUNG:"BON_FAITH",TIBETAN:"BON_FAITH",QIANG:"QIANG_MOUNTAIN_FAITH",
+    CIMBRIC:"NERTHUS_FAITH",CHAEDINIAN:"NORTH_GERMANIC_FAITH",GAUT_SUIONIC:"NORTH_GERMANIC_FAITH"
   };
   return map[culture];
 }

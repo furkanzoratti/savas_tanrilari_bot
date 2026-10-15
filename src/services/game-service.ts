@@ -16,6 +16,7 @@ import { isSpecialUnitType, type SpecialUnitType } from "../domain/special-units
 import { applyFormableShipUpkeepDiscount, FORMABLE_COUNTRIES, formableBuildingDiscount, formableEffectLines, formableModifiers, formableTier, formableUnitDiscount, isFormableCountryKey, missingFormableTerritories, type FormableCountryDefinition, type FormableCountryKey, type FormableTier } from "../domain/formable-countries.js";
 import { assessArmyComposition, type BattleComposition, type BattleUnitType } from "../domain/battle.js";
 import { isSteppeArmyUnitType, STEPPE_ARMY_UNIT_TYPES } from "../domain/steppe-army.js";
+import { isScandinavianArmyUnitType, SCANDINAVIAN_ARMY_UNIT_TYPES } from "../domain/scandinavian-army.js";
 import { calculateTreasuryTransferQuota } from "../domain/treasury-transfer.js";
 import { assimilationCompletionTurn } from "../domain/assimilation.js";
 import type { ArmyView } from "./army-service.js";
@@ -51,7 +52,7 @@ import {
 export class GameError extends Error {}
 
 interface GuildRow { discord_id: string; current_turn: number; turn_phase: string; acquisition_interval: number; army_composition_activation_turn: number | null; culture_military_penalty_enabled: boolean }
-interface CountryRow { id: string; guild_id: string; name: string; treasury: number; mobilization: Mobilization; mobilization_started_turn: number | null; manpower_over_limit_since_turn: number | null; manpower_penalty_active: boolean; discord_role_id: string | null; status: "ACTIVE" | "YOK_EDİLDİ"; destroyed_turn: number | null; destroyed_reason: string | null; active_formable_key: FormableCountryKey | null; primary_culture_group: CultureGroup; war_exhaustion: number; is_steppe_state: boolean }
+interface CountryRow { id: string; guild_id: string; name: string; treasury: number; mobilization: Mobilization; mobilization_started_turn: number | null; manpower_over_limit_since_turn: number | null; manpower_penalty_active: boolean; discord_role_id: string | null; status: "ACTIVE" | "YOK_EDİLDİ"; destroyed_turn: number | null; destroyed_reason: string | null; active_formable_key: FormableCountryKey | null; primary_culture_group: CultureGroup; war_exhaustion: number; is_steppe_state: boolean; is_scandinavian_state: boolean }
 interface SettlementRow {
   id: string; country_id: string; name: string; population: number; slave_population: number;
   base_income: number; tax_income: number; land_trade_income: number; sea_trade_income: number;
@@ -226,6 +227,7 @@ export interface CountryDocument {
   playerIds: string[];
   specialUnitUnlocks?: SpecialUnitType[];
   isSteppeConfederation?: boolean;
+  isScandinavianState?: boolean;
   characters: CountryCharacter[];
   armies: ArmyView[];
   musteringUnits: Array<{ settlement_id: string; unit_type: keyof typeof UNITS; quantity: number }>;
@@ -1109,8 +1111,9 @@ export const gameService = {
         JOIN countries country ON country.id=unlock.country_id
        WHERE unlock.country_id=$1
          AND (country.is_steppe_state=TRUE OR unlock.unit_type<>ALL($2::text[]))
+         AND (country.is_scandinavian_state=TRUE OR unlock.unit_type<>ALL($3::text[]))
        ORDER BY unlock.unit_type`,
-      [countryId, STEPPE_ARMY_UNIT_TYPES]
+      [countryId, STEPPE_ARMY_UNIT_TYPES, SCANDINAVIAN_ARMY_UNIT_TYPES]
     );
     return result.rows.map((row) => row.unit_type);
   },
@@ -1122,6 +1125,9 @@ export const gameService = {
       if (country.guild_id !== input.guildId) throw new GameError("Ülke bu sunucuya ait değil.");
       if (input.enabled && isSteppeArmyUnitType(input.unitType) && !country.is_steppe_state) {
         throw new GameError("Bozkır özel birlikleri yalnızca Xiongnu, Dingling ve Xianbei konfederasyonlarına açılabilir.");
+      }
+      if (input.enabled && isScandinavianArmyUnitType(input.unitType) && !country.is_scandinavian_state) {
+        throw new GameError("İskandinav özel birlikleri yalnızca İskandinav krallıklarına açılabilir.");
       }
       if (input.enabled) {
         await client.query(
@@ -1841,8 +1847,10 @@ export const gameService = {
       const playerIds = (await client.query<{ discord_user_id: string }>("SELECT discord_user_id FROM country_members WHERE country_id=$1 ORDER BY discord_user_id", [countryId])).rows.map((row) => row.discord_user_id);
       const specialUnitUnlocks = (await client.query<{ unit_type: SpecialUnitType }>("SELECT unit_type FROM country_special_unit_unlocks WHERE country_id=$1 ORDER BY unit_type", [countryId])).rows
         .map((row) => row.unit_type)
-        .filter((unitType) => country.is_steppe_state || !isSteppeArmyUnitType(unitType));
+        .filter((unitType) => country.is_steppe_state || !isSteppeArmyUnitType(unitType))
+        .filter((unitType) => country.is_scandinavian_state || !isScandinavianArmyUnitType(unitType));
       const isSteppeConfederation = Boolean(country.is_steppe_state);
+      const isScandinavianState = Boolean(country.is_scandinavian_state);
       const settlements = (await client.query<SettlementRow>("SELECT * FROM settlements WHERE country_id = $1 ORDER BY name", [countryId])).rows;
       const religionDistributions=await loadReligionDistributions(client,settlements.map((settlement)=>settlement.id));
       const dominantReligionProfile=dominantReligionFromDistributions(settlements.map((settlement)=>({
@@ -1931,7 +1939,7 @@ export const gameService = {
           commander_skill_bonus: Number(army.commander_skill_bonus), created_turn: Number(army.created_turn),
           units: armyUnits, siegeAssets, siegeComposition, enhancedSiegeComposition, composition,
           total: Object.values(composition).reduce<number>((sum, value) => sum + Number(value ?? 0), 0),
-          assessment: assessArmyComposition(composition, "FIELD", isSteppeConfederation ? "STEPPE" : "STANDARD"),
+          assessment: assessArmyComposition(composition, "FIELD", isSteppeConfederation ? "STEPPE" : isScandinavianState ? "SCANDINAVIAN" : "STANDARD"),
           composition_active: activationTurn === null || guild.current_turn >= activationTurn,
           composition_activation_turn: activationTurn
         };
@@ -2191,6 +2199,7 @@ export const gameService = {
         playerIds,
         specialUnitUnlocks,
         isSteppeConfederation,
+        isScandinavianState,
         characters,
         armies,
         musteringUnits,
@@ -2688,11 +2697,18 @@ export const gameService = {
       const unit = UNITS[input.unitType];
       if (!unit) throw new GameError("Birim türü bulunamadı.");
       const steppeConfederation = Boolean(country.is_steppe_state);
+      const scandinavianState = Boolean(country.is_scandinavian_state);
       if (!steppeConfederation && isSteppeArmyUnitType(input.unitType)) {
         throw new GameError("Bu birlik yalnızca Xiongnu, Dingling ve Xianbei konfederasyonları tarafından yetiştirilebilir.");
       }
       if (steppeConfederation && !isSteppeArmyUnitType(input.unitType)) {
         throw new GameError("Bozkır devletleri yalnızca Bozkır Atlı Okçu, Bozkır Süvarisi, Kurgan Kalkanlıları ve Oba Yaycıları yetiştirebilir.");
+      }
+      if (!scandinavianState && isScandinavianArmyUnitType(input.unitType)) {
+        throw new GameError("Bu birlik yalnızca İskandinav krallıkları tarafından yetiştirilebilir.");
+      }
+      if (scandinavianState && !isScandinavianArmyUnitType(input.unitType)) {
+        throw new GameError("İskandinav krallıkları yalnızca Berserker, Kuzey Mızraklıları ve Kuzey Avcıları yetiştirebilir.");
       }
       if (isSpecialUnitType(input.unitType)) {
         const unlocked = await client.query(

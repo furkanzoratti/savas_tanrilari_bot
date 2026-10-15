@@ -21,6 +21,7 @@ import { MERCENARY_COMPANIES, MERCENARY_CONTRACT_LIMITS, mercenarySlotCost, merc
 import { NPC_AUTO_PURCHASE_DOCTRINES, type NpcAutoPurchaseDoctrine } from "../domain/npc-auto-purchase.js";
 import { SPECIAL_UNITS, isSpecialUnitType, type SpecialUnitType } from "../domain/special-units.js";
 import { isSteppeArmyUnitType } from "../domain/steppe-army.js";
+import { isScandinavianArmyUnitType } from "../domain/scandinavian-army.js";
 import { FORMABLE_COUNTRIES, FORMABLE_TIER_LABELS, formableModifiers, formableTier, type FormableTier } from "../domain/formable-countries.js";
 import { ESPIONAGE_TARGETS } from "../domain/espionage.js";
 import { RESOURCES, shipCostMultiplier, type ResourceType } from "../domain/resources.js";
@@ -1560,7 +1561,9 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
     if (!settlement) throw new GameError("Yerleşke bulunamadı.");
     const availableUnits = unitChoices.filter(([key]) => document.isSteppeConfederation
       ? isSteppeArmyUnitType(key) && (document.specialUnitUnlocks ?? []).includes(key)
-      : !isSpecialUnitType(key) || (document.specialUnitUnlocks ?? []).includes(key));
+      : document.isScandinavianState
+        ? isScandinavianArmyUnitType(key) && (document.specialUnitUnlocks ?? []).includes(key)
+        : !isSpecialUnitType(key) || (document.specialUnitUnlocks ?? []).includes(key));
     const menuCount = Math.ceil(availableUnits.length / 25);
     const unitMenus = Array.from({ length: menuCount }, (_, index) => {
       const chunk = availableUnits.slice(index * 25, index * 25 + 25);

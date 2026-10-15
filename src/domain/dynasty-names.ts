@@ -50,7 +50,10 @@ export const DYNASTY_CULTURAL_NAMES:Partial<Record<CultureGroup,CulturalNamePool
   TOCHARIAN:{MALE:["Suvarnapuşpa","Haripuşpa","Kumarayana","Swarna","Tottika","Po-Sang"],FEMALE:["Jiva","Akşaya","Suvarna","Kamala","Mitra","Kumari"]},
   ZHANGZHUNG:{MALE:["Ligmincha","Nyima","Muwér","Tonggyung","Tönpa","Gyalpo"],FEMALE:["Öden","Tsering","Metok","Drolma","Yangchen","Lhamo"]},
   TIBETAN:{MALE:["Namri","Nyatsen","Drigum","Nyatri","Löntsen","Tsenpo"],FEMALE:["Tritsun","Tsering","Pema","Yangchen","Dolma","Lhamo"]},
-  QIANG:{MALE:["Dianyu","Mitang","Wuyihu","Beigong","Qiangliang","Longbu"],FEMALE:["Yingzhu","Amei","Rongna","Muzhu","Bailan","Qiongyu"]}
+  QIANG:{MALE:["Dianyu","Mitang","Wuyihu","Beigong","Qiangliang","Longbu"],FEMALE:["Yingzhu","Amei","Rongna","Muzhu","Bailan","Qiongyu"]},
+  CIMBRIC:{MALE:["Boiorix","Lugius","Claodicus","Caesorix","Harigast","Segimer"],FEMALE:["Brunhilda","Albruna","Ganna","Veleda","Thusnelda","Swanhild"]},
+  CHAEDINIAN:{MALE:["Hadding","Gram","Hedin","Svipdag","Högni","Ragnar"],FEMALE:["Groa","Signy","Hilde","Sigrun","Ragnhild","Astrid"]},
+  GAUT_SUIONIC:{MALE:["Hrethel","Hygelac","Herebeald","Hæthcyn","Egil","Ottar"],FEMALE:["Hygd","Freawaru","Alfhild","Yrsa","Disa","Sigrid"]}
 };
 
 const FALLBACK:CulturalNamePool={

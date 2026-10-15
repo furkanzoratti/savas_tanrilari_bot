@@ -13,6 +13,9 @@ describe("ülkeye özel birlikler", () => {
       steppe_cavalry: { name: "Bozkır Süvarisi", price: 2_250, upkeep: 225 },
       kurgan_shieldbearer: { name: "Kurgan Kalkanlıları", price: 3_000, upkeep: 300 },
       oba_archer: { name: "Oba Yaycıları", price: 1_750, upkeep: 175 },
+      scandinavian_berserker: { name: "Berserker", price: 4_000, upkeep: 400 },
+      scandinavian_spearmen: { name: "Kuzey Mızraklıları", price: 3_500, upkeep: 350 },
+      scandinavian_hunters: { name: "Kuzey Avcıları", price: 2_000, upkeep: 200 },
       camel_cavalry: { name: "Deve Süvarisi", price: 4_000, upkeep: 350 },
       briton_longbow: { name: "Briton Uzun Yaycıları", price: 3_500, upkeep: 400 },
       persian_immortal: { name: "Pers Ölümsüzleri", price: 5_000, upkeep: 500 },
@@ -45,6 +48,9 @@ describe("ülkeye özel birlikler", () => {
     expect(BATTLE_UNIT_STATS.steppe_cavalry).toMatchObject({ clashDice: 2, clashSides: 10, damageDice: 2, damageSides: 8, durability: 2 });
     expect(BATTLE_UNIT_STATS.kurgan_shieldbearer).toMatchObject({ clashDice: 2, clashSides: 8, damageDice: 1, damageSides: 12, durability: 3 });
     expect(BATTLE_UNIT_STATS.oba_archer).toMatchObject({ clashDice: 1, clashSides: 10, damageDice: 1, damageSides: 12, durability: 1 });
+    expect(BATTLE_UNIT_STATS.scandinavian_berserker).toMatchObject({ clashDice: 2, clashSides: 10, damageDice: 2, damageSides: 8, durability: 2 });
+    expect(BATTLE_UNIT_STATS.scandinavian_spearmen).toMatchObject({ clashDice: 2, clashSides: 8, damageDice: 1, damageSides: 10, durability: 3 });
+    expect(BATTLE_UNIT_STATS.scandinavian_hunters).toMatchObject({ clashDice: 1, clashSides: 10, damageDice: 1, damageSides: 12, durability: 1 });
     expect(BATTLE_UNIT_STATS.camel_cavalry).toMatchObject({ clashDice: 2, clashSides: 8, damageDice: 1, damageSides: 10, durability: 2 });
     expect(BATTLE_UNIT_STATS.briton_longbow).toMatchObject({ clashDice: 1, clashSides: 12, damageDice: 2, damageSides: 12, durability: 1 });
     expect(BATTLE_UNIT_STATS.persian_immortal).toMatchObject({ clashDice: 2, clashSides: 8, damageDice: 2, damageSides: 10, durability: 3 });
@@ -80,6 +86,9 @@ describe("ülkeye özel birlikler", () => {
     expect(isSpecialUnitType("steppe_horse_archer")).toBe(true);
     expect(isSpecialUnitType("kurgan_shieldbearer")).toBe(true);
     expect(isSpecialUnitType("oba_archer")).toBe(true);
+    expect(isSpecialUnitType("scandinavian_berserker")).toBe(true);
+    expect(isSpecialUnitType("scandinavian_spearmen")).toBe(true);
+    expect(isSpecialUnitType("scandinavian_hunters")).toBe(true);
     expect(isSpecialUnitType("archer")).toBe(false);
   });
 });

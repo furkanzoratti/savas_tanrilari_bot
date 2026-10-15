@@ -122,6 +122,9 @@ export const BATTLE_UNIT_STATS: Record<BattleUnitType, {
   steppe_cavalry: { label: "Bozkır Süvarisi", clashDice: 2, clashSides: 10, damageDice: 2, damageSides: 8, durability: 2 },
   kurgan_shieldbearer: { label: "Kurgan Kalkanlıları", clashDice: 2, clashSides: 8, damageDice: 1, damageSides: 12, durability: 3 },
   oba_archer: { label: "Oba Yaycıları", clashDice: 1, clashSides: 10, damageDice: 1, damageSides: 12, durability: 1 },
+  scandinavian_berserker: { label: "Berserker", clashDice: 2, clashSides: 10, damageDice: 2, damageSides: 8, durability: 2 },
+  scandinavian_spearmen: { label: "Kuzey Mızraklıları", clashDice: 2, clashSides: 8, damageDice: 1, damageSides: 10, durability: 3 },
+  scandinavian_hunters: { label: "Kuzey Avcıları", clashDice: 1, clashSides: 10, damageDice: 1, damageSides: 12, durability: 1 },
   camel_cavalry: { label: "Deve Süvarisi", clashDice: 2, clashSides: 8, damageDice: 1, damageSides: 10, durability: 2 },
   briton_longbow: { label: "Briton Uzun Yaycıları", clashDice: 1, clashSides: 12, damageDice: 2, damageSides: 12, durability: 1 },
   persian_immortal: { label: "Pers Ölümsüzleri", clashDice: 2, clashSides: 8, damageDice: 2, damageSides: 10, durability: 3 },
@@ -182,7 +185,7 @@ export interface BattleCounterContext {
 
 export type ArmyCompositionTier = "MONOTYPE" | "LIMITED" | "STANDARD" | "BALANCED" | "EXCELLENT";
 export type ArmyCompositionContext = "FIELD" | "SIEGE_RESTRICTED";
-export type ArmyCompositionProfile = "STANDARD" | "STEPPE";
+export type ArmyCompositionProfile = "STANDARD" | "STEPPE" | "SCANDINAVIAN";
 
 export interface ArmyCompositionAssessment {
   tier: ArmyCompositionTier;
@@ -215,7 +218,7 @@ export const ASSAULT_UNIT_TYPES = [
   "light_infantry", "militia", "spear", "heavy_infantry", "legionary", "hoplite",
   "persian_immortal", "iberian_caetrati", "germanic_shock_warrior", "anatolian_thureophoroi",
   "triarii_veteran", "punic_veteran", "gaesatae", "peltast", "silver_shield", "machimoi_phalangitai",
-  "sarmatian_longswordsmen", "briton_noble_spearmen", "kurgan_shieldbearer"
+  "sarmatian_longswordsmen", "briton_noble_spearmen", "kurgan_shieldbearer", "scandinavian_berserker", "scandinavian_spearmen"
 ] as const satisfies readonly BattleUnitType[];
 
 export const CAVALRY_UNIT_TYPES = [
@@ -333,7 +336,8 @@ export const roleWeights: Record<BattleUnitType, Partial<Record<keyof ArmyCompos
   mauryan_war_elephant: { mobile: 1 }, desert_raider: { mobile: 1 }, egyptian_war_chariot: { ranged: 0.5, mobile: 0.5 }, germanic_companion_cavalry: { mobile: 1 },
   horse_archer: { ranged: 0.5, mobile: 0.5 }, steppe_horse_archer: { ranged: 0.5, mobile: 0.5 }, steppe_cavalry: { spear: 0.3, mobile: 0.7 },
   iberian_caetrati: { line: 1 }, germanic_shock_warrior: { line: 1 }, sarmatian_longswordsmen: { line: 1 },
-  anatolian_thureophoroi: { line: 0.70, spear: 0.30 }
+  anatolian_thureophoroi: { line: 0.70, spear: 0.30 },
+  scandinavian_berserker: { line: 1 }, scandinavian_spearmen: { spear: 1 }, scandinavian_hunters: { ranged: 1 }
 };
 
 const spearCounterWeights: Partial<Record<BattleUnitType, number>> = {
@@ -344,7 +348,8 @@ const spearCounterWeights: Partial<Record<BattleUnitType, number>> = {
   silver_shield: 1,
   machimoi_phalangitai: 1,
   briton_noble_spearmen: 1,
-  steppe_cavalry: 0.3
+  steppe_cavalry: 0.3,
+  scandinavian_spearmen: 1
 };
 
 const cavalryCounterWeights: Partial<Record<BattleUnitType, number>> = {
@@ -459,12 +464,61 @@ function assessSteppeComposition(
   return { tier, ...COMPOSITION_TIERS[tier], label, dominantUnitShare, meaningfulUnitCount, roleShares };
 }
 
+function assessScandinavianComposition(
+  composition: BattleComposition,
+  context: ArmyCompositionContext
+): ArmyCompositionAssessment {
+  const quantities = unitKeys.map((key) => ({ key, quantity: Math.max(0, composition[key] ?? 0) })).filter((entry) => entry.quantity > 0);
+  const total = quantities.reduce((sum, entry) => sum + entry.quantity, 0);
+  const roleShares: ArmyCompositionAssessment["roleShares"] = { line: 0, spear: 0, ranged: 0, mobile: 0 };
+  if (total <= 0) return { tier: "LIMITED", ...COMPOSITION_TIERS.LIMITED, label: "Eksik Kuzey Kadrosu", dominantUnitShare: 0, meaningfulUnitCount: 0, roleShares };
+
+  const shares = quantities.map((entry) => ({ ...entry, share: entry.quantity / total }));
+  for (const entry of shares) {
+    for (const [role, weight] of Object.entries(roleWeights[entry.key]) as Array<[keyof typeof roleShares, number]>) {
+      roleShares[role] += entry.share * weight;
+    }
+  }
+  const shareOf = (key: BattleUnitType): number => Math.max(0, composition[key] ?? 0) / total;
+  const line = shareOf("scandinavian_berserker");
+  const spear = shareOf("scandinavian_spearmen");
+  const ranged = shareOf("scandinavian_hunters");
+  const scandinavianShare = line + spear + ranged;
+  const dominantUnitShare = Math.max(...shares.map((entry) => entry.share));
+  const meaningfulUnitCount = shares.filter((entry) => entry.share >= 0.10).length;
+
+  if (context === "SIEGE_RESTRICTED") {
+    if (dominantUnitShare >= 0.80 || scandinavianShare < 0.80) {
+      return { tier: "MONOTYPE", ...COMPOSITION_TIERS.MONOTYPE, label: "Dağınık Kuzey Ordusu", dominantUnitShare, meaningfulUnitCount, roleShares };
+    }
+    return { tier: "STANDARD", ...COMPOSITION_TIERS.STANDARD, label: "Kuzey Kuşatma Düzeni", dominantUnitShare, meaningfulUnitCount, roleShares };
+  }
+
+  let tier: ArmyCompositionTier;
+  let label: string;
+  if (dominantUnitShare >= 0.80 || scandinavianShare < 0.80) {
+    tier = "MONOTYPE"; label = "Dağınık Kuzey Ordusu";
+  } else if (inRange(line, 0.35, 0.45) && inRange(spear, 0.30, 0.40)
+    && inRange(ranged, 0.20, 0.30) && dominantUnitShare <= 0.50) {
+    tier = "EXCELLENT"; label = "Büyük Kalkan Duvarı";
+  } else if (inRange(line, 0.30, 0.55) && inRange(spear, 0.25, 0.45)
+    && inRange(ranged, 0.15, 0.35) && dominantUnitShare <= 0.60) {
+    tier = "BALANCED"; label = "Kuzey Savaş Düzeni";
+  } else if (line >= 0.10 && spear >= 0.10 && ranged >= 0.10 && dominantUnitShare <= 0.70) {
+    tier = "STANDARD"; label = "Karma Kuzey Ordusu";
+  } else {
+    tier = "LIMITED"; label = "Eksik Kuzey Düzeni";
+  }
+  return { tier, ...COMPOSITION_TIERS[tier], label, dominantUnitShare, meaningfulUnitCount, roleShares };
+}
+
 export function assessArmyComposition(
   composition: BattleComposition,
   context: ArmyCompositionContext = "FIELD",
   profile: ArmyCompositionProfile = "STANDARD"
 ): ArmyCompositionAssessment {
   if (profile === "STEPPE") return assessSteppeComposition(composition, context);
+  if (profile === "SCANDINAVIAN") return assessScandinavianComposition(composition, context);
   const quantities = unitKeys.map((key) => ({ key, quantity: Math.max(0, composition[key] ?? 0) })).filter((entry) => entry.quantity > 0);
   const total = quantities.reduce((sum, entry) => sum + entry.quantity, 0);
   const roleShares: ArmyCompositionAssessment["roleShares"] = { line: 0, spear: 0, ranged: 0, mobile: 0 };

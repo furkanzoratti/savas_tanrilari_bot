@@ -13,7 +13,7 @@ vi.mock("./game-service.js", async (importOriginal) => {
 import { planPlayerPurchases,playerArmyUnitCandidates,playerAutoPurchasePlanFingerprint } from "./player-auto-purchase-service.js";
 import { assessArmyComposition } from "../domain/battle.js";
 
-function documentFixture(options: { naval?: boolean; specialUnits?: string[]; steppe?: boolean } = {}) {
+function documentFixture(options: { naval?: boolean; specialUnits?: string[]; steppe?: boolean; scandinavian?: boolean } = {}) {
   return {
     guild: { discord_id: "guild", current_turn: 30 },
     country: { id: "country", name: "Test Ülkesi", active_formable_key: null },
@@ -22,6 +22,7 @@ function documentFixture(options: { naval?: boolean; specialUnits?: string[]; st
     militaryUsed: 0,
     specialUnitUnlocks: options.specialUnits ?? [],
     isSteppeConfederation: Boolean(options.steppe),
+    isScandinavianState: Boolean(options.scandinavian),
     settlements: [{
       id: "city", name: "Test Şehri", local_treasury: 100_000,
       is_conquered: false, isBesieged: false, is_coastal: Boolean(options.naval),
@@ -88,6 +89,14 @@ describe("oyuncu otomatik alım planlaması", () => {
     const specials = ["steppe_horse_archer","steppe_cavalry","kurgan_shieldbearer","oba_archer"];
     expect(playerArmyUnitCandidates("GENERAL", specials as any, true)).toEqual(specials);
     const plan = planPlayerPurchases("guild", 30, "GENERAL", documentFixture({ specialUnits: specials, steppe: true }));
+    expect(plan.unitActions.length).toBeGreaterThan(0);
+    expect(plan.unitActions.every((action) => specials.includes(action.unitType))).toBe(true);
+  });
+
+  it("İskandinav otomatik alımında yalnız elle açılan İskandinav birliklerini kullanır", () => {
+    const specials = ["scandinavian_berserker", "scandinavian_spearmen", "scandinavian_hunters"];
+    expect(playerArmyUnitCandidates("GENERAL", specials as any, false, true)).toEqual(specials);
+    const plan = planPlayerPurchases("guild", 30, "GENERAL", documentFixture({ specialUnits: specials, scandinavian: true }));
     expect(plan.unitActions.length).toBeGreaterThan(0);
     expect(plan.unitActions.every((action) => specials.includes(action.unitType))).toBe(true);
   });

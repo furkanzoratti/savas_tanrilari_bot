@@ -7,7 +7,7 @@ vi.hoisted(() => {
 });
 
 import { commandBuilders } from "./commands.js";
-import { characterAvailableForCommand, charactersEmbed, cultureChangeSettlementChoices } from "./character-ui.js";
+import { characterAvailableForCommand, characterEmbeds, charactersEmbed, cultureChangeSettlementChoices } from "./character-ui.js";
 
 const availableCharacter = {
   role:"DIPLOMAT", assignment:"NONE", operation_status:null, character_status:"ACTIVE",
@@ -206,6 +206,37 @@ describe("Akademi karakter komutları", () => {
     }]).toJSON();
     expect(embed.description).toContain("**Marcus** — Mareşal (+3)");
     expect(embed.description).not.toContain("**Marcus** — Komutan");
+  });
+
+  it("karakterlerim çıktısını komuta kadrosu ve her görev türü için ayrı forma böler",()=>{
+    const base={
+      country_id:"00000000-0000-4000-8000-000000000040",assignment:"NONE",assignment_ready_turn:null,
+      doctrine:null,commander_victories:0,specialization:null,specialization_progress:0,specialization_level:0,
+      character_status:"ACTIVE",is_admiral:false,is_marshal:false,unavailable_until_turn:null,
+      trained_settlement_name:null,assigned_settlement_name:null,assigned_country_name:null,assigned_army_name:null,
+      assigned_fleet_name:null,operation_type:null,operation_status:null,operation_progress:null,operation_goal:null,
+      target_country_name:null,target_settlement_name:null
+    };
+    const embeds=characterEmbeds("Persis",[
+      {...base,id:"marshal",name:"Alpyne",role:"COMMANDER",skill_bonus:1,is_marshal:true},
+      {...base,id:"commander",name:"Artaban",role:"COMMANDER",skill_bonus:2},
+      {...base,id:"admiral",name:"Mithra",role:"COMMANDER",skill_bonus:1,is_admiral:true},
+      {...base,id:"diplomat",name:"Roxana",role:"DIPLOMAT",skill_bonus:2},
+      {...base,id:"spy",name:"Spitamenes",role:"SPY",skill_bonus:1},
+      {...base,id:"merchant",name:"Bagabuxsa",role:"MERCHANT",skill_bonus:0},
+      {...base,id:"missionary",name:"Anahita",role:"MISSIONARY",skill_bonus:1}
+    ] as any,{academies:10,characters:7,pending:0,capacity:50}).map((embed)=>embed.toJSON());
+
+    expect(embeds.map((embed)=>embed.title)).toEqual([
+      "🎓 Persis • Komuta Kadrosu","🎓 Persis • Amiraller","🎓 Persis • Diplomatlar",
+      "🎓 Persis • Casuslar","🎓 Persis • Tüccarlar","🎓 Persis • Misyonerler"
+    ]);
+    expect(embeds[0]?.description).toContain("Akademi Kapasitesi");
+    expect(embeds[0]?.description).toContain("Alpyne");
+    expect(embeds[0]?.description).toContain("Artaban");
+    expect(embeds[0]?.description).not.toContain("Roxana");
+    expect(embeds[2]?.description).toContain("Roxana");
+    expect(embeds[2]?.description).not.toContain("Spitamenes");
   });
 
   it("tutsak casusun tutulduğu şehri açıkça gösterir",()=>{

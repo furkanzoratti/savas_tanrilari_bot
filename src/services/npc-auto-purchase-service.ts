@@ -1,5 +1,5 @@
 import { BUILDINGS, SHIPS, UNITS, portShipCapacity, shipHarborRequirement } from "../domain/catalog.js";
-import { assessArmyComposition, type BattleComposition, type BattleUnitType } from "../domain/battle.js";
+import { assessArmyComposition, type ArmyCompositionProfile, type BattleComposition, type BattleUnitType } from "../domain/battle.js";
 import { isAcquisitionTurn } from "../domain/mobilization.js";
 import {
   NPC_AUTO_PURCHASE_DOCTRINES, NPC_UNIT_PURCHASE_BATCH, npcBuildingLimit, npcBuildingPriority, npcDevelopmentOnly, npcPrioritizesShips, npcRecruitsUnits,
@@ -13,6 +13,7 @@ import {
 import { formableModifiers } from "../domain/formable-countries.js";
 import { shipCostMultiplier } from "../domain/resources.js";
 import { STEPPE_ARMY_UNIT_TYPES } from "../domain/steppe-army.js";
+import { SCANDINAVIAN_ARMY_UNIT_TYPES } from "../domain/scandinavian-army.js";
 
 export type NpcAutoPurchaseScope = "ALL_PLAYERLESS" | "INCLUDED_ONLY";
 export type NpcCountryOverrideStatus = "AUTO" | "INCLUDE" | "EXCLUDE";
@@ -172,9 +173,9 @@ function currentArmyComposition(doc: CountryDocument): BattleComposition {
   return composition;
 }
 
-function compositionDistance(composition: BattleComposition, steppe = false): number {
-  const assessment = assessArmyComposition(composition, "FIELD", steppe ? "STEPPE" : "STANDARD");
-  if (steppe) {
+function compositionDistance(composition: BattleComposition, profile: ArmyCompositionProfile = "STANDARD"): number {
+  const assessment = assessArmyComposition(composition, "FIELD", profile);
+  if (profile !== "STANDARD") {
     const tierScore = { EXCELLENT: 0, BALANCED: 0.1, STANDARD: 0.25, LIMITED: 0.6, MONOTYPE: 1 }[assessment.tier];
     return tierScore + Math.pow(Math.max(0, assessment.dominantUnitShare - 0.55), 2);
   }
@@ -195,14 +196,14 @@ function orderedCompositionNeeds(
   composition: BattleComposition,
   candidates: readonly PurchasableUnitType[],
   qualityMixTarget?: number,
-  steppe = false
+  profile: ArmyCompositionProfile = "STANDARD"
 ): PurchasableUnitType[] {
   return [...candidates].sort((left, right) => {
     const leftProjected = { ...composition, [left]: (composition[left] ?? 0) + NPC_UNIT_PURCHASE_BATCH };
     const rightProjected = { ...composition, [right]: (composition[right] ?? 0) + NPC_UNIT_PURCHASE_BATCH };
-    const leftScore = compositionDistance(leftProjected, steppe)
+    const leftScore = compositionDistance(leftProjected, profile)
       + (qualityMixTarget === undefined ? 0 : qualityMixDistance(leftProjected, qualityMixTarget) * 0.10);
-    const rightScore = compositionDistance(rightProjected, steppe)
+    const rightScore = compositionDistance(rightProjected, profile)
       + (qualityMixTarget === undefined ? 0 : qualityMixDistance(rightProjected, qualityMixTarget) * 0.10);
     const scoreDifference = leftScore - rightScore;
     if (Math.abs(scoreDifference) > 1e-9) return scoreDifference;
@@ -337,16 +338,21 @@ export function planCountryPurchases(
   const baseUnitSet = new Set<PurchasableUnitType>(BASE_PURCHASABLE_UNITS);
   const defaultCandidates = doc.isSteppeConfederation
     ? [...STEPPE_ARMY_UNIT_TYPES] as PurchasableUnitType[]
+    : doc.isScandinavianState
+      ? SCANDINAVIAN_ARMY_UNIT_TYPES.filter((unitType) => unlockedSpecials.includes(unitType)) as PurchasableUnitType[]
     : [...BASE_PURCHASABLE_UNITS, ...unlockedSpecials.filter((unitType) => !baseUnitSet.has(unitType))];
   const unlockedSet = new Set<PurchasableUnitType>(doc.isSteppeConfederation
     ? STEPPE_ARMY_UNIT_TYPES
+    : doc.isScandinavianState
+      ? SCANDINAVIAN_ARMY_UNIT_TYPES.filter((unitType) => unlockedSpecials.includes(unitType))
     : [...BASE_PURCHASABLE_UNITS, ...unlockedSpecials]);
   const unitCandidates = (options.unitCandidates ?? defaultCandidates).filter((unitType) => unlockedSet.has(unitType));
+  const compositionProfile: ArmyCompositionProfile = doc.isSteppeConfederation ? "STEPPE" : doc.isScandinavianState ? "SCANDINAVIAN" : "STANDARD";
   const composition = options.compositionBaseline === "EMPTY" ? {} : currentArmyComposition(doc);
   const grouped = new Map<string, UnitAction>();
   while (remainingPersonnel >= NPC_UNIT_PURCHASE_BATCH && remainingBudget > 0) {
     let selected: { settlement: CountryDocument["settlements"][number]; unitType: PurchasableUnitType; cost: number } | undefined;
-    for (const unitType of orderedCompositionNeeds(composition, unitCandidates, options.qualityMixTarget, doc.isSteppeConfederation)) {
+    for (const unitType of orderedCompositionNeeds(composition, unitCandidates, options.qualityMixTarget, compositionProfile)) {
       const eligible = doc.settlements
         .filter((settlement) => (settlementCapacity.get(settlement.id) ?? 0) >= NPC_UNIT_PURCHASE_BATCH)
         .map((settlement) => ({

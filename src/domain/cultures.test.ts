@@ -38,4 +38,13 @@ describe("Hint kültür grupları", () => {
     expect(CULTURE_GROUPS.TIBETAN.label).toBe("Tibetli");
     expect(CULTURE_GROUPS.QIANG.label).toBe("Qiang");
   });
+
+  it("İskandinav kültür gruplarını komut seçimlerine açar",()=>{
+    expect(CULTURE_GROUPS.CIMBRIC.label).toBe("Kimbri");
+    expect(CULTURE_GROUPS.CHAEDINIAN.label).toBe("Hedin");
+    expect(CULTURE_GROUPS.GAUT_SUIONIC.label).toBe("Gaut–Suion");
+    expect(CULTURE_CHOICES.map((choice)=>choice.value)).toEqual(expect.arrayContaining([
+      "CIMBRIC","CHAEDINIAN","GAUT_SUIONIC"
+    ]));
+  });
 });

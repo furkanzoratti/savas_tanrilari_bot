@@ -68,6 +68,7 @@ interface ArmyBaseRow {
   created_turn: number; current_turn: number; army_composition_activation_turn: number | null;
   active_battle_id: string | null;
   is_steppe_confederation: boolean;
+  is_scandinavian_state: boolean;
 }
 
 function mergeComposition(rows: ArmyUnitAllocation[]): BattleComposition {
@@ -85,6 +86,7 @@ async function loadArmy(client: DbClient, armyId: string, countryId?: string): P
             cc.name AS commander_name,COALESCE(cc.skill_bonus,0)::integer AS commander_skill_bonus,
             a.created_turn,g.current_turn,g.army_composition_activation_turn,
             c.is_steppe_state AS is_steppe_confederation,
+            c.is_scandinavian_state,
             (SELECT b.id FROM battle_army_assignments baa JOIN battles b ON b.id=baa.battle_id
               WHERE baa.army_id=a.id AND b.status NOT IN ('FINISHED','CANCELLED') LIMIT 1) AS active_battle_id
        FROM armies a JOIN countries c ON c.id=a.country_id JOIN guilds g ON g.discord_id=a.guild_id
@@ -122,7 +124,7 @@ async function loadArmy(client: DbClient, armyId: string, countryId?: string): P
     enhancedSiegeComposition,
     composition,
     total: Object.values(composition).reduce<number>((sum, value) => sum + Number(value ?? 0), 0),
-    assessment: assessArmyComposition(composition, "FIELD", army.is_steppe_confederation ? "STEPPE" : "STANDARD"),
+    assessment: assessArmyComposition(composition, "FIELD", army.is_steppe_confederation ? "STEPPE" : army.is_scandinavian_state ? "SCANDINAVIAN" : "STANDARD"),
     composition_active: activationTurn === null || Number(army.current_turn) >= activationTurn,
     composition_activation_turn: activationTurn
   };
