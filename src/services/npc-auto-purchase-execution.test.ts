@@ -112,6 +112,14 @@ describe("NPC otomatik alım tekrar çalıştırma", () => {
     expect(mocks.release).toHaveBeenLastCalledWith(false);
   });
 
+  it("panel için yalnız seçilen NPC devletin planını çalıştırabilir", async () => {
+    const result = await npcAutoPurchaseService.execute("guild", "gm", "npc-country");
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.countryId).toBe("npc-country");
+    expect(mocks.document).toHaveBeenCalledWith("npc-country");
+  });
+
   it("kilit açılamazsa bağlantıyı havuza kilitli olarak geri bırakmaz", async () => {
     mocks.lockQuery.mockImplementation(async (sql: string) => {
       if (sql.includes("pg_try_advisory_lock")) return { rows: [{ locked: true }], rowCount: 1 };

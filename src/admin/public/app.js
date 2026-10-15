@@ -183,7 +183,7 @@ function toast(message, kind = "success") {
 const routeTitles = {
   overview: "Genel Bakış", workspace: "Çalışma Alanım", countries: "Devletler", settlements: "Yerleşkeler", armies: "Ordular & Filolar",
   characters: "Karakterler", dynasties: "Hanedanlar", "roman-politics": "Roma Siyaseti",
-  "steppe-politics": "Bozkır Kurultayı", "diplomacy-control": "Diplomasi & Ticaret", assignments: "Görevler", "gm-operations": "Rehberli İşlemler", "bulk-operations": "Toplu İşlemler", "economy-control": "Ekonomi & Üretim", battles: "Savaşlar",
+  "steppe-politics": "Bozkır Kurultayı", "diplomacy-control": "Diplomasi & Ticaret", assignments: "Görevler", "gm-operations": "Rehberli İşlemler", "bulk-operations": "Toplu İşlemler", "economy-control": "Ekonomi & Üretim", "npc-purchases": "NPC Alımları", battles: "Savaşlar",
   rebellions: "İsyanlar", reports: "Raporlar", health: "Oyun Sağlığı", "data-control": "Tam Yetki", audit: "İşlem Geçmişi"
 };
 function loading() { page.innerHTML = '<div class="loading-shell"><div class="skeleton skeleton-title"></div><div class="loading-grid"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div><div class="skeleton skeleton-content"></div></div>'; }
@@ -1247,6 +1247,102 @@ async function economyControlPage(signal) {
   document.querySelectorAll("[data-production-settlement]").forEach((button) => button.addEventListener("click", () => settlementDetail(button.dataset.productionSettlement).catch(showPageError)));
 }
 
+function npcDoctrineOptions(data, current, allowDefault = false) {
+  const options = Object.entries(data.doctrines).map(([value, doctrine]) =>
+    `<option value="${escapeHtml(value)}" ${selected(value, current)}>${escapeHtml(doctrine.label)}</option>`
+  ).join("");
+  return `${allowDefault ? `<option value="" ${current ? "" : "selected"}>Genel doktrini kullan</option>` : ""}${options}`;
+}
+
+function npcPlanActionCount(plan) {
+  return (plan.buildingActions || []).length + (plan.shipActions || []).length + (plan.unitActions || []).length;
+}
+
+function npcPurchasePlanMarkup(plan, doctrineLabel) {
+  const buildings = (plan.buildingActions || []).map((action) =>
+    `<div class="npc-plan-line building"><span><b>${escapeHtml(action.settlementName)}</b><small>${action.targetLevel === 1 ? "Yeni bina" : "Seviye yükseltme"}</small></span><strong>${escapeHtml(action.buildingName)} · Sv${number(action.targetLevel)}</strong><em>${money(action.cost)}</em></div>`
+  ).join("");
+  const ships = (plan.shipActions || []).map((action) =>
+    `<div class="npc-plan-line ship"><span><b>${escapeHtml(action.settlementName)}</b><small>Gemi üretimi</small></span><strong>${number(action.quantity)} × ${escapeHtml(humanKey(action.shipType))}</strong><em>${money(action.cost)}</em></div>`
+  ).join("");
+  const units = (plan.unitActions || []).map((action) =>
+    `<div class="npc-plan-line unit"><span><b>${escapeHtml(action.settlementName)}</b><small>Asker alımı</small></span><strong>${number(action.quantity)} ${escapeHtml(humanKey(action.unitType))}</strong><em>${money(action.cost)}</em></div>`
+  ).join("");
+  const actions = buildings + ships + units;
+  const notes = (plan.notes || []).map((note) => `<span>• ${escapeHtml(note)}</span>`).join("");
+  return `<article class="npc-plan-card"><header><div><span class="pill neutral">${escapeHtml(doctrineLabel)}</span><h3>${escapeHtml(plan.countryName)}</h3><small>${number(npcPlanActionCount(plan))} emir · Başlangıç ${money(plan.startingTreasury)}</small></div><div><small>Planlanan harcama</small><strong>${money(plan.plannedCost)}</strong><em>Bütçe sınırı ${money(plan.spendLimit)}</em></div></header><div class="npc-plan-actions">${actions || '<div class="compact-empty muted">Uygulanabilir yeni alım bulunmadı.</div>'}</div>${notes ? `<footer>${notes}</footer>` : ""}</article>`;
+}
+
+function openNpcPurchaseConfig(data) {
+  const config = data.config;
+  openEditor("NPC otomatik alım ayarları", `Tur ${number(data.guild.currentTurn)} · ${number(data.countries.length)} oyuncusuz devlet`, `<div class="preview-warning"><strong>Aynı oyun kuralları kullanılacak</strong><span>Bütçe, yerel hazine, bina slotu, inşaat kapasitesi, askerî limit ve özel birlik erişimleri her uygulamada yeniden doğrulanır.</span></div><div class="form-grid"><label>Sistem durumu<select id="npc-config-enabled"><option value="true" ${selected(true, config.enabled)}>Açık</option><option value="false" ${selected(false, config.enabled)}>Kapalı</option></select></label><label>Varsayılan doktrin<select id="npc-config-doctrine">${npcDoctrineOptions(data, config.doctrine)}</select></label><label>Harcama bütçesi (%)<input id="npc-config-budget" type="number" min="1" max="100" step="1" value="${Number(config.budgetPercent)}" required><small>Toplam yerel hazinenin en fazla ne kadarı kullanılabilir.</small></label><label>Askerî hedef doluluk (%)<input id="npc-config-fill" type="number" min="1" max="100" step="1" value="${Number(config.targetFillPercent)}" required></label><label>Korunacak asgari hazine<input id="npc-config-reserve" type="number" min="0" step="1" value="${Number(config.minimumReserve)}" required></label><label>Kapsam<select id="npc-config-scope"><option value="ALL_PLAYERLESS" ${selected("ALL_PLAYERLESS", config.scope)}>Tüm oyuncusuz devletler</option><option value="INCLUDED_ONLY" ${selected("INCLUDED_ONLY", config.scope)}>Yalnız elle dahil edilenler</option></select></label></div>`, async () => {
+    await api("/api/admin/npc-purchases/config", { method: "PATCH", body: JSON.stringify({
+      enabled: document.getElementById("npc-config-enabled").value === "true",
+      doctrine: document.getElementById("npc-config-doctrine").value,
+      budgetPercent: Number(document.getElementById("npc-config-budget").value),
+      targetFillPercent: Number(document.getElementById("npc-config-fill").value),
+      minimumReserve: Number(document.getElementById("npc-config-reserve").value),
+      scope: document.getElementById("npc-config-scope").value
+    }) });
+    closeEditor(); toast("NPC otomatik alım ayarları güncellendi."); await refreshKeepingScroll(npcPurchasesPage);
+  });
+  setEditorSaveLabel("Ayarları kaydet");
+}
+
+function openNpcCountryPurchaseSettings(data, country) {
+  openEditor("NPC devlet alım ayarı", country.name, `<div class="npc-country-summary"><span><small>Yerel hazine</small><strong>${money(country.localTreasury)}</strong></span><span><small>Yerleşke</small><strong>${number(country.settlementCount)}</strong></span><span><small>Etkin doktrin</small><strong>${escapeHtml(data.doctrines[country.effectiveDoctrine]?.label || country.effectiveDoctrine)}</strong></span></div><div class="form-grid"><label>Kapsam durumu<select id="npc-country-status"><option value="AUTO" ${selected("AUTO", country.overrideStatus)}>Genel ayara uy</option><option value="INCLUDE" ${selected("INCLUDE", country.overrideStatus)}>Daima kapsama dahil</option><option value="EXCLUDE" ${selected("EXCLUDE", country.overrideStatus)}>Kapsam dışında bırak</option></select></label><label>Özel doktrin<select id="npc-country-doctrine">${npcDoctrineOptions(data, country.overrideDoctrine, true)}</select></label></div><div class="preview-warning"><strong>Özel doktrin isteğe bağlıdır.</strong><span>Boş bırakılırsa genel doktrin kullanılır. “Daima kapsama dahil”, yalnız elle dahil edilen kapsamda bu devleti çalıştırır.</span></div>`, async () => {
+    const doctrine = document.getElementById("npc-country-doctrine").value;
+    await api(`/api/admin/npc-purchases/countries/${country.id}`, { method: "PATCH", body: JSON.stringify({
+      status: document.getElementById("npc-country-status").value,
+      doctrine: doctrine || null
+    }) });
+    closeEditor(); toast(`${country.name} alım ayarı güncellendi.`); await refreshKeepingScroll(npcPurchasesPage);
+  });
+  setEditorSaveLabel("Devlet ayarını kaydet");
+}
+
+async function openNpcPurchasePreview(data, countryId) {
+  const plans = await api("/api/npc-purchases/preview", { method: "POST", body: JSON.stringify(countryId ? { countryId } : {}) });
+  const actionCount = plans.reduce((sum, plan) => sum + npcPlanActionCount(plan), 0);
+  const totalCost = plans.reduce((sum, plan) => sum + Number(plan.plannedCost || 0), 0);
+  const content = `<div class="preview-warning"><strong>Henüz hiçbir alım uygulanmadı.</strong><span>Onay anında bütün hazine, kapasite, slot ve erişim koşulları yeniden hesaplanır. Uygunluğunu kaybeden emirler güvenle hata listesine alınır.</span></div><div class="npc-preview-totals"><span><small>Devlet</small><strong>${number(plans.length)}</strong></span><span><small>Toplam emir</small><strong>${number(actionCount)}</strong></span><span><small>Planlanan bütçe</small><strong>${money(totalCost)}</strong></span></div><div class="npc-plan-list">${plans.map((plan) => npcPurchasePlanMarkup(plan, data.doctrines[plan.doctrine]?.label || plan.doctrine)).join("") || '<div class="empty">Kapsama giren NPC devlet bulunmuyor.</div>'}</div>`;
+  const canExecute = data.config.enabled && actionCount > 0;
+  openEditor(countryId ? "NPC devlet alım planı" : "Toplu NPC alım planı", `${number(actionCount)} emir · ${money(totalCost)}`, content, canExecute ? async () => {
+    const results = await api("/api/admin/npc-purchases/execute", { method: "POST", body: JSON.stringify(countryId ? { countryId } : {}) });
+    const spent = results.reduce((sum, result) => sum + Number(result.actualCost || 0), 0);
+    const failed = results.reduce((sum, result) => sum + (result.errors || []).length, 0);
+    closeEditor();
+    toast(`${number(results.length)} NPC devlet işlendi · ${money(spent)} harcandı${failed ? ` · ${number(failed)} emir uygulanamadı` : ""}.`, failed ? "error" : "success");
+    await refreshKeepingScroll(npcPurchasesPage);
+  } : undefined);
+  editorModal.querySelector(".modal").classList.add("wide");
+  if (canExecute) setEditorSaveLabel(countryId ? "Bu devletin alımlarını uygula" : "Tüm planı uygula");
+}
+
+async function npcPurchasesPage() {
+  setActiveRoute("npc-purchases"); loading();
+  const data = await api("/api/npc-purchases");
+  const included = data.countries.filter((country) => country.included).length;
+  const latestRuns = data.countries.filter((country) => country.lastRun?.turn === data.guild.currentTurn).length;
+  const acquisitionState = data.guild.acquisitionTurn ? "Alım turu açık" : `Sonraki uygun tur: ${Math.ceil((data.guild.currentTurn + 1) / data.guild.acquisitionInterval) * data.guild.acquisitionInterval}`;
+  page.innerHTML = `<div class="page-head npc-purchase-hero"><div><span class="overview-kicker">NPC EKONOMİ VE ÜRETİM MASASI</span><h1>NPC Devlet Alımları</h1><p>Oyuncusuz devletlerin bina kurma, bina yükseltme, asker ve gemi alımlarını aynı otomatik planlama kurallarıyla önizle ve uygula.</p></div><div class="actions"><button class="button" data-npc-config>⚙ Genel ayarlar</button><button class="button primary" data-npc-preview-all ${data.guild.acquisitionTurn ? "" : "disabled"}>Tümünü önizle</button></div></div><section class="kpi-grid"><div class="card kpi"><span>Oyuncusuz devlet</span><strong>${number(data.countries.length)}</strong><small>${number(included)} devlet kapsamda</small></div><div class="card kpi"><span>Sistem</span><strong>${data.config.enabled ? "Açık" : "Kapalı"}</strong><small>${escapeHtml(data.doctrines[data.config.doctrine]?.label || data.config.doctrine)}</small></div><div class="card kpi"><span>Tur durumu</span><strong>${data.guild.acquisitionTurn ? "Uygun" : "Bekliyor"}</strong><small>${escapeHtml(acquisitionState)}</small></div><div class="card kpi"><span>Bu tur çalıştırılan</span><strong>${number(latestRuns)}</strong><small>Tekrar çalıştırma desteklenir</small></div></section>${!data.config.enabled ? '<section class="card npc-purchase-alert"><strong>Otomatik alım şu anda kapalı.</strong><span>Planları inceleyebilirsin; uygulamak için Genel ayarlardan sistemi aç.</span></section>' : ""}<section class="card npc-purchase-toolbar"><label>Devlet ara<input id="npc-purchase-search" placeholder="Devlet adı…" autocomplete="off"></label><label>Görünüm<select id="npc-purchase-filter"><option value="ALL">Tüm NPC devletleri</option><option value="INCLUDED">Kapsamdakiler</option><option value="EXCLUDED">Kapsam dışındakiler</option><option value="RAN">Bu tur çalıştırılanlar</option></select></label><div><span>Varsayılan harcama</span><strong>%${number(data.config.budgetPercent)}</strong><small>${money(data.config.minimumReserve)} rezerv · %${number(data.config.targetFillPercent)} askerî doluluk</small></div></section><section class="npc-country-grid">${data.countries.map((country) => { const doctrine = data.doctrines[country.effectiveDoctrine]; const lastRun = country.lastRun; return `<article class="card npc-country-card ${country.included ? "" : "excluded"}" data-npc-country-card data-name="${escapeHtml(country.name.toLocaleLowerCase("tr-TR"))}" data-included="${country.included}" data-ran="${lastRun?.turn === data.guild.currentTurn}"><header><div><span class="pill ${country.included ? "" : "neutral"}">${country.included ? "Kapsamda" : "Kapsam dışı"}</span><h3>${escapeHtml(country.name)}</h3><small>${number(country.settlementCount)} yerleşke · ${number(country.population)} nüfus</small></div><button class="button compact" data-npc-country-settings="${country.id}">Ayarla</button></header><div class="npc-country-finance"><span><small>Yerel hazine</small><strong>${money(country.localTreasury)}</strong></span><span><small>Etkin doktrin</small><strong>${escapeHtml(doctrine?.label || country.effectiveDoctrine)}</strong></span></div><p>${escapeHtml(doctrine?.description || "Özel NPC alım doktrini")}</p><footer><span>${lastRun ? `Son işlem: Tur ${number(lastRun.turn)} · ${escapeHtml(lastRun.status)} · ${money(lastRun.actualCost)}` : "Henüz çalıştırılmadı"}</span><button class="button primary compact" data-npc-country-preview="${country.id}" ${country.included && data.guild.acquisitionTurn ? "" : "disabled"}>Planı aç</button></footer></article>`; }).join("") || '<div class="card empty">Oyuncusuz aktif devlet bulunmuyor.</div>'}</section>`;
+  document.querySelector("[data-npc-config]").addEventListener("click", () => openNpcPurchaseConfig(data));
+  document.querySelector("[data-npc-preview-all]")?.addEventListener("click", () => openNpcPurchasePreview(data).catch((error) => toast(error.message, "error")));
+  document.querySelectorAll("[data-npc-country-settings]").forEach((button) => button.addEventListener("click", () => openNpcCountryPurchaseSettings(data, data.countries.find((country) => country.id === button.dataset.npcCountrySettings))));
+  document.querySelectorAll("[data-npc-country-preview]").forEach((button) => button.addEventListener("click", () => openNpcPurchasePreview(data, button.dataset.npcCountryPreview).catch((error) => toast(error.message, "error"))));
+  const applyFilter = () => {
+    const query = document.getElementById("npc-purchase-search").value.trim().toLocaleLowerCase("tr-TR");
+    const filter = document.getElementById("npc-purchase-filter").value;
+    document.querySelectorAll("[data-npc-country-card]").forEach((card) => {
+      const matchesName = !query || card.dataset.name.includes(query);
+      const matchesFilter = filter === "ALL" || filter === "INCLUDED" && card.dataset.included === "true" || filter === "EXCLUDED" && card.dataset.included === "false" || filter === "RAN" && card.dataset.ran === "true";
+      card.hidden = !(matchesName && matchesFilter);
+    });
+  };
+  document.getElementById("npc-purchase-search").addEventListener("input", applyFilter);
+  document.getElementById("npc-purchase-filter").addEventListener("change", applyFilter);
+}
+
 function compositionAmount(composition) {
   return Object.values(composition || {}).reduce((sum, value) => sum + Math.max(0, Number(value) || 0), 0);
 }
@@ -2227,6 +2323,7 @@ async function navigate(route) {
     if (route === "gm-operations") return await guidedOperationsPage();
     if (route === "bulk-operations") return await bulkOperationsPage();
     if (route === "economy-control") return await economyControlPage(controller.signal);
+    if (route === "npc-purchases") return await npcPurchasesPage();
     if (route === "battles") return await battlesPage();
     if (route === "rebellions") return await rebellionsPage();
     if (route === "reports") return await reportsPage(controller.signal);
@@ -2320,6 +2417,7 @@ const paletteCommands = [
   { route: "bulk-operations", label: "Toplu İşlemler", detail: "Birden fazla oyun kaydını tek güvenli işlemde güncelle" },
   { route: "diplomacy-control", label: "Diplomasi & Ticaret", detail: "İttifak, vassallık, savaş, pakt ve ticaret bağlantılarını yönet" },
   { route: "economy-control", label: "Ekonomi & Üretim", detail: "Hazine, gelir ve üretim kuyruklarını kontrol et" },
+  { route: "npc-purchases", label: "NPC Alımları", detail: "Oyuncusuz devletlerin bina, asker ve gemi alımlarını yönet" },
   { route: "reports", label: "Raporlar & Karşılaştırma", detail: "Devletleri karşılaştır ve mali eğilimleri incele" },
   { route: "battles", label: "Savaşlar", detail: "Aktif savaş ve kuşatmaları aç" },
   { route: "rebellions", label: "İsyanlar", detail: "İsyan durumlarını incele" },

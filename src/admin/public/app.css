@@ -616,6 +616,45 @@ textarea { resize: vertical; line-height: 1.45; }
 .toast { position: fixed; right: 22px; bottom: 22px; z-index: 30; max-width: 420px; padding: 13px 15px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); box-shadow: 0 16px 50px var(--shadow); }
 .toast.success { border-color: var(--accent); }
 .toast.error { border-color: var(--danger); }
+.npc-purchase-hero { background: linear-gradient(130deg,rgba(128,82,56,.12),rgba(34,52,85,.08)); }
+.npc-purchase-alert { display: flex; justify-content: space-between; align-items: center; gap: 18px; border-color: var(--warning); background: color-mix(in srgb,var(--warning) 8%,var(--surface)); }
+.npc-purchase-alert strong,.npc-purchase-alert span { display: block; }
+.npc-purchase-alert span { color: var(--muted); font-size: 11px; }
+.npc-purchase-toolbar { display: grid; grid-template-columns: minmax(220px,1fr) 220px minmax(230px,.8fr); align-items: end; gap: 14px; margin-bottom: 14px; }
+.npc-purchase-toolbar > div { padding: 9px 12px; border-left: 3px solid var(--accent); }
+.npc-purchase-toolbar > div span,.npc-purchase-toolbar > div small,.npc-purchase-toolbar > div strong { display: block; }
+.npc-purchase-toolbar > div span,.npc-purchase-toolbar > div small { color: var(--muted); font-size: 10px; }
+.npc-purchase-toolbar > div strong { margin: 3px 0; font-size: 17px; }
+.npc-country-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
+.npc-country-card { display: grid; gap: 12px; transition: opacity .18s ease,border-color .18s ease; }
+.npc-country-card.excluded { opacity: .72; }
+.npc-country-card > header,.npc-country-card > footer,.npc-plan-card > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.npc-country-card h3,.npc-plan-card h3 { margin: 7px 0 3px; font-size: 17px; }
+.npc-country-card header small,.npc-country-card footer span,.npc-plan-card header small,.npc-plan-card header em { color: var(--muted); font-size: 10px; font-style: normal; }
+.npc-country-card > p { min-height: 34px; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.npc-country-card > footer { align-items: center; padding-top: 10px; border-top: 1px solid var(--line); }
+.npc-country-finance,.npc-country-summary,.npc-preview-totals { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+.npc-country-finance > span,.npc-country-summary > span,.npc-preview-totals > span { padding: 9px 11px; border-radius: 8px; background: var(--bg); }
+.npc-country-finance small,.npc-country-finance strong,.npc-country-summary small,.npc-country-summary strong,.npc-preview-totals small,.npc-preview-totals strong { display: block; }
+.npc-country-finance small,.npc-country-summary small,.npc-preview-totals small { margin-bottom: 4px; color: var(--muted); font-size: 9px; }
+.npc-country-finance strong,.npc-country-summary strong { font-size: 11px; }
+.npc-country-summary { grid-template-columns: repeat(3,minmax(0,1fr)); margin-bottom: 14px; }
+.npc-preview-totals { grid-template-columns: repeat(3,minmax(0,1fr)); margin: 14px 0; }
+.npc-preview-totals strong { font-size: 18px; }
+.npc-plan-list { display: grid; gap: 12px; max-height: 55vh; overflow: auto; padding-right: 4px; }
+.npc-plan-card { overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.npc-plan-card > header { padding: 13px; background: color-mix(in srgb,var(--surface-2) 62%,transparent); }
+.npc-plan-card > header > div:last-child { text-align: right; }
+.npc-plan-card > header > div:last-child small,.npc-plan-card > header > div:last-child strong,.npc-plan-card > header > div:last-child em { display: block; }
+.npc-plan-card > header > div:last-child strong { margin: 4px 0; font-size: 16px; }
+.npc-plan-actions { display: grid; gap: 1px; padding: 0 12px; }
+.npc-plan-line { display: grid; grid-template-columns: minmax(130px,.8fr) minmax(180px,1.2fr) auto; align-items: center; gap: 12px; padding: 10px 5px; border-top: 1px solid var(--line); }
+.npc-plan-line:first-child { border-top: 0; }
+.npc-plan-line b,.npc-plan-line small,.npc-plan-line strong { display: block; }
+.npc-plan-line small { margin-top: 2px; color: var(--muted); font-size: 9px; }
+.npc-plan-line strong,.npc-plan-line em { font-size: 11px; font-style: normal; }
+.npc-plan-line.building strong::before { content: "🏗 "; }.npc-plan-line.ship strong::before { content: "🚢 "; }.npc-plan-line.unit strong::before { content: "⚔ "; }
+.npc-plan-card > footer { display: grid; gap: 3px; padding: 10px 13px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; }
 @media (max-width: 900px) {
   .audit-toolbar { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .app-shell { grid-template-columns: 68px minmax(0, 1fr); }
@@ -653,6 +692,9 @@ textarea { resize: vertical; line-height: 1.45; }
   .diplomacy-priority-grid { grid-template-columns: 1fr; }
   .settlement-finance-list { grid-template-columns: 1fr; }
   .activity-strip { grid-template-columns: repeat(4,minmax(0,1fr)); }
+  .npc-country-grid { grid-template-columns: 1fr; }
+  .npc-purchase-toolbar { grid-template-columns: 1fr 1fr; }
+  .npc-purchase-toolbar > div { grid-column: 1 / -1; }
 }
 @media (max-width: 620px) {
   .audit-item { grid-template-columns: 12px minmax(0,1fr); }
@@ -712,4 +754,9 @@ textarea { resize: vertical; line-height: 1.45; }
   .comparison-side.second i::after { margin-left: 0; }
   .turn-flow { grid-template-columns: 52px minmax(0,1fr); }
   .turn-flow > em { grid-column: 2; text-align: left; }
+  .npc-purchase-toolbar,.npc-country-summary,.npc-preview-totals { grid-template-columns: 1fr; }
+  .npc-purchase-toolbar > div { grid-column: auto; }
+  .npc-plan-line { grid-template-columns: 1fr auto; }
+  .npc-plan-line > strong { grid-column: 1; }
+  .npc-plan-line > em { grid-column: 2; grid-row: 1 / span 2; }
 }

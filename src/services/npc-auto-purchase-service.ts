@@ -79,6 +79,33 @@ export interface NpcCountryPurchaseResult extends NpcCountryPurchasePlan {
   errors: string[];
 }
 
+export interface NpcAutoPurchaseDashboardCountry {
+  id: string;
+  name: string;
+  treasury: number;
+  localTreasury: number;
+  population: number;
+  settlementCount: number;
+  overrideStatus: NpcCountryOverrideStatus;
+  overrideDoctrine: NpcAutoPurchaseDoctrine | null;
+  effectiveDoctrine: NpcAutoPurchaseDoctrine;
+  included: boolean;
+  lastRun: {
+    turn: number;
+    status: string;
+    attemptCount: number;
+    completedAt: string | null;
+    actualCost: number;
+  } | null;
+}
+
+export interface NpcAutoPurchaseDashboard {
+  guild: { currentTurn: number; acquisitionInterval: number; acquisitionTurn: boolean };
+  config: NpcAutoPurchaseConfig;
+  doctrines: typeof NPC_AUTO_PURCHASE_DOCTRINES;
+  countries: NpcAutoPurchaseDashboardCountry[];
+}
+
 const DEFAULT_CONFIG: Omit<NpcAutoPurchaseConfig, "guildId"> = {
   enabled: false,
   doctrine: "FULL_BUILDING_ARMY",
@@ -413,11 +440,12 @@ async function countryOverrides(guildId: string): Promise<Map<string, { status: 
   return new Map(rows.map((row) => [row.country_id, { status: row.status, doctrine: row.doctrine }]));
 }
 
-async function eligibleCountryPlans(guildId: string, config: NpcAutoPurchaseConfig): Promise<NpcCountryPurchasePlan[]> {
+async function eligibleCountryPlans(guildId: string, config: NpcAutoPurchaseConfig, onlyCountryId?: string): Promise<NpcCountryPurchasePlan[]> {
   const countries = await gameService.listCountries(guildId);
   const overrides = await countryOverrides(guildId);
   const plans: NpcCountryPurchasePlan[] = [];
   for (const country of countries) {
+    if (onlyCountryId && country.id !== onlyCountryId) continue;
     const override = overrides.get(country.id);
     if (override?.status === "EXCLUDE") continue;
     if (config.scope === "INCLUDED_ONLY" && override?.status !== "INCLUDE") continue;
@@ -437,6 +465,75 @@ function errorMessage(error: unknown): string {
 }
 
 export const npcAutoPurchaseService = {
+  async dashboard(guildId: string): Promise<NpcAutoPurchaseDashboard> {
+    const [config, guild, rows] = await Promise.all([
+      this.config(guildId),
+      gameService.guildState(guildId),
+      pool.query<{
+        id: string; name: string; treasury: number; local_treasury: number; population: number; settlement_count: number;
+        override_status: NpcCountryOverrideStatus | null; override_doctrine: NpcAutoPurchaseDoctrine | null;
+        run_turn: number | null; run_status: string | null; attempt_count: number | null; completed_at: string | null; summary: NpcCountryPurchaseResult | null;
+      }>(
+        `SELECT country.id,country.name,country.treasury,
+                COALESCE(stats.local_treasury,0)::bigint AS local_treasury,
+                COALESCE(stats.population,0)::bigint AS population,
+                COALESCE(stats.settlement_count,0)::int AS settlement_count,
+                override.status AS override_status,override.doctrine AS override_doctrine,
+                run.acquisition_turn AS run_turn,run.status AS run_status,run.attempt_count,run.completed_at,run.summary
+           FROM countries country
+           LEFT JOIN npc_auto_purchase_country_overrides override ON override.country_id=country.id
+           LEFT JOIN LATERAL (
+             SELECT COALESCE(SUM(settlement.local_treasury),0) AS local_treasury,
+                    COALESCE(SUM(settlement.population+settlement.slave_population),0) AS population,
+                    COUNT(*) AS settlement_count
+               FROM settlements settlement WHERE settlement.country_id=country.id
+           ) stats ON TRUE
+           LEFT JOIN LATERAL (
+             SELECT purchase.acquisition_turn,purchase.status,purchase.attempt_count,purchase.completed_at,purchase.summary
+               FROM npc_auto_purchase_runs purchase WHERE purchase.country_id=country.id
+              ORDER BY purchase.acquisition_turn DESC,purchase.completed_at DESC NULLS LAST LIMIT 1
+           ) run ON TRUE
+          WHERE country.guild_id=$1 AND country.status='ACTIVE'
+            AND NOT EXISTS(SELECT 1 FROM country_members member WHERE member.country_id=country.id)
+          ORDER BY country.name`,
+        [guildId]
+      )
+    ]);
+    const countries = rows.rows.map((row): NpcAutoPurchaseDashboardCountry => {
+      const overrideStatus = row.override_status ?? "AUTO";
+      const included = overrideStatus !== "EXCLUDE" && (config.scope === "ALL_PLAYERLESS" || overrideStatus === "INCLUDE");
+      return {
+        id: row.id,
+        name: row.name,
+        treasury: Number(row.treasury),
+        localTreasury: Number(row.local_treasury),
+        population: Number(row.population),
+        settlementCount: Number(row.settlement_count),
+        overrideStatus,
+        overrideDoctrine: row.override_doctrine,
+        effectiveDoctrine: row.override_doctrine ?? config.doctrine,
+        included,
+        lastRun: row.run_turn === null ? null : {
+          turn: Number(row.run_turn),
+          status: row.run_status ?? "UNKNOWN",
+          attemptCount: Number(row.attempt_count ?? 1),
+          completedAt: row.completed_at,
+          actualCost: Number(row.summary?.actualCost ?? 0)
+        }
+      };
+    });
+    return {
+      guild: {
+        currentTurn: Number(guild.current_turn),
+        acquisitionInterval: Number(guild.acquisition_interval),
+        acquisitionTurn: isAcquisitionTurn(guild.current_turn,guild.acquisition_interval)
+      },
+      config,
+      doctrines: NPC_AUTO_PURCHASE_DOCTRINES,
+      countries
+    };
+  },
+
   async config(guildId: string): Promise<NpcAutoPurchaseConfig> {
     const row = (await pool.query<{
       enabled: boolean; doctrine: NpcAutoPurchaseDoctrine; budget_percent: number;
@@ -454,10 +551,12 @@ export const npcAutoPurchaseService = {
   },
 
   async saveConfig(input: Omit<NpcAutoPurchaseConfig, "guildId"> & { guildId: string; actorId: string }): Promise<NpcAutoPurchaseConfig> {
+    if (typeof input.enabled !== "boolean") throw new GameError("NPC otomatik alım durumu geçersiz.");
     assertPercent(input.budgetPercent, "Bütçe yüzdesi");
     assertPercent(input.targetFillPercent, "Hedef doluluk");
     if (!Number.isSafeInteger(input.minimumReserve) || input.minimumReserve < 0) throw new GameError("Asgari hazine rezervi negatif olamaz.");
-    if (!(input.doctrine in NPC_AUTO_PURCHASE_DOCTRINES)) throw new GameError("Geçersiz NPC doktrini.");
+    if (typeof input.doctrine !== "string" || !(input.doctrine in NPC_AUTO_PURCHASE_DOCTRINES)) throw new GameError("Geçersiz NPC doktrini.");
+    if (input.scope !== "ALL_PLAYERLESS" && input.scope !== "INCLUDED_ONLY") throw new GameError("Geçersiz NPC alım kapsamı.");
     await gameService.ensureGuild(input.guildId);
     await pool.query(
       `INSERT INTO npc_auto_purchase_configs(guild_id,enabled,doctrine,budget_percent,target_fill_percent,minimum_reserve,scope,updated_by,updated_at)
@@ -473,7 +572,8 @@ export const npcAutoPurchaseService = {
   async setCountryOverride(input: { guildId: string; countryId: string; status: NpcCountryOverrideStatus; doctrine: NpcAutoPurchaseDoctrine | null; actorId: string }): Promise<void> {
     const country = await gameService.listCountries(input.guildId).then((countries) => countries.find((item) => item.id === input.countryId));
     if (!country) throw new GameError("Ülke bulunamadı.");
-    if (input.doctrine && !(input.doctrine in NPC_AUTO_PURCHASE_DOCTRINES)) throw new GameError("Geçersiz NPC doktrini.");
+    if (!(["AUTO","INCLUDE","EXCLUDE"] as const).includes(input.status)) throw new GameError("Geçersiz NPC devlet kapsam ayarı.");
+    if (input.doctrine !== null && (typeof input.doctrine !== "string" || !(input.doctrine in NPC_AUTO_PURCHASE_DOCTRINES))) throw new GameError("Geçersiz NPC doktrini.");
     await pool.query(
       `INSERT INTO npc_auto_purchase_country_overrides(country_id,status,doctrine,updated_by,updated_at)
        VALUES($1,$2,$3,$4,NOW())
@@ -482,14 +582,16 @@ export const npcAutoPurchaseService = {
     );
   },
 
-  async preview(guildId: string): Promise<NpcCountryPurchasePlan[]> {
+  async preview(guildId: string, countryId?: string): Promise<NpcCountryPurchasePlan[]> {
     const config = await this.config(guildId);
     const guild = await gameService.guildState(guildId);
     if (!isAcquisitionTurn(guild.current_turn, guild.acquisition_interval)) throw new GameError("NPC otomatik alım önizlemesi yalnızca Alım Turunda hazırlanabilir.");
-    return eligibleCountryPlans(guildId, config);
+    const plans = await eligibleCountryPlans(guildId, config, countryId);
+    if (countryId && !plans.length) throw new GameError("Bu NPC devlet mevcut kapsamda otomatik alıma uygun değil. Devlet ayarını ve kapsamı kontrol edin.");
+    return plans;
   },
 
-  async execute(guildId: string, actorId: string): Promise<NpcCountryPurchaseResult[]> {
+  async execute(guildId: string, actorId: string, countryId?: string): Promise<NpcCountryPurchaseResult[]> {
     const lockClient = await pool.connect();
     const lockKey = "npc-auto-purchase:" + guildId;
     let locked = false;
@@ -502,7 +604,8 @@ export const npcAutoPurchaseService = {
     if (!config.enabled) throw new GameError("NPC otomatik alım sistemi kapalı. Önce `/npc-devlet-oto-alim ayarla` ile etkinleştirin.");
     const guild = await gameService.guildState(guildId);
     if (!isAcquisitionTurn(guild.current_turn, guild.acquisition_interval)) throw new GameError("NPC otomatik alımı yalnızca Alım Turunda çalıştırılabilir.");
-    const plans = await eligibleCountryPlans(guildId, config);
+    const plans = await eligibleCountryPlans(guildId, config, countryId);
+    if (countryId && !plans.length) throw new GameError("Bu NPC devlet mevcut kapsamda otomatik alıma uygun değil. Devlet ayarını ve kapsamı kontrol edin.");
     const results: NpcCountryPurchaseResult[] = [];
     for (const plan of plans) {
       const claimed = await pool.query<{ attempt_count: number }>(
