@@ -21,6 +21,6 @@ describe("İskandinav hanedan onarım göçü", () => {
     }
     expect(scandinavianDynastiesRepairMigration.sql).toContain("WHERE NOT EXISTS(SELECT 1 FROM dynasty_members");
     expect(scandinavianDynastiesRepairMigration.sql).toContain("ON CONFLICT(country_id) WHERE steppe_title_id IS NULL DO NOTHING");
-    expect(migrations.at(-1)).toBe(scandinavianDynastiesRepairMigration);
+    expect(migrations).toContain(scandinavianDynastiesRepairMigration);
   });
 });

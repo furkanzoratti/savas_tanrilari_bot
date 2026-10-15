@@ -5,7 +5,13 @@ export const scandinavianStartingAssetsMigration = {
     CREATE TEMP TABLE scandinavian_starting_settlements_v206 ON COMMIT DROP AS
     SELECT settlement.id AS settlement_id,settlement.country_id,settlement.name,
            settlement.local_treasury,
-           GREATEST(0,settlement.last_acquisition_income)::bigint AS income_grant,
+           CASE WHEN settlement.last_acquisition_income>0
+             THEN settlement.last_acquisition_income
+             ELSE GREATEST(0,
+               FLOOR(settlement.population*settlement.tax_rate_percent/100.0)
+               +settlement.base_land_trade_income+settlement.manual_flat_income
+             )
+           END::bigint AS income_grant,
            settlement.is_coastal,guild.current_turn
       FROM settlements settlement
       JOIN countries country ON country.id=settlement.country_id AND country.status='ACTIVE'
@@ -33,7 +39,8 @@ export const scandinavianStartingAssetsMigration = {
     SELECT seed.country_id,seed.settlement_id,seed.current_turn,'ADMIN_ADJUSTMENT',seed.income_grant,
            seed.name||': İskandinav başlangıç hazinesi',
            seed.local_treasury+seed.income_grant,
-           jsonb_build_object('source','scandinavian-starting-assets-v206','incomeBasis','last_acquisition_income')
+           jsonb_build_object('source','scandinavian-starting-assets-v206','incomeBasis',
+             CASE WHEN seed.income_grant>0 THEN 'last_or_projected_income' ELSE 'zero_income' END)
       FROM scandinavian_starting_settlements_v206 seed
      WHERE seed.income_grant>0;
 
