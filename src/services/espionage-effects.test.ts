@@ -56,7 +56,7 @@ describe("casusluk etki hedefleri", () => {
     const exists=await espionageTargetExists(client,{
       attacker_country_id:"attacker",target_country_id:"target",target_settlement_id:"settlement",
       target_character_id:null,target_noble_type:"DYNASTY",target_noble_id:"member",target_noble_family_id:"family",
-      target_army_id:null,spy_character_id:"spy",target_type:"KIDNAP"
+      target_army_id:null,spy_character_id:"spy",target_type:"NOBLE_KIDNAP"
     });
     expect(exists).toBe(true);
     expect(queries[0]).toContain("espionage_captivities");
@@ -68,7 +68,7 @@ describe("casusluk etki hedefleri", () => {
     const result=await applyEspionageEffect(client,{
       attacker_country_id:"attacker",target_country_id:"target",target_settlement_id:"settlement",
       target_character_id:null,target_noble_type:"DYNASTY",target_noble_id:"member",target_noble_family_id:"family",
-      target_army_id:null,spy_character_id:"spy",target_type:"KIDNAP"
+      target_army_id:null,spy_character_id:"spy",target_type:"NOBLE_KIDNAP"
     },"LIGHT",20);
     expect(result).toContain("yönetici kararıyla serbest bırakılana veya infaz edilene kadar");
   });

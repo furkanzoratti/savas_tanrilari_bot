@@ -139,6 +139,7 @@ import { scandinavianStartingAssetsMigration } from "./scandinavian-starting-ass
 import { scandinavianDynastiesRepairMigration } from "./scandinavian-dynasties-repair-migration.js";
 import { scandinavianTreasuryRepairMigration } from "./scandinavian-treasury-repair-migration.js";
 import { capitalCitiesMigration } from "./capital-cities-migration.js";
+import { espionagePersonalTargetSplitMigration } from "./espionage-personal-target-split-migration.js";
 
 export const migrations = [
   {
@@ -2495,5 +2496,6 @@ export const migrations = [
   scandinavianStartingAssetsMigration,
   scandinavianDynastiesRepairMigration,
   scandinavianTreasuryRepairMigration,
-  capitalCitiesMigration
+  capitalCitiesMigration,
+  espionagePersonalTargetSplitMigration
 ] as const;

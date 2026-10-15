@@ -1,5 +1,9 @@
 import { EmbedBuilder, MessageFlags, type AutocompleteInteraction, type ChatInputCommandInteraction, type Client } from "discord.js";
-import { ESPIONAGE_PREPARATIONS, ESPIONAGE_SEVERITY_LABELS, ESPIONAGE_TARGETS, type EspionagePreparation, type EspionageTarget } from "../domain/espionage.js";
+import {
+  ESPIONAGE_PREPARATIONS, ESPIONAGE_SEVERITY_LABELS, ESPIONAGE_TARGETS,
+  isAssassinationTarget, isCharacterPersonalTarget, isKidnappingTarget, isNoblePersonalTarget,
+  type EspionagePreparation, type EspionageTarget
+} from "../domain/espionage.js";
 import { gold } from "../domain/format.js";
 import { espionageService, isSpyDefenseAssignment, type EspionageOperationView } from "../services/espionage-service.js";
 import { gameService, GameError } from "../services/game-service.js";
@@ -71,7 +75,7 @@ export function espionageLogEmbed(operation: EspionageOperationView): EmbedBuild
       "",
       `**Tespit Zarı:** 1d20 **${operation.detection_roll}** + toplam bonus/ceza **${detectionBonus}** = **${operation.detection_total}**`,
       `**Tespit Sonucu:** ${detectionText(operation.detection_level, operation.captured)}`,
-      operation.captured && operation.target_type === "ASSASSINATE" ? "**Sonuç:** Yakalanan Suikastçı kalıcı olarak kaybedildi." : operation.captured ? `**Esaret:** Casus Tur ${operation.return_turn + 2} başında yeniden kullanılabilir.` : `**Dönüş:** Tur ${operation.return_turn} başında yeniden kullanılabilir.`
+      operation.captured && isAssassinationTarget(operation.target_type) ? "**Sonuç:** Yakalanan Suikastçı kalıcı olarak kaybedildi." : operation.captured ? `**Esaret:** Casus Tur ${operation.return_turn + 2} başında yeniden kullanılabilir.` : `**Dönüş:** Tur ${operation.return_turn} başında yeniden kullanılabilir.`
     ].filter((line):line is string=>line!==null).join("\n"))
     .setFooter({ text: `Operasyon: ${operation.id}` })
     .setTimestamp(operation.resolved_at ?? new Date());
@@ -123,11 +127,14 @@ export async function handleEspionageCommand(interaction: ChatInputCommandIntera
       );
       const targetType = interaction.options.getString("hedef", true) as EspionageTarget;
       const rawSpecialTarget = interaction.options.getString("ozel-hedef");
-      const personalTarget=["ASSASSINATE","KIDNAP"].includes(targetType)&&rawSpecialTarget
-        ?resolveEspionageChoice(
-          targetType==="KIDNAP"?await espionageService.kidnappingTargets(targetCountry.id):await espionageService.assassinationTargets(targetCountry.id),
-          rawSpecialTarget,targetType==="KIDNAP"?"Kaçırma hedefi":"Suikast hedefi"
-        ):null;
+      const personalTargetRows = isCharacterPersonalTarget(targetType)
+        ? await espionageService.characterPersonalTargets(targetCountry.id,isKidnappingTarget(targetType))
+        : isNoblePersonalTarget(targetType)
+          ? await espionageService.noblePersonalTargets(targetCountry.id,isKidnappingTarget(targetType))
+          : [];
+      const personalTarget=(isCharacterPersonalTarget(targetType)||isNoblePersonalTarget(targetType))&&rawSpecialTarget
+        ?resolveEspionageChoice(personalTargetRows,rawSpecialTarget,isKidnappingTarget(targetType)?"Kaçırma hedefi":"Suikast hedefi")
+        :null;
       const [targetKind,targetId]=personalTarget?.id.split(":",2)??[null,null];
       const operation = await espionageService.startOperation({
         guildId: interaction.guildId,
@@ -334,7 +341,9 @@ export async function handleEspionageAutocomplete(interaction: AutocompleteInter
   if (focused.name === "hedef-sehir") {
     const name = interaction.options.getString("hedef-ulke");
     const target = name ? await gameService.countryByName(interaction.guildId,name) : null;
-    const settlements = target ? await gameService.listSettlements(target.id) : [];
+    const targetType = interaction.options.getString("hedef") as EspionageTarget|null;
+    const settlements = target ? (await gameService.listSettlements(target.id))
+      .filter((item)=>!targetType||!isNoblePersonalTarget(targetType)||item.id===target.capital_settlement_id) : [];
     await interaction.respond(settlements.filter((item) => !query || item.name.toLocaleLowerCase("tr-TR").includes(query)).slice(0,25).map((item) => ({ name: item.name, value: item.id })));
     return true;
   }
@@ -343,8 +352,11 @@ export async function handleEspionageAutocomplete(interaction: AutocompleteInter
     const name = interaction.options.getString("hedef-ulke");
     const target = name ? await gameService.countryByName(interaction.guildId,name) : null;
     if (!target || !targetType) { await interaction.respond([]); return true; }
-    const rows = targetType==="ASSASSINATE"?await espionageService.assassinationTargets(target.id)
-      :targetType==="KIDNAP"?await espionageService.kidnappingTargets(target.id):[];
+    const rows = isCharacterPersonalTarget(targetType)
+      ? await espionageService.characterPersonalTargets(target.id,isKidnappingTarget(targetType))
+      : isNoblePersonalTarget(targetType)
+        ? await espionageService.noblePersonalTargets(target.id,isKidnappingTarget(targetType))
+        : [];
     await interaction.respond(rows.filter((item)=>!query||item.name.toLocaleLowerCase("tr-TR").includes(query)).slice(0,25).map((item)=>({name:item.name.slice(0,100),value:item.id})));
     return true;
   }

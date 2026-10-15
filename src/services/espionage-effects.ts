@@ -3,7 +3,10 @@ import type { DbClient } from "../db/pool.js";
 import { BUILDINGS, SHIPS, SIEGE_ASSETS, UNITS, buildingBaseCost } from "../domain/catalog.js";
 import type { NavalUnitType } from "../domain/battle.js";
 import { NAVAL_HULL_STATS } from "../domain/naval-hulls.js";
-import type { EspionageSeverity, EspionageTarget } from "../domain/espionage.js";
+import {
+  isAssassinationTarget, isKidnappingTarget,
+  type EspionageSeverity, type EspionageTarget
+} from "../domain/espionage.js";
 import { markCharacterDead } from "./character-death-service.js";
 import { terminateCharacterDuties } from "./character-duty-lifecycle-service.js";
 import { killDynastyMemberFromEspionage } from "./dynasty-service.js";
@@ -99,7 +102,7 @@ export async function espionageTargetExists(client: DbClient, operation: Espiona
       [operation.target_character_id,operation.target_country_id]
     )).rowCount);
   }
-  if(operation.target_type==="KIDNAP"){
+  if(isKidnappingTarget(operation.target_type)){
     const captiveType=operation.target_character_id?"CHARACTER":operation.target_noble_type;
     const captiveId=operation.target_character_id??operation.target_noble_id;
     if(!captiveType||!captiveId)return false;
@@ -125,7 +128,7 @@ export async function espionageTargetExists(client: DbClient, operation: Espiona
     )).rowCount);
     return false;
   }
-  if(operation.target_type==="ASSASSINATE"){
+  if(isAssassinationTarget(operation.target_type)){
     if(operation.target_character_id)return Boolean((await client.query(
       "SELECT 1 FROM country_characters WHERE id=$1 AND country_id=$2 AND character_status='ACTIVE'",
       [operation.target_character_id,operation.target_country_id]
@@ -472,11 +475,11 @@ export async function applyEspionageEffect(
     const details = disabledByType.map(({ shipType, quantity }) => `${SHIPS[shipType].name}: ${quantity.toLocaleString("tr-TR")}`).join(" • ");
     return `Her gemi türünün %10'u yukarı yuvarlanarak iş göremez hâle getirildi: ${details}. Gemiler süre sonunda otomatik dönmez; oyuncu tarafından tamire gönderilmelidir.`;
   }
-  if (["DISCREDIT","KIDNAP","ASSASSINATE"].includes(operation.target_type) && operation.target_character_id) {
+  if ((operation.target_type === "DISCREDIT" || isKidnappingTarget(operation.target_type) || isAssassinationTarget(operation.target_type)) && operation.target_character_id) {
     const duration = operation.target_type === "DISCREDIT" ? percent(severity,2,4,6)
-      : operation.target_type === "KIDNAP" ? 0
+      : isKidnappingTarget(operation.target_type) ? 0
       : severity === "LIGHT" ? 3 : severity === "MEDIUM" ? 6 : 0;
-    if (operation.target_type === "ASSASSINATE" && severity === "HEAVY") {
+    if (isAssassinationTarget(operation.target_type) && severity === "HEAVY") {
       await markCharacterDead({
         client,characterId:operation.target_character_id,deathSettlementId:operation.target_settlement_id,
         reason:"Karakter öldürüldüğü için devam eden casusluk görevi iptal edildi."
@@ -497,13 +500,13 @@ export async function applyEspionageEffect(
       [operation.target_settlement_id,duration>0?turn+duration:null,operation.target_type==="DISCREDIT"&&severity==="HEAVY",operation.target_character_id]
     );
     if(affected?.is_marshal)await ensureCountryMarshal(client,affected.country_id,{allowAnyCommander:true});
-    if (operation.target_type === "KIDNAP") return "Hedef karakter kaçırıldı; yönetici kararıyla serbest bırakılana veya infaz edilene kadar tutsak kalacak.";
+    if (isKidnappingTarget(operation.target_type)) return "Hedef karakter kaçırıldı; yönetici kararıyla serbest bırakılana veya infaz edilene kadar tutsak kalacak.";
     return "Hedef karakter "+duration+" tur kullanılamayacak.";
   }
-  if(operation.target_type==="KIDNAP"&&operation.target_noble_id&&operation.target_noble_type){
+  if(isKidnappingTarget(operation.target_type)&&operation.target_noble_id&&operation.target_noble_type){
     return "Hedef soylu kaçırıldı; yönetici kararıyla serbest bırakılana veya infaz edilene kadar tutsak kalacak.";
   }
-  if(operation.target_type==="ASSASSINATE"&&operation.target_noble_id&&operation.target_noble_type){
+  if(isAssassinationTarget(operation.target_type)&&operation.target_noble_id&&operation.target_noble_type){
     const duration=severity==="LIGHT"?3:severity==="MEDIUM"?6:0;
     if(severity==="HEAVY"){
       if(operation.target_noble_type==="DYNASTY"){

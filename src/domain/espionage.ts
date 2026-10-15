@@ -18,6 +18,11 @@ export const ESPIONAGE_TARGETS = {
   DESTROY_SIEGE_SUPPLIES: { label: "Kuşatma Erzağı Yakma", buildingTypes: [], group: "MILITARY_AGENT" },
   SABOTAGE_FLEET: { label: "Filoyu Sabote Etme", buildingTypes: [], group: "MILITARY_AGENT" },
   DISCREDIT: { label: "Karakteri İtibarsızlaştırma", buildingTypes: [], group: "ASSASSIN" },
+  CHARACTER_KIDNAP: { label: "Karakter Kaçırma", buildingTypes: [], group: "ASSASSIN" },
+  NOBLE_KIDNAP: { label: "Soylu Kaçırma", buildingTypes: [], group: "ASSASSIN" },
+  CHARACTER_ASSASSINATE: { label: "Karakter Suikastı", buildingTypes: [], group: "ASSASSIN" },
+  NOBLE_ASSASSINATE: { label: "Soylu Suikastı", buildingTypes: [], group: "ASSASSIN" },
+  /** Eski operasyon kayıtlarının çözülebilmesi ve geçmişte gösterilebilmesi için korunur. */
   KIDNAP: { label: "Karakter veya Soylu Kaçırma", buildingTypes: [], group: "ASSASSIN" },
   ASSASSINATE: { label: "Karakter veya Soylu Suikasti", buildingTypes: [], group: "ASSASSIN" }
 } as const;
@@ -29,11 +34,28 @@ export const PLAYER_ESPIONAGE_TARGETS = [
   "RECRUITMENT_SABOTAGE","CONSTRUCTION","PRODUCTION_SABOTAGE",
   "INCOME_SABOTAGE","TREASURY_INFILTRATION",
   "INCITE_PUBLIC","AGGRAVATE_EVENT",
-  "DESERTION","POISON_GARRISON","DESTROY_SIEGE_SUPPLIES","KIDNAP","ASSASSINATE"
+  "DESERTION","POISON_GARRISON","DESTROY_SIEGE_SUPPLIES",
+  "CHARACTER_ASSASSINATE","CHARACTER_KIDNAP","NOBLE_ASSASSINATE","NOBLE_KIDNAP"
 ] as const satisfies readonly EspionageTarget[];
 
 export function isPlayerEspionageTarget(target:string):target is typeof PLAYER_ESPIONAGE_TARGETS[number]{
   return (PLAYER_ESPIONAGE_TARGETS as readonly string[]).includes(target);
+}
+
+export function isKidnappingTarget(target: EspionageTarget): boolean {
+  return target === "KIDNAP" || target === "CHARACTER_KIDNAP" || target === "NOBLE_KIDNAP";
+}
+
+export function isAssassinationTarget(target: EspionageTarget): boolean {
+  return target === "ASSASSINATE" || target === "CHARACTER_ASSASSINATE" || target === "NOBLE_ASSASSINATE";
+}
+
+export function isCharacterPersonalTarget(target: EspionageTarget): boolean {
+  return target === "CHARACTER_KIDNAP" || target === "CHARACTER_ASSASSINATE";
+}
+
+export function isNoblePersonalTarget(target: EspionageTarget): boolean {
+  return target === "NOBLE_KIDNAP" || target === "NOBLE_ASSASSINATE";
 }
 export type EspionagePreparation = "NONE" | "CAREFUL" | "EXTENSIVE" | "AGGRESSIVE";
 
@@ -56,6 +78,15 @@ export function espionageSeverity(margin: number): EspionageSeverity {
   if (margin <= 4) return "LIGHT";
   if (margin <= 8) return "MEDIUM";
   return "HEAVY";
+}
+
+export function espionageOperationSeverity(
+  target: EspionageTarget,
+  margin: number,
+  targetsNoble: boolean
+): EspionageSeverity {
+  if (isKidnappingTarget(target) && targetsNoble && margin < 12) return "NONE";
+  return espionageSeverity(margin);
 }
 
 export const ESPIONAGE_SEVERITY_LABELS: Record<EspionageSeverity, string> = {

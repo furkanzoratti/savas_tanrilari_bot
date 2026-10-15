@@ -62,7 +62,9 @@ const operationLabels = {
   VASSALIZE: "Diplomatik vassallaştırma", VASSAL_INTEGRATION: "Vassal entegrasyonu",
   ECONOMIC: "Ekonomik casusluk", MILITARY: "Askerî casusluk", PUBLIC: "Kamu casusluğu",
   NAVAL: "Deniz casusluğu", CONSTRUCTION: "İnşaat casusluğu", DISCREDIT: "İtibarsızlaştırma",
-  KIDNAP: "Kaçırma", ASSASSINATE: "Suikast", SUPPLY_COLLAPSE: "İkmal çökertme", DESERTION: "Firar kışkırtma",
+  KIDNAP: "Kaçırma", ASSASSINATE: "Suikast", CHARACTER_KIDNAP: "Karakter kaçırma", NOBLE_KIDNAP: "Soylu kaçırma",
+  CHARACTER_ASSASSINATE: "Karakter suikastı", NOBLE_ASSASSINATE: "Soylu suikastı",
+  SUPPLY_COLLAPSE: "İkmal çökertme", DESERTION: "Firar kışkırtma",
   RELIGIOUS_CONVERSION: "Din değiştirme"
 };
 const operationStatusLabels = {

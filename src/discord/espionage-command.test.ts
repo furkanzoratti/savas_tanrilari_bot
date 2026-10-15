@@ -30,9 +30,12 @@ describe("casusluk komutları", () => {
       "gorev-baslat", "operasyonlarim", "casuslarim", "uzmanlik-sec", "savunma-ata", "savunma-kaldir", "bina-onar"
     ]);
     const start = command?.options?.find((item) => item.name === "gorev-baslat");
-    expect(start?.options?.map((item) => item.name)).toEqual(["casus", "hedef-ulke", "hedef-sehir", "hedef", "hazirlik", "ozel-hedef"]);
+    expect(start?.options?.map((item) => item.name)).toEqual(["casus", "hedef-ulke", "hedef", "hedef-sehir", "hazirlik", "ozel-hedef"]);
     expect(start?.options?.find((item) => item.name === "casus")).toMatchObject({ required: true, autocomplete: true });
     expect(start?.options?.find((item) => item.name === "hedef-sehir")).toMatchObject({ required: true, autocomplete: true });
+    expect(start?.options?.find((item) => item.name === "hedef")?.choices?.map((item) => item.value)).toEqual(expect.arrayContaining([
+      "CHARACTER_ASSASSINATE", "CHARACTER_KIDNAP", "NOBLE_ASSASSINATE", "NOBLE_KIDNAP"
+    ]));
   });
 
   it("yöneticiye log, liste ve iptal araçlarını verir", () => {

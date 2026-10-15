@@ -15,6 +15,6 @@ describe("başkent göçü", () => {
     ]) expect(capitalCitiesMigration.sql).toContain(pair);
     expect(capitalCitiesMigration.sql).toContain("ORDER BY settlement.population DESC");
     expect(capitalCitiesMigration.sql).toContain("ON DELETE SET NULL");
-    expect(migrations.at(-1)).toBe(capitalCitiesMigration);
+    expect(migrations.find((migration) => migration.version === capitalCitiesMigration.version)).toBe(capitalCitiesMigration);
   });
 });
