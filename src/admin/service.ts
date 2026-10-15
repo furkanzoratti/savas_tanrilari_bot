@@ -1021,9 +1021,12 @@ export const adminPanelService = {
         "SELECT current_turn,turn_phase FROM guilds WHERE discord_id=$1", [adminConfig.guildId]
       ),
       adminPool.query(
-        `SELECT country.id,country.name,country.mobilization,
+        `SELECT country.id,country.name,country.mobilization,country.capital_settlement_id,
+                capital.name AS capital_name,
                 COALESCE((SELECT SUM(settlement.local_treasury) FROM settlements settlement WHERE settlement.country_id=country.id),country.treasury)::bigint AS treasury
-           FROM countries country WHERE country.guild_id=$1 AND country.status='ACTIVE' ORDER BY country.name`, [adminConfig.guildId]
+           FROM countries country
+           LEFT JOIN settlements capital ON capital.id=country.capital_settlement_id
+          WHERE country.guild_id=$1 AND country.status='ACTIVE' ORDER BY country.name`, [adminConfig.guildId]
       ),
       adminPool.query(
         `SELECT settlement.id,settlement.name,settlement.country_id,country.name AS country_name,

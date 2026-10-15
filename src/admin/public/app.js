@@ -1016,6 +1016,43 @@ function openGuidedSettlementTransfer(data) {
   setEditorSaveLabel("Etkileri önizle");
 }
 
+function openGuidedCapitalChange(data) {
+  const eligibleCountries = data.countries
+    .map((country) => ({
+      ...country,
+      settlements: data.settlements.filter((settlement) => settlement.country_id === country.id)
+    }))
+    .filter((country) => country.settlements.some((settlement) => settlement.id !== country.capital_settlement_id));
+  if (!eligibleCountries.length) return toast("Başkent değiştirilebilecek uygun bir devlet bulunmuyor.", "error");
+
+  const countryOptions = eligibleCountries
+    .map((country) => `<option value="${country.id}">${escapeHtml(country.name)} · mevcut başkent: ${escapeHtml(country.capital_name || "Atanmamış")}</option>`)
+    .join("");
+  openEditor("Başkent değişimi", "Devletin yönetim merkezini ve +%1 başkent bonuslarını başka bir yerleşkeye taşı.", `<div class="preview-warning"><strong>Bonuslar aynı işlemde taşınır.</strong><span>Eski başkent gelir ve nüfus artışı +%1 bonusunu kaybeder; yeni başkent iki bonusu da anında kazanır.</span></div><label>Devlet<select id="guided-capital-country" required>${countryOptions}</select></label><label>Yeni başkent<select id="guided-capital-settlement" required></select></label><label>Gerekçe<textarea id="guided-capital-reason" minlength="2" maxlength="300" rows="3" required placeholder="Başkent değişikliğinin gerekçesi"></textarea></label>`, async () => {
+    const countryId = document.getElementById("guided-capital-country").value;
+    const settlementId = document.getElementById("guided-capital-settlement").value;
+    const reason = document.getElementById("guided-capital-reason").value.trim();
+    if (reason.length < 2) throw new Error("Başkent değişikliği için kısa bir gerekçe yazın.");
+    const result = await api(`/api/admin/countries/${countryId}/capital`, {
+      method: "POST",
+      body: JSON.stringify({ settlementId, reason })
+    });
+    await finishGuidedOperation(`${result.countryName}: ${result.newCapitalName} yeni başkent oldu; +%1 bonuslar taşındı.`);
+  });
+  const countrySelect = document.getElementById("guided-capital-country");
+  const settlementSelect = document.getElementById("guided-capital-settlement");
+  const updateSettlements = () => {
+    const country = eligibleCountries.find((item) => item.id === countrySelect.value);
+    settlementSelect.innerHTML = (country?.settlements || [])
+      .filter((settlement) => settlement.id !== country?.capital_settlement_id)
+      .map((settlement) => `<option value="${settlement.id}">${escapeHtml(settlement.name)} · ${number(Number(settlement.population) + Number(settlement.slave_population))} nüfus</option>`)
+      .join("");
+  };
+  countrySelect.addEventListener("change", updateSettlements);
+  updateSettlements();
+  setEditorSaveLabel("Başkenti değiştir");
+}
+
 function openGuidedCharacterCancel(data) {
   if (!data.assignments.length) return toast("Sonlandırılabilecek aktif karakter görevi bulunmuyor.", "error");
   openEditor("Karakter görevini sonlandır", "Bağlı görev, komutanlık ve operasyon kayıtları birlikte temizlenir.", `<label>Aktif görev<select id="guided-assignment" required>${data.assignments.map((row) => `<option value="${row.id}">${escapeHtml(row.country_name)} · ${escapeHtml(row.name)} · ${escapeHtml(operationLabels[row.operation_type] || assignmentLabel(row.assignment))}</option>`).join("")}</select></label><label>Gerekçe<textarea id="guided-assignment-reason" minlength="3" maxlength="500" rows="3" required placeholder="Görevin neden sonlandırıldığı"></textarea></label><div class="preview-warning"><strong>Karakter silinmez.</strong><span>Yalnız etkin görevi ve bu göreve bağlı operasyon/komutanlık kayıtları sonlandırılır.</span></div>`, async () => {
@@ -1056,9 +1093,10 @@ async function guidedOperationsPage() {
   const data = await api("/api/gm-operations");
   state.guidedOperations = data;
   const relationCount = data.alliances.length + data.vassalages.length + data.wars.length;
-  page.innerHTML = `<div class="page-head guided-hero"><div><span class="overview-kicker">GÜVENLİ GM AKIŞLARI</span><h1>Rehberli İşlemler</h1><p>Riskli oyun müdahalelerini hedef seçimi, etki önizlemesi, açık gerekçe ve ikinci onayla uygula.</p></div><span class="pill neutral">Tur ${number(data.guild.current_turn)} · ${turnPhaseLabels[data.guild.turn_phase] || data.guild.turn_phase}</span></div><section class="guided-operation-grid"><article class="card guided-operation-card"><div class="guided-operation-icon">¤</div><div><h2>Hazine düzeltmesi</h2><p>Devlet veya yerleşke hazinesine kontrollü altın ekle ya da çıkar.</p></div><div class="guided-operation-meta"><span>${number(data.countries.length)} devlet</span><span>${number(data.settlements.length)} yerleşke</span></div><button class="button primary" data-guided-treasury>İşlemi başlat</button></article><article class="card guided-operation-card"><div class="guided-operation-icon">⌖</div><div><h2>Yerleşke devri</h2><p>Fetih, barış veya gönüllü devir etkilerini uygulamadan önce incele.</p></div><div class="guided-operation-meta"><span>${number(data.settlements.length)} yerleşke</span><span>Bağlı kayıt kontrolü</span></div><button class="button primary" data-guided-transfer>İşlemi başlat</button></article><article class="card guided-operation-card"><div class="guided-operation-icon">♟</div><div><h2>Karakter görevi</h2><p>Etkin görevleri ve bağlı operasyonları tek güvenli akışta sonlandır.</p></div><div class="guided-operation-meta"><span>${number(data.assignments.length)} aktif görev</span><span>Karakter korunur</span></div><button class="button primary" data-guided-character>İşlemi başlat</button></article><article class="card guided-operation-card"><div class="guided-operation-icon">⚖</div><div><h2>Diplomatik sonlandırma</h2><p>İttifak, vassallık veya resmî savaşı gerekçeli biçimde kapat.</p></div><div class="guided-operation-meta"><span>${number(relationCount)} aktif kayıt</span><span>Geçmiş korunur</span></div><button class="button primary" data-guided-diplomacy>İşlemi başlat</button></article></section><section class="card guided-safety"><div><strong>Her kritik adım yeniden doğrulanır</strong><p>Önizlemeden sonra sahiplik veya hazine değişirse işlem uygulanmaz. Aynı imzalı işlem ikinci kez gönderilirse çoğaltılmaz.</p></div><button class="button" data-route-action="audit">İşlem geçmişini aç</button></section>`;
+  page.innerHTML = `<div class="page-head guided-hero"><div><span class="overview-kicker">GÜVENLİ GM AKIŞLARI</span><h1>Rehberli İşlemler</h1><p>Riskli oyun müdahalelerini hedef seçimi, etki önizlemesi, açık gerekçe ve ikinci onayla uygula.</p></div><span class="pill neutral">Tur ${number(data.guild.current_turn)} · ${turnPhaseLabels[data.guild.turn_phase] || data.guild.turn_phase}</span></div><section class="guided-operation-grid"><article class="card guided-operation-card"><div class="guided-operation-icon">¤</div><div><h2>Hazine düzeltmesi</h2><p>Devlet veya yerleşke hazinesine kontrollü altın ekle ya da çıkar.</p></div><div class="guided-operation-meta"><span>${number(data.countries.length)} devlet</span><span>${number(data.settlements.length)} yerleşke</span></div><button class="button primary" data-guided-treasury>İşlemi başlat</button></article><article class="card guided-operation-card"><div class="guided-operation-icon">⌖</div><div><h2>Yerleşke devri</h2><p>Fetih, barış veya gönüllü devir etkilerini uygulamadan önce incele.</p></div><div class="guided-operation-meta"><span>${number(data.settlements.length)} yerleşke</span><span>Bağlı kayıt kontrolü</span></div><button class="button primary" data-guided-transfer>İşlemi başlat</button></article><article class="card guided-operation-card"><div class="guided-operation-icon">♜</div><div><h2>Başkent değişimi</h2><p>Yönetim merkezini değiştir ve +%1 gelir ile nüfus artışı bonuslarını yeni şehre taşı.</p></div><div class="guided-operation-meta"><span>${number(data.countries.length)} devlet</span><span>Eski bonus otomatik kaldırılır</span></div><button class="button primary" data-guided-capital>İşlemi başlat</button></article><article class="card guided-operation-card"><div class="guided-operation-icon">♟</div><div><h2>Karakter görevi</h2><p>Etkin görevleri ve bağlı operasyonları tek güvenli akışta sonlandır.</p></div><div class="guided-operation-meta"><span>${number(data.assignments.length)} aktif görev</span><span>Karakter korunur</span></div><button class="button primary" data-guided-character>İşlemi başlat</button></article><article class="card guided-operation-card"><div class="guided-operation-icon">⚖</div><div><h2>Diplomatik sonlandırma</h2><p>İttifak, vassallık veya resmî savaşı gerekçeli biçimde kapat.</p></div><div class="guided-operation-meta"><span>${number(relationCount)} aktif kayıt</span><span>Geçmiş korunur</span></div><button class="button primary" data-guided-diplomacy>İşlemi başlat</button></article></section><section class="card guided-safety"><div><strong>Her kritik adım yeniden doğrulanır</strong><p>Önizlemeden sonra sahiplik veya hazine değişirse işlem uygulanmaz. Aynı imzalı işlem ikinci kez gönderilirse çoğaltılmaz.</p></div><button class="button" data-route-action="audit">İşlem geçmişini aç</button></section>`;
   document.querySelector("[data-guided-treasury]").addEventListener("click", () => openGuidedTreasury(data));
   document.querySelector("[data-guided-transfer]").addEventListener("click", () => openGuidedSettlementTransfer(data));
+  document.querySelector("[data-guided-capital]").addEventListener("click", () => openGuidedCapitalChange(data));
   document.querySelector("[data-guided-character]").addEventListener("click", () => openGuidedCharacterCancel(data));
   document.querySelector("[data-guided-diplomacy]").addEventListener("click", () => openGuidedDiplomacyEnd(data));
   bindPageActions();

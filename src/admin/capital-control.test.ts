@@ -32,4 +32,14 @@ describe("GM paneli başkent yönetimi", () => {
     expect(app).toContain("/capital`" );
     expect(app).toContain("Yönetici işlem gerekçesi");
   });
+
+  it("başkent değişimini Rehberli İşlemler ekranında bağımsız yönetici hamlesi olarak sunar", () => {
+    const service = read("./service.ts");
+    const app = read("./public/app.js");
+    expect(service).toContain("country.capital_settlement_id");
+    expect(service).toContain("capital.name AS capital_name");
+    expect(app).toContain("function openGuidedCapitalChange(data)");
+    expect(app).toContain("data-guided-capital");
+    expect(app).toContain("Eski bonus otomatik kaldırılır");
+  });
 });
