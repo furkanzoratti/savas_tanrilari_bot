@@ -48,6 +48,7 @@ export const UNIT_POWER: Record<keyof typeof UNITS, number> = {
 
 export const SHIP_POWER: Record<keyof typeof SHIPS, number> = {
   kerkouros: 400,
+  hjortspring: 700,
   trireme: 900,
   quinquereme: 2_000
 };

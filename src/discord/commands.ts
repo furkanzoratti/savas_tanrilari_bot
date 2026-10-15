@@ -952,6 +952,7 @@ export const commandBuilders = [
       .addIntegerOption((o) => o.setName("kerkouros").setDescription("Kerkouros sayısı").setMinValue(0).setRequired(true))
       .addIntegerOption((o) => o.setName("trireme").setDescription("Trireme sayısı").setMinValue(0).setRequired(true))
       .addIntegerOption((o) => o.setName("quinquereme").setDescription("Quinquereme sayısı").setMinValue(0).setRequired(true))
+      .addIntegerOption((o) => o.setName("hjortspring").setDescription("Hjortspring Savaş Teknesi sayısı").setMinValue(0))
       .addStringOption((o) => o.setName("ulke").setDescription("Koalisyonda filosu düzenlenecek ülke; boşsa ana ülke")))
     .addSubcommand((sub) => sub.setName("kusatma-aleti-ayarla").setDescription("Kuşatma taslağının gizli savaş aletlerini düzenler")
       .addStringOption((o) => o.setName("taraf").setDescription("A saldıran, B savunandır").setRequired(true).addChoices({ name: "A — Kuşatan", value: "A" }, { name: "B — Savunan", value: "B" }))
@@ -1211,4 +1212,4 @@ export const commandBuilders = [
 
 export const buildingChoices = BUILDABLE_BUILDINGS;
 export const unitChoices = Object.entries(UNITS).filter(([key]) => !["observer", "militia"].includes(key));
-export const shipChoices = Object.entries(SHIPS);
+export const shipChoices = Object.entries(SHIPS) as Array<[keyof typeof SHIPS, (typeof SHIPS)[keyof typeof SHIPS]]>;

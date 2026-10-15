@@ -10,6 +10,7 @@ export interface NavalHullStats {
 
 export const NAVAL_HULL_STATS: Record<NavalUnitType, NavalHullStats> = {
   kerkouros: { label:"Kerkouros", maxHp:40, armor:1, incomingMultiplier:1.15, disabledAtHp:10 },
+  hjortspring: { label:"Hjortspring Savaş Teknesi", maxHp:60, armor:2, incomingMultiplier:1.05, disabledAtHp:15 },
   trireme: { label:"Trireme", maxHp:75, armor:3, incomingMultiplier:1, disabledAtHp:20 },
   quinquereme: { label:"Quinquereme", maxHp:120, armor:6, incomingMultiplier:0.85, disabledAtHp:30 }
 };

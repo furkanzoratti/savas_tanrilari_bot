@@ -22,6 +22,7 @@ import { BATTLE_UNIT_STATS, NAVAL_UNIT_STATS } from "../domain/battle.js";
 import { isAcquisitionTurn } from "../domain/mobilization.js";
 import { planCountryPurchases, type NpcAutoPurchaseConfig } from "./npc-auto-purchase-service.js";
 import type { NpcAutoPurchaseDoctrine } from "../domain/npc-auto-purchase.js";
+import { purchasableShipTypes } from "../domain/scandinavian-navy.js";
 
 interface OpenAiResponse {
   id?: string;
@@ -106,7 +107,7 @@ function purchaseDecisionSupport(doc: CountryDocument, profile: AiCountryProfile
     allowedUnitTypes: [...allowedUnitTypes],
     unitCatalog,
     buildingCatalog,
-    shipCatalog: Object.entries(SHIPS).map(([key, ship]) => ({ key, ...ship, battle: NAVAL_UNIT_STATS[key as keyof typeof NAVAL_UNIT_STATS] })),
+    shipCatalog: purchasableShipTypes(Boolean(doc.isScandinavianState)).map((key) => ({ key, ...SHIPS[key], battle: NAVAL_UNIT_STATS[key] })),
     siegeCatalog: Object.entries(SIEGE_ASSETS).map(([key, asset]) => ({ key, ...asset })),
     settlementPurchaseContexts: doc.settlements.map((settlement) => ({
       settlementRef: settlement.id,

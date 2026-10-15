@@ -61,7 +61,7 @@ async function loadRepairFleet(client:DbClient,id:string,countryId?:string):Prom
             COUNT(*)::integer AS quantity,SUM(damage.current_hp)::integer AS current_hp,
             SUM(damage.max_hp)::integer AS max_hp,SUM(damage.max_hp-damage.current_hp)::integer AS missing_hp,
             COUNT(*) FILTER(WHERE damage.current_hp<=CASE damage.ship_type
-              WHEN 'kerkouros' THEN 10 WHEN 'trireme' THEN 20 ELSE 30 END)::integer AS disabled
+              WHEN 'kerkouros' THEN 10 WHEN 'hjortspring' THEN 15 WHEN 'trireme' THEN 20 ELSE 30 END)::integer AS disabled
        FROM naval_ship_damage damage JOIN settlements origin ON origin.id=damage.settlement_id
       WHERE damage.repair_group_id=$1
       GROUP BY damage.settlement_id,origin.name,damage.ship_type
@@ -276,7 +276,7 @@ export const navalRepairService={
         await client.query("DELETE FROM naval_ship_damage WHERE id=ANY($1::uuid[])",[ships.map((ship)=>ship.id)]);
       }else{
         await client.query(`UPDATE naval_ship_damage SET fleet_id=$1,repair_group_id=NULL,
-          status=CASE WHEN current_hp<=CASE ship_type WHEN 'kerkouros' THEN 10 WHEN 'trireme' THEN 20 ELSE 30 END
+          status=CASE WHEN current_hp<=CASE ship_type WHEN 'kerkouros' THEN 10 WHEN 'hjortspring' THEN 15 WHEN 'trireme' THEN 20 ELSE 30 END
             THEN 'DISABLED' ELSE 'DAMAGED' END,updated_at=NOW()
           WHERE id=ANY($2::uuid[])`,[target.id,ships.map((ship)=>ship.id)]);
       }

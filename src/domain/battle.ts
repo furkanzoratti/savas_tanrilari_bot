@@ -1,4 +1,4 @@
-import { UNITS } from "./catalog.js";
+import { SHIPS, UNITS } from "./catalog.js";
 
 export const BATTLE_TERRAINS = {
   OPEN_PLAIN: { label: "Açık Ova", frontageA: 30_000, frontageB: 30_000, preset: "open-plain.png" },
@@ -18,7 +18,7 @@ export type BattleSideKey = "A" | "B";
 export type BattleController = "PLAYERS" | "GM";
 export type BattleUnitType = Exclude<keyof typeof UNITS, "observer">;
 
-export type NavalUnitType = "kerkouros" | "trireme" | "quinquereme";
+export type NavalUnitType = keyof typeof SHIPS;
 export type SiegeAssetType = "ladder_group" | "ram" | "mantlet" | "ballista" | "wall_ballista" | "catapult" | "siege_tower";
 export type BattleForceType = BattleUnitType | NavalUnitType;
 export type BattleComposition = Partial<Record<BattleForceType, number>>;
@@ -151,6 +151,7 @@ export const NAVAL_UNIT_STATS: Record<NavalUnitType, {
   label: string; clashDice: number; clashSides: number; damageDice: number; damageSides: number; durability: 1 | 2 | 3;
 }> = {
   kerkouros: { label: "Kerkouros", clashDice: 1, clashSides: 6, damageDice: 1, damageSides: 12, durability: 1 },
+  hjortspring: { label: "Hjortspring Savaş Teknesi", clashDice: 2, clashSides: 6, damageDice: 2, damageSides: 10, durability: 2 },
   trireme: { label: "Trireme", clashDice: 2, clashSides: 8, damageDice: 2, damageSides: 12, durability: 2 },
   quinquereme: { label: "Quinquereme", clashDice: 3, clashSides: 10, damageDice: 3, damageSides: 12, durability: 3 }
 };

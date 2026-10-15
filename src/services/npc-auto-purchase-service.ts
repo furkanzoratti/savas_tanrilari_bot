@@ -14,6 +14,7 @@ import { formableModifiers } from "../domain/formable-countries.js";
 import { shipCostMultiplier } from "../domain/resources.js";
 import { STEPPE_ARMY_UNIT_TYPES } from "../domain/steppe-army.js";
 import { SCANDINAVIAN_ARMY_UNIT_TYPES } from "../domain/scandinavian-army.js";
+import { purchasableShipTypes } from "../domain/scandinavian-navy.js";
 
 export type NpcAutoPurchaseScope = "ALL_PLAYERLESS" | "INCLUDED_ONLY";
 export type NpcCountryOverrideStatus = "AUTO" | "INCLUDE" | "EXCLUDE";
@@ -285,8 +286,11 @@ export function planCountryPurchases(
       shipyardLevels.set(settlement.id, shipyardLevel);
     }
     const groupedShips = new Map<string, ShipAction>();
-    const shipPriority: Array<keyof typeof SHIPS> = ["quinquereme", "trireme", "kerkouros"];
-    while (remainingBudget > 0 && remainingPersonnel >= SHIPS.kerkouros.manpower) {
+    const permittedShips = new Set(purchasableShipTypes(Boolean(doc.isScandinavianState)));
+    const preferredShipOrder: Array<keyof typeof SHIPS> = ["quinquereme", "trireme", "hjortspring", "kerkouros"];
+    const shipPriority = preferredShipOrder.filter((shipType) => permittedShips.has(shipType));
+    const minimumShipManpower = Math.min(...shipPriority.map((shipType) => SHIPS[shipType].manpower));
+    while (shipPriority.length > 0 && remainingBudget > 0 && remainingPersonnel >= minimumShipManpower) {
       let selected: { settlement: CountryDocument["settlements"][number]; shipType: keyof typeof SHIPS; cost: number } | undefined;
       for (const shipType of shipPriority) {
         const ship = SHIPS[shipType];

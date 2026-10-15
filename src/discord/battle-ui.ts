@@ -610,7 +610,7 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
     requireGameMaster(interaction);
     const side = interaction.options.getString("taraf", true) as BattleSideKey;
     const view = await battleService.setRoster({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id, side, naval: true, countryName: interaction.options.getString("ulke"),
-      composition: { kerkouros: interaction.options.getInteger("kerkouros", true), trireme: interaction.options.getInteger("trireme", true), quinquereme: interaction.options.getInteger("quinquereme", true) } });
+      composition: { kerkouros: interaction.options.getInteger("kerkouros", true), hjortspring: interaction.options.getInteger("hjortspring") ?? 0, trireme: interaction.options.getInteger("trireme", true), quinquereme: interaction.options.getInteger("quinquereme", true) } });
     await interaction.editReply({ content: `✅ ${side} tarafının bütün filosu tek işlemde kaydedildi. Açık toplam: **${number(view.sides[side].initial_total)} gemi**` });
   } else if (sub === "kusatma-aleti-ayarla") {
     requireGameMaster(interaction);

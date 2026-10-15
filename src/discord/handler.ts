@@ -22,6 +22,7 @@ import { NPC_AUTO_PURCHASE_DOCTRINES, type NpcAutoPurchaseDoctrine } from "../do
 import { SPECIAL_UNITS, isSpecialUnitType, type SpecialUnitType } from "../domain/special-units.js";
 import { isSteppeArmyUnitType } from "../domain/steppe-army.js";
 import { isScandinavianArmyUnitType } from "../domain/scandinavian-army.js";
+import { purchasableShipTypes } from "../domain/scandinavian-navy.js";
 import { FORMABLE_COUNTRIES, FORMABLE_TIER_LABELS, formableModifiers, formableTier, type FormableTier } from "../domain/formable-countries.js";
 import { ESPIONAGE_TARGETS } from "../domain/espionage.js";
 import { RESOURCES, shipCostMultiplier, type ResourceType } from "../domain/resources.js";
@@ -1584,7 +1585,9 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
     const document = await gameService.document(countryId);
     const settlement = document.settlements.find((item) => item.id === settlementId);
     if (!settlement) throw new GameError("Yerleşke bulunamadı.");
-    await interaction.editReply({ content: "Üretilecek gemi türünü seç:", components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder().setCustomId(`sc|${countryId}|${settlementId}`).setPlaceholder("Gemi seç").addOptions(shipChoices.map(([key, ship]) => ({ label: ship.name, description: `${gold(Math.ceil(ship.price * Math.max(0.5, shipCostMultiplier(settlement.effectiveResources) - (formableModifiers(document.country.active_formable_key).shipDiscount ?? 0) - settlement.religionModifiers.shipPurchaseDiscount)))} • ${ship.manpower} mürettebat • ${ship.transportCapacity} taşıma • ${ship.productionPoints}/${ship.harborPoints} üretim/rıhtım`, value: key }))))] });
+    const allowedShipTypes = new Set(purchasableShipTypes(Boolean(document.isScandinavianState)));
+    const availableShips = shipChoices.filter(([key]) => allowedShipTypes.has(key));
+    await interaction.editReply({ content: "Üretilecek gemi türünü seç:", components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder().setCustomId(`sc|${countryId}|${settlementId}`).setPlaceholder("Gemi seç").addOptions(availableShips.map(([key, ship]) => ({ label: ship.name, description: `${gold(Math.ceil(ship.price * Math.max(0.5, shipCostMultiplier(settlement.effectiveResources) - (formableModifiers(document.country.active_formable_key).shipDiscount ?? 0) - settlement.religionModifiers.shipPurchaseDiscount)))} • ${ship.manpower} mürettebat • ${ship.transportCapacity} taşıma • ${ship.productionPoints}/${ship.harborPoints} üretim/rıhtım`, value: key }))))] });
   }
 }
 

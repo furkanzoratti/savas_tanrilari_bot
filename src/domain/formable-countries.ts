@@ -42,7 +42,7 @@ export interface FormableModifiers {
   warPreparationMilitia?: number;
   policyMilitiaMultiplier?: number;
   starvationBonus?: number;
-  shipyardPointBonus?: Partial<Record<"kerkouros" | "trireme" | "quinquereme", number>>;
+  shipyardPointBonus?: Partial<Record<"kerkouros" | "hjortspring" | "trireme" | "quinquereme", number>>;
   siegeAssetDiscount?: number;
   mercenaryHireDiscount?: number;
   mercenaryUpkeepDiscount?: number;
@@ -62,7 +62,7 @@ export interface FormableCountryDefinition {
   requiredActiveFormables?: readonly string[];
   foundingReward?: {
     shipsPerActiveShipyard: {
-      shipType: "kerkouros" | "trireme" | "quinquereme";
+      shipType: "kerkouros" | "hjortspring" | "trireme" | "quinquereme";
       quantity: number;
     };
   };

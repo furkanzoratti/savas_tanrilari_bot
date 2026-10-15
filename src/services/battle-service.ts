@@ -551,14 +551,14 @@ async function loadView(client: DbClient, battleId: string, lock = false): Promi
     }>(
       `SELECT side_key,
               COUNT(*) FILTER(WHERE sunk_round IS NULL AND disabled_round IS NULL
-                AND current_hp>CASE ship_type WHEN 'kerkouros' THEN 10 WHEN 'trireme' THEN 20 ELSE 30 END)::integer AS active,
+                AND current_hp>CASE ship_type WHEN 'kerkouros' THEN 10 WHEN 'hjortspring' THEN 15 WHEN 'trireme' THEN 20 ELSE 30 END)::integer AS active,
               COUNT(*) FILTER(WHERE sunk_round IS NULL AND current_hp>0 AND (
-                disabled_round IS NOT NULL OR current_hp<=CASE ship_type WHEN 'kerkouros' THEN 10 WHEN 'trireme' THEN 20 ELSE 30 END
+                disabled_round IS NOT NULL OR current_hp<=CASE ship_type WHEN 'kerkouros' THEN 10 WHEN 'hjortspring' THEN 15 WHEN 'trireme' THEN 20 ELSE 30 END
               ))::integer AS disabled,
               COUNT(*) FILTER(WHERE sunk_round IS NOT NULL OR current_hp<=0)::integer AS sunk,
               COALESCE(SUM(max_hp),0)::integer AS initial_hull_hp,
               COALESCE(SUM(current_hp) FILTER(WHERE sunk_round IS NULL AND disabled_round IS NULL
-                AND current_hp>CASE ship_type WHEN 'kerkouros' THEN 10 WHEN 'trireme' THEN 20 ELSE 30 END),0)::integer AS operational_hull_hp,
+                AND current_hp>CASE ship_type WHEN 'kerkouros' THEN 10 WHEN 'hjortspring' THEN 15 WHEN 'trireme' THEN 20 ELSE 30 END),0)::integer AS operational_hull_hp,
               COALESCE(SUM(current_hp) FILTER(WHERE sunk_round IS NULL AND current_hp>0),0)::integer AS remaining_hull_hp
          FROM battle_ship_hulls WHERE battle_id=$1 GROUP BY side_key`,[battleId])).rows;
     for(const row of rows){

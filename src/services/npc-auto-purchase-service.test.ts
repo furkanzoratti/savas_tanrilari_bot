@@ -19,7 +19,7 @@ const config: NpcAutoPurchaseConfig = {
   scope: "ALL_PLAYERLESS"
 };
 
-function document(input: { treasury: number; militaryUsed: number; trainingRemaining: number; buildingStarted?: boolean; units?: Array<{ unit_type: string; quantity: number; status: string; force_type: string }>; levelOneBuildings?: string[]; naval?: boolean; besieged?: boolean; conquered?: boolean; steppe?: boolean }): CountryDocument {
+function document(input: { treasury: number; militaryUsed: number; trainingRemaining: number; buildingStarted?: boolean; units?: Array<{ unit_type: string; quantity: number; status: string; force_type: string }>; levelOneBuildings?: string[]; naval?: boolean; besieged?: boolean; conquered?: boolean; steppe?: boolean; scandinavian?: boolean }): CountryDocument {
   return {
     guild: { current_turn: 3 },
     country: { id: "country" },
@@ -27,6 +27,7 @@ function document(input: { treasury: number; militaryUsed: number; trainingRemai
     militaryUsed: input.militaryUsed,
     specialUnitUnlocks: input.steppe ? ["steppe_horse_archer","steppe_cavalry","kurgan_shieldbearer","oba_archer"] : [],
     isSteppeConfederation: Boolean(input.steppe),
+    isScandinavianState: Boolean(input.scandinavian),
     settlements: [{
       id: "settlement",
       name: "Test Şehri",
@@ -94,6 +95,12 @@ describe("NPC ek alım planlaması", () => {
     const plan = planCountryPurchases(document({ treasury: 30_000, militaryUsed: 0, trainingRemaining: 10_000, naval: true }), { ...config, budgetPercent: 100 }, "NAVAL_FOCUS");
     expect(plan.shipActions.length).toBeGreaterThan(0);
     expect(plan.shipActions.reduce((sum, action) => sum + action.quantity, 0)).toBeGreaterThan(0);
+  });
+
+  it("İskandinav Gemi Odaklı alımında yalnız Hjortspring üretir", () => {
+    const plan = planCountryPurchases(document({ treasury: 30_000, militaryUsed: 0, trainingRemaining: 10_000, naval: true, scandinavian: true }), { ...config, budgetPercent: 100 }, "NAVAL_FOCUS");
+    expect(plan.shipActions.length).toBeGreaterThan(0);
+    expect(plan.shipActions.every((action) => action.shipType === "hjortspring")).toBe(true);
   });
 
   it("Gemi Odaklı gemi üretemeyen devlette kompozisyona uygun asker alır", () => {

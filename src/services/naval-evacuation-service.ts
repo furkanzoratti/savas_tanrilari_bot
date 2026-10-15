@@ -1,4 +1,6 @@
 import type { DbClient } from "../db/pool.js";
+import type { NavalUnitType } from "../domain/battle.js";
+import { NAVAL_HULL_STATS } from "../domain/naval-hulls.js";
 
 interface EvacuationPort {
   id: string;
@@ -11,7 +13,7 @@ interface RepairShipRow {
   source_fleet_id: string | null;
   damage_id: string;
   settlement_id: string;
-  ship_type: "kerkouros" | "trireme" | "quinquereme";
+  ship_type: NavalUnitType;
   current_hp: number;
   max_hp: number;
 }
@@ -27,7 +29,7 @@ export interface NavalEvacuationResult {
 }
 
 function operationalDamageStatus(shipType:RepairShipRow["ship_type"],currentHp:number):"DAMAGED"|"DISABLED"{
-  const threshold=shipType==="kerkouros"?10:shipType==="trireme"?20:30;
+  const threshold=NAVAL_HULL_STATS[shipType].disabledAtHp;
   return currentHp>threshold?"DAMAGED":"DISABLED";
 }
 

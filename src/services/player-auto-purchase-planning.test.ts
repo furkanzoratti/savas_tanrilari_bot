@@ -48,6 +48,13 @@ describe("oyuncu otomatik alım planlaması", () => {
     ]));
   });
 
+  it("İskandinav gemi alımında standart gemileri planlamaz", () => {
+    const plan = planPlayerPurchases("guild", 30, "SHIPS", documentFixture({ naval: true, scandinavian: true }));
+    expect(plan.unitActions).toHaveLength(0);
+    expect(plan.shipActions.length).toBeGreaterThan(0);
+    expect(plan.shipActions.every((action) => action.shipType === "hjortspring")).toBe(true);
+  });
+
   it("ağır ordu planını ağır standartlar ve onları karşılayan özel birliklerden kurar", () => {
     const specialUnits = ["hoplite", "germanic_companion_cavalry", "sarmatian_longswordsmen", "briton_longbow", "peltast"];
     const candidates = playerArmyUnitCandidates("QUALITY", specialUnits as any);

@@ -93,7 +93,7 @@ const recruitmentActionSchema = z.object({
 
 const shipbuildingActionSchema = z.object({
   settlementRef: z.string(),
-  shipType: z.enum(["kerkouros", "trireme", "quinquereme"]),
+  shipType: z.enum(["kerkouros", "hjortspring", "trireme", "quinquereme"]),
   shipName: z.string().min(1),
   quantity: z.number().int().min(1),
   estimatedCost: z.number().int().min(0),
@@ -228,7 +228,7 @@ export const aiTurnPlanJsonSchema = {
         type: "object", additionalProperties: false,
         required: ["settlementRef", "shipType", "shipName", "quantity", "estimatedCost", "addedUpkeep", "completionTurns", "priority", "reason"],
         properties: {
-          settlementRef: { type: "string" }, shipType: { type: "string", enum: ["kerkouros", "trireme", "quinquereme"] }, shipName: { type: "string" },
+          settlementRef: { type: "string" }, shipType: { type: "string", enum: ["kerkouros", "hjortspring", "trireme", "quinquereme"] }, shipName: { type: "string" },
           quantity: { type: "integer", minimum: 1 }, estimatedCost: { type: "integer", minimum: 0 }, addedUpkeep: { type: "integer", minimum: 0 },
           completionTurns: { type: "integer", minimum: 1 }, priority: { type: "integer", minimum: 1, maximum: 5 }, reason: { type: "string" }
         }

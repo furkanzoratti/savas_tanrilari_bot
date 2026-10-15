@@ -17,6 +17,7 @@ import { applyFormableShipUpkeepDiscount, FORMABLE_COUNTRIES, formableBuildingDi
 import { assessArmyComposition, type BattleComposition, type BattleUnitType } from "../domain/battle.js";
 import { isSteppeArmyUnitType, STEPPE_ARMY_UNIT_TYPES } from "../domain/steppe-army.js";
 import { isScandinavianArmyUnitType, SCANDINAVIAN_ARMY_UNIT_TYPES } from "../domain/scandinavian-army.js";
+import { countryCanPurchaseShip } from "../domain/scandinavian-navy.js";
 import { calculateTreasuryTransferQuota } from "../domain/treasury-transfer.js";
 import { assimilationCompletionTurn } from "../domain/assimilation.js";
 import type { ArmyView } from "./army-service.js";
@@ -2848,11 +2849,17 @@ export const gameService = {
   },
   async purchaseShips(input: { guildId: string; actorId: string; countryId: string; settlementId: string; shipType: keyof typeof SHIPS; quantity: number }): Promise<{ cost: number; completionTurn: number; harborUsed: number; harborCapacity: number }> {
     if (!Number.isSafeInteger(input.quantity) || input.quantity < 1) throw new GameError("Gemi miktarı pozitif bir tam sayı olmalıdır.");
+    if (!SHIPS[input.shipType]) throw new GameError("Gemi türü bulunamadı.");
     return withTransaction(async (client) => {
       const guild = await getGuild(client, input.guildId);
       if (!isAcquisitionTurn(guild.current_turn, guild.acquisition_interval)) throw new GameError("Gemi alımı yalnızca Alım Turunda yapılabilir.");
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`country:${input.countryId}`]);
       const country = await getCountry(client, input.countryId);
+      if (!countryCanPurchaseShip(Boolean(country.is_scandinavian_state), input.shipType)) {
+        throw new GameError(country.is_scandinavian_state
+          ? "İskandinav devletleri yalnızca Hjortspring Savaş Teknesi üretebilir."
+          : "Hjortspring Savaş Teknesi yalnızca İskandinav devletleri tarafından üretilebilir.");
+      }
       const settlement = (await client.query<SettlementRow>("SELECT * FROM settlements WHERE id=$1 AND country_id=$2 FOR UPDATE", [input.settlementId, country.id])).rows[0];
       if (!settlement) throw new GameError("Yerleşke bulunamadı.");
       if (settlement.is_conquered) throw new GameError("Fethedilmiş yerleşke asimile edilmeden gemi üretemez.");

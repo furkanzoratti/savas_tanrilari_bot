@@ -7,10 +7,11 @@ describe("scandinavian army doctrine migration", () => {
     expect(scandinavianArmyDoctrineMigration.version).toBe(204);
     expect(scandinavianArmyDoctrineMigration.sql).toContain("is_scandinavian_state");
     expect(scandinavianArmyDoctrineMigration.sql).toContain("'CIMBRIC','CHAEDINIAN','GAUT_SUIONIC'");
+    expect(scandinavianArmyDoctrineMigration.sql).toContain("lower('Svege Krallığı')");
     expect(scandinavianArmyDoctrineMigration.sql).toContain("'scandinavian_berserker'");
     expect(scandinavianArmyDoctrineMigration.sql).toContain("'scandinavian_spearmen'");
     expect(scandinavianArmyDoctrineMigration.sql).toContain("'scandinavian_hunters'");
     expect(scandinavianArmyDoctrineMigration.sql).not.toContain("INSERT INTO country_special_unit_unlocks");
-    expect(migrations.at(-1)).toBe(scandinavianArmyDoctrineMigration);
+    expect(migrations).toContain(scandinavianArmyDoctrineMigration);
   });
 });

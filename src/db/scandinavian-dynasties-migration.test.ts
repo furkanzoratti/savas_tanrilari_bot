@@ -1,6 +1,7 @@
 import {describe,expect,it} from "vitest";
 import {migrations} from "./migrations.js";
 import {scandinavianDynastiesMigration} from "./scandinavian-dynasties-migration.js";
+import {scandinavianArmyDoctrineMigration} from "./scandinavian-army-doctrine-migration.js";
 
 describe("İskandinav ülke hanedanları göçü",()=>{
   it("dört İskandinav hanesini en az sekiz üyeyle kurar",()=>{
@@ -18,6 +19,6 @@ describe("İskandinav ülke hanedanları göçü",()=>{
     expect(scandinavianDynastiesMigration.sql).toContain("ON CONFLICT(country_id) WHERE steppe_title_id IS NULL DO NOTHING");
     expect(scandinavianDynastiesMigration.sql).toContain("dynasty.country_id=country.id AND dynasty.steppe_title_id IS NULL");
     expect(scandinavianDynastiesMigration.sql).toContain("WHERE NOT EXISTS(SELECT 1 FROM dynasty_members member WHERE member.dynasty_id=dynasty.id)");
-    expect(migrations.at(-2)).toBe(scandinavianDynastiesMigration);
+    expect(migrations.indexOf(scandinavianDynastiesMigration)+1).toBe(migrations.indexOf(scandinavianArmyDoctrineMigration));
   });
 });

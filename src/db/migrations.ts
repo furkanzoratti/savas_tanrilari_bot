@@ -134,6 +134,8 @@ import { dynastyWidowRemarriageMigration } from "./dynasty-widow-remarriage-migr
 import { scandinavianCultureReligionMigration } from "./scandinavian-culture-religion-migration.js";
 import { scandinavianDynastiesMigration } from "./scandinavian-dynasties-migration.js";
 import { scandinavianArmyDoctrineMigration } from "./scandinavian-army-doctrine-migration.js";
+import { scandinavianNavalDoctrineMigration } from "./scandinavian-naval-doctrine-migration.js";
+import { scandinavianStartingAssetsMigration } from "./scandinavian-starting-assets-migration.js";
 
 export const migrations = [
   {
@@ -2485,5 +2487,7 @@ export const migrations = [
   dynastyWidowRemarriageMigration,
   scandinavianCultureReligionMigration,
   scandinavianDynastiesMigration,
-  scandinavianArmyDoctrineMigration
+  scandinavianArmyDoctrineMigration,
+  scandinavianNavalDoctrineMigration,
+  scandinavianStartingAssetsMigration
 ] as const;

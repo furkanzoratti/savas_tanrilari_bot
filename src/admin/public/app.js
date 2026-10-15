@@ -1790,7 +1790,7 @@ async function openArmyEditor(armyId) {
 async function openFleetHealthEditor(fleetId) {
   const data=await api(`/api/fleets/${fleetId}`);
   const fleet=data.fleet;
-  const shipLabels={kerkouros:"Kerkouros",trireme:"Trireme",quinquereme:"Quinquereme"};
+  const shipLabels={kerkouros:"Kerkouros",hjortspring:"Hjortspring Savaş Teknesi",trireme:"Trireme",quinquereme:"Quinquereme"};
   const statusLabels={HEALTHY:"Sağlam",DAMAGED:"Hasarlı",DISABLED:"İş göremez"};
   const hasDamaged=data.healthGroups.some((group)=>Number(group.current_hp)<Number(group.max_hp));
   const blockedReason=fleet.active_battle_id

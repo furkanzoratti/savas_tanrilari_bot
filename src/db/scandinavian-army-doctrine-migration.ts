@@ -11,7 +11,8 @@ export const scandinavianArmyDoctrineMigration = {
            lower('Kimbriler'),lower('Kimbri Krallığı'),
            lower('Hedinler'),lower('Hedin Krallığı'),lower('Chaedinler'),
            lower('Gautlar'),lower('Gaut Krallığı'),
-           lower('Suionlar'),lower('Suion Krallığı')
+           lower('Suionlar'),lower('Suion Krallığı'),
+           lower('Svege'),lower('Svege Krallığı')
          )
          OR primary_culture_group IN ('CIMBRIC','CHAEDINIAN','GAUT_SUIONIC')
        );

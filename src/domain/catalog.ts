@@ -177,9 +177,12 @@ export function portShipCapacity(level: number): number {
 
 export const SHIPS = {
   kerkouros: { name: "Kerkouros", price: 750, upkeep: 75, manpower: 50, buildTurns: 2, transportCapacity: 200, productionPoints: 1, harborPoints: 1 },
+  hjortspring: { name: "Hjortspring Savaş Teknesi", price: 1_200, upkeep: 120, manpower: 80, buildTurns: 3, transportCapacity: 350, productionPoints: 2, harborPoints: 2 },
   trireme: { name: "Trireme", price: 1_500, upkeep: 150, manpower: 100, buildTurns: 3, transportCapacity: 500, productionPoints: 2, harborPoints: 2 },
   quinquereme: { name: "Quinquereme", price: 3_000, upkeep: 300, manpower: 150, buildTurns: 4, transportCapacity: 800, productionPoints: 4, harborPoints: 4 }
 } as const;
+
+export type ShipType = keyof typeof SHIPS;
 
 export function shipCrewRequirement(shipType: keyof typeof SHIPS, quantity: number): number {
   return Math.max(0, Math.floor(quantity)) * SHIPS[shipType].manpower;
