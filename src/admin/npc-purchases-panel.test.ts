@@ -13,6 +13,7 @@ describe("NPC alım yönetim paneli", () => {
     expect(server).toContain('url.pathname === "/api/admin/npc-purchases/execute"');
     expect(server).toContain("const npcBuildingDashboardMatch");
     expect(server).toContain("const npcBuildingPurchaseMatch");
+    expect(server).toContain("const npcTreasuryTransferMatch");
     expect(server).toContain("npcPanelPurchaseService.preview");
     expect(server).not.toContain('/api/admin/npc-purchases/config');
     expect(server).not.toContain("npcPurchaseCountryMatch");
@@ -26,6 +27,8 @@ describe("NPC alım yönetim paneli", () => {
     expect(app).toContain("plan.unitActions");
     expect(app).toContain("openNpcBuildingManager");
     expect(app).toContain("data-npc-buy-building");
+    expect(app).toContain("openNpcTreasuryTransfer");
+    expect(app).toContain("data-npc-open-transfer");
     expect(app).toContain('let npcPurchaseMode = "GENERAL"');
   });
 

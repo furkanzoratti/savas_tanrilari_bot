@@ -523,6 +523,20 @@ const server = createServer(async (request, response) => {
         settlementId: input.settlementId, buildingType: input.buildingType
       }));
     }
+    const npcTreasuryTransferMatch = request.method === "POST"
+      ? url.pathname.match(/^\/api\/admin\/npc-purchases\/countries\/([0-9a-f-]+)\/treasury-transfer$/iu)
+      : null;
+    if (npcTreasuryTransferMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      const input = await body(request) as { sourceSettlementId?: unknown; targetSettlementId?: unknown; amount?: unknown };
+      if (typeof input.sourceSettlementId !== "string" || typeof input.targetSettlementId !== "string") throw new GameError("Kaynak ve hedef yerleşke zorunludur.");
+      return json(response, 200, await npcPanelPurchaseService.transferTreasury({
+        guildId: adminConfig.guildId, actorId: session.sub, countryId: npcTreasuryTransferMatch[1]!,
+        sourceSettlementId: input.sourceSettlementId, targetSettlementId: input.targetSettlementId,
+        amount: Number(input.amount)
+      }));
+    }
     const aiDraftMatch = request.method === "POST" ? url.pathname.match(/^\/api\/admin\/ai-governance\/countries\/([0-9a-f-]+)\/generate-draft$/iu) : null;
     if (aiDraftMatch) {
       const session = requireMutation(request, response);

@@ -219,5 +219,13 @@ export const npcPanelPurchaseService = {
     await npcCountryIds(input.guildId, input.countryId);
     if (!BUILDABLE_BUILDINGS.some((building) => building.key === input.buildingType)) throw new GameError("Geçersiz bina türü.");
     return gameService.purchaseBuilding(input);
+  },
+
+  async transferTreasury(input: {
+    guildId: string; actorId: string; countryId: string;
+    sourceSettlementId: string; targetSettlementId: string; amount: number;
+  }) {
+    await npcCountryIds(input.guildId, input.countryId);
+    return gameService.transferSettlementTreasury(input);
   }
 };
