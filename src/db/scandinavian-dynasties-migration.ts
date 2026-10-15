@@ -23,14 +23,14 @@ export const scandinavianDynastiesMigration={
     SELECT country.guild_id,country.id,seed.dynasty_name,'system:scandinavian-dynasties-v203'
       FROM scandinavian_dynasty_countries_v203 seed
       JOIN countries country ON lower(country.name)=lower(seed.country_name)
-    ON CONFLICT(country_id) DO NOTHING;
+    ON CONFLICT(country_id) WHERE steppe_title_id IS NULL DO NOTHING;
 
     CREATE TEMP TABLE scandinavian_dynasty_targets_v203 ON COMMIT DROP AS
     SELECT dynasty.id AS dynasty_id,country.id AS country_id,seed.seed_key,seed.dynasty_name,guild.current_turn
       FROM scandinavian_dynasty_countries_v203 seed
       JOIN countries country ON lower(country.name)=lower(seed.country_name)
       JOIN guilds guild ON guild.discord_id=country.guild_id
-      JOIN dynasties dynasty ON dynasty.country_id=country.id
+      JOIN dynasties dynasty ON dynasty.country_id=country.id AND dynasty.steppe_title_id IS NULL
      WHERE NOT EXISTS(SELECT 1 FROM dynasty_members member WHERE member.dynasty_id=dynasty.id);
 
     UPDATE dynasties dynasty
