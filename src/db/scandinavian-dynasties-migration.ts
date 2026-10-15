@@ -17,7 +17,9 @@ export const scandinavianDynastiesMigration={
       ('Gautlar','GAUT','Hretheling Hanedanı'),
       ('Gaut Krallığı','GAUT','Hretheling Hanedanı'),
       ('Suionlar','SUION','Yngling Hanedanı'),
-      ('Suion Krallığı','SUION','Yngling Hanedanı');
+      ('Suion Krallığı','SUION','Yngling Hanedanı'),
+      ('Svege','SUION','Yngling Hanedanı'),
+      ('Svege Krallığı','SUION','Yngling Hanedanı');
 
     INSERT INTO dynasties(guild_id,country_id,name,created_by)
     SELECT country.guild_id,country.id,seed.dynasty_name,'system:scandinavian-dynasties-v203'

@@ -13,6 +13,7 @@ describe("İskandinav ülke hanedanları göçü",()=>{
       const memberRows=scandinavianDynastiesMigration.sql.match(new RegExp(`\\('${seedKey}','[^']+'`,'g'))??[];
       expect(memberRows).toHaveLength(8);
     }
+    expect(scandinavianDynastiesMigration.sql).toContain("('Svege Krallığı','SUION','Yngling Hanedanı')");
   });
 
   it("mevcut dolu hanedanlara dokunmaz ve ordu doktrininden hemen önce çalışır",()=>{

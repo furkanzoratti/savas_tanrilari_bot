@@ -14,6 +14,6 @@ describe("İskandinav başlangıç varlıkları göçü", () => {
     expect(scandinavianStartingAssetsMigration.sql).toContain("GREATEST(0,settlement.last_acquisition_income)");
     expect(scandinavianStartingAssetsMigration.sql).toContain("'ADMIN_ADJUSTMENT'");
     expect(scandinavianStartingAssetsMigration.sql).toContain("SET treasury=COALESCE");
-    expect(migrations.at(-1)).toBe(scandinavianStartingAssetsMigration);
+    expect(migrations).toContain(scandinavianStartingAssetsMigration);
   });
 });
