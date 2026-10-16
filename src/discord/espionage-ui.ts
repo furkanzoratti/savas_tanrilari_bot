@@ -174,16 +174,19 @@ export async function publishPendingEspionagePublications(
         resultEmbed.setImage(`attachment://${name}`);
       }
 
-      const fateImage=espionagePublicDetectionImage(operation.detection_level,operation.captured);
-      const fateName=`fate-${operation.id}.png`;
-      files.push(espionageEventAsset(fateImage,fateName));
-      const fateEmbed=new EmbedBuilder()
-        .setColor(operation.captured?0x7f1d1d:operation.detection_level===2?0x9a6b31:0x263857)
-        .setTitle("🕵️ Casusun Akıbeti")
-        .setDescription(disclosure)
-        .setImage(`attachment://${fateName}`);
+      const embeds=[resultEmbed];
+      if (disclosure) {
+        const fateImage=espionagePublicDetectionImage(operation.detection_level,operation.captured);
+        const fateName=`fate-${operation.id}.png`;
+        files.push(espionageEventAsset(fateImage,fateName));
+        embeds.push(new EmbedBuilder()
+          .setColor(operation.captured?0x7f1d1d:operation.detection_level===2?0x9a6b31:0x263857)
+          .setTitle("🕵️ Casusun Akıbeti")
+          .setDescription(disclosure)
+          .setImage(`attachment://${fateName}`));
+      }
 
-      await channel.send({embeds:[resultEmbed,fateEmbed],files});
+      await channel.send({embeds,files});
       await espionageService.markPublicPosted(operation.id);
       published+=1;
     } catch (error) {

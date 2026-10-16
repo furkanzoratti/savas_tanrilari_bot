@@ -9,7 +9,9 @@ describe("casusluk görselli olay teslimi",()=>{
     const service=read("../services/espionage-service.ts");
     const handler=read("./handler.ts");
     expect(ui).toContain("publishPendingEspionagePublications");
-    expect(ui).toContain("embeds:[resultEmbed,fateEmbed]");
+    expect(ui).toContain("const embeds=[resultEmbed]");
+    expect(ui).toContain("if (disclosure)");
+    expect(ui).toContain("await channel.send({embeds,files})");
     expect(ui).toContain("espionagePublicDetectionImage");
     expect(ui).toContain("if (!channelId)");
     expect(ui).toContain("await espionageService.markPublicPosted(operation.id)");

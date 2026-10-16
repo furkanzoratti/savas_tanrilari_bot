@@ -11,7 +11,7 @@ export const ESPIONAGE_PUBLICATION_PLACEHOLDERS = [
   { key: "hedef", label: "Hedef kişi veya birim", example: "Kraliyet hazinesi" },
   { key: "etki", label: "Oyundaki sonuç", example: "2.400 Altın kaybedildi." },
   { key: "tur", label: "Sonuç turu", example: "38" },
-  { key: "tespit", label: "Tespit bilgisi", example: "Saldırının arkasındaki güç tespit edilemedi." }
+  { key: "tespit", label: "Tespit bilgisi", example: "Olayın ardında dış müdahale olmuş olabileceğine dair işaretler bulundu." }
 ] as const;
 
 export const ESPIONAGE_PUBLICATION_IMAGE_KEYS = [
@@ -177,8 +177,8 @@ export function espionagePublicDetectionState(
   detectionLevel: number | null,
   captured: boolean
 ): EspionagePublicDetectionState {
-  if (captured || (detectionLevel ?? 0) >= 3) return "CAPTURED";
-  if (detectionLevel === 2) return "COUNTRY_IDENTIFIED";
+  if (captured) return "CAPTURED";
+  if ((detectionLevel ?? 0) >= 2) return "COUNTRY_IDENTIFIED";
   if (detectionLevel === 1) return "INTERVENTION_NOTICED";
   return "UNTRACED";
 }
@@ -202,15 +202,15 @@ export function espionagePublicDetectionDisclosure(input: {
 }): string {
   const state=espionagePublicDetectionState(input.detectionLevel,input.captured);
   if (state === "CAPTURED") {
-    return `Muhafızlar izleri takip ederek operasyonun **${input.attackerCountryName}** adına yürütüldüğünü ortaya çıkardı. **${input.spyName}** yakalandı.`;
+    return `Muhafızlar **${input.spyName}** adlı casusu yakaladı. Ele geçirilen deliller, operasyonun **${input.attackerCountryName}** adına yürütüldüğünü ortaya çıkardı.`;
   }
   if (state === "COUNTRY_IDENTIFIED") {
     return `Casus kaçmayı başardı; ancak geride kalan deliller operasyonun **${input.attackerCountryName}** adına yürütüldüğünü gösterdi.`;
   }
   if (state === "INTERVENTION_NOTICED") {
-    return "Olayın ardında yabancı bir müdahale olduğu anlaşıldı; casus izini kaybettirerek kaçtı.";
+    return "Olayın ardında dış müdahale olmuş olabileceğine dair işaretler bulundu.";
   }
-  return "Muhafızların araştırmasına rağmen casusa veya onu gönderen devlete ulaşan hiçbir iz bulunamadı.";
+  return "";
 }
 
 export function espionagePublicationPlaceholders(value: string): string[] {

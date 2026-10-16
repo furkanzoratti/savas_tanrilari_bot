@@ -430,7 +430,7 @@ async function battleSimulatorPage(signal) {
 
 const espionagePublicationExample = {
   yerleske: "Atina", ulke: "Trakya", gorev: "Hazine Çalma", hedef: "Kraliyet hazinesi",
-  etki: "2.400 Altın kaybedildi.", tur: "38", tespit: "Saldırının arkasındaki güç tespit edilemedi."
+  etki: "2.400 Altın kaybedildi.", tur: "38", tespit: "Olayın ardında dış müdahale olmuş olabileceğine dair işaretler bulundu."
 };
 
 function renderPublicationText(value) {

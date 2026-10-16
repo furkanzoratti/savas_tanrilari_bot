@@ -59,12 +59,15 @@ describe("casusluk oyuncu yayını şablonları", () => {
     const disclosure=(detectionLevel:number,captured=false)=>espionagePublicDetectionDisclosure({
       detectionLevel,captured,attackerCountryName:"Persis",spyName:"Artemon"
     });
-    expect(disclosure(0)).not.toContain("Persis");
-    expect(disclosure(0)).not.toContain("Artemon");
-    expect(disclosure(1)).toContain("izini kaybettirerek kaçtı");
+    expect(disclosure(0)).toBe("");
+    expect(disclosure(1)).toContain("dış müdahale olmuş olabileceğine");
     expect(disclosure(1)).not.toContain("Persis");
+    expect(disclosure(1)).not.toContain("Artemon");
+    expect(disclosure(1).toLocaleLowerCase("tr-TR")).not.toContain("casus");
     expect(disclosure(2)).toContain("Persis");
     expect(disclosure(2)).not.toContain("Artemon");
+    expect(disclosure(3,false)).toContain("Persis");
+    expect(disclosure(3,false)).not.toContain("Artemon");
     expect(disclosure(3,true)).toContain("Persis");
     expect(disclosure(3,true)).toContain("Artemon");
   });
