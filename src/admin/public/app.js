@@ -183,7 +183,7 @@ function toast(message, kind = "success") {
 const routeTitles = {
   overview: "Genel Bakış", workspace: "Çalışma Alanım", countries: "Devletler", settlements: "Yerleşkeler", armies: "Ordular & Filolar",
   characters: "Karakterler", dynasties: "Hanedanlar", "roman-politics": "Roma Siyaseti",
-  "steppe-politics": "Bozkır Kurultayı", "diplomacy-control": "Diplomasi & Ticaret", assignments: "Görevler", "gm-operations": "Rehberli İşlemler", "bulk-operations": "Toplu İşlemler", "economy-control": "Ekonomi & Üretim", "npc-purchases": "NPC Alımları", battles: "Savaşlar", "battle-simulator": "Savaş Simülasyonu",
+  "steppe-politics": "Bozkır Kurultayı", "diplomacy-control": "Diplomasi & Ticaret", assignments: "Görevler", "espionage-publications": "Casusluk Yayınları", "gm-operations": "Rehberli İşlemler", "bulk-operations": "Toplu İşlemler", "economy-control": "Ekonomi & Üretim", "npc-purchases": "NPC Alımları", battles: "Savaşlar", "battle-simulator": "Savaş Simülasyonu",
   rebellions: "İsyanlar", reports: "Raporlar", health: "Oyun Sağlığı", "data-control": "Tam Yetki", audit: "İşlem Geçmişi"
 };
 function loading() { page.innerHTML = '<div class="loading-shell"><div class="skeleton skeleton-title"></div><div class="loading-grid"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div><div class="skeleton skeleton-content"></div></div>'; }
@@ -425,6 +425,133 @@ async function battleSimulatorPage(signal) {
       submit.disabled = false; submit.textContent = "⚔ Savaşı simüle et";
     }
   });
+}
+
+const espionagePublicationExample = {
+  yerleske: "Atina", ulke: "Trakya", gorev: "Hazine Çalma", hedef: "Kraliyet hazinesi",
+  etki: "2.400 Altın kaybedildi.", tur: "38", tespit: "Saldırının arkasındaki güç tespit edilemedi."
+};
+
+function renderPublicationText(value) {
+  const rendered = String(value || "").replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/gu, (_match, key) => espionagePublicationExample[key] ?? `{{${key}}}`);
+  return escapeHtml(rendered).replace(/\*\*(.+?)\*\*/gu, "<strong>$1</strong>").replace(/\n/gu, "<br>");
+}
+
+function publicationTemplateCard(template) {
+  const outcomeLabel = template.outcome === "SUCCESS" ? "Başarılı" : "Başarısız";
+  return `<article class="publication-template-card" data-publication-template data-publication-target="${template.targetType}" data-publication-outcome="${template.outcome}">
+    <div class="publication-template-image ${template.imageUrl ? "has-image" : "no-image"}">${template.imageUrl ? `<img src="${template.imageUrl}" alt="${escapeHtml(template.targetLabel)} ${outcomeLabel} olay görseli" loading="lazy">` : "<span>Görsel yok</span>"}</div>
+    <div class="publication-template-content">
+      <div class="publication-template-meta"><span class="pill ${template.outcome === "SUCCESS" ? "" : "neutral"}">${outcomeLabel}</span><span class="pill ${template.enabled ? "neutral" : "danger"}">${template.enabled ? "Yayına açık" : "Kapalı"}</span>${template.customized ? '<span class="customized-mark">Özelleştirilmiş</span>' : ""}</div>
+      <small>${escapeHtml(template.targetLabel)}</small><h3>${renderPublicationText(template.titleTemplate)}</h3><p>${renderPublicationText(template.bodyTemplate)}</p>
+      <div class="publication-template-actions"><button class="button compact" data-edit-publication="${template.targetType}:${template.outcome}">Metni düzenle</button>${template.customized ? `<button class="button compact" data-reset-publication="${template.targetType}:${template.outcome}">Varsayılana dön</button>` : ""}</div>
+    </div>
+  </article>`;
+}
+
+function openPublicationTemplateEditor(template, data) {
+  const imageOptions = ['<option value="">Görsel kullanma</option>', ...data.images.map((image) => `<option value="${image.key}" ${selected(image.key, template.imageKey)}>${escapeHtml(image.key)}</option>`)].join("");
+  const placeholderButtons = data.placeholders.map((item) => `<button type="button" class="publication-variable" data-insert-publication-variable="${item.key}" title="${escapeHtml(item.label)}">{{${item.key}}}</button>`).join("");
+  openEditor(
+    `${template.targetLabel} · ${template.outcome === "SUCCESS" ? "Başarılı" : "Başarısız"}`,
+    "Oyunculara açık olay metni · saldırgan devlet ve casus bilgisi özellikle kullanılamaz",
+    `<div class="publication-editor-grid"><div><label>Başlık<input id="publication-title" maxlength="100" minlength="2" value="${escapeHtml(template.titleTemplate)}" required></label><label>Olay metni<textarea id="publication-body" rows="8" maxlength="1800" minlength="10" required>${escapeHtml(template.bodyTemplate)}</textarea></label><label>Hazır görsel<select id="publication-image">${imageOptions}</select></label><label class="check"><input id="publication-enabled" type="checkbox" ${template.enabled ? "checked" : ""}> Bu sonuç türü oyuncu yayınına açık olsun</label><div class="publication-variable-box"><strong>Kullanılabilir değişkenler</strong><p>Bir değişkeni son kullandığın metin alanına eklemek için tıkla.</p><div>${placeholderButtons}</div></div></div><aside class="publication-live-preview"><span class="overview-kicker">CANLI ÖNİZLEME</span><div id="publication-image-preview" class="publication-editor-image"></div><h3 id="publication-title-preview"></h3><p id="publication-body-preview"></p><small>Örnek veriler yalnız önizleme içindir.</small></aside></div>`,
+    async () => {
+      await api("/api/espionage-publications/template", { method: "POST", body: JSON.stringify({
+        targetType: template.targetType,
+        outcome: template.outcome,
+        titleTemplate: document.getElementById("publication-title").value,
+        bodyTemplate: document.getElementById("publication-body").value,
+        imageKey: document.getElementById("publication-image").value || null,
+        enabled: document.getElementById("publication-enabled").checked
+      }) });
+      closeEditor(); toast("Casusluk olay şablonu güncellendi."); await refreshKeepingScroll(espionagePublicationsPage);
+    }
+  );
+  editorModal.querySelector(".modal").classList.add("wide");
+  let lastTextField = document.getElementById("publication-body");
+  const updatePreview = () => {
+    document.getElementById("publication-title-preview").innerHTML = renderPublicationText(document.getElementById("publication-title").value);
+    document.getElementById("publication-body-preview").innerHTML = renderPublicationText(document.getElementById("publication-body").value);
+    const image = document.getElementById("publication-image").value;
+    document.getElementById("publication-image-preview").innerHTML = image ? `<img src="/espionage-events/${image}" alt="Olay görseli önizlemesi">` : "<span>Bu şablonda görsel kullanılmayacak.</span>";
+  };
+  ["publication-title", "publication-body"].forEach((id) => {
+    const field = document.getElementById(id);
+    field.addEventListener("focus", () => { lastTextField = field; });
+    field.addEventListener("input", updatePreview);
+  });
+  document.getElementById("publication-image").addEventListener("change", updatePreview);
+  document.querySelectorAll("[data-insert-publication-variable]").forEach((button) => button.addEventListener("click", () => {
+    const token = `{{${button.dataset.insertPublicationVariable}}}`;
+    const start = lastTextField.selectionStart ?? lastTextField.value.length;
+    const end = lastTextField.selectionEnd ?? start;
+    lastTextField.setRangeText(token, start, end, "end");
+    lastTextField.focus(); updatePreview();
+  }));
+  updatePreview();
+}
+
+async function espionagePublicationsPage(signal) {
+  setActiveRoute("espionage-publications"); loading();
+  const data = await api("/api/espionage-publications", signal ? { signal } : {});
+  const countries = [...new Set(data.settlements.map((item) => item.countryName))];
+  const targetOptions = [...new Map(data.templates.map((item) => [item.targetType, item.targetLabel])).entries()];
+  page.innerHTML = `<div class="page-head publication-hero"><div><span class="overview-kicker">CASUSLUK OLAY YAYIN MERKEZİ</span><h1>Casusluk Yayınları</h1><p>Yerleşkeleri Discord kanallarıyla eşleştir; oyunculara gösterilecek başarı ve başarısızlık metinlerini tek merkezden yönet.</p></div><span class="pill warning">Otomatik gönderim henüz kapalı</span></div>
+  <section class="kpi-grid publication-kpis"><article class="card kpi"><span>Yerleşke</span><strong>${number(data.summary.settlements)}</strong><small>Toplam kayıt</small></article><article class="card kpi"><span>Kanalı hazır</span><strong>${number(data.summary.mappedSettlements)}</strong><small>${number(data.summary.unmappedSettlements)} yerleşke bekliyor</small></article><article class="card kpi"><span>Hazır metin</span><strong>${number(data.summary.templates)}</strong><small>Başarı ve başarısızlık</small></article><article class="card kpi"><span>Özelleştirilmiş</span><strong>${number(data.summary.customizedTemplates)}</strong><small>${number(data.summary.enabledTemplates)} şablon açık</small></article></section>
+  <section class="publication-workflow"><span>1</span><div><strong>Kanalları tanımla</strong><small>Her yerleşkeye oyuncuların görebileceği olay kanalını bağla.</small></div><b>→</b><span>2</span><div><strong>Metinleri hazırla</strong><small>Gizli bilgileri açığa çıkarmayan betimlemeleri düzenle.</small></div><b>→</b><span>3</span><div><strong>Yayını bağla</strong><small>Sonraki aşamada tur çözümlemesi bu güvenli verileri kullanacak.</small></div></section>
+  <section class="card publication-section"><div class="card-head"><div><h2>Yerleşke–kanal eşleştirmeleri</h2><p>Kanal ID'sini veya Discord'dan kopyaladığın &lt;#kanal&gt; etiketini kullanabilirsin.</p></div><span class="pill neutral">${number(data.summary.mappedSettlements)} / ${number(data.summary.settlements)}</span></div><div class="publication-toolbar"><label>Yerleşke ara<input id="publication-settlement-search" placeholder="Yerleşke veya devlet adı"></label><label>Devlet<select id="publication-country-filter"><option value="">Tüm devletler</option>${countries.map((country) => `<option value="${escapeHtml(country)}">${escapeHtml(country)}</option>`).join("")}</select></label><label class="check"><input id="publication-unmapped-only" type="checkbox"> Yalnız eşleşmeyenler</label></div><div id="publication-settlement-list" class="publication-settlement-list">${data.settlements.map((settlement) => `<form class="publication-settlement-row" data-publication-settlement data-country="${escapeHtml(settlement.countryName)}" data-search="${escapeHtml(`${settlement.name} ${settlement.countryName}`.toLocaleLowerCase("tr-TR"))}" data-configured="${settlement.configured}"><span class="publication-status ${settlement.configured ? "ready" : "missing"}">${settlement.configured ? "✓" : "!"}</span><div><strong>${escapeHtml(settlement.name)}</strong><small>${escapeHtml(settlement.countryName)}</small></div><label><span class="sr-only">Discord kanal ID'si</span><input name="channel" value="${escapeHtml(settlement.channelId || "")}" placeholder="Kanal ID veya <#kanal>"></label><input type="hidden" name="settlementId" value="${settlement.id}"><button class="button compact primary" type="submit">Kaydet</button>${settlement.configured ? '<button class="button compact" type="button" data-clear-publication-channel>Temizle</button>' : ""}</form>`).join("")}</div><div id="publication-settlement-empty" class="empty" hidden>Filtreye uyan yerleşke yok.</div></section>
+  <section class="card publication-section"><div class="card-head"><div><h2>Hazır olay metinleri</h2><p>Her görev için başarı ve başarısızlık metni ayrı tutulur. Gerçek değerler yayın anında değişkenlerin yerine gelir.</p></div><span class="pill neutral">${number(data.summary.templates)} şablon</span></div><div class="publication-toolbar template-toolbar"><label>Görev<select id="publication-target-filter"><option value="">Tüm görevler</option>${targetOptions.map(([value, label]) => `<option value="${value}">${escapeHtml(label)}</option>`).join("")}</select></label><label>Sonuç<select id="publication-outcome-filter"><option value="">Tüm sonuçlar</option><option value="SUCCESS">Başarılı</option><option value="FAILURE">Başarısız</option></select></label><div class="publication-privacy-note"><strong>Gizlilik koruması</strong><span>Saldırgan devlet ve casus adı oyuncu şablonlarında kullanılamaz.</span></div></div><div id="publication-template-grid" class="publication-template-grid">${data.templates.map(publicationTemplateCard).join("")}</div></section>`;
+
+  const filterSettlements = () => {
+    const search = document.getElementById("publication-settlement-search").value.trim().toLocaleLowerCase("tr-TR");
+    const country = document.getElementById("publication-country-filter").value;
+    const unmappedOnly = document.getElementById("publication-unmapped-only").checked;
+    let visible = 0;
+    document.querySelectorAll("[data-publication-settlement]").forEach((row) => {
+      const show = (!search || row.dataset.search.includes(search)) && (!country || row.dataset.country === country) && (!unmappedOnly || row.dataset.configured !== "true");
+      row.hidden = !show; if (show) visible += 1;
+    });
+    document.getElementById("publication-settlement-empty").hidden = visible > 0;
+  };
+  ["publication-settlement-search", "publication-country-filter", "publication-unmapped-only"].forEach((id) => document.getElementById(id).addEventListener(id.includes("search") ? "input" : "change", filterSettlements));
+  document.querySelectorAll("[data-publication-settlement]").forEach((form) => {
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault(); const button = form.querySelector('button[type="submit"]'); button.disabled = true;
+      try {
+        await api("/api/espionage-publications/settlement-channel", { method: "POST", body: JSON.stringify({ settlementId: form.elements.settlementId.value, channel: form.elements.channel.value }) });
+        toast("Yerleşke kanalı kaydedildi."); await refreshKeepingScroll(espionagePublicationsPage);
+      } catch (error) { toast(error.message, "error"); button.disabled = false; }
+    });
+    form.querySelector("[data-clear-publication-channel]")?.addEventListener("click", async (event) => {
+      const button = event.currentTarget; button.disabled = true;
+      try {
+        await api("/api/espionage-publications/settlement-channel", { method: "POST", body: JSON.stringify({ settlementId: form.elements.settlementId.value, channel: "" }) });
+        toast("Yerleşke kanal eşleştirmesi kaldırıldı."); await refreshKeepingScroll(espionagePublicationsPage);
+      } catch (error) { toast(error.message, "error"); button.disabled = false; }
+    });
+  });
+  const filterTemplates = () => {
+    const target = document.getElementById("publication-target-filter").value;
+    const outcome = document.getElementById("publication-outcome-filter").value;
+    document.querySelectorAll("[data-publication-template]").forEach((card) => { card.hidden = Boolean((target && card.dataset.publicationTarget !== target) || (outcome && card.dataset.publicationOutcome !== outcome)); });
+  };
+  document.getElementById("publication-target-filter").addEventListener("change", filterTemplates);
+  document.getElementById("publication-outcome-filter").addEventListener("change", filterTemplates);
+  document.querySelectorAll("[data-edit-publication]").forEach((button) => button.addEventListener("click", () => {
+    const [targetType, outcome] = button.dataset.editPublication.split(":");
+    const template = data.templates.find((item) => item.targetType === targetType && item.outcome === outcome);
+    if (template) openPublicationTemplateEditor(template, data);
+  }));
+  document.querySelectorAll("[data-reset-publication]").forEach((button) => button.addEventListener("click", async () => {
+    const [targetType, outcome] = button.dataset.resetPublication.split(":");
+    if (!window.confirm("Bu şablon varsayılan metin, görsel ve açık/kapalı durumuna döndürülsün mü?")) return;
+    button.disabled = true;
+    try {
+      await api("/api/espionage-publications/template/reset", { method: "POST", body: JSON.stringify({ targetType, outcome }) });
+      toast("Şablon varsayılan hâline döndürüldü."); await refreshKeepingScroll(espionagePublicationsPage);
+    } catch (error) { toast(error.message, "error"); button.disabled = false; }
+  }));
 }
 
 function pageScrollTop() {
@@ -2430,6 +2557,7 @@ async function navigate(route) {
     if (route === "steppe-politics") return await steppePoliticsPage();
     if (route === "diplomacy-control") return await diplomacyControlPage(controller.signal);
     if (route === "assignments") return await assignmentsPage();
+    if (route === "espionage-publications") return await espionagePublicationsPage(controller.signal);
     if (route === "gm-operations") return await guidedOperationsPage();
     if (route === "bulk-operations") return await bulkOperationsPage();
     if (route === "economy-control") return await economyControlPage(controller.signal);

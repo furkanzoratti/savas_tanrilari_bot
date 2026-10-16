@@ -7,6 +7,6 @@ describe("player auto purchase ship modes migration", () => {
     expect(playerAutoPurchaseShipModesMigration.version).toBe(211);
     expect(playerAutoPurchaseShipModesMigration.sql).toContain("mode = 'MIXED_SHIPS'");
     expect(playerAutoPurchaseShipModesMigration.sql).toContain("'HEAVY_SHIPS','MIXED_SHIPS','QUALITY','LIGHT','GENERAL'");
-    expect(migrations.at(-1)).toBe(playerAutoPurchaseShipModesMigration);
+    expect(migrations.find((migration) => migration.version === playerAutoPurchaseShipModesMigration.version)).toBe(playerAutoPurchaseShipModesMigration);
   });
 });

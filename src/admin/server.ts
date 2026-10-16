@@ -21,6 +21,8 @@ import { aiCountryGovernanceService } from "../services/ai-country-governance-se
 import { npcPanelPurchaseService } from "../services/npc-panel-purchase-service.js";
 import { battleSimulationService } from "../services/battle-simulation-service.js";
 import { GameError } from "../services/game-service.js";
+import { adminEspionagePublicationService } from "./espionage-publication-service.js";
+import { ESPIONAGE_PUBLICATION_IMAGE_KEYS } from "../domain/espionage-publications.js";
 
 const logger = pino({ level: adminConfig.logLevel });
 const responseStartedAt = new WeakMap<ServerResponse, number>();
@@ -113,6 +115,17 @@ async function serveStatic(pathname: keyof typeof publicFiles, response: ServerR
   response.end(content);
 }
 
+async function serveEspionageEventAsset(filename: string, response: ServerResponse): Promise<void> {
+  if (!(ESPIONAGE_PUBLICATION_IMAGE_KEYS as readonly string[]).includes(filename)) {
+    return json(response, 404, { error: "NOT_FOUND" });
+  }
+  const content = await readFile(fileURLToPath(new URL(`../../assets/espionage-events/${filename}`, import.meta.url)));
+  securityHeaders(response);
+  responseTiming(response);
+  response.writeHead(200, { "content-type": "image/png", "cache-control": "public, max-age=3600" });
+  response.end(content);
+}
+
 const server = createServer(async (request, response) => {
   const requestId = randomUUID();
   const startedAt = performance.now();
@@ -170,6 +183,25 @@ const server = createServer(async (request, response) => {
     if (request.method === "POST" && url.pathname === "/api/battle-simulation") {
       if (!requireMutation(request, response)) return;
       return json(response, 200, battleSimulationService.simulate(await body(request)));
+    }
+    if (request.method === "GET" && url.pathname === "/api/espionage-publications") {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await adminEspionagePublicationService.dashboard());
+    }
+    if (request.method === "POST" && url.pathname === "/api/espionage-publications/settlement-channel") {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminEspionagePublicationService.setSettlementChannel(session.sub, await body(request)));
+    }
+    if (request.method === "POST" && url.pathname === "/api/espionage-publications/template") {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminEspionagePublicationService.updateTemplate(session.sub, await body(request)));
+    }
+    if (request.method === "POST" && url.pathname === "/api/espionage-publications/template/reset") {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminEspionagePublicationService.resetTemplate(session.sub, await body(request)));
     }
     if (request.method === "GET" && url.pathname === "/api/game-health") {
       if (!requireSession(request, response)) return;
@@ -683,6 +715,9 @@ const server = createServer(async (request, response) => {
       const input = await body(request) as { previewToken?: unknown };
       if (typeof input.previewToken !== "string") throw new Error("Toplu işlem önizleme anahtarı eksik.");
       return json(response, 200, await adminPanelService.applyBulkOperation(session.sub, input.previewToken));
+    }
+    if (request.method === "GET" && url.pathname.startsWith("/espionage-events/")) {
+      return serveEspionageEventAsset(url.pathname.slice("/espionage-events/".length), response);
     }
     if (request.method === "GET" && url.pathname in publicFiles) {
       return serveStatic(url.pathname as keyof typeof publicFiles, response);

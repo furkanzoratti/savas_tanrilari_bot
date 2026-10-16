@@ -71,7 +71,10 @@ import { handleCityAutocomplete, handleCityButton, handleCityCommand, handleCity
 import { addCountryRoleToMember, deleteCountryRole, ensureCountryRole, removeCountryRoleFromMember } from "./country-roles.js";
 import { setEventManagerRole } from "./event-manager-role.js";
 import { handleSettlementEventSelect } from "./event-ui.js";
-import { handleEspionageAutocomplete, handleEspionageCommand, publishPendingEspionageLogs } from "./espionage-ui.js";
+import {
+  handleEspionageAutocomplete,handleEspionageCommand,
+  publishPendingEspionageLogs,publishPendingEspionagePublications
+} from "./espionage-ui.js";
 import { espionageService, resolveDueEspionageOperations } from "../services/espionage-service.js";
 import { handleCharacterAutocomplete, handleCharacterCommand, publishCharacterTurnLogs } from "./character-ui.js";
 import { characterService, processCharacterTurn } from "../services/character-service.js";
@@ -129,15 +132,21 @@ async function processEspionageTurn(client: Client, guildId: string, turn: numbe
     };
   }
   const remaining = await espionageService.dueCount(guildId,turn).catch(() => 0);
+  const warnings:string[] = [...resolutionWarnings];
   let published = 0;
   try {
     published = await publishPendingEspionageLogs(client, guildId);
   } catch (error) {
     logger.error({ error, guildId, turn }, "Casusluk sonuç logları yayımlanamadı");
-    return { resolved, published: 0, warning: "Casusluk sonuçları işlendi fakat Akademi log kanalına gönderilemedi; kayıtlar kuyrukta bekliyor." };
+    warnings.push("Casusluk sonuçları Akademi log kanalına gönderilemedi; kayıtlar kuyrukta bekliyor.");
   }
-  const warnings:string[] = [];
-  warnings.push(...resolutionWarnings);
+  try {
+    const publicResult=await publishPendingEspionagePublications(client,guildId);
+    if (publicResult.failed) warnings.push(`${publicResult.failed} casusluk olayı yerleşke kanalına gönderilemedi; yayın kuyruğunda bekliyor.`);
+  } catch (error) {
+    logger.error({error,guildId,turn},"Casusluk oyuncu olayları yayımlanamadı");
+    warnings.push("Casusluk olayları yerleşke kanallarına gönderilemedi; yayın kuyruğunda bekliyor.");
+  }
   if (remaining) warnings.push(`${remaining} vadesi gelmiş casus görevi bir işlem hatası nedeniyle beklemede kaldı; diğer görevler tamamlandı.`);
   if (resolved && !published) {
     const channelId = await characterService.logChannel(guildId) ?? await espionageService.logChannel(guildId);

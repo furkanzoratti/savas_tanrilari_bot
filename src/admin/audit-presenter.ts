@@ -46,6 +46,9 @@ const ACTION_LABELS: Record<string, string> = {
   "admin.panel.steppe.title.update": "Bozkır makamı güncellendi",
   "admin.panel.steppe.hegemony.update": "Hanlar Hanlığı otoritesi güncellendi",
   "admin.panel.steppe.tributary.update": "Bağlı Han ilişkisi güncellendi",
+  "ESPIONAGE_PUBLICATION_CHANNEL_SET": "Yerleşkenin casusluk olay kanalı güncellendi",
+  "ESPIONAGE_PUBLICATION_TEMPLATE_UPDATE": "Casusluk olay metni güncellendi",
+  "ESPIONAGE_PUBLICATION_TEMPLATE_RESET": "Casusluk olay metni varsayılana döndürüldü",
   "ADMIN_DATA_INSERT": "Tam yetki panelinden oyun kaydı eklendi",
   "ADMIN_DATA_UPDATE": "Tam yetki panelinden oyun kaydı güncellendi",
   "ADMIN_DATA_DELETE": "Tam yetki panelinden oyun kaydı silindi",
@@ -96,7 +99,7 @@ const ENTITY_LABELS: Record<string, string> = {
   steppe_hegemony_war_call: "Hanlar Hanı savaş çağrısı",
   roman_family: "Roma siyasi ailesi", roman_family_member: "Roma aile üyesi",
   bulk_operation: "Toplu işlem",
-  health_issue: "Oyun sağlığı bulgusu",
+  health_issue: "Oyun sağlığı bulgusu", espionage_public_template: "Casusluk olay metni",
   ADMIN_DATA: "Oyun verisi"
 };
 
@@ -143,7 +146,9 @@ const FIELD_LABELS: Record<string, string> = {
   gender: "Cinsiyet", position: "Hanedeki konum", sortOrder: "Liste sırası", sort_order: "Liste sırası",
   sickUntilTurn: "Hastalık bitiş turu", sick_until_turn: "Hastalık bitiş turu",
   spouseId: "Eş", spouse_id: "Eş", motherId: "Anne", mother_id: "Anne", fatherId: "Baba", father_id: "Baba",
-  table: "Veri tablosu"
+  table: "Veri tablosu", beforeChannelId: "Önceki kanal", afterChannelId: "Yeni kanal",
+  targetType: "Casusluk görevi", outcome: "Sonuç türü", titleTemplate: "Olay başlığı",
+  bodyTemplate: "Olay metni", imageKey: "Olay görseli"
 };
 
 const VALUE_LABELS: Record<string, string> = {

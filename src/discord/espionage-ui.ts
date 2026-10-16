@@ -1,9 +1,17 @@
-import { EmbedBuilder, MessageFlags, type AutocompleteInteraction, type ChatInputCommandInteraction, type Client } from "discord.js";
+import { resolve } from "node:path";
+import { AttachmentBuilder, EmbedBuilder, MessageFlags, type AutocompleteInteraction, type ChatInputCommandInteraction, type Client } from "discord.js";
 import {
   ESPIONAGE_PREPARATIONS, ESPIONAGE_SEVERITY_LABELS, ESPIONAGE_TARGETS,
-  isAssassinationTarget, isCharacterPersonalTarget, isKidnappingTarget, isNoblePersonalTarget,
+  isAssassinationTarget, isCharacterPersonalTarget, isKidnappingTarget, isNoblePersonalTarget, isPlayerEspionageTarget,
   type EspionagePreparation, type EspionageTarget
 } from "../domain/espionage.js";
+import {
+  espionagePublicDetectionImage,
+  espionagePublicDetectionDisclosure,
+  renderEspionagePublication,
+  type EspionagePublicationImageKey,
+  type EspionagePublicationOutcome
+} from "../domain/espionage-publications.js";
 import { gold } from "../domain/format.js";
 import { espionageService, isSpyDefenseAssignment, type EspionageOperationView } from "../services/espionage-service.js";
 import { gameService, GameError } from "../services/game-service.js";
@@ -11,6 +19,7 @@ import { characterService } from "../services/character-service.js";
 import { isGameMaster, requireGameMaster, resolveCountry } from "./auth.js";
 import { queueCharacterLog } from "./character-ui.js";
 import { CHARACTER_SPECIALIZATIONS, type CharacterSpecialization } from "../domain/characters.js";
+import { logger } from "../logger.js";
 
 const assignmentLabels: Record<string, string> = {
   NONE: "Müsait",
@@ -93,6 +102,93 @@ export async function publishPendingEspionageLogs(client: Client, guildId: strin
     published += 1;
   }
   return published;
+}
+
+function espionageEventAsset(imageKey: EspionagePublicationImageKey, attachmentName: string): AttachmentBuilder {
+  return new AttachmentBuilder(resolve(process.cwd(),"assets","espionage-events",imageKey),{ name:attachmentName });
+}
+
+function publicTargetName(operation: EspionageOperationView): string {
+  return operation.target_character_name
+    ?? operation.target_army_name
+    ?? operation.target_building_name
+    ?? operation.target_building_type
+    ?? "şehir ve görevlileri";
+}
+
+export async function publishPendingEspionagePublications(
+  client: Client,
+  guildId: string
+): Promise<{ published:number; failed:number }> {
+  let published=0;
+  let failed=0;
+  const channels=new Map<string,Awaited<ReturnType<Client["channels"]["fetch"]>>>();
+  for (const operation of await espionageService.pendingPublications(guildId)) {
+    if (!isPlayerEspionageTarget(operation.target_type)) {
+      await espionageService.markPublicPosted(operation.id);
+      continue;
+    }
+    const outcome:EspionagePublicationOutcome=operation.severity && operation.severity!=="NONE" ? "SUCCESS" : "FAILURE";
+    try {
+      const template=await espionageService.publicTemplate(guildId,operation.target_type,outcome);
+      if (!template?.enabled) {
+        await espionageService.markPublicPosted(operation.id);
+        continue;
+      }
+      const channelId=operation.target_event_channel_id;
+      if (!channelId) continue;
+      let channel=channels.get(channelId);
+      if (channel===undefined) {
+        channel=await client.channels.fetch(channelId).catch(()=>null);
+        channels.set(channelId,channel);
+      }
+      if (!channel?.isTextBased() || channel.isDMBased()) throw new Error("Yerleşke olay kanalı bulunamadı veya metin kanalı değil.");
+
+      const disclosure=espionagePublicDetectionDisclosure({
+        detectionLevel:operation.detection_level,
+        captured:operation.captured,
+        attackerCountryName:operation.attacker_country_name,
+        spyName:operation.spy_name
+      });
+      const variables={
+        yerleske:operation.target_settlement_name,
+        ulke:operation.target_country_name,
+        gorev:ESPIONAGE_TARGETS[operation.target_type].label,
+        hedef:publicTargetName(operation),
+        etki:operation.effect_text??"Kalıcı bir etki oluşmadı.",
+        tur:operation.resolve_turn,
+        tespit:disclosure
+      };
+      const files:AttachmentBuilder[]=[];
+      const resultEmbed=new EmbedBuilder()
+        .setColor(outcome==="SUCCESS"?0x8b5a3c:0x4b5563)
+        .setTitle(renderEspionagePublication(template.titleTemplate,variables).slice(0,256))
+        .setDescription(renderEspionagePublication(template.bodyTemplate,variables).slice(0,4096))
+        .setFooter({text:`${operation.target_settlement_name} • Tur ${operation.resolve_turn}`});
+      if (template.imageKey) {
+        const name=`mission-${operation.id}.png`;
+        files.push(espionageEventAsset(template.imageKey,name));
+        resultEmbed.setImage(`attachment://${name}`);
+      }
+
+      const fateImage=espionagePublicDetectionImage(operation.detection_level,operation.captured);
+      const fateName=`fate-${operation.id}.png`;
+      files.push(espionageEventAsset(fateImage,fateName));
+      const fateEmbed=new EmbedBuilder()
+        .setColor(operation.captured?0x7f1d1d:operation.detection_level===2?0x9a6b31:0x263857)
+        .setTitle("🕵️ Casusun Akıbeti")
+        .setDescription(disclosure)
+        .setImage(`attachment://${fateName}`);
+
+      await channel.send({embeds:[resultEmbed,fateEmbed],files});
+      await espionageService.markPublicPosted(operation.id);
+      published+=1;
+    } catch (error) {
+      failed+=1;
+      logger.error({error,guildId,operationId:operation.id},"Casusluk oyuncu olayı yayımlanamadı");
+    }
+  }
+  return {published,failed};
 }
 
 async function logEspionageCommand(interaction: ChatInputCommandInteraction, countryName: string, entry: string): Promise<void> {

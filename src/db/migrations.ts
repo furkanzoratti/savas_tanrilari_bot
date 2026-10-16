@@ -141,6 +141,8 @@ import { scandinavianTreasuryRepairMigration } from "./scandinavian-treasury-rep
 import { capitalCitiesMigration } from "./capital-cities-migration.js";
 import { espionagePersonalTargetSplitMigration } from "./espionage-personal-target-split-migration.js";
 import { playerAutoPurchaseShipModesMigration } from "./player-auto-purchase-ship-modes-migration.js";
+import { espionagePublicationsPanelMigration } from "./espionage-publications-panel-migration.js";
+import { espionagePublicationDeliveryMigration } from "./espionage-publication-delivery-migration.js";
 
 export const migrations = [
   {
@@ -2499,5 +2501,7 @@ export const migrations = [
   scandinavianTreasuryRepairMigration,
   capitalCitiesMigration,
   espionagePersonalTargetSplitMigration,
-  playerAutoPurchaseShipModesMigration
+  playerAutoPurchaseShipModesMigration,
+  espionagePublicationsPanelMigration,
+  espionagePublicationDeliveryMigration
 ] as const;

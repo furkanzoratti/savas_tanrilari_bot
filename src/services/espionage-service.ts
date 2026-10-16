@@ -15,6 +15,13 @@ import { markCharacterDead } from "./character-death-service.js";
 import { killDynastyMemberFromEspionage } from "./dynasty-service.js";
 import { RELIGIONS } from "../domain/religions.js";
 import { loadCountryReligionProfile } from "./religion-service.js";
+import {
+  espionagePublicationTemplate,
+  type EspionagePublicationImageKey,
+  type EspionagePublicationOutcome,
+  type EspionagePublicationTemplate,
+  type PlayerEspionageTarget
+} from "../domain/espionage-publications.js";
 
 export const SPY_DEFENSE_ASSIGNMENTS = [
   "COUNTERINTELLIGENCE_TRAVELING_COUNTRY", "COUNTERINTELLIGENCE_TRAVELING_SETTLEMENT",
@@ -37,6 +44,7 @@ export interface EspionageOperationView {
   target_country_name: string;
   target_settlement_id: string;
   target_settlement_name: string;
+  target_event_channel_id: string | null;
   target_character_id: string | null;
   target_character_name: string | null;
   target_noble_type: "DYNASTY"|"ROMAN_FAMILY"|null;
@@ -70,6 +78,7 @@ export interface EspionageOperationView {
   effect_text: string | null;
   resolved_at: Date | null;
   log_posted_at: Date | null;
+  public_posted_at: Date | null;
 }
 
 export interface CapturedSpyView {
@@ -160,7 +169,8 @@ function requireUuid(value: string | null | undefined, label: string): void {
 
 const operationViewSql = `
   SELECT operation.*,attacker.name AS attacker_country_name,target.name AS target_country_name,
-         settlement.name AS target_settlement_name,spy.name AS spy_name,spy.skill_bonus AS spy_skill_bonus,
+         settlement.name AS target_settlement_name,settlement.espionage_event_channel_id AS target_event_channel_id,
+         spy.name AS spy_name,spy.skill_bonus AS spy_skill_bonus,
          COALESCE(target_character.name,target_dynasty_member.name,target_roman_member.name) AS target_character_name,
          target_army.name AS target_army_name,
          CASE WHEN operation.target_building_type IS NULL THEN NULL ELSE COALESCE(definition.name,operation.target_building_type) END AS target_building_name
@@ -870,6 +880,46 @@ export const espionageService = {
   },
 
   async markLogged(id: string): Promise<void> { await pool.query("UPDATE espionage_operations SET log_posted_at=NOW() WHERE id=$1", [id]); },
+
+  async pendingPublications(guildId: string): Promise<EspionageOperationView[]> {
+    return (await pool.query<EspionageOperationView>(
+      `${operationViewSql} WHERE operation.guild_id=$1 AND operation.status='RESOLVED'
+         AND operation.public_posted_at IS NULL AND settlement.espionage_event_channel_id IS NOT NULL
+       ORDER BY operation.resolved_at`,
+      [guildId]
+    )).rows;
+  },
+
+  async publicTemplate(
+    guildId: string,
+    targetType: PlayerEspionageTarget,
+    outcome: EspionagePublicationOutcome
+  ): Promise<EspionagePublicationTemplate | undefined> {
+    const defaults = espionagePublicationTemplate(targetType,outcome);
+    if (!defaults) return undefined;
+    const custom = (await pool.query<{
+      title_template:string;
+      body_template:string;
+      image_key:EspionagePublicationImageKey|null;
+      enabled:boolean;
+    }>(
+      `SELECT title_template,body_template,image_key,enabled
+         FROM espionage_public_templates
+        WHERE guild_id=$1 AND target_type=$2 AND outcome=$3`,
+      [guildId,targetType,outcome]
+    )).rows[0];
+    return custom ? {
+      ...defaults,
+      titleTemplate:custom.title_template,
+      bodyTemplate:custom.body_template,
+      imageKey:custom.image_key,
+      enabled:custom.enabled
+    } : defaults;
+  },
+
+  async markPublicPosted(id: string): Promise<void> {
+    await pool.query("UPDATE espionage_operations SET public_posted_at=NOW() WHERE id=$1", [id]);
+  },
 
   async adminList(guildId: string): Promise<EspionageOperationView[]> {
     return (await pool.query<EspionageOperationView>(`${operationViewSql} WHERE operation.guild_id=$1 ORDER BY operation.created_at DESC LIMIT 50`, [guildId])).rows;
