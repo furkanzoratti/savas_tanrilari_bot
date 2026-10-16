@@ -180,6 +180,8 @@ const PREMIUM_UNITS = new Set<PurchasableUnitType>([
 
 export interface PurchasePlanningOptions {
   unitCandidates?: readonly PurchasableUnitType[];
+  shipCandidates?: readonly (keyof typeof SHIPS)[];
+  shipSelection?: "PRIORITY" | "BALANCED";
   qualityMixTarget?: number;
   compositionBaseline?: "CURRENT" | "EMPTY";
 }
@@ -315,11 +317,18 @@ export function planCountryPurchases(
     const groupedShips = new Map<string, ShipAction>();
     const permittedShips = new Set(purchasableShipTypes(Boolean(doc.isScandinavianState)));
     const preferredShipOrder: Array<keyof typeof SHIPS> = ["quinquereme", "trireme", "hjortspring", "kerkouros"];
-    const shipPriority = preferredShipOrder.filter((shipType) => permittedShips.has(shipType));
+    const requestedShips = options.shipCandidates ?? preferredShipOrder;
+    const shipPriority = [...new Set(requestedShips)].filter((shipType) => permittedShips.has(shipType));
+    const plannedShipCounts = new Map(shipPriority.map((shipType) => [shipType, 0]));
     const minimumShipManpower = Math.min(...shipPriority.map((shipType) => SHIPS[shipType].manpower));
     while (shipPriority.length > 0 && remainingBudget > 0 && remainingPersonnel >= minimumShipManpower) {
       let selected: { settlement: CountryDocument["settlements"][number]; shipType: keyof typeof SHIPS; cost: number } | undefined;
-      for (const shipType of shipPriority) {
+      const currentPriority = options.shipSelection === "BALANCED"
+        ? [...shipPriority].sort((left, right) =>
+            (plannedShipCounts.get(left) ?? 0) - (plannedShipCounts.get(right) ?? 0)
+            || shipPriority.indexOf(left) - shipPriority.indexOf(right))
+        : shipPriority;
+      for (const shipType of currentPriority) {
         const ship = SHIPS[shipType];
         const eligible = doc.settlements.filter((settlement) => {
           const level = shipyardLevels.get(settlement.id) ?? 0;
@@ -344,6 +353,7 @@ export function planCountryPurchases(
       action.quantity += 1;
       action.cost += selected.cost;
       groupedShips.set(key, action);
+      plannedShipCounts.set(selected.shipType, (plannedShipCounts.get(selected.shipType) ?? 0) + 1);
       productionRemaining.set(selected.settlement.id, (productionRemaining.get(selected.settlement.id) ?? 0) - ship.productionPoints);
       harborRemaining.set(selected.settlement.id, (harborRemaining.get(selected.settlement.id) ?? 0) - ship.harborPoints);
       localTreasury.set(selected.settlement.id, (localTreasury.get(selected.settlement.id) ?? 0) - selected.cost);

@@ -38,21 +38,27 @@ function documentFixture(options: { naval?: boolean; specialUnits?: string[]; st
 }
 
 describe("oyuncu otomatik alım planlaması", () => {
-  it("gemi alımında en pahalı gemiden başlayıp kalan üretim puanını doldurur", () => {
-    const plan = planPlayerPurchases("guild", 30, "SHIPS", documentFixture({ naval: true }));
-    expect(plan.unitActions).toHaveLength(0);
-    expect(plan.shipActions).toEqual(expect.arrayContaining([
-      expect.objectContaining({ shipType: "quinquereme", quantity: 3 }),
-      expect.objectContaining({ shipType: "trireme", quantity: 1 }),
-      expect.objectContaining({ shipType: "kerkouros", quantity: 1 })
-    ]));
-  });
-
-  it("İskandinav gemi alımında standart gemileri planlamaz", () => {
-    const plan = planPlayerPurchases("guild", 30, "SHIPS", documentFixture({ naval: true, scandinavian: true }));
+  it("ağır gemi alımında yalnız Quinquereme ve Trireme planlar", () => {
+    const plan = planPlayerPurchases("guild", 30, "HEAVY_SHIPS", documentFixture({ naval: true }));
     expect(plan.unitActions).toHaveLength(0);
     expect(plan.shipActions.length).toBeGreaterThan(0);
-    expect(plan.shipActions.every((action) => action.shipType === "hjortspring")).toBe(true);
+    expect(plan.shipActions.every((action) => ["quinquereme", "trireme"].includes(action.shipType))).toBe(true);
+    expect(plan.shipActions.some((action) => action.shipType === "kerkouros")).toBe(false);
+  });
+
+  it("karışık gemi alımında üç standart gemi türünü dengeli kullanır", () => {
+    const plan = planPlayerPurchases("guild", 30, "MIXED_SHIPS", documentFixture({ naval: true }));
+    expect(plan.unitActions).toHaveLength(0);
+    expect(plan.shipActions.length).toBeGreaterThan(0);
+    expect(new Set(plan.shipActions.map((action) => action.shipType))).toEqual(new Set(["quinquereme", "trireme", "kerkouros"]));
+    const quantities = plan.shipActions.map((action) => action.quantity);
+    expect(Math.max(...quantities) - Math.min(...quantities)).toBeLessThanOrEqual(1);
+  });
+
+  it("gemi planları İskandinav özel donanma kısıtını aşmaz", () => {
+    const plan = planPlayerPurchases("guild", 30, "MIXED_SHIPS", documentFixture({ naval: true, scandinavian: true }));
+    expect(plan.unitActions).toHaveLength(0);
+    expect(plan.shipActions).toHaveLength(0);
   });
 
   it("ağır ordu planını ağır standartlar ve onları karşılayan özel birliklerden kurar", () => {

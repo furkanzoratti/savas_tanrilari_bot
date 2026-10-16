@@ -642,7 +642,8 @@ export const commandBuilders = [
     .setName("otomatik-alim").setDescription("Ülken için güvenli bir asker veya gemi alım planı hazırlayıp onaya sunar")
     .addStringOption((option) => option.setName("tur").setDescription("Hazırlanacak otomatik alım planı").setRequired(true)
       .addChoices(
-        { name: "Gemi Alımı", value: "SHIPS" },
+        { name: "Ağır Gemi", value: "HEAVY_SHIPS" },
+        { name: "Karışık Gemi", value: "MIXED_SHIPS" },
         { name: "Ağır Ordu", value: "QUALITY" },
         { name: "Hafif Ordu", value: "LIGHT" },
         { name: "Orta Ordu", value: "GENERAL" }

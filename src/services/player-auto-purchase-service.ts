@@ -13,12 +13,16 @@ import {
   type NpcCountryPurchasePlan
 } from "./npc-auto-purchase-service.js";
 
-export type PlayerAutoPurchaseMode = "SHIPS" | "QUALITY" | "LIGHT" | "GENERAL";
+export type PlayerAutoPurchaseMode = "HEAVY_SHIPS" | "MIXED_SHIPS" | "QUALITY" | "LIGHT" | "GENERAL";
 
 export const PLAYER_AUTO_PURCHASE_MODES: Record<PlayerAutoPurchaseMode, { label: string; description: string }> = {
-  SHIPS: {
-    label: "Gemi Alımı",
-    description: "Tersane ve liman kapasitesini en pahalı uygun gemiden başlayarak doldurur; kalan puanları Trireme veya Kerkouros ile değerlendirir."
+  HEAVY_SHIPS: {
+    label: "Ağır Gemi",
+    description: "Yalnızca Quinquereme ve Trireme üretir; Kerkouros satın almaz."
+  },
+  MIXED_SHIPS: {
+    label: "Karışık Gemi",
+    description: "Quinquereme, Trireme ve Kerkouros'u üretim kapasitesi elverdiğince dengeli biçimde karıştırır."
   },
   QUALITY: {
     label: "Ağır Ordu",
@@ -84,7 +88,7 @@ function uniqueUnits(units: readonly PurchasableUnitType[]): PurchasableUnitType
 }
 
 export function playerArmyUnitCandidates(
-  mode: Exclude<PlayerAutoPurchaseMode, "SHIPS">,
+  mode: Exclude<PlayerAutoPurchaseMode, "HEAVY_SHIPS" | "MIXED_SHIPS">,
   unlockedSpecials: readonly PurchasableUnitType[],
   steppe = false,
   scandinavian = false
@@ -149,8 +153,14 @@ export function planPlayerPurchases(
 ): PlayerAutoPurchasePlan {
   const config = planningConfig(guildId);
   let base: NpcCountryPurchasePlan;
-  if (mode === "SHIPS") {
-    base = planCountryPurchases(document, config, "NAVAL_FOCUS", 0, { unitCandidates: [] });
+  if (mode === "HEAVY_SHIPS" || mode === "MIXED_SHIPS") {
+    base = planCountryPurchases(document, config, "NAVAL_FOCUS", 0, {
+      unitCandidates: [],
+      shipCandidates: mode === "HEAVY_SHIPS"
+        ? ["quinquereme", "trireme"]
+        : ["quinquereme", "trireme", "kerkouros"],
+      shipSelection: mode === "MIXED_SHIPS" ? "BALANCED" : "PRIORITY"
+    });
     base = { ...base, notes: base.notes.filter((note) => !note.includes("kişilik hedef") && !note.includes("Hedef askerî doluluk")) };
   } else {
     const candidates = playerArmyUnitCandidates(mode, document.specialUnitUnlocks ?? [], document.isSteppeConfederation, document.isScandinavianState);
@@ -208,7 +218,7 @@ export const playerAutoPurchaseService = {
   }): Promise<PlayerAutoPurchasePreview> {
     const plan = await currentPlan(input.guildId, input.countryId, input.mode);
     if (!plan.shipActions.length && !plan.unitActions.length) {
-      const reason = plan.notes[0] ?? (input.mode === "SHIPS"
+      const reason = plan.notes[0] ?? (input.mode === "HEAVY_SHIPS" || input.mode === "MIXED_SHIPS"
         ? "Uygun tersane, liman, üretim puanı, askerî personel veya yerel hazine bulunamadı."
         : "Uygun eğitim kapasitesi, askerî personel sınırı veya yerel hazine bulunamadı.");
       throw new GameError(`Otomatik alım planı oluşturulamadı: ${reason}`);

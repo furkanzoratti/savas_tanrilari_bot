@@ -10,6 +10,6 @@ describe("casusluk şahsi hedef ayrımı göçü", () => {
     expect(espionagePersonalTargetSplitMigration.sql).toContain("'CHARACTER_ASSASSINATE'");
     expect(espionagePersonalTargetSplitMigration.sql).toContain("'NOBLE_ASSASSINATE'");
     expect(espionagePersonalTargetSplitMigration.sql).toContain("'KIDNAP','ASSASSINATE'");
-    expect(migrations.at(-1)).toBe(espionagePersonalTargetSplitMigration);
+    expect(migrations.at(-2)).toBe(espionagePersonalTargetSplitMigration);
   });
 });
