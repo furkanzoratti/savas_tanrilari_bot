@@ -136,7 +136,10 @@ export async function publishPendingEspionagePublications(
         continue;
       }
       const channelId=operation.target_event_channel_id;
-      if (!channelId) continue;
+      if (!channelId) {
+        await espionageService.markPublicPosted(operation.id);
+        continue;
+      }
       let channel=channels.get(channelId);
       if (channel===undefined) {
         channel=await client.channels.fetch(channelId).catch(()=>null);

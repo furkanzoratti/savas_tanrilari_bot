@@ -10,6 +10,8 @@ describe("GM casusluk yayınları paneli", () => {
     const css = read("./public/app.css");
     const server = read("./server.ts");
     const service = read("./espionage-publication-service.ts");
+    const gameService = read("../services/game-service.ts");
+    const diplomacyService = read("../services/diplomacy-service.ts");
 
     expect(html).toContain('data-route="espionage-publications"');
     expect(html).toContain("espionage-publications-v27");
@@ -28,5 +30,9 @@ describe("GM casusluk yayınları paneli", () => {
     expect(service).toContain("WHERE country.guild_id=$1");
     expect(service).toContain("country.guild_id=$2");
     expect(service).not.toContain("settlement.guild_id");
+    expect(gameService).toContain("UPDATE settlements SET country_id=$1");
+    expect(diplomacyService).toContain("UPDATE settlements SET country_id=$2");
+    expect(gameService).not.toContain("espionage_event_channel_id=NULL");
+    expect(diplomacyService).not.toContain("espionage_event_channel_id=NULL");
   });
 });

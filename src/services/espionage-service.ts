@@ -884,7 +884,7 @@ export const espionageService = {
   async pendingPublications(guildId: string): Promise<EspionageOperationView[]> {
     return (await pool.query<EspionageOperationView>(
       `${operationViewSql} WHERE operation.guild_id=$1 AND operation.status='RESOLVED'
-         AND operation.public_posted_at IS NULL AND settlement.espionage_event_channel_id IS NOT NULL
+         AND operation.public_posted_at IS NULL
        ORDER BY operation.resolved_at`,
       [guildId]
     )).rows;

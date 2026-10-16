@@ -33,6 +33,7 @@ describe("casusluk oyuncu yayını şablonları", () => {
       expect(used).not.toContain("saldirgan");
       expect(template.imageKey).not.toBeNull();
       expect(ESPIONAGE_PUBLICATION_IMAGE_KEYS).toContain(template.imageKey);
+      expect(template.bodyTemplate).toContain("{{etki}}");
     }
   });
 
@@ -60,7 +61,7 @@ describe("casusluk oyuncu yayını şablonları", () => {
     });
     expect(disclosure(0)).not.toContain("Persis");
     expect(disclosure(0)).not.toContain("Artemon");
-    expect(disclosure(1)).toContain("yakalanmadan kaçmayı");
+    expect(disclosure(1)).toContain("izini kaybettirerek kaçtı");
     expect(disclosure(1)).not.toContain("Persis");
     expect(disclosure(2)).toContain("Persis");
     expect(disclosure(2)).not.toContain("Artemon");

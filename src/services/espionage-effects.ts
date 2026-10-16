@@ -293,7 +293,7 @@ export async function applyEspionageEffect(
         [operation.attacker_country_id,home,turn,stolen,homeBalance,JSON.stringify({severity,rate})]
       );
     }
-    return "Hedef hazinenin %"+rate+"'i sızdırıldı; tutar saldıran oyuncuya açıklanmayacak.";
+    return `Hazine mevcudunun yüzde ${rate} oranındaki bölümü çalındı: ${stolen.toLocaleString("tr-TR")} Altın kaybedildi.`;
   }
   if (operation.target_type === "TRADE_COLLAPSE") {
     const agreements = (await client.query<{ id: string }>("SELECT id FROM trade_agreements WHERE status='ACTIVE' AND (proposer_settlement_id=$1 OR receiver_settlement_id=$1) ORDER BY created_at",[operation.target_settlement_id])).rows;
@@ -327,10 +327,26 @@ export async function applyEspionageEffect(
     return severity === "LIGHT" ? "Bir şehir politikası 2 tur kapandı." : "Şehir politikaları "+duration+" tur kapandı"+(severity==="HEAVY" ? "; Curia etkileri 2 tur devre dışı." : ".");
   }
   if (operation.target_type === "AGGRAVATE_EVENT") {
+    const active=(await client.query<{
+      black_market_active:boolean;
+      epidemic_active:boolean;
+      unrest_active:boolean;
+    }>(
+      "SELECT black_market_active,epidemic_active,unrest_active FROM settlements WHERE id=$1 FOR UPDATE",
+      [operation.target_settlement_id]
+    )).rows[0];
+    const events=[
+      active?.black_market_active?"Kara Borsa":null,
+      active?.epidemic_active?"Salgın":null,
+      active?.unrest_active?"Huzursuzluk":null
+    ].filter((event):event is string=>Boolean(event));
+    const eventLabel=events.length?events.join(", "):"Mevcut kriz";
     await client.query("UPDATE settlements SET unrest_active=TRUE WHERE id=$1",[operation.target_settlement_id]);
     return severity === "HEAVY"
-      ? "Aktif olay ağırlaştırıldı ve yoğun huzursuzluk başladı; casusluk doğrudan isyan başlatmaz."
-      : severity === "MEDIUM" ? "Aktif olay ağırlaştırıldı ve huzursuzluk başladı." : "Aktif olay huzursuzluğu artırdı.";
+      ? `Körüklenen olay: ${eventLabel}. Kriz ağırlaştırıldı ve yoğun huzursuzluk başladı; casusluk doğrudan isyan başlatmaz.`
+      : severity === "MEDIUM"
+        ? `Körüklenen olay: ${eventLabel}. Kriz ağırlaştırıldı ve huzursuzluk başladı.`
+        : `Körüklenen olay: ${eventLabel}. Yerleşkedeki huzursuzluk artırıldı.`;
   }
   if (operation.target_type === "SUPPLY_COLLAPSE" && operation.target_army_id) {
     const multiplier = severity === "LIGHT" ? 0.95 : severity === "MEDIUM" ? 0.90 : 0.85;
@@ -348,9 +364,10 @@ export async function applyEspionageEffect(
     )).rows[0];
     if(!targetArmy)return "Hedef ülkede firar ettirilebilecek etkin ordu kalmadı.";
     const units = (await client.query<{ settlement_id: string; unit_type: string; quantity: number }>("SELECT settlement_id,unit_type,quantity FROM army_units WHERE army_id=$1 FOR UPDATE",[targetArmy.id])).rows;
-    let total = 0;
+    const losses:Array<{unitType:string;lost:number}>=[];
     for (const unit of units) {
-      const lost = Math.floor(Number(unit.quantity)*rate/100); if (!lost) continue; total += lost;
+      const lost = Math.floor(Number(unit.quantity)*rate/100); if (!lost) continue;
+      losses.push({unitType:unit.unit_type,lost});
       await client.query("UPDATE army_units SET quantity=quantity-$1 WHERE army_id=$2 AND settlement_id=$3 AND unit_type=$4",[lost,targetArmy.id,unit.settlement_id,unit.unit_type]);
       await client.query("DELETE FROM army_units WHERE army_id=$1 AND settlement_id=$2 AND unit_type=$3 AND quantity<=0",[targetArmy.id,unit.settlement_id,unit.unit_type]);
       await client.query(
@@ -358,12 +375,26 @@ export async function applyEspionageEffect(
         [lost,unit.settlement_id,unit.unit_type]
       );
     }
-    return "Rastgele seçilen **"+targetArmy.name+"** ordusunun %"+rate+"'i firar etti; "+total.toLocaleString("tr-TR")+" asker hem ordu hem kaynak yerleşke kayıtlarından silindi.";
+    if(!losses.length)return `**${targetArmy.name}** ordusunda firar girişimi yaşandı ancak birlik kaybı oluşmadı.`;
+    const detail=limitedDetails(losses.map((unit)=>`${unit.lost.toLocaleString("tr-TR")} ${catalogName(UNITS,unit.unitType)}`));
+    return `**${targetArmy.name}** ordusundan ${detail} firar etti.`;
   }
   if (operation.target_type === "POISON_GARRISON") {
     const rate = percent(severity,5,10,20);
+    const garrison=(await client.query<{unit_type:string;quantity:number}>(
+      "SELECT unit_type,quantity FROM unit_stacks WHERE settlement_id=$1 AND force_type='GARRISON' AND quantity>0 FOR UPDATE",
+      [operation.target_settlement_id]
+    )).rows;
+    const losses=garrison.map((unit)=>({
+      unitType:unit.unit_type,
+      lost:Math.floor(Number(unit.quantity)*rate/100)
+    })).filter((unit)=>unit.lost>0);
+    const totalLost=losses.reduce((sum,unit)=>sum+unit.lost,0);
     await client.query("UPDATE unit_stacks SET quantity=GREATEST(0,quantity-FLOOR(quantity*$1/100)::integer) WHERE settlement_id=$2 AND force_type='GARRISON'",[rate,operation.target_settlement_id]);
-    return "Garnizonun %"+rate+"'i kaybedildi; otomatik yenileme başlatılmadı.";
+    const detail=losses.length
+      ? limitedDetails(losses.map((unit)=>`${catalogName(UNITS,unit.unitType)}: ${unit.lost.toLocaleString("tr-TR")}`))
+      : "yuvarlama nedeniyle sayısal kayıp oluşmadı";
+    return `Garnizon mevcudunun yüzde ${rate} oranındaki bölümü zehirlendi; toplam ${totalLost.toLocaleString("tr-TR")} asker kaybedildi (${detail}). Otomatik yenileme başlatılmadı.`;
   }
   if (operation.target_type === "DESTROY_SIEGE_SUPPLIES") {
     const reduction = percent(severity,2,3,4);
@@ -372,7 +403,9 @@ export async function applyEspionageEffect(
   }
   if (operation.target_type === "SABOTAGE_FLEET") {
     const settlement = (await client.query<{ name: string; guild_id: string; country_id: string }>(
-      "SELECT name,guild_id,country_id FROM settlements WHERE id=$1 FOR UPDATE",
+      `SELECT settlement.name,country.guild_id,settlement.country_id
+         FROM settlements settlement JOIN countries country ON country.id=settlement.country_id
+        WHERE settlement.id=$1 FOR UPDATE OF settlement`,
       [operation.target_settlement_id],
     )).rows[0];
     if (!settlement) return "Hedef yerleşke bulunamadığı için filo sabotajı uygulanamadı.";

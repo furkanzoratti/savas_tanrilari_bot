@@ -1242,11 +1242,35 @@ export const adminPanelService = {
            SELECT settlement.country_id,COUNT(*)::integer AS settlements,
                   COALESCE(SUM(COALESCE(settlement.population,0)+COALESCE(settlement.slave_population,0)),0)::bigint AS population,
                   COALESCE(SUM(settlement.local_treasury),0)::bigint AS treasury,
-                  COALESCE(SUM(COALESCE(settlement.tax_income,0)),0)::bigint AS tax_income,
-                  COALESCE(SUM(COALESCE(settlement.land_trade_income,0)),0)::bigint AS land_trade_income,
-                  COALESCE(SUM(COALESCE(settlement.sea_trade_income,0)),0)::bigint AS sea_trade_income,
-                  COALESCE(SUM(COALESCE(settlement.tax_income,0)+COALESCE(settlement.land_trade_income,0)+COALESCE(settlement.sea_trade_income,0)),0)::bigint AS turn_income
+                  COALESCE(SUM(COALESCE(latest_income.building_income,0)),0)::bigint AS building_income,
+                  COALESCE(SUM(CASE WHEN latest_income.settlement_id IS NOT NULL
+                    THEN latest_income.tax_income
+                    ELSE FLOOR(COALESCE(settlement.population,0)*COALESCE(settlement.tax_rate_percent,3)/100)
+                  END),0)::bigint AS tax_income,
+                  COALESCE(SUM(CASE WHEN latest_income.settlement_id IS NOT NULL
+                    THEN latest_income.land_trade_income ELSE COALESCE(settlement.base_land_trade_income,0)
+                  END),0)::bigint AS land_trade_income,
+                  COALESCE(SUM(COALESCE(latest_income.sea_trade_income,0)),0)::bigint AS sea_trade_income,
+                  COALESCE(SUM(CASE
+                    WHEN latest_income.settlement_id IS NOT NULL
+                      THEN COALESCE(settlement.last_acquisition_income,0)
+                    ELSE FLOOR(COALESCE(settlement.population,0)*COALESCE(settlement.tax_rate_percent,3)/100)
+                      +COALESCE(settlement.base_land_trade_income,0)+COALESCE(settlement.manual_flat_income,0)
+                  END),0)::bigint AS turn_income
              FROM settlements settlement JOIN countries scoped_country ON scoped_country.id=settlement.country_id
+             LEFT JOIN LATERAL (
+               SELECT tx.settlement_id,
+                      COALESCE((tx.details->>'buildingIncome')::bigint,0)::bigint AS building_income,
+                      COALESCE((tx.details->>'taxIncome')::bigint,0)::bigint AS tax_income,
+                      COALESCE((tx.details->>'landTradeIncome')::bigint,0)::bigint AS land_trade_income,
+                      COALESCE((tx.details->>'seaTradeIncome')::bigint,0)::bigint AS sea_trade_income
+                 FROM transactions tx
+                WHERE tx.settlement_id=settlement.id
+                  AND tx.country_id=settlement.country_id
+                  AND tx.kind='ACQUISITION_SETTLEMENT'
+                ORDER BY tx.turn DESC,tx.created_at DESC,tx.id DESC
+                LIMIT 1
+             ) latest_income ON TRUE
             WHERE scoped_country.guild_id=$1 GROUP BY settlement.country_id
          ), army_stats AS (
            SELECT army.country_id,COALESCE(SUM(unit.quantity),0)::bigint AS field_army
@@ -1275,6 +1299,7 @@ export const adminPanelService = {
                 COALESCE(settlement_stats.settlements,0)::integer AS settlements,
                 COALESCE(settlement_stats.population,0)::bigint AS population,
                 COALESCE(settlement_stats.treasury,country.treasury)::bigint AS treasury,
+                COALESCE(settlement_stats.building_income,0)::bigint AS building_income,
                 COALESCE(settlement_stats.tax_income,0)::bigint AS tax_income,
                 COALESCE(settlement_stats.land_trade_income,0)::bigint AS land_trade_income,
                 COALESCE(settlement_stats.sea_trade_income,0)::bigint AS sea_trade_income,

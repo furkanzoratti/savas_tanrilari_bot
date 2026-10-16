@@ -60,101 +60,101 @@ const seed = (
 
 const TEMPLATE_SEEDS: Record<PlayerEspionageTarget, Record<EspionagePublicationOutcome, TemplateSeed>> = {
   RECRUITMENT_SABOTAGE: seed(
-    "⚔️ {{yerleske}}’de Asker Alımı Aksadı",
-    "Kışla kayıtları ile erzak sayımları birbirini tutmadı. Yeni askerlerin toplanması ciddi biçimde aksadı. **Sonuç:** {{etki}}",
-    "🛡️ {{yerleske}} Kışlalarında Sabotaj Girişimi",
-    "Muhafızlar değiştirilmiş kayıtları zamanında fark etti ve asker alımı kesintiye uğramadı. {{tespit}}",
+    "⚔️ {{yerleske}}’de Asker Alımı Sabote Edildi",
+    "Kışla kayıtları ile erzak sevkiyatları değiştirilerek birliklerin zamanında toplanması engellendi.\n\n**Sonuç:** {{etki}}",
+    "🛡️ {{yerleske}} Kışlalarında Sabotaj Önlenmiş",
+    "Görevliler değiştirilmiş kayıtları zamanında fark etti; alım düzeni ve teslim takvimi korundu.\n\n**Sonuç:** {{etki}}",
     "recruitment-sabotage-success.png", "recruitment-sabotage-failure.png"
   ),
   CONSTRUCTION: seed(
     "🏗️ {{yerleske}}’de İnşaat Sabotajı",
-    "Şantiye ölçüleri ve yapı malzemeleri kasıtlı olarak bozuldu. Çalışmalar durdurulurken sorumlular aranıyor. **Sonuç:** {{etki}}",
-    "🔨 {{yerleske}}’de Şüpheli Müdahale Önlenmiş",
-    "Ustalar yapı planlarındaki değişikliği erkenden fark etti. İnşaat güvenli biçimde devam ediyor. {{tespit}}",
-    "production-sabotage-success.png", "production-sabotage-failure.png"
+    "**{{hedef}}** şantiyesinin planları değiştirildi, malzemeleri bozularak çalışmalar sekteye uğratıldı.\n\n**Sonuç:** {{etki}}",
+    "🔨 {{yerleske}}’de İnşaat Sabotajı Önlenmiş",
+    "Ustalar **{{hedef}}** planlarındaki müdahaleyi zamanında fark ederek şantiyeyi güvence altına aldı.\n\n**Sonuç:** {{etki}}",
+    "building-sabotage-success.png", "building-sabotage-failure.png"
   ),
   PRODUCTION_SABOTAGE: seed(
     "🛠️ {{yerleske}} Kuşatma Atölyelerinde Sabotaj",
-    "Atölyedeki kritik parçalar ve üretim kalıpları kullanılamaz hâle getirildi. **Sonuç:** {{etki}}",
-    "🛡️ Kuşatma Atölyeleri Korundu",
-    "Denetçiler bozulmuş parçaları üretime girmeden buldu; kuşatma aleti üretimi zarar görmedi. {{tespit}}",
-    "building-sabotage-success.png", "building-sabotage-failure.png"
+    "Üretim kalıpları ile kritik parçalar sabote edilerek atölye takvimi aksatıldı.\n\n**Sonuç:** {{etki}}",
+    "🛡️ {{yerleske}} Kuşatma Atölyeleri Korundu",
+    "Denetçiler değiştirilmiş parçaları üretime girmeden buldu; atölyelerin çalışma düzeni korundu.\n\n**Sonuç:** {{etki}}",
+    "production-sabotage-success.png", "production-sabotage-failure.png"
   ),
   INCOME_SABOTAGE: seed(
-    "📉 {{yerleske}} Pazarlarında Gelir Kaybı",
-    "Sahte kayıtlar, kayıp mühürler ve yönü değiştirilen vergiler şehrin gelirini düşürdü. **Sonuç:** {{etki}}",
-    "📜 Sahte Mali Kayıtlar Yakalandı",
-    "Mali görevliler hesap defterlerindeki tutarsızlığı zamanında ortaya çıkardı. Gelir akışı korundu. {{tespit}}",
+    "📉 {{yerleske}}’nin Gelir Düzeni Sabote Edildi",
+    "Sahte hesaplar ve değiştirilen vergi kayıtları yerleşkenin mali düzenini zarara uğrattı.\n\n**Sonuç:** {{etki}}",
+    "📜 {{yerleske}}’de Mali Sabotaj Önlenmiş",
+    "Mali görevliler sahte kayıtları zamanında ortaya çıkararak vergi ve pazar gelirlerini korudu.\n\n**Sonuç:** {{etki}}",
     "income-sabotage-success.png", "income-sabotage-failure.png"
   ),
   TREASURY_INFILTRATION: seed(
-    "💰 {{yerleske}} Hazinesine Sızıldı",
-    "Hazine mühürleri gizlice açıldı ve muhafız değişimi sırasında değerli sandıklar kayboldu. **Sonuç:** {{etki}}",
+    "💰 {{yerleske}} Hazinesi Soyuldu",
+    "Taklit edilen mühürlerle hazineye sızıldı ve nöbet değişimi sırasında altınlar dışarı çıkarıldı.\n\n**Sonuç:** {{etki}}",
     "🔐 {{yerleske}} Hazinesi Korundu",
-    "Gece nöbetçileri hazineye girmeye çalışan yabancıları durdurdu. Kasa ve kayıtlar zarar görmedi. {{tespit}}",
+    "Gece nöbetçileri sızma girişimini durdurdu; kasa ve mali kayıtlar zarar görmedi.\n\n**Sonuç:** {{etki}}",
     "treasury-infiltration-success.png", "treasury-infiltration-failure.png"
   ),
   INCITE_PUBLIC: seed(
     "🔥 {{yerleske}} Sokaklarında Huzursuzluk",
-    "Yayılan söylentiler ve kışkırtıcı konuşmalar kalabalıkları harekete geçirdi. **Sonuç:** {{etki}}",
+    "Yayılan söylentiler ve kışkırtıcı konuşmalar halk arasındaki hoşnutsuzluğu büyüttü.\n\n**Sonuç:** {{etki}}",
     "🕊️ {{yerleske}}’de Kışkırtma Sonuçsuz Kaldı",
-    "Halk arasında yayılan asılsız söylentiler şehir görevlilerince yatıştırıldı. {{tespit}}",
-    "aggravate-event-success.png", "aggravate-event-failure.png"
-  ),
-  AGGRAVATE_EVENT: seed(
-    "🌪️ {{yerleske}}’de Kriz Derinleşti",
-    "Kimliği belirsiz kışkırtıcılar mevcut sıkıntıları büyüttü ve şehirdeki gerilimi artırdı. **Sonuç:** {{etki}}",
-    "🕯️ {{yerleske}}’de Provokasyon Sonuçsuz Kaldı",
-    "Krizden yararlanmak isteyen kişilerin yaydığı söylentiler karşılık bulmadı. {{tespit}}",
+    "Asılsız söylentiler karşılık bulmadı; yerel görevliler kalabalığı yatıştırarak düzeni korudu.\n\n**Sonuç:** {{etki}}",
     "incite-unrest-success.png", "incite-unrest-failure.png"
   ),
+  AGGRAVATE_EVENT: seed(
+    "🌪️ {{yerleske}}’deki Kriz Körüklendi",
+    "Kimliği belirsiz kişiler mevcut krizi ve halkın korkularını kullanarak gerilimi büyüttü.\n\n**Sonuç:** {{etki}}",
+    "🕯️ {{yerleske}}’de Krizi Körükleme Girişimi Önlenmiş",
+    "Krizden yararlanmak isteyen kışkırtıcıların yaydığı haberler etkisiz kaldı.\n\n**Sonuç:** {{etki}}",
+    "aggravate-event-success.png", "aggravate-event-failure.png"
+  ),
   DESERTION: seed(
-    "🏃 {{yerleske}} Birliklerinde Firar",
-    "Sahte emirler ve kasıtlı söylentiler askerlerin bir bölümünü saflarını terk etmeye yöneltti. **Sonuç:** {{etki}}",
-    "🛡️ Firar Ağı Ortaya Çıkarıldı",
-    "Komutanlar sahte emirleri zamanında ele geçirdi ve birlik düzeni korundu. {{tespit}}",
+    "🏃 {{ulke}} Ordusunda Toplu Firar",
+    "Sahte emirler ve yayılan söylentiler bazı askerleri saflarını terk etmeye sürükledi.\n\n**Sonuç:** {{etki}}",
+    "🛡️ {{ulke}} Ordusunda Firar Girişimi Önlenmiş",
+    "Komutanlar sahte emirleri ele geçirerek askerler arasındaki kışkırtıcı ağı dağıttı.\n\n**Sonuç:** {{etki}}",
     "desertion-success.png", "desertion-failure.png"
   ),
   POISON_GARRISON: seed(
-    "☠️ {{yerleske}} Garnizonunda Zehirlenme",
-    "Garnizonun erzak ve su kaynaklarına zehir karıştırıldığı anlaşıldı. **Sonuç:** {{etki}}",
-    "🧪 Zehirleme Girişimi Önlenmiş",
-    "Şüpheli erzak sevkiyatı dağıtılmadan durduruldu; garnizon kayıp vermedi. {{tespit}}",
+    "☠️ {{yerleske}} Garnizonu Zehirlendi",
+    "Garnizonun erzak ve su kaynaklarına karıştırılan zehir askerleri etkisiz hâle getirdi.\n\n**Sonuç:** {{etki}}",
+    "🧪 {{yerleske}}’de Zehirleme Girişimi Önlenmiş",
+    "Şüpheli erzak dağıtıma girmeden durduruldu ve su kaynakları güvence altına alındı.\n\n**Sonuç:** {{etki}}",
     "poison-garrison-success.png", "poison-garrison-failure.png"
   ),
   DESTROY_SIEGE_SUPPLIES: seed(
-    "🔥 {{yerleske}}’de Kuşatma Erzağı Yakıldı",
-    "Gece çıkan yangın kuşatma için ayrılan erzak ve malzemeleri kullanılamaz hâle getirdi. **Sonuç:** {{etki}}",
-    "🧯 Kuşatma Erzağı Kurtarıldı",
-    "Depolarda başlayan yangın hızla söndürüldü ve kuşatma stokları korundu. {{tespit}}",
+    "🔥 {{yerleske}} Kuşatmasında Erzak Depoları Yakıldı",
+    "Gece çıkarılan yangın savunma için ayrılan erzak ve kuşatma stoklarını kullanılamaz hâle getirdi.\n\n**Sonuç:** {{etki}}",
+    "🧯 {{yerleske}} Kuşatma Erzağı Kurtarıldı",
+    "Depolarda çıkarılan yangın büyümeden söndürüldü ve savunma stokları korundu.\n\n**Sonuç:** {{etki}}",
     "siege-supplies-destroyed-success.png", "siege-supplies-destroyed-failure.png"
   ),
   CHARACTER_ASSASSINATE: seed(
-    "🗡️ {{yerleske}}’de Kanlı Saldırı",
-    "{{hedef}} kimliği belirsiz bir saldırganın hedefi oldu. **Sonuç:** {{etki}}",
+    "🗡️ {{hedef}} Suikasta Uğradı",
+    "**{{hedef}}**, {{yerleske}}’de düzenlenen planlı bir saldırının hedefi oldu.\n\n**Sonuç:** {{etki}}",
     "🛡️ {{hedef}} Suikasttan Kurtuldu",
-    "Muhafızlar saldırıyı son anda engelledi. Hedef güvenli bir yere götürüldü. {{tespit}}",
+    "Muhafızlar saldırıyı son anda engelleyerek **{{hedef}}** adlı kişiyi güvenli bir yere götürdü.\n\n**Sonuç:** {{etki}}",
     "assassination-success.png", "assassination-failure.png"
   ),
   CHARACTER_KIDNAP: seed(
-    "⛓️ {{yerleske}}’de Karakter Kaçırıldı",
-    "{{hedef}} son görüldüğü yerden iz bırakmadan kayboldu. **Sonuç:** {{etki}}",
-    "🛡️ {{hedef}} İçin Kaçırma Girişimi",
-    "Kaçırma girişimi muhafızların müdahalesiyle başarısız oldu. {{tespit}}",
+    "⛓️ {{hedef}} Kaçırıldı",
+    "**{{hedef}}**, {{yerleske}}’de düzenlenen gizli bir operasyonla kaçırıldı.\n\n**Sonuç:** {{etki}}",
+    "🛡️ {{hedef}} İçin Kaçırma Girişimi Önlenmiş",
+    "Muhafızlar kaçırma girişimini bozarak **{{hedef}}** adlı kişiyi koruma altına aldı.\n\n**Sonuç:** {{etki}}",
     "character-kidnap-success.png", "character-kidnap-failure.png"
   ),
   NOBLE_ASSASSINATE: seed(
-    "🗡️ {{yerleske}} Soylularına Saldırı",
-    "Hanedan mensubu {{hedef}} hedef alınarak saray çevresinde kanlı bir saldırı düzenlendi. **Sonuç:** {{etki}}",
-    "🏛️ Hanedan Mensubuna Suikast Önlenmiş",
-    "{{hedef}} için hazırlanan saldırı başkent muhafızlarınca engellendi. {{tespit}}",
+    "🗡️ Hanedan Mensubu {{hedef}} Suikasta Uğradı",
+    "Başkent {{yerleske}}’de hanedan mensubu **{{hedef}}** hedef alınarak bir saldırı düzenlendi.\n\n**Sonuç:** {{etki}}",
+    "🏛️ {{hedef}} İçin Suikast Girişimi Önlenmiş",
+    "Başkent muhafızları saldırıyı bozarak hanedan mensubu **{{hedef}}** adlı kişiyi koruma altına aldı.\n\n**Sonuç:** {{etki}}",
     "assassination-success.png", "assassination-failure.png"
   ),
   NOBLE_KIDNAP: seed(
-    "⛓️ {{yerleske}}’de Soylu Kaçırıldı",
-    "Hanedan mensubu {{hedef}} başkentte düzenlenen gizli bir operasyonla kaçırıldı. **Sonuç:** {{etki}}",
-    "🏛️ Soylu Kaçırma Girişimi Önlenmiş",
-    "{{hedef}} için kurulan tuzak başkent muhafızlarınca bozuldu. {{tespit}}",
+    "⛓️ Hanedan Mensubu {{hedef}} Kaçırıldı",
+    "Hanedan mensubu **{{hedef}}**, başkent {{yerleske}}’de düzenlenen gizli bir operasyonla kaçırıldı.\n\n**Sonuç:** {{etki}}",
+    "🏛️ {{hedef}} İçin Kaçırma Girişimi Önlenmiş",
+    "Başkent muhafızları kurulan tuzağı bozarak hanedan mensubu **{{hedef}}** adlı kişiyi güvenli biçimde saraya ulaştırdı.\n\n**Sonuç:** {{etki}}",
     "noble-kidnap-success.png", "noble-kidnap-failure.png"
   )
 };
@@ -202,15 +202,15 @@ export function espionagePublicDetectionDisclosure(input: {
 }): string {
   const state=espionagePublicDetectionState(input.detectionLevel,input.captured);
   if (state === "CAPTURED") {
-    return `Operasyonun **${input.attackerCountryName}** tarafından yürütüldüğü ortaya çıktı. **${input.spyName}** yakalandı.`;
+    return `Muhafızlar izleri takip ederek operasyonun **${input.attackerCountryName}** adına yürütüldüğünü ortaya çıkardı. **${input.spyName}** yakalandı.`;
   }
   if (state === "COUNTRY_IDENTIFIED") {
-    return `Casus kaçmayı başardı; ancak operasyonun arkasında **${input.attackerCountryName}** olduğu tespit edildi.`;
+    return `Casus kaçmayı başardı; ancak geride kalan deliller operasyonun **${input.attackerCountryName}** adına yürütüldüğünü gösterdi.`;
   }
   if (state === "INTERVENTION_NOTICED") {
-    return "Yabancı müdahale fark edildi; casus yakalanmadan kaçmayı başardı. Kaynak ülke belirlenemedi.";
+    return "Olayın ardında yabancı bir müdahale olduğu anlaşıldı; casus izini kaybettirerek kaçtı.";
   }
-  return "Operasyonun ardından casusa veya onu gönderen devlete ulaşan hiçbir iz bulunamadı.";
+  return "Muhafızların araştırmasına rağmen casusa veya onu gönderen devlete ulaşan hiçbir iz bulunamadı.";
 }
 
 export function espionagePublicationPlaceholders(value: string): string[] {

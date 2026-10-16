@@ -30,9 +30,22 @@ describe("casusluk etki hedefleri", () => {
       target_character_id:null,target_noble_type:null,target_noble_id:null,target_noble_family_id:null,
       target_army_id:null,spy_character_id:"spy",target_type:targetType
     },"HEAVY",20);
-    expect(queries).toEqual(["UPDATE settlements SET unrest_active=TRUE WHERE id=$1"]);
+    expect(queries).toContain("UPDATE settlements SET unrest_active=TRUE WHERE id=$1");
+    if(targetType==="AGGRAVATE_EVENT")expect(queries[0]).toContain("black_market_active,epidemic_active,unrest_active");
     expect(queries.join(" ")).not.toContain("rebellion_active");
     expect(result).toContain("doğrudan isyan başlatmaz");
+  });
+
+  it("körüklenen etkin olayların adlarını sonuç metnine yazar",async()=>{
+    const client={query:async(sql:string)=>sql.startsWith("SELECT black_market_active")
+      ?{rows:[{black_market_active:true,epidemic_active:true,unrest_active:false}],rowCount:1}
+      :{rows:[],rowCount:1}} as unknown as DbClient;
+    const result=await applyEspionageEffect(client,{
+      attacker_country_id:"attacker",target_country_id:"target",target_settlement_id:"settlement",
+      target_character_id:null,target_noble_type:null,target_noble_id:null,target_noble_family_id:null,
+      target_army_id:null,spy_character_id:"spy",target_type:"AGGRAVATE_EVENT"
+    },"MEDIUM",20);
+    expect(result).toContain("Körüklenen olay: Kara Borsa, Salgın");
   });
 
   it("olayı körüklemeyi yalnız huzursuzluk veya diğer etkin olaylarda mümkün kılar",async()=>{
@@ -102,9 +115,40 @@ describe("casusluk etki hedefleri", () => {
       attacker_country_id:"attacker",target_country_id:"target",target_settlement_id:null,
       target_character_id:null,target_noble_type:null,target_noble_id:null,target_noble_family_id:null,
       target_army_id:null,spy_character_id:"spy",target_type:"DESERTION"
-    }, "LIGHT", 20)).resolves.toContain("Test Ordusu");
+    }, "LIGHT", 20)).resolves.toMatch(/Test Ordusu.*3 Okçu/u);
     const selection = queries.find((sql) => sql.includes("SELECT army.id,army.name"));
     expect(selection).toContain("EXISTS(SELECT 1 FROM army_units");
     expect(selection).not.toContain("army.status");
+  });
+
+  it("hazine kaybını çalınan ve kalan altınla açıklar",async()=>{
+    const client={query:async(sql:string)=>{
+      if(sql.includes("SELECT local_treasury FROM settlements"))return{rows:[{local_treasury:10_000}],rowCount:1};
+      if(sql.includes("SELECT COALESCE(trained_settlement_id"))return{rows:[{id:"home"}],rowCount:1};
+      if(sql.includes("local_treasury=local_treasury-$1"))return{rows:[{local_treasury:9_000}],rowCount:1};
+      if(sql.includes("local_treasury=local_treasury+$1"))return{rows:[{local_treasury:1_000}],rowCount:1};
+      return{rows:[],rowCount:1};
+    }} as unknown as DbClient;
+    const result=await applyEspionageEffect(client,{
+      attacker_country_id:"attacker",target_country_id:"target",target_settlement_id:"settlement",
+      target_character_id:null,target_noble_type:null,target_noble_id:null,target_noble_family_id:null,
+      target_army_id:null,spy_character_id:"spy",target_type:"TREASURY_INFILTRATION"
+    },"MEDIUM",20);
+    expect(result).toContain("1.000 Altın kaybedildi");
+    expect(result).not.toContain("Altın kaldı");
+  });
+
+  it("garnizon zehirlenmesinde toplam ve birlik bazlı kaybı açıklar",async()=>{
+    const client={query:async(sql:string)=>sql.startsWith("SELECT unit_type,quantity")
+      ?{rows:[{unit_type:"heavy_infantry",quantity:100},{unit_type:"archer",quantity:55}],rowCount:2}
+      :{rows:[],rowCount:1}} as unknown as DbClient;
+    const result=await applyEspionageEffect(client,{
+      attacker_country_id:"attacker",target_country_id:"target",target_settlement_id:"settlement",
+      target_character_id:null,target_noble_type:null,target_noble_id:null,target_noble_family_id:null,
+      target_army_id:null,spy_character_id:"spy",target_type:"POISON_GARRISON"
+    },"MEDIUM",20);
+    expect(result).toContain("toplam 15 asker kaybedildi");
+    expect(result).toContain("Ağır Piyade: 10");
+    expect(result).toContain("Okçu: 5");
   });
 });

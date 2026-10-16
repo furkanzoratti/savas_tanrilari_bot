@@ -11,8 +11,9 @@ describe("casusluk görselli olay teslimi",()=>{
     expect(ui).toContain("publishPendingEspionagePublications");
     expect(ui).toContain("embeds:[resultEmbed,fateEmbed]");
     expect(ui).toContain("espionagePublicDetectionImage");
+    expect(ui).toContain("if (!channelId)");
+    expect(ui).toContain("await espionageService.markPublicPosted(operation.id)");
     expect(service).toContain("operation.public_posted_at IS NULL");
-    expect(service).toContain("settlement.espionage_event_channel_id IS NOT NULL");
     expect(handler).toContain("await publishPendingEspionagePublications(client,guildId)");
   });
 });
