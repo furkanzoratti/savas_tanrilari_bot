@@ -1240,9 +1240,12 @@ export const adminPanelService = {
       () => adminPool.query(
         `WITH settlement_stats AS (
            SELECT settlement.country_id,COUNT(*)::integer AS settlements,
-                  COALESCE(SUM(settlement.population+settlement.slave_population),0)::bigint AS population,
+                  COALESCE(SUM(COALESCE(settlement.population,0)+COALESCE(settlement.slave_population,0)),0)::bigint AS population,
                   COALESCE(SUM(settlement.local_treasury),0)::bigint AS treasury,
-                  COALESCE(SUM(settlement.tax_income+settlement.land_trade_income+settlement.sea_trade_income),0)::bigint AS turn_income
+                  COALESCE(SUM(COALESCE(settlement.tax_income,0)),0)::bigint AS tax_income,
+                  COALESCE(SUM(COALESCE(settlement.land_trade_income,0)),0)::bigint AS land_trade_income,
+                  COALESCE(SUM(COALESCE(settlement.sea_trade_income,0)),0)::bigint AS sea_trade_income,
+                  COALESCE(SUM(COALESCE(settlement.tax_income,0)+COALESCE(settlement.land_trade_income,0)+COALESCE(settlement.sea_trade_income,0)),0)::bigint AS turn_income
              FROM settlements settlement JOIN countries scoped_country ON scoped_country.id=settlement.country_id
             WHERE scoped_country.guild_id=$1 GROUP BY settlement.country_id
          ), army_stats AS (
@@ -1272,6 +1275,9 @@ export const adminPanelService = {
                 COALESCE(settlement_stats.settlements,0)::integer AS settlements,
                 COALESCE(settlement_stats.population,0)::bigint AS population,
                 COALESCE(settlement_stats.treasury,country.treasury)::bigint AS treasury,
+                COALESCE(settlement_stats.tax_income,0)::bigint AS tax_income,
+                COALESCE(settlement_stats.land_trade_income,0)::bigint AS land_trade_income,
+                COALESCE(settlement_stats.sea_trade_income,0)::bigint AS sea_trade_income,
                 COALESCE(settlement_stats.turn_income,0)::bigint AS turn_income,
                 COALESCE(army_stats.field_army,0)::bigint AS field_army,
                 COALESCE(garrison_stats.garrison,0)::bigint AS garrison,

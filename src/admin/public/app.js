@@ -1,4 +1,4 @@
-const state = { session: null, csrf: "", countries: [], catalog: [], characterCatalog: null, religionCatalog: null, rebellionData: null, guidedOperations: null, previewToken: null, selectedCountry: null, editor: null, pendingPageScrollTop: null, dataCatalog: null, dataTable: null, dataRows: [], dataOffset: 0, dataSearch: "", auditRows: [], auditOffset: 0, auditSearch: "", auditSource: "ALL", auditKind: "ALL", auditFrom: "", auditTo: "", activeRoute: "overview", focusTarget: null, navigationId: 0, navigationController: null };
+const state = { session: null, csrf: "", countries: [], catalog: [], characterCatalog: null, religionCatalog: null, battleSimulationCatalog: null, rebellionData: null, guidedOperations: null, previewToken: null, selectedCountry: null, editor: null, pendingPageScrollTop: null, dataCatalog: null, dataTable: null, dataRows: [], dataOffset: 0, dataSearch: "", auditRows: [], auditOffset: 0, auditSearch: "", auditSource: "ALL", auditKind: "ALL", auditFrom: "", auditTo: "", activeRoute: "overview", focusTarget: null, navigationId: 0, navigationController: null };
 const page = document.getElementById("page");
 const app = document.getElementById("app");
 const login = document.getElementById("login");
@@ -183,7 +183,7 @@ function toast(message, kind = "success") {
 const routeTitles = {
   overview: "Genel Bakış", workspace: "Çalışma Alanım", countries: "Devletler", settlements: "Yerleşkeler", armies: "Ordular & Filolar",
   characters: "Karakterler", dynasties: "Hanedanlar", "roman-politics": "Roma Siyaseti",
-  "steppe-politics": "Bozkır Kurultayı", "diplomacy-control": "Diplomasi & Ticaret", assignments: "Görevler", "gm-operations": "Rehberli İşlemler", "bulk-operations": "Toplu İşlemler", "economy-control": "Ekonomi & Üretim", "npc-purchases": "NPC Alımları", battles: "Savaşlar",
+  "steppe-politics": "Bozkır Kurultayı", "diplomacy-control": "Diplomasi & Ticaret", assignments: "Görevler", "gm-operations": "Rehberli İşlemler", "bulk-operations": "Toplu İşlemler", "economy-control": "Ekonomi & Üretim", "npc-purchases": "NPC Alımları", battles: "Savaşlar", "battle-simulator": "Savaş Simülasyonu",
   rebellions: "İsyanlar", reports: "Raporlar", health: "Oyun Sağlığı", "data-control": "Tam Yetki", audit: "İşlem Geçmişi"
 };
 function loading() { page.innerHTML = '<div class="loading-shell"><div class="skeleton skeleton-title"></div><div class="loading-grid"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div><div class="skeleton skeleton-content"></div></div>'; }
@@ -300,6 +300,8 @@ function renderCountryComparison(data) {
   if (!first || !second) { target.innerHTML = '<div class="empty">Karşılaştırma için en az iki aktif devlet gerekir.</div>'; return; }
   const metrics = [
     { key: "treasury", label: "Hazine", format: money }, { key: "turn_income", label: "Tur geliri", format: money },
+    { key: "tax_income", label: "Vergi geliri", format: money }, { key: "land_trade_income", label: "Kara ticareti", format: money },
+    { key: "sea_trade_income", label: "Deniz ticareti", format: money },
     { key: "population", label: "Nüfus", format: number }, { key: "military", label: "Kara askeri", format: number },
     { key: "ships", label: "Gemi", format: number }, { key: "settlements", label: "Yerleşke", format: number }
   ];
@@ -311,8 +313,8 @@ function renderCountryComparison(data) {
 }
 
 function downloadReportCsv(data) {
-  const header = ["Devlet", "Yerleşke", "Nüfus", "Hazine", "Tur Geliri", "Saha Ordusu", "Garnizon", "Gemi", "Aktif Savaş"];
-  const rows = data.countries.map((row) => [row.name, row.settlements, row.population, row.treasury, row.turn_income, row.field_army, row.garrison, row.ships, row.active_wars]);
+  const header = ["Devlet", "Yerleşke", "Nüfus", "Hazine", "Tur Geliri", "Vergi Geliri", "Kara Ticareti", "Deniz Ticareti", "Saha Ordusu", "Garnizon", "Gemi", "Aktif Savaş"];
+  const rows = data.countries.map((row) => [row.name, row.settlements, row.population, row.treasury, row.turn_income, row.tax_income, row.land_trade_income, row.sea_trade_income, row.field_army, row.garrison, row.ships, row.active_wars]);
   const cell = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
   const blob = new Blob([[header, ...rows].map((row) => row.map(cell).join(",")).join("\n")], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob); const link = document.createElement("a");
@@ -334,13 +336,95 @@ async function reportsPage(signal) {
   const maxFlow = Math.max(1, ...turns.flatMap((row) => [row.income, row.expense]));
   const options = data.countries.map((row, index) => `<option value="${row.id}">${escapeHtml(row.name)}</option>`).join("");
   const warnings = loadWarningsMarkup(data.warnings);
-  page.innerHTML = `<div class="page-head reports-hero"><div><span class="overview-kicker">OYUN RAPORLAMA MERKEZİ</span><h1>Raporlar & Karşılaştırma</h1><p>Devletlerin güncel gücünü karşılaştır, son sekiz turun mali akışını izle ve veriyi CSV olarak dışa aktar.</p></div><div class="actions"><span class="pill neutral">${date(data.generatedAt)}</span><button class="button primary" data-export-report>CSV dışa aktar</button></div></div><section class="kpi-grid"><div class="card kpi"><span>Aktif devlet</span><strong>${number(data.countries.length)}</strong><small>Karşılaştırılabilir kayıt</small></div><div class="card kpi"><span>Toplam hazine</span><strong>${money(totalTreasury)}</strong><small>Yerel hazineler toplamı</small></div><div class="card kpi"><span>Toplam nüfus</span><strong>${number(totalPopulation)}</strong><small>Özgür + köle nüfus</small></div><div class="card kpi"><span>Kara gücü</span><strong>${number(totalMilitary)}</strong><small>Saha ordusu + garnizon</small></div></section><section class="card comparison-card"><div class="card-head"><div><h2>Devlet karşılaştırması</h2><p>Aynı ölçekte iki devleti yan yana incele</p></div><div class="comparison-selectors"><select id="report-country-a">${options}</select><span>↔</span><select id="report-country-b">${data.countries.map((row, index) => `<option value="${row.id}" ${index === 1 ? "selected" : ""}>${escapeHtml(row.name)}</option>`).join("")}</select></div></div><div id="country-comparison" class="country-comparison"></div></section><section class="reports-grid"><article class="card"><div class="card-head"><div><h2>Son turların mali akışı</h2><p>Gelir, gider ve net işlem hareketi</p></div></div><div class="turn-flow-list">${turns.map((row) => `<div class="turn-flow"><strong>Tur ${number(row.turn)}</strong><div><span class="income" style="--flow-width:${Math.round(row.income / maxFlow * 100)}%">+${money(row.income)}</span><span class="expense" style="--flow-width:${Math.round(row.expense / maxFlow * 100)}%">−${money(row.expense)}</span></div><em class="${row.net < 0 ? "danger-text" : "success-text"}">${signedMoney(row.net)} · ${number(row.count)} işlem</em></div>`).join("")}</div></article><article class="card"><div class="card-head"><div><h2>İşlem türleri</h2><p>Son sekiz turdaki en yoğun mali hareketler</p></div></div>${rowsOrEmpty(data.transactionKinds, (row) => `<div class="relation-row static"><span><strong>${escapeHtml(humanKey(row.kind))}</strong><small>${number(row.count)} işlem</small></span><em class="${Number(row.net) < 0 ? "danger-text" : "success-text"}">${signedMoney(row.net)}</em></div>`, "Mali işlem bulunmuyor.")}</article><article class="card relation-span"><div class="card-head"><div><h2>Yönetim etkinliği</h2><p>Son 14 günün panel ve oyun işlem sayıları</p></div></div><div class="activity-strip">${data.activity.map((row) => `<div><span>${new Intl.DateTimeFormat("tr-TR", { day: "2-digit", month: "2-digit" }).format(new Date(row.day))}</span><strong>${number(row.total)}</strong><small>${number(row.panel)} panel · ${number(row.game)} oyun</small></div>`).join("") || '<div class="empty">Etkinlik kaydı bulunmuyor.</div>'}</div></article></section><div class="section-title"><h2>Tüm devletler</h2><span>Güncel karşılaştırmalı tablo</span></div><section class="card table-wrap"><table><thead><tr><th>Devlet</th><th>Yerleşke</th><th>Nüfus</th><th>Hazine</th><th>Tur geliri</th><th>Saha / Garnizon</th><th>Gemi</th><th>Savaş</th></tr></thead><tbody>${data.countries.map((row) => `<tr><td><strong>${escapeHtml(row.name)}</strong><small>${escapeHtml(mobilizationLabels[row.mobilization] || row.mobilization)}</small></td><td>${number(row.settlements)}</td><td>${number(row.population)}</td><td>${money(row.treasury)}</td><td>${money(row.turn_income)}</td><td>${number(row.field_army)} / ${number(row.garrison)}</td><td>${number(row.ships)}</td><td>${number(row.active_wars)}</td></tr>`).join("")}</tbody></table></section>`;
+  page.innerHTML = `<div class="page-head reports-hero"><div><span class="overview-kicker">OYUN RAPORLAMA MERKEZİ</span><h1>Raporlar & Karşılaştırma</h1><p>Devletlerin güncel gücünü karşılaştır, son sekiz turun mali akışını izle ve veriyi CSV olarak dışa aktar.</p></div><div class="actions"><span class="pill neutral">${date(data.generatedAt)}</span><button class="button primary" data-export-report>CSV dışa aktar</button></div></div><section class="kpi-grid"><div class="card kpi"><span>Aktif devlet</span><strong>${number(data.countries.length)}</strong><small>Karşılaştırılabilir kayıt</small></div><div class="card kpi"><span>Toplam hazine</span><strong>${money(totalTreasury)}</strong><small>Yerel hazineler toplamı</small></div><div class="card kpi"><span>Toplam nüfus</span><strong>${number(totalPopulation)}</strong><small>Özgür + köle nüfus</small></div><div class="card kpi"><span>Kara gücü</span><strong>${number(totalMilitary)}</strong><small>Saha ordusu + garnizon</small></div></section><section class="card comparison-card"><div class="card-head"><div><h2>Devlet karşılaştırması</h2><p>Aynı ölçekte iki devleti yan yana incele</p></div><div class="comparison-selectors"><select id="report-country-a">${options}</select><span>↔</span><select id="report-country-b">${data.countries.map((row, index) => `<option value="${row.id}" ${index === 1 ? "selected" : ""}>${escapeHtml(row.name)}</option>`).join("")}</select></div></div><div id="country-comparison" class="country-comparison"></div></section><section class="reports-grid"><article class="card"><div class="card-head"><div><h2>Son turların mali akışı</h2><p>Gelir, gider ve net işlem hareketi</p></div></div><div class="turn-flow-list">${turns.map((row) => `<div class="turn-flow"><strong>Tur ${number(row.turn)}</strong><div><span class="income" style="--flow-width:${Math.round(row.income / maxFlow * 100)}%">+${money(row.income)}</span><span class="expense" style="--flow-width:${Math.round(row.expense / maxFlow * 100)}%">−${money(row.expense)}</span></div><em class="${row.net < 0 ? "danger-text" : "success-text"}">${signedMoney(row.net)} · ${number(row.count)} işlem</em></div>`).join("")}</div></article><article class="card"><div class="card-head"><div><h2>İşlem türleri</h2><p>Son sekiz turdaki en yoğun mali hareketler</p></div></div>${rowsOrEmpty(data.transactionKinds, (row) => `<div class="relation-row static"><span><strong>${escapeHtml(humanKey(row.kind))}</strong><small>${number(row.count)} işlem</small></span><em class="${Number(row.net) < 0 ? "danger-text" : "success-text"}">${signedMoney(row.net)}</em></div>`, "Mali işlem bulunmuyor.")}</article><article class="card relation-span"><div class="card-head"><div><h2>Yönetim etkinliği</h2><p>Son 14 günün panel ve oyun işlem sayıları</p></div></div><div class="activity-strip">${data.activity.map((row) => `<div><span>${new Intl.DateTimeFormat("tr-TR", { day: "2-digit", month: "2-digit" }).format(new Date(row.day))}</span><strong>${number(row.total)}</strong><small>${number(row.panel)} panel · ${number(row.game)} oyun</small></div>`).join("") || '<div class="empty">Etkinlik kaydı bulunmuyor.</div>'}</div></article></section><div class="section-title"><h2>Tüm devletler</h2><span>Güncel karşılaştırmalı tablo</span></div><section class="card table-wrap"><table><thead><tr><th>Devlet</th><th>Yerleşke</th><th>Nüfus</th><th>Hazine</th><th>Tur geliri</th><th>Saha / Garnizon</th><th>Gemi</th><th>Savaş</th></tr></thead><tbody>${data.countries.map((row) => `<tr><td><strong>${escapeHtml(row.name)}</strong><small>${escapeHtml(mobilizationLabels[row.mobilization] || row.mobilization)}</small></td><td>${number(row.settlements)}</td><td>${number(row.population)}</td><td>${money(row.treasury)}</td><td><strong>${money(row.turn_income)}</strong><small>Vergi ${money(row.tax_income)} · Kara ${money(row.land_trade_income)} · Deniz ${money(row.sea_trade_income)}</small></td><td>${number(row.field_army)} / ${number(row.garrison)}</td><td>${number(row.ships)}</td><td>${number(row.active_wars)}</td></tr>`).join("")}</tbody></table></section>`;
   if (warnings) page.querySelector(".page-head")?.insertAdjacentHTML("afterend", warnings);
   document.querySelector("[data-retry-page]")?.addEventListener("click", () => reportsPage().catch(showPageError));
   document.getElementById("report-country-a")?.addEventListener("change", () => renderCountryComparison(data));
   document.getElementById("report-country-b").addEventListener("change", () => renderCountryComparison(data));
   document.querySelector("[data-export-report]").addEventListener("click", () => downloadReportCsv(data));
   renderCountryComparison(data);
+}
+
+function simulationUnitOptions(units, selected) {
+  return units.map((unit) => `<option value="${unit.key}" ${unit.key === selected ? "selected" : ""}>${escapeHtml(unit.label)} · ${unit.clashDice}d${unit.clashSides} / ${unit.damageDice}d${unit.damageSides}</option>`).join("");
+}
+
+function addSimulationUnitRow(side, units, selected, quantity) {
+  const container = document.querySelector(`[data-simulation-side="${side}"]`);
+  if (!container) return;
+  const row = document.createElement("div");
+  row.className = "simulation-unit-row";
+  row.innerHTML = `<select aria-label="Birlik türü">${simulationUnitOptions(units, selected || units[0]?.key)}</select><input aria-label="Birlik miktarı" type="number" min="1" step="1" value="${Number(quantity || (units === state.battleSimulationCatalog?.navalUnits ? 10 : 1000))}" required><button type="button" class="icon-button" aria-label="Satırı kaldır">×</button>`;
+  row.querySelector("button").addEventListener("click", () => {
+    if (container.querySelectorAll(".simulation-unit-row").length > 1) row.remove();
+    else toast("Her tarafta en az bir birlik satırı bulunmalı.", "error");
+  });
+  container.append(row);
+}
+
+function simulationSideUnits(side) {
+  const units = {};
+  document.querySelectorAll(`[data-simulation-side="${side}"] .simulation-unit-row`).forEach((row) => {
+    const key = row.querySelector("select").value;
+    units[key] = (units[key] || 0) + Number(row.querySelector("input").value || 0);
+  });
+  return units;
+}
+
+function simulationLossText(items, field = "lost") {
+  if (!items?.length) return "Kayıp yok";
+  return items.map((item) => `${escapeHtml(item.label)} ${number(item[field])}`).join(" · ");
+}
+
+function renderBattleSimulationResult(result) {
+  const target = document.getElementById("battle-simulation-result");
+  if (!target) return;
+  const isNaval = result.mode === "NAVAL";
+  const sideCard = (key) => {
+    const side = result.sides[key];
+    return `<article class="simulation-result-side ${result.winner === key ? "winner" : ""}"><div class="simulation-result-heading"><div><span>${key} TARAFI</span><h3>${escapeHtml(side.name)}</h3></div>${result.winner === key ? '<span class="pill">Kazanan</span>' : ""}</div><div class="simulation-stat-grid"><div><span>Başlangıç</span><strong>${number(side.initialTotal)}</strong></div><div><span>Kayıp</span><strong class="danger-text">${number(side.lostTotal)}</strong></div><div><span>Kalan</span><strong>${number(side.remainingTotal)}</strong></div>${isNaval ? `<div><span>Aktif / Hasarlı</span><strong>${number(side.activeTotal)} / ${number(side.disabledTotal)}</strong></div><div><span>Filo durumu</span><strong>${escapeHtml(humanKey(side.condition))}</strong></div><div><span>Savaşabilir gövde canı</span><strong>${number(side.operationalHullHp)} / ${number(side.initialHullHp)} HP</strong></div>` : `<div><span>Düzen</span><strong>${escapeHtml(humanKey(side.order))} · ${number(side.pressure)} baskı</strong></div>`}</div><div class="simulation-unit-results">${side.units.map((unit) => `<div><span><strong>${escapeHtml(unit.label)}</strong><small>${number(unit.initial)} başlangıç</small></span><span><b>${number(unit.lost)}</b> kayıp · ${number(unit.remaining)} kalan${isNaval ? ` · ${number(unit.active)} aktif · ${number(unit.disabled)} hasarlı` : ""}</span></div>`).join("")}</div></article>`;
+  };
+  const roundRows = result.rounds.map((round) => `<details class="simulation-round"><summary><span><b>${number(round.round)}. savaş turu</b><small>${escapeHtml(humanKey(round.tier))}${round.winner ? ` · Tur üstünlüğü ${round.winner}` : " · Dengeli"}</small></span><strong>${number(round.sideA.lost)} / ${number(round.sideB.lost)} kayıp</strong></summary><div class="simulation-round-grid"><div><h4>${escapeHtml(result.sides.A.name)}</h4><p>Çarpışma ${number(round.sideA.clash)} · Hasar ${number(round.sideA.damage)}</p><p>Kalan ${number(round.sideA.remaining)}${isNaval ? ` · ${number(round.sideA.active)} aktif · ${number(round.sideA.disabled)} yeni hasarlı` : ` · ${escapeHtml(humanKey(round.sideA.order))} · ${number(round.sideA.pressure)} baskı`}</p><small>Kayıp: ${simulationLossText(round.sideA.lossesByUnit)}${isNaval && round.sideA.disabledByUnit?.length ? `<br>Devre dışı: ${simulationLossText(round.sideA.disabledByUnit, "disabled")}` : ""}</small></div><div><h4>${escapeHtml(result.sides.B.name)}</h4><p>Çarpışma ${number(round.sideB.clash)} · Hasar ${number(round.sideB.damage)}</p><p>Kalan ${number(round.sideB.remaining)}${isNaval ? ` · ${number(round.sideB.active)} aktif · ${number(round.sideB.disabled)} yeni hasarlı` : ` · ${escapeHtml(humanKey(round.sideB.order))} · ${number(round.sideB.pressure)} baskı`}</p><small>Kayıp: ${simulationLossText(round.sideB.lossesByUnit)}${isNaval && round.sideB.disabledByUnit?.length ? `<br>Devre dışı: ${simulationLossText(round.sideB.disabledByUnit, "disabled")}` : ""}</small></div></div></details>`).join("");
+  target.innerHTML = `<section class="simulation-result-head"><div><span class="overview-kicker">SİMÜLASYON SONUCU</span><h2>${result.winnerName ? `${escapeHtml(result.winnerName)} kazandı` : "Savaş berabere sonuçlandı"}</h2><p>${escapeHtml(result.terrainLabel)} · ${number(result.roundCount)} savaş turu${result.reachedRoundLimit ? " · 30 tur güvenlik sınırında puanlandı" : ""}</p></div><button class="button" data-scroll-rounds>Tur dökümüne git</button></section><div class="simulation-result-grid">${sideCard("A")}${sideCard("B")}</div><section class="card simulation-round-list" id="simulation-round-list"><div class="card-head"><div><h3>Tur tur savaş dökümü</h3><p>Her turdaki zar, hasar, kayıp türleri ve kalan kuvvet</p></div><span class="pill neutral">${number(result.roundCount)} tur</span></div>${roundRows}</section>`;
+  target.hidden = false;
+  target.querySelector("[data-scroll-rounds]")?.addEventListener("click", () => document.getElementById("simulation-round-list")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  target.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function battleSimulatorPage(signal) {
+  setActiveRoute("battle-simulator"); loading();
+  const catalog = state.battleSimulationCatalog || await api("/api/battle-simulation/catalog", { signal });
+  state.battleSimulationCatalog = catalog;
+  page.innerHTML = `<div class="page-head battle-simulator-hero"><div><span class="overview-kicker">GM SAVAŞ LABORATUVARI</span><h1>Savaş Simülasyonu</h1><p>Canlı oyun verisini değiştirmeden kara veya deniz kuvvetlerini karşılaştır. Birlikleri ve miktarları tamamen sen belirle.</p></div><span class="pill neutral">En fazla ${number(catalog.limits.maxRounds)} savaş turu</span></div><form id="battle-simulation-form"><section class="card simulation-settings"><div><label>Savaş türü<select id="simulation-mode"><option value="LAND">Kara savaşı</option><option value="NAVAL">Deniz savaşı</option></select></label><label id="simulation-terrain-wrap">Arazi<select id="simulation-terrain">${catalog.terrains.map((terrain) => `<option value="${terrain.key}">${escapeHtml(terrain.label)} · Cephe ${number(terrain.frontageA)} / ${number(terrain.frontageB)}</option>`).join("")}</select></label></div><p>Sonuçlar oyunun gerçek çarpışma, hasar, dayanıklılık, düzen baskısı ve gemi gövde kurallarından hesaplanır.</p></section><section class="simulation-side-grid"><article class="card simulation-side-card side-a"><div class="simulation-side-title"><span>A</span><label>Taraf adı<input id="simulation-side-a-name" maxlength="60" value="A Tarafı" required></label></div><div class="section-head"><div><strong>A tarafı birlikleri</strong><span>Aynı türü birden fazla satırda eklersen miktarlar birleşir.</span></div><button type="button" class="button compact" data-add-simulation-unit="A">＋ Birlik</button></div><div class="simulation-unit-list" data-simulation-side="A"></div></article><article class="card simulation-side-card side-b"><div class="simulation-side-title"><span>B</span><label>Taraf adı<input id="simulation-side-b-name" maxlength="60" value="B Tarafı" required></label></div><div class="section-head"><div><strong>B tarafı birlikleri</strong><span>Aynı türü birden fazla satırda eklersen miktarlar birleşir.</span></div><button type="button" class="button compact" data-add-simulation-unit="B">＋ Birlik</button></div><div class="simulation-unit-list" data-simulation-side="B"></div></article></section><div class="simulation-submit"><div><strong>Güvenli deneme alanı</strong><span>Ordular, filolar, gemi canları ve hazineler etkilenmez.</span></div><button class="button primary" type="submit">⚔ Savaşı simüle et</button></div><p id="simulation-error" class="error" hidden></p></form><div id="battle-simulation-result" class="simulation-result" hidden></div>`;
+  const refreshRows = () => {
+    const mode = document.getElementById("simulation-mode").value;
+    const units = mode === "NAVAL" ? catalog.navalUnits : catalog.landUnits;
+    document.getElementById("simulation-terrain-wrap").hidden = mode === "NAVAL";
+    document.querySelectorAll("[data-simulation-side]").forEach((container) => { container.innerHTML = ""; });
+    addSimulationUnitRow("A", units, units[0]?.key, mode === "NAVAL" ? 10 : 1000);
+    addSimulationUnitRow("B", units, units[Math.min(1, units.length - 1)]?.key, mode === "NAVAL" ? 10 : 1000);
+  };
+  refreshRows();
+  document.getElementById("simulation-mode").addEventListener("change", refreshRows);
+  document.querySelectorAll("[data-add-simulation-unit]").forEach((button) => button.addEventListener("click", () => {
+    const units = document.getElementById("simulation-mode").value === "NAVAL" ? catalog.navalUnits : catalog.landUnits;
+    addSimulationUnitRow(button.dataset.addSimulationUnit, units, units[0]?.key);
+  }));
+  document.getElementById("battle-simulation-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const submit = event.currentTarget.querySelector('button[type="submit"]');
+    const error = document.getElementById("simulation-error");
+    error.hidden = true; submit.disabled = true; submit.textContent = "Hesaplanıyor…";
+    try {
+      const mode = document.getElementById("simulation-mode").value;
+      const result = await api("/api/battle-simulation", { method: "POST", body: JSON.stringify({ mode, terrain: document.getElementById("simulation-terrain").value, sideA: { name: document.getElementById("simulation-side-a-name").value, units: simulationSideUnits("A") }, sideB: { name: document.getElementById("simulation-side-b-name").value, units: simulationSideUnits("B") } }) });
+      renderBattleSimulationResult(result);
+    } catch (requestError) {
+      error.textContent = requestError.message; error.hidden = false;
+    } finally {
+      submit.disabled = false; submit.textContent = "⚔ Savaşı simüle et";
+    }
+  });
 }
 
 function pageScrollTop() {
@@ -2351,6 +2435,7 @@ async function navigate(route) {
     if (route === "economy-control") return await economyControlPage(controller.signal);
     if (route === "npc-purchases") return await npcPurchasesPage();
     if (route === "battles") return await battlesPage();
+    if (route === "battle-simulator") return await battleSimulatorPage(controller.signal);
     if (route === "rebellions") return await rebellionsPage();
     if (route === "reports") return await reportsPage(controller.signal);
     if (route === "health") return await gameHealthPage();

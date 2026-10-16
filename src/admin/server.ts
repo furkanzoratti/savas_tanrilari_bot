@@ -19,6 +19,7 @@ import { adminRebellionService } from "./rebellion-service.js";
 import { adminDataControlService } from "./data-control-service.js";
 import { aiCountryGovernanceService } from "../services/ai-country-governance-service.js";
 import { npcPanelPurchaseService } from "../services/npc-panel-purchase-service.js";
+import { battleSimulationService } from "../services/battle-simulation-service.js";
 import { GameError } from "../services/game-service.js";
 
 const logger = pino({ level: adminConfig.logLevel });
@@ -161,6 +162,14 @@ const server = createServer(async (request, response) => {
     if (request.method === "GET" && url.pathname === "/api/reports") {
       if (!requireSession(request, response)) return;
       return json(response, 200, await adminPanelService.reporting());
+    }
+    if (request.method === "GET" && url.pathname === "/api/battle-simulation/catalog") {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, battleSimulationService.catalog());
+    }
+    if (request.method === "POST" && url.pathname === "/api/battle-simulation") {
+      if (!requireMutation(request, response)) return;
+      return json(response, 200, battleSimulationService.simulate(await body(request)));
     }
     if (request.method === "GET" && url.pathname === "/api/game-health") {
       if (!requireSession(request, response)) return;

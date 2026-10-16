@@ -174,6 +174,7 @@ describe("GM operasyon merkezi", () => {
   });
 
   it("mekanik ve rapor menülerini kısmi sorgu hatalarında kullanılabilir tutar", () => {
+    const server = read("./server.ts");
     const service = read("./service.ts");
     const app = read("./public/app.js");
     const html = read("./public/index.html");
@@ -199,7 +200,13 @@ describe("GM operasyon merkezi", () => {
     expect(service).toContain('scope !== "DIPLOMACY"');
     expect(css).toContain(".load-warning");
     expect(app).toContain("const rowsOrEmpty =");
-    expect(html).toContain("npc-ships-ui-v25");
+    expect(service).toContain("COALESCE(settlement.tax_income,0)+COALESCE(settlement.land_trade_income,0)+COALESCE(settlement.sea_trade_income,0)");
+    expect(app).toContain("Vergi ${money(row.tax_income)} · Kara ${money(row.land_trade_income)} · Deniz ${money(row.sea_trade_income)}");
+    expect(server).toContain('url.pathname === "/api/battle-simulation"');
+    expect(app).toContain("async function battleSimulatorPage");
+    expect(html).toContain('data-route="battle-simulator"');
+    expect(css).toContain(".simulation-side-grid");
+    expect(html).toContain("battle-simulator-v26");
   });
 
   it("son güvenlik ve performans katmanını istek izleme ve canlı durumla tamamlar", () => {
@@ -225,6 +232,6 @@ describe("GM operasyon merkezi", () => {
     expect(app).toContain('Promise.all([api("/api/game-health"), api("/api/system-status")])');
     expect(app).toContain("Panel çalışma durumu");
     expect(css).toContain(".system-status-grid");
-    expect(html).toContain("npc-ships-ui-v25");
+    expect(html).toContain("battle-simulator-v26");
   });
 });
