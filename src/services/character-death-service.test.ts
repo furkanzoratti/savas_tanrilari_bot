@@ -20,7 +20,8 @@ describe("karakter ölümü", () => {
     expect(query.mock.calls[1]?.[0]).toContain("status='CANCELLED'");
     expect(query.mock.calls[2]?.[0]).toContain("character_status='DEAD'");
     expect(query.mock.calls[2]?.[0]).toContain("death_settlement_id=COALESCE");
-    expect(query.mock.calls[2]?.[1]).toEqual(["character-1","settlement-1"]);
+    expect(query.mock.calls[2]?.[0]).toContain("death_reason=COALESCE");
+    expect(query.mock.calls[2]?.[1]).toEqual(["character-1","settlement-1","Casus idam edildi."]);
   });
 
   it("ölen Mareşalin ardından rastgele etkin kara Komutanını Mareşal yapar",async()=>{

@@ -515,7 +515,7 @@ export async function applyEspionageEffect(
     if (isAssassinationTarget(operation.target_type) && severity === "HEAVY") {
       await markCharacterDead({
         client,characterId:operation.target_character_id,deathSettlementId:operation.target_settlement_id,
-        reason:"Karakter öldürüldüğü için devam eden casusluk görevi iptal edildi."
+        reason:"Karakter öldürüldüğü için devam eden casusluk görevi iptal edildi.",deathReason:"Suikast"
       });
       return "Hedef karakter kalıcı olarak öldürüldü; bütün görevleri sona erdi.";
     }

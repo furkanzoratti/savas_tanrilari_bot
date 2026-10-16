@@ -79,6 +79,7 @@ import { espionageService, resolveDueEspionageOperations } from "../services/esp
 import { handleCharacterAutocomplete, handleCharacterCommand, publishCharacterTurnLogs } from "./character-ui.js";
 import { characterService, processCharacterTurn } from "../services/character-service.js";
 import { handleDynastyAutocomplete,handleDynastyButton,handleDynastyCommand,handleDynastyModal,processDynastyAutomation } from "./dynasty-ui.js";
+import { publishPendingDeathPublications } from "./death-publication-ui.js";
 import { handleDiplomacyButton, handleDiplomacyCommand } from "./diplomacy-ui.js";
 import { handleSteppeHegemonyAutocomplete,handleSteppeHegemonyButton,handleSteppeHegemonyCommand,handleSteppeHegemonySelect } from "./steppe-hegemony-ui.js";
 import { handlePlayerAutoPurchaseButton, handlePlayerAutoPurchaseCommand } from "./player-auto-purchase-ui.js";
@@ -110,6 +111,7 @@ interface CharacterAutomationResult {
   dynastyDeathLogsPublished: number;
   dynastyNpcBirths: number;
   dynastyNpcMarriages: number;
+  deathPublicationsPublished: number;
   warnings: string[];
 }
 
@@ -204,12 +206,22 @@ export async function processDueCharacterSystems(
     logger.error({error,guildId,turn},"Hanedan tur otomasyonu tamamlanamadı");
     dynastyWarnings=["Hanedan yaşlanma ve ölüm kontrolleri bu tur tamamlanamadı; güvenle yeniden denenebilir."];
   }
+  let deathPublicationsPublished=0;
+  try{
+    const publication=await publishPendingDeathPublications(client,guildId);
+    deathPublicationsPublished=publication.published;
+    if(publication.failed)dynastyWarnings.push(`${publication.failed} ölüm olayı yerleşke kanalına gönderilemedi; yayın kuyruğunda bekliyor.`);
+  }catch(error){
+    logger.error({error,guildId,turn},"Ölüm olayları yerleşke kanallarına yayımlanamadı");
+    dynastyWarnings.push("Ölüm olayları yerleşke kanallarına gönderilemedi; yayın kuyruğunda bekliyor.");
+  }
   return {
     espionageResolved: espionage.resolved,
     espionagePublished: espionage.published,
     characterEvents: academy.events,
     characterPublished: academy.published,
     dynastyProcessed,dynastyEvents,dynastyDeathChecks,dynastyDeathLogsPublished,dynastyNpcBirths,dynastyNpcMarriages,
+    deathPublicationsPublished,
     warnings: [espionage.warning,academy.warning,...dynastyWarnings].filter((warning): warning is string => Boolean(warning))
   };
 }
@@ -230,6 +242,7 @@ async function handleCharacterTurnRecovery(interaction: ChatInputCommandInteract
     `👑 İşlenen hanedan: **${result.dynastyProcessed}** • Hanedan olayı: **${result.dynastyEvents}**`,
     `🤖 NPC hanedan doğumu: **${result.dynastyNpcBirths}** • Otomatik NPC evliliği: **${result.dynastyNpcMarriages}**`,
     `⚰️ Atılan ölüm zarı: **${result.dynastyDeathChecks}** • Loglanan/kuyruktan yayımlanan: **${result.dynastyDeathLogsPublished}**`,
+    `🕯️ Yerleşke kanallarında yayımlanan ölüm olayı: **${result.deathPublicationsPublished}**`,
     result.warnings.length ? `\n⚠️ ${result.warnings.join("\n⚠️ ")}` : "\nBütün işlemler tamamlandı. Komut tekrar kullanılırsa tamamlanmış görevler ikinci kez uygulanmaz."
   ].join("\n"));
 }

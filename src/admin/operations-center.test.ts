@@ -211,7 +211,7 @@ describe("GM operasyon merkezi", () => {
     expect(app).toContain("async function battleSimulatorPage");
     expect(html).toContain('data-route="battle-simulator"');
     expect(css).toContain(".simulation-side-grid");
-    expect(html).toContain("espionage-publications-v27");
+    expect(html).toContain("event-publications-v28");
   });
 
   it("son güvenlik ve performans katmanını istek izleme ve canlı durumla tamamlar", () => {
@@ -237,6 +237,6 @@ describe("GM operasyon merkezi", () => {
     expect(app).toContain('Promise.all([api("/api/game-health"), api("/api/system-status")])');
     expect(app).toContain("Panel çalışma durumu");
     expect(css).toContain(".system-status-grid");
-    expect(html).toContain("espionage-publications-v27");
+    expect(html).toContain("event-publications-v28");
   });
 });

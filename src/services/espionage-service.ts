@@ -394,7 +394,7 @@ async function finalizeEspionageResolution(
   if (prepared.captured && isAssassinationTarget(operation.target_type)) {
     await markCharacterDead({
       client,characterId:operation.spy_character_id,deathSettlementId:operation.target_settlement_id,
-      reason:"Casus yakalandığı için görevi iptal edildi."
+      reason:"Casus yakalandığı için görevi iptal edildi.",deathReason:"Operasyon sırasında yakalanarak infaz edildi"
     });
   } else if (prepared.captured) {
     await client.query("UPDATE country_characters SET assignment='CAPTURED',assigned_settlement_id=$1 WHERE id=$2", [operation.target_settlement_id, operation.spy_character_id]);
@@ -1021,7 +1021,7 @@ export const espionageService = {
       }else if(captive.captive_type==="CHARACTER"){
         await markCharacterDead({
           client,characterId:captive.captive_id,deathSettlementId:captive.captured_settlement_id,
-          reason:"Kaçırıldıktan sonra yönetici kararıyla infaz edildi."
+          reason:"Kaçırıldıktan sonra yönetici kararıyla infaz edildi.",deathReason:"Kaçırıldıktan sonra infaz edildi"
         });
       }else if(captive.captive_type==="DYNASTY"){
         await killDynastyMemberFromEspionage(client,captive.captive_id,turn,"Kaçırıldıktan sonra infaz");
@@ -1079,7 +1079,7 @@ export const espionageService = {
       )).rows[0]?.id??null;
       await markCharacterDead({
         client,characterId:spy.id,deathSettlementId:deathSettlement,
-        reason:"Casus idam edildiği için görevi iptal edildi."
+        reason:"Casus idam edildiği için görevi iptal edildi.",deathReason:"Esaret altında infaz edildi"
       });
       await client.query(
         "UPDATE espionage_operations SET executed_at=NOW(),executed_by=$1,effect_text=COALESCE(effect_text,'') || $2 WHERE id=$3",

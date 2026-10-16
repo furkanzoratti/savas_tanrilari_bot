@@ -6,6 +6,7 @@ export async function markCharacterDead(input: {
   characterId: string;
   deathSettlementId: string | null;
   reason: string;
+  deathReason?: string;
 }): Promise<void> {
   const { client,characterId,deathSettlementId,reason }=input;
   await client.query(
@@ -25,11 +26,12 @@ export async function markCharacterDead(input: {
     `UPDATE country_characters
         SET character_status='DEAD',died_at=COALESCE(died_at,NOW()),
             death_settlement_id=COALESCE(death_settlement_id,$2),
+            death_reason=COALESCE(death_reason,$3),
             assignment='NONE',assigned_settlement_id=NULL,protected_character_id=NULL,
             assignment_ready_turn=NULL,unavailable_until_turn=NULL
       WHERE id=$1
       RETURNING country_id,is_marshal`,
-    [characterId,deathSettlementId]
+    [characterId,deathSettlementId,input.deathReason??reason]
   )).rows[0];
   if(deceased?.is_marshal){
     await ensureCountryMarshal(client,deceased.country_id,{allowAnyCommander:true});

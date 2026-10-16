@@ -14,9 +14,11 @@ describe("GM casusluk yayınları paneli", () => {
     const diplomacyService = read("../services/diplomacy-service.ts");
 
     expect(html).toContain('data-route="espionage-publications"');
-    expect(html).toContain("espionage-publications-v27");
+    expect(html).toContain("event-publications-v28");
     expect(app).toContain("async function espionagePublicationsPage");
     expect(app).toContain("Yerleşke–kanal eşleştirmeleri");
+    expect(app).toContain("Casusluk ve Ölüm Yayınları");
+    expect(app).toContain("Otomatik gönderim aktif");
     expect(app).toContain("Hazır olay metinleri");
     expect(app).toContain("openPublicationTemplateEditor");
     expect(css).toContain(".publication-template-grid");

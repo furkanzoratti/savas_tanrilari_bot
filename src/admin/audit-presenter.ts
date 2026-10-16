@@ -46,7 +46,7 @@ const ACTION_LABELS: Record<string, string> = {
   "admin.panel.steppe.title.update": "Bozkır makamı güncellendi",
   "admin.panel.steppe.hegemony.update": "Hanlar Hanlığı otoritesi güncellendi",
   "admin.panel.steppe.tributary.update": "Bağlı Han ilişkisi güncellendi",
-  "ESPIONAGE_PUBLICATION_CHANNEL_SET": "Yerleşkenin casusluk olay kanalı güncellendi",
+  "ESPIONAGE_PUBLICATION_CHANNEL_SET": "Yerleşkenin olay yayın kanalı güncellendi",
   "ESPIONAGE_PUBLICATION_TEMPLATE_UPDATE": "Casusluk olay metni güncellendi",
   "ESPIONAGE_PUBLICATION_TEMPLATE_RESET": "Casusluk olay metni varsayılana döndürüldü",
   "ADMIN_DATA_INSERT": "Tam yetki panelinden oyun kaydı eklendi",
