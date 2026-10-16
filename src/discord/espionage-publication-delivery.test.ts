@@ -17,5 +17,6 @@ describe("casusluk görselli olay teslimi",()=>{
     expect(ui).toContain("await espionageService.markPublicPosted(operation.id)");
     expect(service).toContain("operation.public_posted_at IS NULL");
     expect(handler).toContain("await publishPendingEspionagePublications(client,guildId)");
+    expect(handler).toContain("const characterAutomation = await processDueCharacterSystems(interaction.client, interaction.guildId, result.turn, result.acquisition)");
   });
 });

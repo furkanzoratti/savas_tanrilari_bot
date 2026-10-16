@@ -143,6 +143,7 @@ import { espionagePersonalTargetSplitMigration } from "./espionage-personal-targ
 import { playerAutoPurchaseShipModesMigration } from "./player-auto-purchase-ship-modes-migration.js";
 import { espionagePublicationsPanelMigration } from "./espionage-publications-panel-migration.js";
 import { espionagePublicationDeliveryMigration } from "./espionage-publication-delivery-migration.js";
+import { espionagePublicationActivationMigration } from "./espionage-publication-activation-migration.js";
 
 export const migrations = [
   {
@@ -2503,5 +2504,6 @@ export const migrations = [
   espionagePersonalTargetSplitMigration,
   playerAutoPurchaseShipModesMigration,
   espionagePublicationsPanelMigration,
-  espionagePublicationDeliveryMigration
+  espionagePublicationDeliveryMigration,
+  espionagePublicationActivationMigration
 ] as const;
