@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
 
 describe("NPC alım yönetim paneli", () => {
-  it("menü, dört alım modu ve hızlı bina işlem rotalarını sunar", () => {
+  it("menü, beş alım modu ve hızlı bina işlem rotalarını sunar", () => {
     const html = read("./public/index.html");
     const server = read("./server.ts");
     expect(html).toContain('data-route="npc-purchases"');
@@ -30,6 +30,8 @@ describe("NPC alım yönetim paneli", () => {
     expect(app).toContain("openNpcTreasuryTransfer");
     expect(app).toContain("data-npc-open-transfer");
     expect(app).toContain('let npcPurchaseMode = "GENERAL"');
+    expect(app).toContain('key === "HEAVY_SHIPS"');
+    expect(app).toContain('key === "MIXED_SHIPS"');
   });
 
   it("toplu önizlemeyi kontrollü eşzamanlı belge yüklemesiyle hızlandırır", () => {
@@ -37,5 +39,11 @@ describe("NPC alım yönetim paneli", () => {
     expect(service).toContain("return mapConcurrent(ids, 6");
     expect(service).toContain("planPlayerPurchases");
     expect(service).toContain("PLAYER_AUTO_PURCHASE_MODES");
+  });
+
+  it("asimile edilmemiş yerleşkede hızlı bina alımını panelden engellemez", () => {
+    const service = read("../services/npc-panel-purchase-service.ts");
+    expect(service).not.toContain('unavailableReason = "Asimile edilmemiş"');
+    expect(service).toContain("blocked: Boolean(settlement.isBesieged)");
   });
 });

@@ -179,7 +179,7 @@ export const npcPanelPurchaseService = {
           localTreasury: Number(settlement.local_treasury),
           slots: { used: occupiedSlots, limit: settlement.slotLimit },
           construction: { used: activeConstruction, limit: settlement.constructionLimit },
-          blocked: Boolean(settlement.is_conquered || settlement.isBesieged),
+          blocked: Boolean(settlement.isBesieged),
           buildings: BUILDABLE_BUILDINGS.map((definition) => {
             const existing = settlement.buildings.find((building) => building.building_type === definition.key);
             const currentLevel = Number(existing?.level ?? 0);
@@ -189,7 +189,6 @@ export const npcPanelPurchaseService = {
               : null;
             let unavailableReason: string | null = null;
             if (!acquisitionTurn) unavailableReason = "Alım turu değil";
-            else if (settlement.is_conquered) unavailableReason = "Asimile edilmemiş";
             else if (settlement.isBesieged) unavailableReason = "Kuşatma altında";
             else if (existing?.status === "BUILDING") unavailableReason = "İnşaat sürüyor";
             else if (existing?.status === "SABOTAGED") unavailableReason = "Sabotajlı bina";

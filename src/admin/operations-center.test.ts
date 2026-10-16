@@ -199,7 +199,7 @@ describe("GM operasyon merkezi", () => {
     expect(service).toContain('scope !== "DIPLOMACY"');
     expect(css).toContain(".load-warning");
     expect(app).toContain("const rowsOrEmpty =");
-    expect(html).toContain("npc-ships-v24");
+    expect(html).toContain("npc-ships-ui-v25");
   });
 
   it("son güvenlik ve performans katmanını istek izleme ve canlı durumla tamamlar", () => {
@@ -225,6 +225,6 @@ describe("GM operasyon merkezi", () => {
     expect(app).toContain('Promise.all([api("/api/game-health"), api("/api/system-status")])');
     expect(app).toContain("Panel çalışma durumu");
     expect(css).toContain(".system-status-grid");
-    expect(html).toContain("npc-ships-v24");
+    expect(html).toContain("npc-ships-ui-v25");
   });
 });
