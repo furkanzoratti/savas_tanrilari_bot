@@ -64,8 +64,13 @@ export async function publishPendingDeathPublications(
   const channels=new Map<string,Awaited<ReturnType<Client["channels"]["fetch"]>>>();
   for (const publication of await deathPublicationService.pending(guildId)) {
     if (!publication.channel_id) {
-      await deathPublicationService.markPosted(publication.id);
-      skipped+=1;
+      await deathPublicationService.markFailed(
+        publication.id,
+        publication.subject_type==="ACADEMY_CHARACTER"
+          ? "Ölüm yerleşkesinin olay kanalı eşleştirilmemiş."
+          : "Ülkenin güncel başkentinin olay kanalı eşleştirilmemiş."
+      );
+      failed+=1;
       continue;
     }
     try {
