@@ -87,7 +87,7 @@ async function dashboard() {
               settlement.espionage_event_channel_id AS channel_id
          FROM settlements settlement
          JOIN countries country ON country.id=settlement.country_id
-        WHERE settlement.guild_id=$1
+        WHERE country.guild_id=$1
         ORDER BY country.name,settlement.name`,
       [adminConfig.guildId]
     ),
@@ -147,15 +147,22 @@ async function setSettlementChannel(actorId: string, raw: unknown) {
   const nextChannelId = channelId(input.channel);
   return withAdminTransaction(async (client) => {
     const before = (await client.query<{ id: string; name: string; channel_id: string | null }>(
-      `SELECT id,name,espionage_event_channel_id AS channel_id
-         FROM settlements
-        WHERE id=$1 AND guild_id=$2
-        FOR UPDATE`,
+      `SELECT settlement.id,settlement.name,settlement.espionage_event_channel_id AS channel_id
+         FROM settlements settlement
+         JOIN countries country ON country.id=settlement.country_id
+        WHERE settlement.id=$1 AND country.guild_id=$2
+        FOR UPDATE OF settlement`,
       [input.settlementId, adminConfig.guildId]
     )).rows[0];
     if (!before) throw new Error("Yerleşke bulunamadı.");
     await client.query(
-      "UPDATE settlements SET espionage_event_channel_id=$1 WHERE id=$2 AND guild_id=$3",
+      `UPDATE settlements settlement
+          SET espionage_event_channel_id=$1
+        WHERE settlement.id=$2
+          AND EXISTS (
+            SELECT 1 FROM countries country
+             WHERE country.id=settlement.country_id AND country.guild_id=$3
+          )`,
       [nextChannelId, input.settlementId, adminConfig.guildId]
     );
     await audit(client, actorId, "ESPIONAGE_PUBLICATION_CHANNEL_SET", "settlement", input.settlementId, {

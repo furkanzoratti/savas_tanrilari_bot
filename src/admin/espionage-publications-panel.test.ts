@@ -25,5 +25,8 @@ describe("GM casusluk yayınları paneli", () => {
     expect(service).toContain("updateTemplate");
     expect(service).toContain("resetTemplate");
     expect(service).toContain("ESPIONAGE_PUBLICATION_CHANNEL_SET");
+    expect(service).toContain("WHERE country.guild_id=$1");
+    expect(service).toContain("country.guild_id=$2");
+    expect(service).not.toContain("settlement.guild_id");
   });
 });
