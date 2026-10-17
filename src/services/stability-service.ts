@@ -8,6 +8,7 @@ import {
 import {RELIGIONS,type ReligionKey} from "../domain/religions.js";
 import { rebelLeaderProfile } from "../domain/rebel-leaders.js";
 import {FORMABLE_COUNTRIES,formableModifiers,type FormableCountryKey} from "../domain/formable-countries.js";
+import {activeGreatProjectModifiers} from "./great-project-service.js";
 
 interface CountryStabilityRow {
   id: string; name: string; primary_culture_group: string; war_exhaustion: number;
@@ -173,7 +174,8 @@ export async function processStabilityTurn(client: DbClient, guildId: string, ne
     )).rowCount);
     const slaveRatio = Number(settlement.slave_population)/Math.max(1,Number(settlement.population)+Number(settlement.slave_population));
     const foreignCulture = settlement.culture_group!==settlement.primary_culture_group;
-    const stabilityReduction=formableModifiers(settlement.active_formable_key).stabilityRiskReduction??0;
+    const projectModifiers=await activeGreatProjectModifiers(client,settlement.country_id);
+    const stabilityReduction=(formableModifiers(settlement.active_formable_key).stabilityRiskReduction??0)+Number(projectModifiers.rebellionResistance??0);
     const pressure=assessRebellionPressure({
       prosperity:Number(settlement.prosperity),unrestActive:settlement.unrest_active,conquered:settlement.is_conquered,
       foreignCulture,activeMissionary:Boolean(activeMissionary),strictTaxation:policies.has("STRICT_TAXATION"),

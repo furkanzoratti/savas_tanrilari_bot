@@ -91,6 +91,7 @@ import {
   handleRomanRepublicSelect,refreshRomanPublicPanels
 } from "./roman-republic-ui.js";
 import { decodeUnitTypeFromCustomId, encodeUnitTypeForCustomId } from "./unit-custom-id.js";
+import {greatProjectService,GreatProjectError} from "../services/great-project-service.js";
 
 function settlementSelect(customId: string, settlements: Array<{ id: string; name: string; population: number }>, placeholder: string) {
   if (!settlements.length) throw new GameError("Bu ülkeye ait yerleşke bulunmuyor.");
@@ -1375,6 +1376,25 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     }
   } else if (interaction.commandName === "alim") {
     await startPurchase(interaction, "build");
+  } else if(interaction.commandName==="buyuk-proje"){
+    if(!interaction.guildId)throw new GameError("Sunucu bulunamadı.");
+    await interaction.deferReply({flags:MessageFlags.Ephemeral});
+    const country=await resolveCountry(interaction,interaction.options.getString("ulke"));
+    await assertCountryExecutiveAccess(interaction,country.id);
+    const projects=await greatProjectService.listForCountry(country.id);
+    if(!projects.length)throw new GameError("Bu devletin elindeki yerleşkelerde tanımlanmış büyük proje alanı yok.");
+    const status=(value:string)=>value==="ACTIVE"?"✅ Tamamlandı":value==="BUILDING"?"🏗️ İnşa ediliyor":"📜 İnşa edilebilir";
+    const embed=new EmbedBuilder().setColor(0x8b5a3c).setTitle(`🏛️ ${country.name} • Büyük Projeler`).setDescription(
+      "Büyük projeler normal bina slotundan ve asimilasyon şartından bağımsızdır. Tamamlanan etkiler, proje yerleşkesinin güncel sahibine ülke genelinde uygulanır."
+    ).addFields(projects.map((item)=>({
+      name:`${status(item.status)} • ${item.definition.name}`.slice(0,256),
+      value:[`📍 **${item.settlementName}** • ${gold(item.definition.cost)} • ${item.definition.duration} tur`,...item.definition.effects.map((effect)=>`• ${effect}`),item.status==="BUILDING"?`⏳ Tur ${item.completionTurn} tamamlanır.`:null,item.status==="ACTIVE"&&item.foundedByCountryName?`Kurucu: ${item.foundedByCountryName}`:null].filter(Boolean).join("\n").slice(0,1024)
+    })));
+    const available=projects.filter((item)=>item.status==="AVAILABLE");
+    const components=Array.from({length:Math.ceil(Math.min(available.length,25)/5)},(_,index)=>new ActionRowBuilder<ButtonBuilder>().addComponents(
+      available.slice(index*5,index*5+5).map((item)=>new ButtonBuilder().setCustomId(`gp|${country.id}|${item.settlementId}`).setLabel(`${item.settlementName}: İnşa Et`.slice(0,80)).setStyle(ButtonStyle.Success))
+    ));
+    await interaction.editReply({embeds:[embed],components});
   } else if (interaction.commandName === "bina-yik") {
     if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
     await interaction.deferReply({flags:MessageFlags.Ephemeral});
@@ -1644,6 +1664,15 @@ async function handleButton(interaction: ButtonInteraction): Promise<void> {
   }
   if (interaction.customId === "cancel") {
     await interaction.update({ content: "İşlem iptal edildi.", components: [] });
+    return;
+  }
+  if(interaction.customId.startsWith("gp|")){
+    const [,countryId,settlementId]=interaction.customId.split("|");
+    if(!interaction.guildId||!countryId||!settlementId)throw new GameError("Büyük proje düğmesi eskimiş.");
+    await interaction.deferUpdate();
+    await assertCountryExecutiveAccess(interaction,countryId);
+    const result=await greatProjectService.purchase({guildId:interaction.guildId,actorId:interaction.user.id,countryId,settlementId});
+    await interaction.editReply({content:`✅ **${result.definition.name}** inşaatı başlatıldı. ${gold(result.cost)} yerel hazineden ödendi; proje **Tur ${result.completionTurn}** tamamlanacak.`,embeds:[],components:[]});
     return;
   }
   const [kind, countryId, settlementId, buildingType] = interaction.customId.split("|");
@@ -2180,7 +2209,7 @@ async function reportError(interaction: Interaction, error: unknown): Promise<vo
     if (!interaction.responded) await interaction.respond([]).catch(() => undefined);
     return;
   }
-  if (!(error instanceof GameError)) {
+  if (!(error instanceof GameError)&&!(error instanceof GreatProjectError)) {
     const databaseError = error as Partial<{
       code: string; detail: string; hint: string; where: string;
       schema: string; table: string; column: string; constraint: string;
@@ -2211,7 +2240,7 @@ async function reportError(interaction: Interaction, error: unknown): Promise<vo
       replied: "replied" in interaction ? interaction.replied : undefined
     }, "Discord etkileşimi beklenmeyen bir hatayla sonuçlandı");
   }
-  const message = error instanceof GameError
+  const message = error instanceof GameError||error instanceof GreatProjectError
     ? error.message
     : `Beklenmeyen bir hata oluştu. İşlem daha önce uygulanmış olabilir; belgeyi kontrol edin. Hata kodu: ${reference}`;
   const payload: InteractionReplyOptions = { content: `❌ ${message}`, components: [], flags: MessageFlags.Ephemeral };

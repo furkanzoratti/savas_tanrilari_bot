@@ -10,6 +10,7 @@ import { SPECIAL_UNITS } from "../domain/special-units.js";
 import { FORMABLE_COUNTRIES, formableEffectLines, formableModifiers, formableTier } from "../domain/formable-countries.js";
 import { TRADE_ROUTE_LABELS } from "../domain/trade.js";
 import { MERCENARY_COMPANIES, mercenarySlotCost, mercenaryTier } from "../domain/mercenaries.js";
+import { greatProjectUnitUpkeepDiscount, type GreatProjectModifiers } from "../domain/great-projects.js";
 import type { CountryDocument } from "../services/game-service.js";
 import { TEMPLE_BANNER_URL } from "./assets.js";
 import { renderFleetEmbed } from "./fleet-embed.js";
@@ -74,11 +75,12 @@ function renderLandForces(
   settlement: SettlementDocument,
   forceType: "GARRISON" | "ARMY",
   mobilization: CountryDocument["country"]["mobilization"],
-  overLimitPenalty: boolean
+  overLimitPenalty: boolean,
+  projectModifiers: GreatProjectModifiers = {}
 ): string | null {
   const units = settlement.units.filter((unit) => unit.force_type === forceType);
   if (!units.length) return null;
-  const upkeep = units.reduce((sum, unit) => sum + calculateUnitUpkeep(unit.unit_type, unit.quantity, unit.status, mobilization, settlement.effectiveResources, overLimitPenalty, religionUnitDiscount(settlement.religionModifiers?.unitUpkeepDiscounts ?? [], unit.unit_type)), 0);
+  const upkeep = units.reduce((sum, unit) => sum + Math.ceil(calculateUnitUpkeep(unit.unit_type, unit.quantity, unit.status, mobilization, settlement.effectiveResources, overLimitPenalty, religionUnitDiscount(settlement.religionModifiers?.unitUpkeepDiscounts ?? [], unit.unit_type)) * (1 - greatProjectUnitUpkeepDiscount(unit.unit_type, unit.status, projectModifiers))), 0);
   const rows = units.map((unit) => unit.unit_type === "observer"
     ? `• **${number(Math.ceil(unit.quantity / 200))}** Gözcü Birliği (${number(unit.quantity)} personel)`
     : `• **${number(unit.quantity)}** ${UNITS[unit.unit_type]?.name ?? unit.unit_type}`);
@@ -133,6 +135,9 @@ export function renderDocument(document: CountryDocument,scope?:DocumentSettleme
         return `• **${contract.companyName}** — Tier ${mercenaryTier(company)} • ${mercenarySlotCost(company)} slot — ${contract.settlement_name}\n↳ ${mercenaryStatusLabels[contract.status] ?? contract.status} • Üç turluk bakım ${gold(contract.turn_upkeep)}`;
       }).join("\n\n")
     : "Aktif veya yolda paralı asker sözleşmesi yok.";
+  const greatProjectSummary=(document.greatProjects??[]).length
+    ?document.greatProjects.map((item)=>`${item.status==="ACTIVE"?"✅":"🏗️"} **${item.name}** • ${item.settlementName}${item.status==="BUILDING"?` • Tur ${item.completionTurn} tamamlanır`:""}\n${item.effects.map((effect)=>`• ${effect}`).join("\n")}`).join("\n\n")
+    :"Devletin elinde etkin veya yapımı süren büyük proje yok.";
 
   const summary = new EmbedBuilder()
     .setColor(0xc59b45)
@@ -158,6 +163,7 @@ export function renderDocument(document: CountryDocument,scope?:DocumentSettleme
         ? `**${RELIGIONS[document.dominantReligion.key].label}** • %${number(document.dominantReligion.sharePercent)}\n${RELIGIONS[document.dominantReligion.key].nationalEffect}`
         : `Özgür nüfusun en az %${NATIONAL_RELIGION_EFFECT_THRESHOLD}’ini temsil eden baskın din yok.`), inline: true },
       { name: "🛡️ Özel Birlik Erişimi", value: spacedSection((document.specialUnitUnlocks ?? []).length ? (document.specialUnitUnlocks ?? []).map((unitType) => `• **${SPECIAL_UNITS[unitType].name}**`).join("\n") : "Özel birlik erişimi bulunmuyor.") },
+      {name:"🏛️ Büyük Projeler",value:spacedSection(greatProjectSummary)},
       ...(formable && document.country.active_formable_key ? [{ name: `${formable.emoji} Kurulabilir Ülke • Tier ${formableTier(document.country.active_formable_key)}`, value: spacedSection(formableEffectLines(document.country.active_formable_key).map((buff) => `• ${buff}`).join("\n")) }] : []),
       {
         name: "📥 Gelir Dağılımı",
@@ -204,14 +210,15 @@ export function renderDocument(document: CountryDocument,scope?:DocumentSettleme
       `${share.active?"İkinci mezhep":"Mezhep"}: **${share.secondaryLabel} • %${number(share.secondaryPercent)}**`
     ]);
     const producedResource = RESOURCES[settlement.resource_type].label;
-    const fixedGarrison = renderLandForces(settlement, "GARRISON", document.country.mobilization, document.manpowerPenaltyActive);
-    const army = renderLandForces(settlement, "ARMY", document.country.mobilization, document.manpowerPenaltyActive);
+    const fixedGarrison = renderLandForces(settlement, "GARRISON", document.country.mobilization, document.manpowerPenaltyActive, document.greatProjectModifiers);
+    const army = renderLandForces(settlement, "ARMY", document.country.mobilization, document.manpowerPenaltyActive, document.greatProjectModifiers);
     const assimilationDiplomat = document.characters.find((character) => character.assignment === "ASSIMILATION" && character.assigned_settlement_id === settlement.id);
     const assimilationTurn = settlement.is_conquered && settlement.conquered_turn !== null
       ? settlement.conquered_turn + 6 - (assimilationDiplomat ? 1 : 0)
       : null;
 
-    const buildings = settlement.buildings.length
+    const settlementProject=(document.greatProjects??[]).find((project)=>project.settlementName===settlement.name);
+    const ordinaryBuildings = settlement.buildings.length
       ? settlement.buildings.map((building) => {
           const definition = BUILDINGS[building.building_type];
           const name = definition?.name ?? building.building_type;
@@ -224,6 +231,9 @@ export function renderDocument(document: CountryDocument,scope?:DocumentSettleme
               : `• ${name} Sv${building.level}`;
         }).join("\n")
       : "Henüz bina bulunmuyor.";
+    const buildings=settlementProject
+      ? `${ordinaryBuildings}\n\n${settlementProject.status==="ACTIVE"?"🏛️":"🏗️"} **${settlementProject.name}**${settlementProject.status==="BUILDING"?` • Tur ${settlementProject.completionTurn} tamamlanır`:" • Büyük proje"}\n${settlementProject.effects.map((effect)=>`• ${effect}`).join("\n")}`
+      : ordinaryBuildings;
 
     const resourceDetails = settlement.effectiveResources.map((resource) => {
       const source = settlement.ownResourceActive && resource === settlement.resource_type ? "Yerel üretim" : "Ticaret etkisi";

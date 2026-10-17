@@ -15,6 +15,7 @@ import { convertReligionDistribution, religionConversionPercent, RELIGIONS, type
 import { fallbackReligionDistribution, loadCountryReligionProfile, loadReligionDistributions } from "./religion-service.js";
 import { isAcquisitionTurn } from "../domain/mobilization.js";
 import { syncCountryPrimaryCulture } from "./culture-service.js";
+import {activeGreatProjectModifiers} from "./great-project-service.js";
 
 export const MISSIONARY_PURCHASE_COST = 2_000;
 export const MISSIONARY_LIMIT_PER_COUNTRY = 5;
@@ -1239,9 +1240,11 @@ export async function processCharacterTurn(
         const skillBonus = Number(operation.skill_bonus);
         const specializationBonus = operation.specialization === "CARAVAN_MASTER" ? 1 : 0;
         const religionBonus = (await countryReligionBonuses(operation.country_id)).merchant;
+        const projectModifiers=await activeGreatProjectModifiers(client,operation.country_id);
+        const projectRollBonus=Number(projectModifiers.taskRollBonus?.MERCHANT??0);
         const effectivePercent = Math.min(
           10,
-          roll + skillBonus + specializationBonus + religionBonus
+          roll + skillBonus + specializationBonus + religionBonus+projectRollBonus
         );
         const tradeIncome = merchantTradeIncomeBase({
           acquisitionLandTradeIncome:operation.acquisition_land_trade_income,
@@ -1253,7 +1256,7 @@ export async function processCharacterTurn(
         const concessionBonus = operation.task_type === "FOREIGN_CONCESSION"
           ? caravanseraiForeignConcessionBonus(Number(operation.home_caravanserai_level))
           : 0;
-        const amount = Math.floor(baseAmount * (1 + concessionBonus) * MERCHANT_TASK_INCOME_MULTIPLIER);
+        const amount = Math.floor(baseAmount * (1 + concessionBonus) * MERCHANT_TASK_INCOME_MULTIPLIER*(1+Number(projectModifiers.merchantReturnPercent??0)));
         const destination = operation.home_settlement_id??operation.target_settlement_id;
         const inserted = await client.query(
           `INSERT INTO merchant_income_results(operation_id,acquisition_turn,roll,effective_percent,amount)
@@ -1360,6 +1363,9 @@ export async function processCharacterTurn(
         ? specializationLevel(Number(operation.specialization_progress)) : 0;
       let attackBonus = Number(operation.skill_bonus)+specializationBonus;
       attackBonus += (await countryReligionBonuses(operation.country_id)).diplomat;
+      const projectModifiers=await activeGreatProjectModifiers(client,operation.country_id);
+      attackBonus+=Number(projectModifiers.taskRollBonus?.DIPLOMAT??0);
+      if(operation.task_type==="CULTURE_CHANGE")attackBonus+=Number(projectModifiers.cultureTaskRollBonus??0);
       let defenseBonus = 0;
       let delta = 0;
       let failed = false;
@@ -1550,7 +1556,8 @@ export async function processCharacterTurn(
       }
       const attackRoll=randomInt(1,21);
       const defenseRoll=randomInt(1,21);
-      const attackBonus=MISSIONARY_TASK_BONUS+(await countryReligionBonuses(operation.country_id)).missionary;
+      const projectModifiers=await activeGreatProjectModifiers(client,operation.country_id);
+      const attackBonus=MISSIONARY_TASK_BONUS+(await countryReligionBonuses(operation.country_id)).missionary+Number(projectModifiers.taskRollBonus?.MISSIONARY??0)+Number(projectModifiers.religionTaskRollBonus??0);
       const populationBonus=culturePopulationResistance(Number(operation.population));
       const templeBonus=await pantheonBonus(client,operation.target_settlement_id);
       const defenseBonus=populationBonus+templeBonus;

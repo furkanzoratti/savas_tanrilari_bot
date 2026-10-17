@@ -183,7 +183,7 @@ function toast(message, kind = "success") {
 const routeTitles = {
   overview: "Genel Bakış", workspace: "Çalışma Alanım", countries: "Devletler", settlements: "Yerleşkeler", armies: "Ordular & Filolar",
   characters: "Karakterler", dynasties: "Hanedanlar", "roman-politics": "Roma Siyaseti",
-  "steppe-politics": "Bozkır Kurultayı", "diplomacy-control": "Diplomasi & Ticaret", assignments: "Görevler", "espionage-publications": "Olay Yayınları", "gm-operations": "Rehberli İşlemler", "bulk-operations": "Toplu İşlemler", "economy-control": "Ekonomi & Üretim", "npc-purchases": "NPC Alımları", battles: "Savaşlar", "battle-simulator": "Savaş Simülasyonu",
+  "steppe-politics": "Bozkır Kurultayı", "diplomacy-control": "Diplomasi & Ticaret", assignments: "Görevler", "espionage-publications": "Olay Yayınları", "gm-operations": "Rehberli İşlemler", "bulk-operations": "Toplu İşlemler", "economy-control": "Ekonomi & Üretim", "great-projects": "Büyük Projeler", "npc-purchases": "NPC Alımları", battles: "Savaşlar", "battle-simulator": "Savaş Simülasyonu",
   rebellions: "İsyanlar", reports: "Raporlar", health: "Oyun Sağlığı", "data-control": "Tam Yetki", audit: "İşlem Geçmişi"
 };
 function loading() { page.innerHTML = '<div class="loading-shell"><div class="skeleton skeleton-title"></div><div class="loading-grid"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div><div class="skeleton skeleton-content"></div></div>'; }
@@ -344,6 +344,28 @@ async function reportsPage(signal) {
   document.getElementById("report-country-b").addEventListener("change", () => renderCountryComparison(data));
   document.querySelector("[data-export-report]").addEventListener("click", () => downloadReportCsv(data));
   renderCountryComparison(data);
+}
+
+async function greatProjectsPage(signal) {
+  setActiveRoute("great-projects"); loading();
+  const data = await api("/api/great-projects", { signal });
+  const active = data.projects.filter((row) => row.status === "ACTIVE").length;
+  const building = data.projects.filter((row) => row.status === "BUILDING").length;
+  const available = data.projects.filter((row) => row.status === "AVAILABLE").length;
+  const statusLabel = (value) => value === "ACTIVE" ? "Tamamlandı" : value === "BUILDING" ? "İnşa ediliyor" : "İnşa edilebilir";
+  page.innerHTML = `<div class="page-head"><div><span class="overview-kicker">YERLEŞKE MİRASLARI</span><h1>Büyük Projeler</h1><p>Projeler belirli yerleşkelere bağlıdır; tamamlanan etkiler yerleşkenin güncel sahibine ülke genelinde uygulanır.</p></div><span class="pill neutral">Tur ${number(data.turn)}</span></div><section class="kpi-grid"><div class="card kpi"><span>Proje alanı</span><strong>${number(data.projects.length)}</strong><small>Katalog: ${number(data.catalogCount)}</small></div><div class="card kpi"><span>Tamamlandı</span><strong>${number(active)}</strong><small>Etkin bonuslar</small></div><div class="card kpi"><span>İnşaat</span><strong>${number(building)}</strong><small>Tur bekleyen projeler</small></div><div class="card kpi"><span>Uygun alan</span><strong>${number(available)}</strong><small>Henüz başlanmamış</small></div></section><section class="card table-wrap"><table><thead><tr><th>Proje</th><th>Yerleşke / Sahip</th><th>Durum</th><th>Bedel / Süre</th><th>Etkiler</th><th>Yönetim</th></tr></thead><tbody>${data.projects.map((row) => `<tr><td><strong>${escapeHtml(row.projectName)}</strong><small>${escapeHtml(row.projectKey)}</small></td><td><strong>${escapeHtml(row.settlementName)}</strong><small>${escapeHtml(row.countryName)} · Yerel hazine ${money(row.local_treasury)}</small></td><td><span class="pill ${row.status === "ACTIVE" ? "success" : row.status === "BUILDING" ? "warning" : "neutral"}">${statusLabel(row.status)}</span>${row.completionTurn ? `<small>Tur ${number(row.completionTurn)}</small>` : ""}</td><td>${money(row.cost)}<small>${number(row.duration)} tur</small></td><td>${row.effects.map((effect) => `<small>• ${escapeHtml(effect)}</small>`).join("")}</td><td>${row.status === "AVAILABLE" ? `<button class="button compact primary" data-project-action="START" data-settlement-id="${row.id}">Anında etkinleştir</button>` : row.status === "BUILDING" ? `<button class="button compact primary" data-project-action="COMPLETE" data-settlement-id="${row.id}">İnşaatı tamamla</button><button class="button compact danger" data-project-action="RESET" data-settlement-id="${row.id}">Sıfırla</button>` : `<button class="button compact danger" data-project-action="RESET" data-settlement-id="${row.id}">Projeyi kaldır</button>`}</td></tr>`).join("")}</tbody></table></section>`;
+  document.querySelectorAll("[data-project-action]").forEach((button) => button.addEventListener("click", async () => {
+    const action = button.dataset.projectAction;
+    if (action === "RESET" && !confirm("Bu proje kaydı kaldırılacak ve alan yeniden inşa edilebilir olacak. Devam edilsin mi?")) return;
+    button.disabled = true;
+    try {
+      const scroll = window.scrollY;
+      const result = await api("/api/great-projects/action", { method: "POST", body: JSON.stringify({ settlementId: button.dataset.settlementId, action }) });
+      toast(`${result.projectName} güncellendi.`);
+      await greatProjectsPage();
+      window.scrollTo({ top: scroll });
+    } catch (error) { button.disabled = false; toast(error.message, "error"); }
+  }));
 }
 
 function simulationUnitOptions(units, selected) {
@@ -2631,6 +2653,7 @@ async function navigate(route) {
     if (route === "gm-operations") return await guidedOperationsPage();
     if (route === "bulk-operations") return await bulkOperationsPage();
     if (route === "economy-control") return await economyControlPage(controller.signal);
+    if (route === "great-projects") return await greatProjectsPage(controller.signal);
     if (route === "npc-purchases") return await npcPurchasesPage();
     if (route === "battles") return await battlesPage();
     if (route === "battle-simulator") return await battleSimulatorPage(controller.signal);
@@ -2727,6 +2750,7 @@ const paletteCommands = [
   { route: "diplomacy-control", label: "Diplomasi & Ticaret", detail: "İttifak, vassallık, savaş, pakt ve ticaret bağlantılarını yönet" },
   { route: "economy-control", label: "Ekonomi & Üretim", detail: "Hazine, gelir ve üretim kuyruklarını kontrol et" },
   { route: "npc-purchases", label: "NPC Alımları", detail: "Oyuncusuz devletlerin bina, asker ve gemi alımlarını yönet" },
+  { route: "great-projects", label: "Büyük Projeler", detail: "Yerleşkeye bağlı projeleri izle ve yönet" },
   { route: "reports", label: "Raporlar & Karşılaştırma", detail: "Devletleri karşılaştır ve mali eğilimleri incele" },
   { route: "battles", label: "Savaşlar", detail: "Aktif savaş ve kuşatmaları aç" },
   { route: "rebellions", label: "İsyanlar", detail: "İsyan durumlarını incele" },

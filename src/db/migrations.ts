@@ -147,6 +147,7 @@ import { espionagePublicationActivationMigration } from "./espionage-publication
 import { deathPublicationAutomationMigration } from "./death-publication-automation-migration.js";
 import { romanElectionNpcPreferencesMigration } from "./roman-election-npc-preferences-migration.js";
 import { eventPublicationStatusMigration } from "./event-publication-status-migration.js";
+import { greatProjectsMigration } from "./great-projects-migration.js";
 
 export const migrations = [
   {
@@ -2511,5 +2512,6 @@ export const migrations = [
   espionagePublicationActivationMigration,
   deathPublicationAutomationMigration,
   romanElectionNpcPreferencesMigration,
-  eventPublicationStatusMigration
+  eventPublicationStatusMigration,
+  greatProjectsMigration
 ] as const;

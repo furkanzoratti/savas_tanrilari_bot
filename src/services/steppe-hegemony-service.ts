@@ -14,6 +14,7 @@ import {
   type SteppeWarCallResponse
 } from "../domain/steppe-politics.js";
 import { GameError } from "./game-service.js";
+import { activeGreatProjectModifiers } from "./great-project-service.js";
 
 export interface SteppeTributeOfferView {
   id:string;
@@ -183,6 +184,22 @@ async function moveTreasury(client:DbClient,fromCountryId:string,toCountryId:str
     );
   }
   return collected;
+}
+
+async function creditTreasury(client:DbClient,countryId:string,amount:number):Promise<void>{
+  if(amount<=0)return;
+  const targetSettlement=(await client.query<{id:string}>(
+    "SELECT id FROM settlements WHERE country_id=$1 ORDER BY local_treasury DESC,name,id LIMIT 1 FOR UPDATE",[countryId]
+  )).rows[0];
+  if(targetSettlement){
+    await client.query("UPDATE settlements SET local_treasury=local_treasury+$1 WHERE id=$2",[amount,targetSettlement.id]);
+    await client.query(
+      "UPDATE countries SET treasury=(SELECT COALESCE(SUM(local_treasury),0)::bigint FROM settlements WHERE country_id=$1) WHERE id=$1",
+      [countryId]
+    );
+  }else{
+    await client.query("UPDATE countries SET treasury=treasury+$1 WHERE id=$2",[amount,countryId]);
+  }
 }
 
 function normalizeOffer(row:InternalSteppeTributeOffer):InternalSteppeTributeOffer{
@@ -528,6 +545,9 @@ export const steppeHegemonyService={
       const requested=steppeTributePayment(normalized.full_due,input.response);
       const treasuryBefore=await currentTreasury(client,normalized.tributary_country_id);
       const paid=await moveTreasury(client,normalized.tributary_country_id,normalized.hegemon_country_id,requested);
+      const projectModifiers=await activeGreatProjectModifiers(client,normalized.hegemon_country_id);
+      const projectBonus=Math.floor(paid*(projectModifiers.tributeIncomePercent??0));
+      await creditTreasury(client,normalized.hegemon_country_id,projectBonus);
       const treasuryAfter=await currentTreasury(client,normalized.tributary_country_id);
       await client.query(
         `UPDATE steppe_tribute_offers SET response=$2,paid_amount=$3,treasury_before=$4,treasury_after=$5,
@@ -544,12 +564,12 @@ export const steppeHegemonyService={
            VALUES($1,$3,'STEPPE_TRIBUTE_OUT',$4,$5,$6::jsonb),
                  ($2,$3,'STEPPE_TRIBUTE_IN',$7,$8,$6::jsonb)`,
           [normalized.tributary_country_id,normalized.hegemon_country_id,normalized.turn,-paid,
-            `${normalized.hegemon_country_name} devletine bozkır haracı`,JSON.stringify({offerId:normalized.id,response:input.response}),
-            paid,`${normalized.tributary_country_name} devletinden bozkır haracı`]
+            `${normalized.hegemon_country_name} devletine bozkır haracı`,JSON.stringify({offerId:normalized.id,response:input.response,projectBonus}),
+            paid+projectBonus,`${normalized.tributary_country_name} devletinden bozkır haracı${projectBonus>0?` • Büyük proje bonusu: ${projectBonus.toLocaleString("tr-TR")} Altın`:""}`]
         );
       }
       await audit(client,input.guildId,input.actorId,"STEPPE_TRIBUTE_RESPONSE",input.offerId,{
-        response:input.response,requestedAmount:requested,paidAmount:paid,
+        response:input.response,requestedAmount:requested,paidAmount:paid,projectBonus,
         acquisitionIncome:normalized.acquisition_income,treasuryBefore,treasuryAfter,
         hegemonCountryId:normalized.hegemon_country_id,tributaryCountryId:normalized.tributary_country_id
       });

@@ -1,23 +1,26 @@
 import type { DbClient } from "../db/pool.js";
 import { specializationLevel, type CharacterSpecialization } from "../domain/characters.js";
+import {activeGreatProjectModifiers} from "./great-project-service.js";
 
 export async function awardCharacterSpecializationProgress(
   client: DbClient,
   characterId: string,
   specialization: CharacterSpecialization
 ): Promise<number> {
-  const character = (await client.query<{ specialization: CharacterSpecialization | null; specialization_choice_credit: number }>(
-    "SELECT specialization,specialization_choice_credit FROM country_characters WHERE id=$1 FOR UPDATE",
+  const character = (await client.query<{ specialization: CharacterSpecialization | null; specialization_choice_credit: number;country_id:string;role:string;is_admiral:boolean }>(
+    "SELECT specialization,specialization_choice_credit,country_id,role,is_admiral FROM country_characters WHERE id=$1 FOR UPDATE",
     [characterId]
   )).rows[0];
   if (!character || (character.specialization && character.specialization !== specialization)) return 0;
+  const modifiers=await activeGreatProjectModifiers(client,character.country_id);
+  const increment=1+(character.role!=="COMMANDER"&&!character.is_admiral?Number(modifiers.successfulTaskExtraProgress??0):0);
   const progress = Number((await client.query<{ successes: number }>(
     `INSERT INTO character_specialization_progress(character_id,specialization,successes)
-     VALUES($1,$2,1)
+     VALUES($1,$2,$3)
      ON CONFLICT(character_id,specialization) DO UPDATE
-       SET successes=character_specialization_progress.successes+1
+       SET successes=character_specialization_progress.successes+EXCLUDED.successes
      RETURNING successes`,
-    [characterId,specialization]
+    [characterId,specialization,increment]
   )).rows[0]!.successes);
   if (character.specialization === specialization) {
     await client.query(

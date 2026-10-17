@@ -15,6 +15,7 @@ import { markCharacterDead } from "./character-death-service.js";
 import { killDynastyMemberFromEspionage } from "./dynasty-service.js";
 import { RELIGIONS } from "../domain/religions.js";
 import { loadCountryReligionProfile } from "./religion-service.js";
+import {activeGreatProjectModifiers} from "./great-project-service.js";
 import {
   espionagePublicationTemplate,
   type EspionagePublicationImageKey,
@@ -316,7 +317,8 @@ async function prepareEspionageResolution(
   const defenseRoll = randomInt(1, 21);
   const specialization = espionageSpecialization(operation.target_type) as CharacterSpecialization;
   const specializationBonus = operation.spy_specialization === specialization ? Number(operation.spy_specialization_level) : 0;
-  const attackTotal = attackRoll + Number(operation.spy_skill_bonus) + preparation.attackBonus + specializationBonus;
+  const projectModifiers=await activeGreatProjectModifiers(client,operation.attacker_country_id);
+  const attackTotal = attackRoll + Number(operation.spy_skill_bonus) + preparation.attackBonus + specializationBonus+Number(projectModifiers.taskRollBonus?.SPY??0);
   const targetReligion = await loadCountryReligionProfile(client, operation.target_country_id);
   const religionDefense = targetReligion.dominant ? RELIGIONS[targetReligion.dominant.key].national.spyDefenseBonus ?? 0 : 0;
   const counterDefense = (counter ? Number(counter.skill_bonus)

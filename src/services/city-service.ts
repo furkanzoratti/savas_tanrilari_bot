@@ -10,6 +10,7 @@ import { formableModifiers, type FormableCountryKey } from "../domain/formable-c
 import { settlementResourceAccess } from "./resource-service.js";
 import { GameError, type AcademyTrainingSession, type CountryCharacter, type SettlementPolicyRow } from "./game-service.js";
 import { ensureCountryMarshal } from "./marshal-service.js";
+import {activeGreatProjectModifiers} from "./great-project-service.js";
 
 interface CountryRow { id: string; guild_id: string; name: string; active_formable_key: FormableCountryKey | null }
 interface GuildRow { current_turn: number; acquisition_interval: number; turn_phase: string }
@@ -74,9 +75,10 @@ export const cityService = {
           WHERE country_id=$1 AND status IN ('PENDING_ROLL','AWAITING_NAME')) AS pending`,
       [countryId]
     )).rows[0]??{academies:0,characters:0,pending:0};
+    const projectModifiers=await activeGreatProjectModifiers(pool,countryId);
     return {
       academies:Number(row.academies),characters:Number(row.characters),pending:Number(row.pending),
-      capacity:Number(row.academies)*5
+      capacity:Number(row.academies)*5+Number(projectModifiers.characterCapacity??0)
     };
   },
 
@@ -173,10 +175,11 @@ export const cityService = {
             WHERE country_id=$1 AND status IN ('PENDING_ROLL','AWAITING_NAME')) AS pending`,
         [input.countryId]
       )).rows[0]!;
-      const characterLimit=Number(capacity.academies)*5;
+      const projectModifiers=await activeGreatProjectModifiers(client,input.countryId);
+      const characterLimit=Number(capacity.academies)*5+Number(projectModifiers.characterCapacity??0);
       const reserved=Number(capacity.characters)+Number(capacity.pending);
       if (reserved>=characterLimit) {
-        throw new GameError(`Akademi karakter sınırına ulaşıldı: ${Number(capacity.characters)}/${characterLimit}. Her Akademi 5 karakter kapasitesi sağlar; yeni eğitim için Akademi kurmalı veya müsait bir karakteri kalıcı olarak görevden almalısınız.`);
+        throw new GameError(`Toplam karakter sınırına ulaşıldı: ${Number(capacity.characters)}/${characterLimit}. Her Akademi 5, etkin büyük projeler ise tanımlı ek karakter kapasitesi sağlar.`);
       }
       const resources = (await settlementResourceAccess(client, input.countryId)).get(settlement.id) ?? [];
       const skillBonus = (level === 1 ? 0 : level === 2 ? 1 : 2) + (resources.includes("SILK") ? 1 : 0);

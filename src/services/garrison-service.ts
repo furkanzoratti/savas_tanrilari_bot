@@ -7,6 +7,7 @@ import {
   garrisonRecruitmentCost,
   type GarrisonComposition
 } from "../domain/garrison.js";
+import { activeGreatProjectModifiers } from "./great-project-service.js";
 
 export type GarrisonReplenishmentReason = "CONQUEST" | "BATTLE_LOSS" | "ROUTINE";
 
@@ -86,7 +87,8 @@ export async function scheduleMandatoryGarrisonReplenishment(
     await client.query("UPDATE settlements SET garrison_level=$1 WHERE id=$2", [garrisonLevel(Number(settlement.population)), settlement.id]);
     return null;
   }
-  const cost = garrisonRecruitmentCost(deficit);
+  const projectModifiers = await activeGreatProjectModifiers(client, settlement.country_id);
+  const cost = Math.ceil(garrisonRecruitmentCost(deficit) * (1 - (projectModifiers.garrisonPurchaseDiscount ?? 0)));
   const completionTurn = input.currentTurn + 2;
   await client.query(
     "UPDATE settlements SET local_treasury=local_treasury-$1 WHERE id=$2",
