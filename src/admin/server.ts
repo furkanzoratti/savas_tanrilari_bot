@@ -501,6 +501,12 @@ const server = createServer(async (request, response) => {
       if (!session) return;
       return json(response, 200, await adminPanelService.updateDynastyMember(session.sub, dynastyMemberUpdateMatch[1]!, await body(request)));
     }
+    const dynastyMemberTraitMatch = request.method === "POST" ? url.pathname.match(/^\/api\/admin\/dynasty-members\/([0-9a-f-]+)\/trait$/iu) : null;
+    if (dynastyMemberTraitMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.updateDynastyMemberTrait(session.sub, dynastyMemberTraitMatch[1]!, await body(request)));
+    }
     const dynastyMemberDeathMatch = request.method === "POST" ? url.pathname.match(/^\/api\/admin\/dynasty-members\/([0-9a-f-]+)\/death$/iu) : null;
     if (dynastyMemberDeathMatch) {
       const session = requireMutation(request, response);

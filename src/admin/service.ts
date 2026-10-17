@@ -41,6 +41,8 @@ import { warDeclarationService } from "../services/war-declaration-service.js";
 import { terminateCharacterDuties } from "../services/character-duty-lifecycle-service.js";
 import { romanRepublicService } from "../services/roman-republic-service.js";
 import { ROMAN_BUSINESSES,romanNpcDecisionScore,type RomanPoliticalBloc } from "../domain/roman-republic.js";
+import {NOBLE_TRAITS,isNobleTraitKey} from "../domain/noble-traits.js";
+import {rollNobleTraitKey} from "../services/noble-trait-service.js";
 
 const usableUnitTypes = (Object.keys(BATTLE_UNIT_STATS) as BattleUnitType[]).filter((unitType) => unitType !== "militia");
 const usableUnitTypeSet = new Set<string>(usableUnitTypes);
@@ -123,8 +125,11 @@ const dynastyMemberUpdateSchema = z.object({
   successionRank: z.coerce.number().int().min(1).nullable(),
   spouseId: z.string().uuid().nullable(),
   motherId: z.string().uuid().nullable(),
-  fatherId: z.string().uuid().nullable()
+  fatherId: z.string().uuid().nullable(),
+  traitKey:z.string().nullable().refine((value)=>value===null||isNobleTraitKey(value),"Geçersiz soylu traiti.").optional()
 });
+
+const dynastyMemberTraitActionSchema=z.object({action:z.enum(["REROLL","REMOVE"])});
 
 const dynastyMemberDeathSchema = z.object({
   reason: z.string().trim().min(2).max(200)
@@ -2645,7 +2650,7 @@ export const adminPanelService = {
         ORDER BY country.name,CASE WHEN member.status='ALIVE' THEN 0 ELSE 1 END,member.name`,
       [adminConfig.guildId]
     )).rows;
-    return { ...dynasty, members, events, relationCandidates };
+    return { ...dynasty, members, events, relationCandidates, traitCatalog:NOBLE_TRAITS };
   },
 
   async characterAssignments() {
@@ -4032,11 +4037,11 @@ export const adminPanelService = {
       const created = (await client.query<Record<string, unknown> & { id: string }>(
         `INSERT INTO dynasty_members(
            dynasty_id,name,gender,age,title,relation,status,health,sick_until_turn,is_monarch,is_heir,
-           succession_rank,spouse_id,mother_id,father_id,born_turn
-         ) VALUES($1,$2,$3,$4,$5,$6,'ALIVE',$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
+           succession_rank,spouse_id,mother_id,father_id,born_turn,trait_key
+         ) VALUES($1,$2,$3,$4,$5,$6,'ALIVE',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
         [dynasty.id, input.name, input.gender, input.age, input.title, input.relation, input.health,
           input.health === "SICK" ? input.sickUntilTurn : null, input.isMonarch, input.isHeir,
-          input.successionRank, input.spouseId, input.motherId, input.fatherId, dynasty.current_turn - input.age]
+          input.successionRank, input.spouseId, input.motherId, input.fatherId, dynasty.current_turn - input.age,input.traitKey??rollNobleTraitKey()]
       )).rows[0]!;
       if (spouse) await client.query("UPDATE dynasty_members SET spouse_id=$1,updated_at=NOW() WHERE id=$2", [created.id, spouse.id]);
       await dynastyEvent(client, dynasty.id, dynasty.current_turn, "MEMBER_ADDED", created.id, {
@@ -4104,14 +4109,14 @@ export const adminPanelService = {
       const updated = (await client.query(
         `UPDATE dynasty_members SET name=$1,gender=$2,age=$3,title=$4,relation=$5,health=$6,
                 sick_until_turn=$7,is_monarch=$8,is_heir=$9,succession_rank=$10,spouse_id=$11,
-                mother_id=$12,father_id=$13,born_turn=$14,updated_at=NOW()
-          WHERE id=$15 RETURNING *`,
+                mother_id=$12,father_id=$13,born_turn=$14,trait_key=$15,updated_at=NOW()
+          WHERE id=$16 RETURNING *`,
         [input.name, input.gender, input.age, input.title, input.relation,
           member.status === "DEAD" ? "HEALTHY" : input.health,
           member.status === "ALIVE" && input.health === "SICK" ? input.sickUntilTurn : null,
           member.status === "ALIVE" && input.isMonarch, member.status === "ALIVE" && input.isHeir,
           input.successionRank, input.spouseId, input.motherId, input.fatherId,
-          dynasty.current_turn - input.age, member.id]
+          dynasty.current_turn - input.age,input.traitKey===undefined?member.trait_key:input.traitKey, member.id]
       )).rows[0]!;
       if (spouse) await client.query("UPDATE dynasty_members SET spouse_id=$1,updated_at=NOW() WHERE id=$2", [member.id, spouse.id]);
       await dynastyEvent(client, dynasty.id, dynasty.current_turn, "MEMBER_UPDATED", member.id, {
@@ -4125,6 +4130,21 @@ export const adminPanelService = {
       }
       await writeAdminAudit(client, actorId, "admin.panel.dynasty.member.update", "dynasty_member", member.id, {
         previous: member, updated
+      });
+      return updated;
+    });
+  },
+
+  async updateDynastyMemberTrait(actorId:string,memberId:string,rawInput:unknown){
+    const input=dynastyMemberTraitActionSchema.parse(rawInput);
+    return withAdminTransaction(async(client)=>{
+      const member=await adminDynastyMember(client,memberId,true);
+      const nextTrait=input.action==="REROLL"?rollNobleTraitKey():null;
+      const updated=(await client.query<{id:string;trait_key:string|null}>(
+        "UPDATE dynasty_members SET trait_key=$2,updated_at=NOW() WHERE id=$1 RETURNING id,trait_key",[member.id,nextTrait]
+      )).rows[0]!;
+      await writeAdminAudit(client,actorId,"admin.panel.dynasty.member.trait","dynasty_member",member.id,{
+        action:input.action,previousTraitKey:member.trait_key??null,traitKey:updated.trait_key
       });
       return updated;
     });
@@ -4153,11 +4173,11 @@ export const adminPanelService = {
       const spouse = (await client.query<Record<string, unknown> & { id: string }>(
         `INSERT INTO dynasty_members(
            dynasty_id,name,gender,age,title,relation,status,health,is_monarch,is_heir,
-           succession_rank,spouse_id,born_turn
-         ) VALUES($1,$2,$3,$4,$5,'Yerel soylu eş','ALIVE','HEALTHY',FALSE,FALSE,NULL,$6,$7)
+           succession_rank,spouse_id,born_turn,trait_key
+         ) VALUES($1,$2,$3,$4,$5,'Yerel soylu eş','ALIVE','HEALTHY',FALSE,FALSE,NULL,$6,$7,$8)
          RETURNING *`,
         [dynasty.id, spouseName, spouseProfile.gender, input.age, spouseProfile.title,
-          member.id, dynasty.current_turn - input.age]
+          member.id, dynasty.current_turn - input.age,rollNobleTraitKey()]
       )).rows[0]!;
       if (member.spouse_id) {
         await client.query(

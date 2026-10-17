@@ -51,7 +51,8 @@ import {
 } from "./christian-passive-spread-service.js";
 import { applyCapitalIncomeBonus, applyCapitalPopulationBonus } from "../domain/capital-city.js";
 import {applyGreatProjectIncome,greatProjectByKey,greatProjectShipPurchaseDiscount,greatProjectUnitPurchaseDiscount,greatProjectUnitUpkeepDiscount,type GreatProjectModifiers} from "../domain/great-projects.js";
-import {activeGreatProjectModifiers,completeDueGreatProjects} from "./great-project-service.js";
+import {completeDueGreatProjects} from "./great-project-service.js";
+import {activeCountryModifiers} from "./country-modifier-service.js";
 
 export class GameError extends Error {}
 
@@ -2080,7 +2081,7 @@ export const gameService = {
       const displacedSupport = await loadDisplacedArmySupport(client,countryId);
       const manpower = await countryManpower(client, countryId);
       const marshalPartial = await hasActiveMarshalPartialMobilization(client, countryId, country.mobilization);
-      const projectModifiers=await activeGreatProjectModifiers(client,countryId);
+      const projectModifiers=await activeCountryModifiers(client,countryId);
       const greatProjects=(await client.query<{project_key:string;settlement_name:string;status:"BUILDING"|"ACTIVE";completion_turn:number|null}>(
         `SELECT project.project_key,settlement.name AS settlement_name,project.status,project.completion_turn
            FROM settlement_great_projects project JOIN settlements settlement ON settlement.id=project.settlement_id
@@ -2685,7 +2686,7 @@ export const gameService = {
       const effectiveResources = (await settlementResourceAccess(client, country.id)).get(settlement.id) ?? [];
       const religion = (await loadSettlementReligionModifiers(client, settlement)).modifiers;
       const baseTerms = buildingPurchaseTerms(input.buildingType, targetLevel, effectiveResources, activePolicies, country.active_formable_key, religion);
-      const projectModifiers=await activeGreatProjectModifiers(client,country.id);
+      const projectModifiers=await activeCountryModifiers(client,country.id);
       const terms={...baseTerms,cost:Math.ceil(baseTerms.cost*(1-(projectModifiers.buildingCostDiscount??0)))};
       const cost = await applyPurchaseAgentDiscount(client,{
         countryId:country.id,settlementId:settlement.id,category:"BUILDING",currentTurn:guild.current_turn,cost:terms.cost
@@ -2719,7 +2720,7 @@ export const gameService = {
         }
         const manpower = await countryManpower(client, country.id);
         const marshalPartial = await hasActiveMarshalPartialMobilization(client, country.id, input.mobilization);
-        const projectModifiers=await activeGreatProjectModifiers(client,country.id);
+        const projectModifiers=await activeCountryModifiers(client,country.id);
         if (manpower.used > Math.floor(militaryLimit(manpower.militaryPopulation, input.mobilization, marshalPartial)*(1+(projectModifiers.militaryLimitPercent??0)))) throw new GameError("Mevcut personel yeni seferberlik sınırının üzerinde.");
       }
       await client.query("UPDATE countries SET mobilization=$1,mobilization_started_turn=$2 WHERE id=$3", [input.mobilization, guild.current_turn, country.id]);
@@ -2783,7 +2784,7 @@ export const gameService = {
       if (input.quantity > trainingRemaining) throw new GameError(`Bu Alım Turunda Eğitim Kapasitesinde yalnızca ${trainingRemaining.toLocaleString("tr-TR")} kişilik yer bulunuyor.`);
 
       const manpower = await countryManpower(client, country.id);
-      const projectModifiers=await activeGreatProjectModifiers(client,country.id);
+      const projectModifiers=await activeCountryModifiers(client,country.id);
       const limit = Math.floor(militaryLimit(manpower.militaryPopulation, country.mobilization, marshalPartial)*(1+(projectModifiers.militaryLimitPercent??0)));
       if (manpower.used > limit) throw new GameError("Devlet askerî personel sınırının üzerindeyken yeni asker alamaz.");
       if (manpower.used + input.quantity > limit) throw new GameError(`Askerî personel sınırında yalnızca ${Math.max(0, limit - manpower.used).toLocaleString("tr-TR")} kişilik yer var.`);
@@ -2940,7 +2941,7 @@ export const gameService = {
       const manpower = await countryManpower(client, country.id);
       const personNeed = ship.manpower * input.quantity;
       const marshalPartial = await hasActiveMarshalPartialMobilization(client, country.id, country.mobilization);
-      const projectModifiers=await activeGreatProjectModifiers(client,country.id);
+      const projectModifiers=await activeCountryModifiers(client,country.id);
       const limit = Math.floor(militaryLimit(manpower.militaryPopulation, country.mobilization, marshalPartial)*(1+(projectModifiers.militaryLimitPercent??0)));
       if (manpower.used > limit) throw new GameError("Devlet askerî personel sınırının üzerindeyken yeni gemi üretemez.");
       if (manpower.used + personNeed > limit) throw new GameError("Gemi mürettebatı askerî personel sınırını aşıyor.");
@@ -3266,7 +3267,7 @@ export const gameService = {
       for (const country of manpowerCountries) {
         const manpower = await countryManpower(client, country.id);
         const marshalPartial = await hasActiveMarshalPartialMobilization(client, country.id, country.mobilization);
-        const projectModifiers=await activeGreatProjectModifiers(client,country.id);
+        const projectModifiers=await activeCountryModifiers(client,country.id);
         const overLimit = manpower.used > Math.floor(militaryLimit(manpower.militaryPopulation, country.mobilization, marshalPartial)*(1+(projectModifiers.militaryLimitPercent??0)));
         if (!overLimit) {
           await client.query("UPDATE countries SET manpower_over_limit_since_turn=NULL,manpower_penalty_active=FALSE WHERE id=$1", [country.id]);
@@ -3285,7 +3286,7 @@ export const gameService = {
         const countries = (await client.query<CountryRow>("SELECT * FROM countries WHERE guild_id=$1 AND status='ACTIVE' FOR UPDATE", [guildId])).rows;
         for (const country of countries) {
           const marshalPartial = await hasActiveMarshalPartialMobilization(client, country.id, country.mobilization);
-          const projectModifiers=await activeGreatProjectModifiers(client,country.id);
+          const projectModifiers=await activeCountryModifiers(client,country.id);
           const settlements = (await client.query<SettlementRow>("SELECT * FROM settlements WHERE country_id=$1 FOR UPDATE", [country.id])).rows;
           const religionDistributions=await loadReligionDistributions(client,settlements.map((settlement)=>settlement.id));
           const dominantReligionProfile=dominantReligionFromDistributions(settlements.map((settlement)=>({

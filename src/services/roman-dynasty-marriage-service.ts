@@ -6,6 +6,7 @@ import {
   type BirthComplication,type DynastyGender
 } from "../domain/dynasty.js";
 import {GameError} from "./game-service.js";
+import {rollNobleTraitKey} from "./noble-trait-service.js";
 import {romanFamilyMembership} from "./roman-family-access.js";
 
 export type RomanDynastyMarriageStatus="PENDING"|"ACCEPTED"|"REJECTED"|"CANCELLED";
@@ -397,14 +398,14 @@ export const romanDynastyMarriageService={
         if(duplicate.rowCount)throw new GameError("Hanedanda aynı adlı bir üye zaten bulunuyor.");
         const rank=Number((await client.query<{value:number}>("SELECT COALESCE(MAX(succession_rank),0)+1 AS value FROM dynasty_members WHERE dynasty_id=$1",[session.dynasty_id])).rows[0]?.value??1);
         childId=(await client.query<{id:string}>(`INSERT INTO dynasty_members(
-          dynasty_id,name,gender,age,title,relation,succession_rank,mother_id,father_id,roman_mother_id,roman_father_id,born_turn
-        ) VALUES($1,$2,$3,0,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,[
+          dynasty_id,name,gender,age,title,relation,succession_rank,mother_id,father_id,roman_mother_id,roman_father_id,born_turn,trait_key
+        ) VALUES($1,$2,$3,0,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,[
           session.dynasty_id,name,session.gender,session.gender==="MALE"?"Prens":"Prenses",session.child_relation,rank,
           session.mother_system==="DYNASTY"?session.dynasty_member_id:null,
           session.mother_system!=="DYNASTY"?session.dynasty_member_id:null,
           session.mother_system==="ROMAN_FAMILY"?session.roman_member_id:null,
           session.mother_system!=="ROMAN_FAMILY"?session.roman_member_id:null,
-          session.game_turn
+          session.game_turn,rollNobleTraitKey()
         ])).rows[0]!.id;
         await client.query("UPDATE roman_dynasty_birth_sessions SET status='COMPLETED',dynasty_child_id=$1,completed_at=NOW() WHERE id=$2",[childId,session.id]);
       }

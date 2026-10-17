@@ -11,6 +11,8 @@ import {
 } from "../domain/dynasty.js";
 import {GameError} from "./game-service.js";
 import {fallbackDynastyCandidateSql,lineageAwareDynastyCandidateSql} from "./dynasty-succession.js";
+import {rollNobleTraitKey} from "./noble-trait-service.js";
+import type {NobleTraitKey} from "../domain/noble-traits.js";
 
 export interface DynastyMemberView{
   id:string;name:string;gender:DynastyGender;age:number|null;title:string;relation:string;
@@ -25,6 +27,7 @@ export interface DynastyMemberView{
   mother_id:string|null;mother_name:string|null;
   father_id:string|null;father_name:string|null;born_turn:number|null;died_turn:number|null;death_reason:string|null;
   kidnapped:boolean;captor_country_name:string|null;captured_settlement_name:string|null;
+  trait_key:NobleTraitKey|null;
 }
 
 export interface DynastyView{
@@ -464,10 +467,10 @@ async function insertNpcChild(input:{
   )).rows[0]?.rank??1);
   const child=(await client.query<{id:string}>(
     `INSERT INTO dynasty_members(
-       dynasty_id,name,gender,age,title,relation,succession_rank,mother_id,father_id,born_turn,birth_dynasty_id
-     ) VALUES($1,$2,$3,0,$4,$5,$6,$7,$8,$9,$1) RETURNING id`,
+       dynasty_id,name,gender,age,title,relation,succession_rank,mother_id,father_id,born_turn,birth_dynasty_id,trait_key
+     ) VALUES($1,$2,$3,0,$4,$5,$6,$7,$8,$9,$1,$10) RETURNING id`,
     [country.dynasty_id,childName,input.gender,input.gender==="MALE"?"Prens":"Prenses",input.childRelation,
-      rank,mother.id,father.id,turn]
+      rank,mother.id,father.id,turn,rollNobleTraitKey()]
   )).rows[0]!;
   await client.query(
     `INSERT INTO dynasty_birth_sessions(
@@ -522,10 +525,10 @@ async function completePendingNpcBirths(
   )).rows[0]?.rank??1);
   const child=(await client.query<{id:string}>(
     `INSERT INTO dynasty_members(
-       dynasty_id,name,gender,age,title,relation,succession_rank,mother_id,father_id,born_turn,birth_dynasty_id
-     ) VALUES($1,$2,$3,0,$4,$5,$6,$7,$8,$9,$1) RETURNING id`,
+       dynasty_id,name,gender,age,title,relation,succession_rank,mother_id,father_id,born_turn,birth_dynasty_id,trait_key
+     ) VALUES($1,$2,$3,0,$4,$5,$6,$7,$8,$9,$1,$10) RETURNING id`,
     [country.dynasty_id,childName,pending.gender,pending.gender==="MALE"?"Prens":"Prenses",pending.child_relation,
-      rank,mother.id,father.id,pending.game_turn]
+      rank,mother.id,father.id,pending.game_turn,rollNobleTraitKey()]
   )).rows[0]!;
   await client.query(
     "UPDATE dynasty_birth_sessions SET status='COMPLETED',child_id=$1,completed_at=NOW() WHERE id=$2",
@@ -888,10 +891,10 @@ export const dynastyService={
       const created=(await client.query<{id:string}>(
         `INSERT INTO dynasty_members(
            dynasty_id,name,gender,age,title,relation,is_monarch,is_heir,succession_rank,
-           spouse_id,mother_id,father_id,born_turn
-         ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
+           spouse_id,mother_id,father_id,born_turn,trait_key
+         ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
         [dynasty.id,name,input.gender,input.age,title,relation,input.isMonarch,input.isHeir,
-          input.successionRank??null,input.spouseId??null,input.motherId??null,input.fatherId??null,turn-input.age]
+          input.successionRank??null,input.spouseId??null,input.motherId??null,input.fatherId??null,turn-input.age,rollNobleTraitKey()]
       )).rows[0]!;
       if(input.spouseId)await client.query("UPDATE dynasty_members SET spouse_id=$1 WHERE id=$2",[created.id,input.spouseId]);
       await addEvent(client,dynasty.id,turn,"MEMBER_ADDED",created.id,{name,title,relation,age:input.age,actorId:input.actorId});
@@ -1316,10 +1319,10 @@ export const dynastyService={
       )).rows[0]?.rank??1);
       const child=(await client.query<{id:string}>(
         `INSERT INTO dynasty_members(
-           dynasty_id,name,gender,age,title,relation,succession_rank,mother_id,father_id,born_turn
-         ) VALUES($1,$2,$3,0,$4,$5,$6,$7,$8,$9) RETURNING id`,
+           dynasty_id,name,gender,age,title,relation,succession_rank,mother_id,father_id,born_turn,trait_key
+         ) VALUES($1,$2,$3,0,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
         [dynasty.id,childName,pending.gender,pending.gender==="MALE"?"Prens":"Prenses",
-          pending.child_relation,rank,pending.mother_id,pending.father_id,pending.game_turn]
+          pending.child_relation,rank,pending.mother_id,pending.father_id,pending.game_turn,rollNobleTraitKey()]
       )).rows[0]!;
       await client.query(
         "UPDATE dynasty_birth_sessions SET status='COMPLETED',child_id=$1,completed_at=NOW() WHERE id=$2",

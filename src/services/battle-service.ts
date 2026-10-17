@@ -19,7 +19,7 @@ import { siegeCostMultiplier, type ResourceType } from "../domain/resources.js";
 import { settlementResourceAccess } from "./resource-service.js";
 import { scheduleMandatoryGarrisonReplenishment } from "./garrison-service.js";
 import { GameError } from "./game-service.js";
-import {activeGreatProjectModifiers} from "./great-project-service.js";
+import {activeCountryModifiers} from "./country-modifier-service.js";
 import { formableModifiers, type FormableCountryKey } from "../domain/formable-countries.js";
 import {
   admiralBattleRollMultipliers,admiralEnemyRetreatLossMultiplier,admiralIncomingDamageMultiplier,
@@ -2848,7 +2848,7 @@ export const battleService = {
       const defenderReserve = siege
         ? siegeDefenderReserveBonus(view.sides.B.current_total, defenderFrontage)
         : { reserve: 0, stepSize: 1, tiers: 0, clashMultiplier: 1, damageMultiplier: 1, incomingDamageMultiplier: 1 };
-      const projectDefenseRoll=siege?Number((await activeGreatProjectModifiers(client,view.sides.B.country_id)).settlementDefenseRoll??0):0;
+      const projectDefenseRoll=siege?Number((await activeCountryModifiers(client,view.sides.B.country_id)).settlementDefenseRoll??0):0;
       const attackerEffectiveClash = Math.ceil(rollA.clash_total * defense.attackerClash);
       const defenderEffectiveClash = Math.ceil((rollB.clash_total+projectDefenseRoll) * defense.defenderClash * defenderReserve.clashMultiplier);
       let defenderEffectiveDamage = Math.ceil(rollB.damage_total * defense.defenderDamage * defenderReserve.damageMultiplier);

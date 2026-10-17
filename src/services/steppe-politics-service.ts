@@ -5,6 +5,7 @@ import {
   type SteppeConflictType,type SteppeTitleTier,type SteppeWarCallResponse
 } from "../domain/steppe-politics.js";
 import {GameError} from "./game-service.js";
+import {rollNobleTraitKey} from "./noble-trait-service.js";
 
 export interface SteppeInternalTitleView{
   id:string;tier:SteppeTitleTier;titleName:string;holderName:string;holderUserId:string|null;
@@ -167,6 +168,8 @@ async function ensureTitleDynasty(client:DbClient,input:{
     names.sister,sisterAge,input.turn-sisterAge,names.son,sonAge,input.tier==="KHAN"?"Han Oğlu":"Ağa Oğlu",spouse.id,member.id,input.turn-sonAge,
     names.daughter,daughterAge,input.tier==="KHAN"?"Han Kızı":"Ağa Kızı",input.turn-daughterAge
   ]);
+  const traitless=(await client.query<{id:string}>("SELECT id FROM dynasty_members WHERE dynasty_id=$1 AND trait_key IS NULL",[dynasty.id])).rows;
+  for(const row of traitless)await client.query("UPDATE dynasty_members SET trait_key=$2,updated_at=NOW() WHERE id=$1",[row.id,rollNobleTraitKey()]);
   await client.query(`INSERT INTO dynasty_events(dynasty_id,game_turn,event_type,member_id,details)
     VALUES($1,$2,'DYNASTY_CREATED',$3,$4::jsonb)`,[dynasty.id,input.turn,member.id,JSON.stringify({
       name:houseName,source:"STEPPE_TITLE_FAMILY",titleId:input.titleId,titleName:input.titleName
