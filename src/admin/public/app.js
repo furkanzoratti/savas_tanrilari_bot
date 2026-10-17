@@ -182,7 +182,7 @@ function toast(message, kind = "success") {
 
 const routeTitles = {
   overview: "Genel Bakış", workspace: "Çalışma Alanım", countries: "Devletler", settlements: "Yerleşkeler", armies: "Ordular & Filolar",
-  characters: "Karakterler", dynasties: "Hanedanlar", "roman-politics": "Roma Siyaseti",
+  characters: "Karakterler", dynasties: "Hanedanlar", "noble-traits": "Soylu Traitleri", "roman-politics": "Roma Siyaseti",
   "steppe-politics": "Bozkır Kurultayı", "diplomacy-control": "Diplomasi & Ticaret", assignments: "Görevler", "espionage-publications": "Olay Yayınları", "gm-operations": "Rehberli İşlemler", "bulk-operations": "Toplu İşlemler", "economy-control": "Ekonomi & Üretim", "great-projects": "Büyük Projeler", "npc-purchases": "NPC Alımları", battles: "Savaşlar", "battle-simulator": "Savaş Simülasyonu",
   rebellions: "İsyanlar", reports: "Raporlar", health: "Oyun Sağlığı", "data-control": "Tam Yetki", audit: "İşlem Geçmişi"
 };
@@ -775,6 +775,49 @@ async function dynastiesPage() {
   document.querySelectorAll("[data-open-dynasty]").forEach((button) => button.addEventListener("click", () => {
     dynastyDetailPage(button.dataset.openDynasty).catch(showPageError);
   }));
+}
+
+async function nobleTraitsPage() {
+  setActiveRoute("noble-traits"); loading();
+  const data = await api("/api/noble-traits");
+  const catalog = data.catalog || [];
+  const members = data.members || [];
+  const traitByKey = new Map(catalog.map((trait) => [trait.key, trait]));
+  const countries = [...new Set(members.map((member) => member.country_name))].sort((left, right) => left.localeCompare(right, "tr"));
+  const categoryLabel = (value) => value === "POSITIVE" ? "Olumlu" : value === "MIXED" ? "Karma" : "Olumsuz";
+  const traitOptions = (current) => `<option value="">Traitsiz</option>${["POSITIVE", "MIXED", "NEGATIVE"].map((category) => `<optgroup label="${categoryLabel(category)}">${catalog.filter((trait) => trait.category === category).map((trait) => `<option value="${trait.key}" ${selected(trait.key, current)}>${escapeHtml(trait.name)} — ${escapeHtml(trait.effects.join(" · "))}</option>`).join("")}</optgroup>`).join("")}`;
+  const cards = catalog.map((trait) => `<article class="card"><div class="card-head"><div><h3>${escapeHtml(trait.name)}</h3><p>${escapeHtml(trait.description)}</p></div><span class="pill ${trait.category === "NEGATIVE" ? "danger" : trait.category === "MIXED" ? "warning" : ""}">${categoryLabel(trait.category)}</span></div><small>${escapeHtml(trait.effects.join(" · "))}</small></article>`).join("");
+  const rows = members.map((member) => {
+    const trait = traitByKey.get(member.trait_key);
+    const search = `${member.name} ${member.title} ${member.country_name} ${member.dynasty_name} ${trait?.name || "traitsiz"}`.toLocaleLowerCase("tr-TR");
+    const stateValue = member.trait_effect_active ? "ACTIVE" : member.status === "ALIVE" ? "INACTIVE" : "DEAD";
+    return `<tr data-trait-row data-country="${escapeHtml(member.country_name)}" data-state="${stateValue}" data-search="${escapeHtml(search)}"><td><strong>${escapeHtml(member.name)}</strong><small>${escapeHtml(member.title)} · ${member.age === null ? "Yaş bilinmiyor" : `${number(member.age)} yaş`}</small></td><td><strong>${escapeHtml(member.country_name)}</strong><small>${escapeHtml(member.dynasty_name)}${member.steppe_title_id ? " · İç hane" : ""}</small></td><td>${member.is_monarch ? '<span class="pill">Hükümdar</span>' : member.is_heir ? '<span class="pill neutral">Varis</span>' : escapeHtml(member.relation)}<small>${member.status === "DEAD" ? "Ölü" : member.health === "SICK" ? "Hasta" : "Hayatta"}</small></td><td>${trait ? `<strong>${escapeHtml(trait.name)}</strong><small>${escapeHtml(trait.effects.join(" · "))}</small>` : '<span class="pill neutral">Traitsiz</span>'}${member.trait_effect_active ? '<span class="pill">Ülke etkisi etkin</span>' : trait ? '<small>Etki çalışmıyor</small>' : ""}</td><td><select data-trait-select="${member.id}" aria-label="${escapeHtml(member.name)} traiti">${traitOptions(member.trait_key)}</select></td><td><div class="row-actions"><button class="button compact primary" data-set-noble-trait="${member.id}">Uygula</button><button class="button compact" data-reroll-noble-trait="${member.id}">Rastgele</button><button class="button compact danger" data-remove-noble-trait="${member.id}" ${member.trait_key ? "" : "disabled"}>Kaldır</button><button class="button compact" data-open-noble-dynasty="${member.dynasty_id}">Hanedan</button></div></td></tr>`;
+  }).join("");
+  page.innerHTML = `<div class="page-head"><div><span class="overview-kicker">HANEDAN YÖNETİMİ</span><h1>Soylu Traitleri</h1><p>Tüm hanedan üyelerinin traitlerini tek ekrandan izle ve yönet. Mekanik etkiler yalnızca yaşayan asıl devlet hükümdarında çalışır.</p></div><div class="actions"><span class="pill">${number(members.filter((member) => member.trait_key).length)} traitli üye</span><span class="pill neutral">${number(members.filter((member) => member.trait_effect_active).length)} etkin hükümdar etkisi</span></div></div>
+    <section class="detail-grid"><div class="detail-cell"><span>Toplam trait</span><strong>${number(catalog.length)}</strong></div><div class="detail-cell"><span>Olumlu</span><strong>${number(catalog.filter((trait) => trait.category === "POSITIVE").length)}</strong></div><div class="detail-cell"><span>Karma</span><strong>${number(catalog.filter((trait) => trait.category === "MIXED").length)}</strong></div><div class="detail-cell"><span>Olumsuz</span><strong>${number(catalog.filter((trait) => trait.category === "NEGATIVE").length)}</strong></div></section>
+    <details class="card section-gap"><summary><strong>Trait kataloğunu ve etkilerini göster</strong></summary><div class="dynasty-grid section-gap">${cards}</div></details>
+    <section class="card section-gap"><div class="form-grid"><label>Üye, hanedan veya trait ara<input id="noble-trait-search" placeholder="Örn. Adil, Roma, hükümdar…"></label><label>Devlet<select id="noble-trait-country"><option value="ALL">Tüm devletler</option>${countries.map((country) => `<option value="${escapeHtml(country)}">${escapeHtml(country)}</option>`).join("")}</select></label><label>Durum<select id="noble-trait-state"><option value="ALL">Tüm üyeler</option><option value="ACTIVE">Etkin hükümdarlar</option><option value="INACTIVE">Yaşayan, etkisiz üyeler</option><option value="DEAD">Ölü üyeler</option></select></label></div></section>
+    <section class="card table-wrap section-gap"><table><thead><tr><th>Soylu</th><th>Devlet / Hanedan</th><th>Konum</th><th>Mevcut trait</th><th>Yeni trait</th><th>Yönetim</th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="empty">Hanedan üyesi bulunmuyor.</td></tr>'}</tbody></table></section>`;
+  const applyFilters = () => {
+    const search = document.getElementById("noble-trait-search").value.trim().toLocaleLowerCase("tr-TR");
+    const country = document.getElementById("noble-trait-country").value;
+    const stateValue = document.getElementById("noble-trait-state").value;
+    document.querySelectorAll("[data-trait-row]").forEach((row) => { row.hidden = Boolean((search && !row.dataset.search.includes(search)) || (country !== "ALL" && row.dataset.country !== country) || (stateValue !== "ALL" && row.dataset.state !== stateValue)); });
+  };
+  document.getElementById("noble-trait-search").addEventListener("input", applyFilters);
+  document.getElementById("noble-trait-country").addEventListener("change", applyFilters);
+  document.getElementById("noble-trait-state").addEventListener("change", applyFilters);
+  const mutate = async (memberId, payload, success) => {
+    await api(`/api/admin/dynasty-members/${memberId}/trait`, { method: "POST", body: JSON.stringify(payload) });
+    toast(success); await refreshKeepingScroll(nobleTraitsPage);
+  };
+  document.querySelectorAll("[data-set-noble-trait]").forEach((button) => button.addEventListener("click", () => {
+    const traitKey = document.querySelector(`[data-trait-select="${button.dataset.setNobleTrait}"]`).value;
+    return mutate(button.dataset.setNobleTrait, traitKey ? { action: "SET", traitKey } : { action: "REMOVE" }, traitKey ? "Soylu traiti güncellendi." : "Soylu traiti kaldırıldı.").catch((error) => toast(error.message, "error"));
+  }));
+  document.querySelectorAll("[data-reroll-noble-trait]").forEach((button) => button.addEventListener("click", () => mutate(button.dataset.rerollNobleTrait, { action: "REROLL" }, "Yeni rastgele trait atandı.").catch((error) => toast(error.message, "error"))));
+  document.querySelectorAll("[data-remove-noble-trait]").forEach((button) => button.addEventListener("click", () => mutate(button.dataset.removeNobleTrait, { action: "REMOVE" }, "Soylu traiti kaldırıldı.").catch((error) => toast(error.message, "error"))));
+  document.querySelectorAll("[data-open-noble-dynasty]").forEach((button) => button.addEventListener("click", () => dynastyDetailPage(button.dataset.openNobleDynasty).catch(showPageError)));
 }
 
 function romanSenateSeats(families, totalSeats) {
@@ -2663,6 +2706,7 @@ async function navigate(route) {
     if (route === "armies") return await forcesPage();
     if (route === "characters") return await charactersPage();
     if (route === "dynasties") return await dynastiesPage();
+    if (route === "noble-traits") return await nobleTraitsPage();
     if (route === "roman-politics") return await romanPoliticsPage();
     if (route === "steppe-politics") return await steppePoliticsPage();
     if (route === "diplomacy-control") return await diplomacyControlPage(controller.signal);
@@ -2763,6 +2807,7 @@ const paletteCommands = [
   { route: "settlements", label: "Yerleşkeler", detail: "Nüfus, ekonomi, kültür ve dini incele" },
   { route: "armies", label: "Ordular & Filolar", detail: "Kuvvetleri ve komutanları yönet" },
   { route: "characters", label: "Karakterler", detail: "Karakter ve uzmanlık kayıtlarını aç" },
+  { route: "noble-traits", label: "Soylu Traitleri", detail: "Hanedan traitlerini görüntüle, değiştir, kaldır veya yeniden belirle" },
   { route: "gm-operations", label: "Rehberli İşlemler", detail: "Riskli GM müdahalelerini önizleme ve onayla uygula" },
   { route: "bulk-operations", label: "Toplu İşlemler", detail: "Birden fazla oyun kaydını tek güvenli işlemde güncelle" },
   { route: "diplomacy-control", label: "Diplomasi & Ticaret", detail: "İttifak, vassallık, savaş, pakt ve ticaret bağlantılarını yönet" },

@@ -129,7 +129,12 @@ const dynastyMemberUpdateSchema = z.object({
   traitKey:z.string().nullable().refine((value)=>value===null||isNobleTraitKey(value),"Geçersiz soylu traiti.").optional()
 });
 
-const dynastyMemberTraitActionSchema=z.object({action:z.enum(["REROLL","REMOVE"])});
+const dynastyMemberTraitActionSchema=z.object({
+  action:z.enum(["SET","REROLL","REMOVE"]),
+  traitKey:z.string().refine(isNobleTraitKey,"Geçersiz soylu traiti.").optional()
+}).superRefine((value,context)=>{
+  if(value.action==="SET"&&!value.traitKey)context.addIssue({code:"custom",message:"Atanacak soylu traiti seçilmelidir.",path:["traitKey"]});
+});
 
 const dynastyMemberDeathSchema = z.object({
   reason: z.string().trim().min(2).max(200)
@@ -2056,6 +2061,26 @@ export const adminPanelService = {
         ORDER BY CASE WHEN country.status='ACTIVE' THEN 0 ELSE 1 END,country.name,dynasty.name`,
       [adminConfig.guildId]
     )).rows;
+  },
+
+  async nobleTraits(){
+    const members=(await adminPool.query(
+      `SELECT member.id,member.name,member.title,member.relation,member.gender,member.age,
+              member.status,member.health,member.is_monarch,member.is_heir,member.trait_key,
+              dynasty.id AS dynasty_id,dynasty.name AS dynasty_name,dynasty.steppe_title_id,
+              country.id AS country_id,country.name AS country_name,country.status AS country_status,
+              (member.status='ALIVE' AND member.is_monarch=TRUE AND dynasty.steppe_title_id IS NULL
+               AND country.status='ACTIVE') AS trait_effect_active
+         FROM dynasty_members member
+         JOIN dynasties dynasty ON dynasty.id=member.dynasty_id
+         JOIN countries country ON country.id=dynasty.country_id
+        WHERE dynasty.guild_id=$1
+        ORDER BY CASE WHEN country.status='ACTIVE' THEN 0 ELSE 1 END,country.name,dynasty.name,
+                 CASE WHEN member.status='ALIVE' THEN 0 ELSE 1 END,member.is_monarch DESC,
+                 member.is_heir DESC,member.succession_rank NULLS LAST,member.age DESC,member.name`,
+      [adminConfig.guildId]
+    )).rows;
+    return{catalog:NOBLE_TRAITS,members};
   },
 
   async romanPolitics() {
@@ -4139,7 +4164,7 @@ export const adminPanelService = {
     const input=dynastyMemberTraitActionSchema.parse(rawInput);
     return withAdminTransaction(async(client)=>{
       const member=await adminDynastyMember(client,memberId,true);
-      const nextTrait=input.action==="REROLL"?rollNobleTraitKey():null;
+      const nextTrait=input.action==="REROLL"?rollNobleTraitKey():input.action==="SET"?input.traitKey!:null;
       const updated=(await client.query<{id:string;trait_key:string|null}>(
         "UPDATE dynasty_members SET trait_key=$2,updated_at=NOW() WHERE id=$1 RETURNING id,trait_key",[member.id,nextTrait]
       )).rows[0]!;

@@ -259,6 +259,10 @@ const server = createServer(async (request, response) => {
       if (!requireSession(request, response)) return;
       return json(response, 200, await adminPanelService.dynasties());
     }
+    if (request.method === "GET" && url.pathname === "/api/noble-traits") {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await adminPanelService.nobleTraits());
+    }
     if (request.method === "GET" && url.pathname === "/api/roman-politics") {
       if (!requireSession(request, response)) return;
       return json(response, 200, await adminPanelService.romanPolitics());
