@@ -12,7 +12,7 @@ import {
   DYNASTY_VIEW_BANNER_NAMES,dynastyViewAsset,
   DYNASTY_MARRIAGE_BANNER_PATH,DYNASTY_MARRIAGE_BANNER_URL
 } from "./assets.js";
-import {dynastyEmbed,publishDynastyDeathLogs} from "./dynasty-ui.js";
+import {dynastyEmbed,dynastyPersonEmbed,publishDynastyDeathLogs} from "./dynasty-ui.js";
 import {dynastyService,type DynastyView} from "../services/dynasty-service.js";
 
 const dynastyMember=(overrides:Partial<DynastyView["members"][number]>):DynastyView["members"][number]=>({
@@ -69,6 +69,26 @@ describe("hanedan görselleri",()=>{
     expect(tree).toContain("└─ Prenses Aelswith — 18");
     expect(tree).not.toContain("└─ 💍");
     expect(tree.match(/Roxana/g)).toHaveLength(1);
+  });
+
+  it("oyuncu hanedan formlarında yalnızca trait adını gösterir",()=>{
+    const monarch=dynastyMember({id:"king",name:"Leandros",title:"Kral",is_monarch:true,trait_key:"ZALIM"});
+    const view:DynastyView={
+      id:"dynasty",guild_id:"guild",country_id:"country",country_name:"Akdeniz Ligi",name:"Thalassid Hanedanı",
+      current_turn:40,last_birth_attempt_turn:null,published_channel_id:null,published_message_id:null,
+      members:[monarch],events:[],birth_attempts:[]
+    };
+    const overview=JSON.stringify(dynastyEmbed(view).toJSON());
+    const person=JSON.stringify(dynastyPersonEmbed(view,monarch.id).toJSON());
+    expect(overview).toContain("Hükümdar Traiti:** Zalim");
+    expect(person).toContain("Soylu Traiti:** Zalim");
+    for(const output of [overview,person]){
+      expect(output).not.toContain("İsyan direnci");
+      expect(output).not.toContain("Vergi geliri");
+      expect(output).not.toContain("Etkileri ülke genelinde etkin");
+      expect(output).not.toContain("Etkileri yalnızca");
+      expect(output).not.toContain("(Karma)");
+    }
   });
 
   it("evlilik teklifi görselini deploy paketinde tutar",()=>{

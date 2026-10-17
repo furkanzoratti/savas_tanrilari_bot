@@ -4,7 +4,7 @@ import {
   type AutocompleteInteraction,type ButtonInteraction,type ChatInputCommandInteraction,type Client,type ModalSubmitInteraction
 } from "discord.js";
 import {BIRTH_ATTEMPT_COOLDOWN_TURNS,DYNASTY_GENDER_LABELS,DYNASTY_HEALTH_LABELS,MINIMUM_MARRIAGE_AGE,type DynastyGender,type DynastyHealth} from "../domain/dynasty.js";
-import {nobleTraitByKey,nobleTraitCategoryLabel} from "../domain/noble-traits.js";
+import {nobleTraitByKey} from "../domain/noble-traits.js";
 import {dynastyService,type DynastyMarriageProposalView,type DynastyTurnResult,type DynastyView} from "../services/dynasty-service.js";
 import {
   romanDynastyMarriageService,type CrossHouseBirthAttemptResult,type RomanDynastyMarriageProposalView
@@ -318,7 +318,7 @@ export function dynastyEmbed(view:DynastyView):EmbedBuilder{
   const overview=[
     "**👑 "+(steppeHouse?"Hane Reisi":"Hanedan Başkanı")+":** "+(monarch?memberName(monarch):"⚠️ Veraset krizi"),
     "**⚔️ "+(steppeHouse?"Bozkır Makamı":"Hükümdar")+":** "+(monarch?monarch.title+" "+monarch.name:"Belirlenmedi"),
-    "**🎭 Hükümdar Traiti:** "+(monarchTrait?monarchTrait.name+" ("+nobleTraitCategoryLabel(monarchTrait.category)+")":"Belirlenmedi"),
+    "**🎭 Hükümdar Traiti:** "+(monarchTrait?monarchTrait.name:"Belirlenmedi"),
     "**🕊️ Durum:** "+marital,
     "**📜 "+(steppeHouse?"Hane Varisi":"Tahtın Varisi")+":** "+(heir?memberName(heir):"Belirlenmedi"),
     "**⚖️ Veraset Sistemi:** Erkek Öncelikli Primogenitür",
@@ -348,8 +348,7 @@ export function dynastyPersonEmbed(view:DynastyView,memberId:string):EmbedBuilde
     "**❤️ Durum:** "+(member.status==="DEAD"?"Öldü":member.kidnapped?"⛓️ Kaçırıldı":DYNASTY_HEALTH_LABELS[member.health]),
     member.kidnapped?"**📍 Esaret:** "+(member.captor_country_name??"Bilinmeyen devlet")+" • "+(member.captured_settlement_name??"Bilinmeyen yer"):"","",
     "**👑 Hanedan:** "+view.name,"**📜 Unvan:** "+member.title,"**🧬 Akrabalık:** "+member.relation,"**👑 Konum:** "+position,
-    "**🎭 Soylu Traiti:** "+(trait?trait.name+" ("+nobleTraitCategoryLabel(trait.category)+")":"Belirlenmedi"),
-    trait?"↳ "+trait.effects.join(" • ")+(member.status==="ALIVE"&&member.is_monarch?"\n✅ Etkileri ülke genelinde etkin.":"\nℹ️ Etkileri yalnızca hayatta olan hükümdarken çalışır."):"",
+    "**🎭 Soylu Traiti:** "+(trait?trait.name:"Belirlenmedi"),
     "**⚖️ Veraset:** "+(member.is_monarch?"Tahtta":member.succession_rank!==null?"#"+member.succession_rank:"Sırada değil"),"",
     "**👨 Baba:** "+(member.father_name??"Kayıt yok"),"**👩 Anne:** "+(member.mother_name??"Kayıt yok"),"",
     "**💍 Eşi:** "+spouseText(view,member),"",

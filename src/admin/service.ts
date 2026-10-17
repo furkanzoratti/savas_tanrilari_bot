@@ -2069,8 +2069,15 @@ export const adminPanelService = {
               member.status,member.health,member.is_monarch,member.is_heir,member.trait_key,
               dynasty.id AS dynasty_id,dynasty.name AS dynasty_name,dynasty.steppe_title_id,
               country.id AS country_id,country.name AS country_name,country.status AS country_status,
-              (member.status='ALIVE' AND member.is_monarch=TRUE AND dynasty.steppe_title_id IS NULL
-               AND country.status='ACTIVE') AS trait_effect_active
+              (member.status='ALIVE' AND EXISTS(
+                 SELECT 1
+                   FROM dynasty_members active_monarch
+                   JOIN dynasties active_dynasty ON active_dynasty.id=active_monarch.dynasty_id
+                   JOIN countries active_country ON active_country.id=active_dynasty.country_id
+                  WHERE active_monarch.status='ALIVE' AND active_monarch.is_monarch=TRUE
+                    AND active_dynasty.steppe_title_id IS NULL AND active_country.status='ACTIVE'
+                    AND (active_monarch.id=member.id OR active_monarch.spouse_id=member.id)
+               )) AS trait_effect_active
          FROM dynasty_members member
          JOIN dynasties dynasty ON dynasty.id=member.dynasty_id
          JOIN countries country ON country.id=dynasty.country_id
