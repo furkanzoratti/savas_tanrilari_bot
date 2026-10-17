@@ -13,12 +13,14 @@ describe("yerleşkeye bağlı büyük projeler",()=>{
     expect(greatProjectForSettlement("Pantikapaion")?.key).toBe("PANTICAPAION_ACROPOLIS");
   });
 
-  it("maliyetleri onaylanan aralıkta ve inşaat süresini sabit 6 tur tutar",()=>{
+  it("tüm maliyetlere 10.000 Altın indirimi uygular ve inşaat süresini sabit 6 tur tutar",()=>{
     for(const item of GREAT_PROJECTS){
-      expect(item.cost).toBeGreaterThanOrEqual(40_000);
-      expect(item.cost).toBeLessThanOrEqual(80_000);
+      expect(item.cost).toBeGreaterThanOrEqual(45_000);
+      expect(item.cost).toBeLessThanOrEqual(70_000);
       expect(item.duration).toBe(6);
     }
+    expect(greatProjectForSettlement("Roma")?.cost).toBe(70_000);
+    expect(greatProjectForSettlement("Baykal Kışlağı")?.cost).toBe(45_000);
   });
 
   it("ülke etkilerini toplar ve güvenli tavanları uygular",()=>{

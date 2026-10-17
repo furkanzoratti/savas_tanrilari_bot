@@ -58,10 +58,12 @@ export interface GreatProjectDefinition {
   modifiers: GreatProjectModifiers;
 }
 
+export const GREAT_PROJECT_COST_REDUCTION = 10_000;
+
 const project = (
   key: GreatProjectKey, name: string, settlementNames: readonly string[], cost: number,
   effects: readonly string[], modifiers: GreatProjectModifiers
-): GreatProjectDefinition => ({ key, name, settlementNames, cost, duration: 6, effects, modifiers });
+): GreatProjectDefinition => ({ key, name, settlementNames, cost: cost - GREAT_PROJECT_COST_REDUCTION, duration: 6, effects, modifiers });
 
 export const GREAT_PROJECTS: readonly GreatProjectDefinition[] = [
   project("RHODES_COLOSSUS","Rodos Heykeli",["Rodos"],75_000,["Liman geliri +%15","Gemi bakım maliyeti -%10","Tüccar görev getirisi +%10"],{portIncomePercent:.15,shipUpkeepDiscount:.10,merchantReturnPercent:.10}),
