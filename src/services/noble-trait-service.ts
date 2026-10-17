@@ -9,7 +9,8 @@ export async function activeMonarchTrait(client:Pick<DbClient,"query">,countryId
   const row=(await client.query<{trait_key:string|null}>(
     `SELECT member.trait_key FROM dynasty_members member
        JOIN dynasties dynasty ON dynasty.id=member.dynasty_id
-      WHERE dynasty.country_id=$1 AND member.status='ALIVE' AND member.is_monarch=TRUE
+      WHERE dynasty.country_id=$1 AND dynasty.steppe_title_id IS NULL
+        AND member.status='ALIVE' AND member.is_monarch=TRUE
       ORDER BY member.updated_at DESC LIMIT 1`,[countryId]
   )).rows[0];
   return nobleTraitByKey(row?.trait_key);
