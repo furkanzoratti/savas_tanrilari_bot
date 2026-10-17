@@ -12,6 +12,7 @@ import {
   type PlayerEspionageTarget
 } from "../domain/espionage-publications.js";
 import { PLAYER_ESPIONAGE_TARGETS } from "../domain/espionage.js";
+import { ESPIONAGE_TARGETS } from "../domain/espionage.js";
 
 const settlementChannelSchema = z.object({
   settlementId: z.string().uuid(),
@@ -46,6 +47,23 @@ interface TemplateOverrideRow {
   updated_at: string;
 }
 
+interface PublicationEventRow {
+  source:"ESPIONAGE"|"DEATH";
+  id:string;
+  game_turn:number;
+  event_type:string;
+  country_name:string|null;
+  settlement_name:string|null;
+  subject_name:string|null;
+  outcome:"SUCCESS"|"FAILURE"|null;
+  effect_text:string|null;
+  delivery_status:"PENDING"|"PUBLISHED"|"FAILED"|"SKIPPED"|"UNKNOWN";
+  posted_at:string|null;
+  publish_attempts:number;
+  last_error:string|null;
+  created_at:string;
+}
+
 function channelId(input: string): string | null {
   if (!input.trim()) return null;
   const match = input.match(/\d{15,25}/u);
@@ -75,7 +93,7 @@ async function audit(
 }
 
 async function dashboard() {
-  const [settlementResult, overrideResult] = await Promise.all([
+  const [settlementResult, overrideResult,eventResult] = await Promise.all([
     adminPool.query<{
       id: string;
       name: string;
@@ -95,6 +113,54 @@ async function dashboard() {
       `SELECT target_type,outcome,title_template,body_template,image_key,enabled,updated_by,updated_at
          FROM espionage_public_templates
         WHERE guild_id=$1`,
+      [adminConfig.guildId]
+    ),
+    adminPool.query<PublicationEventRow>(
+      `WITH state AS (
+         SELECT current_turn FROM guilds WHERE discord_id=$1
+       ), events AS (
+         SELECT 'ESPIONAGE'::text AS source,operation.id,operation.resolve_turn AS game_turn,
+                operation.target_type AS event_type,target.name AS country_name,
+                settlement.name AS settlement_name,
+                COALESCE(target_character.name,target_dynasty.name,target_roman.name,target_army.name) AS subject_name,
+                CASE WHEN operation.severity IS NOT NULL AND operation.severity<>'NONE' THEN 'SUCCESS' ELSE 'FAILURE' END AS outcome,
+                operation.effect_text,operation.public_delivery_status AS delivery_status,
+                operation.public_posted_at AS posted_at,operation.public_publish_attempts AS publish_attempts,
+                operation.public_last_error AS last_error,COALESCE(operation.resolved_at,operation.created_at) AS created_at
+           FROM espionage_operations operation
+           JOIN countries target ON target.id=operation.target_country_id
+           JOIN settlements settlement ON settlement.id=operation.target_settlement_id
+           LEFT JOIN country_characters target_character ON target_character.id=operation.target_character_id
+           LEFT JOIN dynasty_members target_dynasty ON operation.target_noble_type='DYNASTY' AND target_dynasty.id=operation.target_noble_id
+           LEFT JOIN roman_family_members target_roman ON operation.target_noble_type='ROMAN_FAMILY' AND target_roman.id=operation.target_noble_id
+           LEFT JOIN armies target_army ON target_army.id=operation.target_army_id
+          WHERE operation.guild_id=$1 AND operation.status='RESOLVED'
+            AND operation.resolve_turn>=GREATEST((SELECT current_turn FROM state)-7,0)
+         UNION ALL
+         SELECT 'DEATH'::text AS source,publication.id,publication.game_turn,
+                publication.subject_type AS event_type,country.name AS country_name,
+                settlement.name AS settlement_name,publication.subject_name,NULL::text AS outcome,
+                COALESCE(publication.death_reason,publication.subject_role) AS effect_text,
+                CASE WHEN publication.public_posted_at IS NOT NULL THEN 'PUBLISHED'
+                     WHEN publication.last_error IS NOT NULL THEN 'FAILED' ELSE 'PENDING' END AS delivery_status,
+                publication.public_posted_at AS posted_at,publication.publish_attempts,
+                publication.last_error,publication.created_at
+           FROM death_publications publication
+           LEFT JOIN countries country ON country.id=publication.country_id
+           LEFT JOIN settlements settlement ON settlement.id=CASE
+             WHEN publication.subject_type IN ('DYNASTY_MEMBER','ROMAN_FAMILY_MEMBER') THEN
+               COALESCE(
+                 country.capital_settlement_id,
+                 (SELECT fallback.id FROM settlements fallback
+                   WHERE fallback.country_id=country.id
+                   ORDER BY fallback.population DESC,fallback.name,fallback.id LIMIT 1)
+               )
+             ELSE publication.settlement_id
+           END
+          WHERE publication.guild_id=$1
+            AND publication.game_turn>=GREATEST((SELECT current_turn FROM state)-7,0)
+       )
+       SELECT * FROM events ORDER BY game_turn DESC,created_at DESC LIMIT 500`,
       [adminConfig.guildId]
     )
   ]);
@@ -118,6 +184,26 @@ async function dashboard() {
     };
   });
   const mapped = settlementResult.rows.filter((row) => row.channel_id).length;
+  const events=eventResult.rows.map((row)=>({
+    source:row.source,
+    id:row.id,
+    turn:Number(row.game_turn),
+    type:row.event_type,
+    typeLabel:row.source==="ESPIONAGE"
+      ? ESPIONAGE_TARGETS[row.event_type as keyof typeof ESPIONAGE_TARGETS]?.label??row.event_type
+      : row.event_type==="ACADEMY_CHARACTER"?"Karakter ölümü"
+        :row.event_type==="DYNASTY_MEMBER"?"Hanedan ölümü":"Roma ailesi ölümü",
+    countryName:row.country_name,
+    settlementName:row.settlement_name,
+    subjectName:row.subject_name,
+    outcome:row.outcome,
+    effectText:row.effect_text,
+    status:row.delivery_status,
+    postedAt:row.posted_at,
+    attempts:Number(row.publish_attempts),
+    failureReason:row.last_error,
+    createdAt:row.created_at
+  }));
 
   return {
     summary: {
@@ -126,7 +212,11 @@ async function dashboard() {
       unmappedSettlements: settlementResult.rows.length - mapped,
       templates: templates.length,
       customizedTemplates: overrideResult.rows.length,
-      enabledTemplates: templates.filter((item) => item.enabled).length
+      enabledTemplates: templates.filter((item) => item.enabled).length,
+      publishedEvents:events.filter((item)=>item.status==="PUBLISHED").length,
+      failedEvents:events.filter((item)=>item.status==="FAILED").length,
+      pendingEvents:events.filter((item)=>item.status==="PENDING").length,
+      unknownEvents:events.filter((item)=>item.status==="UNKNOWN").length
     },
     settlements: settlementResult.rows.map((row) => ({
       id: row.id,
@@ -137,6 +227,19 @@ async function dashboard() {
       configured: Boolean(row.channel_id)
     })),
     templates,
+    events,
+    eventTurns:[...new Set(events.map((event)=>event.turn))],
+    detectionPreviews:[
+      {key:"CAPTURED",label:"Casus yakalandı",description:"Casusun adı ve gönderen devlet açıkça paylaşılır.",imageUrl:"/espionage-events/captured-spy-success.png"},
+      {key:"COUNTRY_IDENTIFIED",label:"Casus kaçtı, kaynak tespit edildi",description:"Casusun adı gizli kalır; operasyonu gönderen devlet açıklanır.",imageUrl:"/espionage-events/spy-country-identified.png"},
+      {key:"INTERVENTION_NOTICED",label:"Dış müdahale fark edildi",description:"Casus ve devlet açıklanmaz; yalnız dış müdahale ihtimali belirtilir.",imageUrl:"/espionage-events/captured-spy-failure.png"},
+      {key:"UNTRACED",label:"İz bulunamadı",description:"Casusun akıbetine ilişkin ikinci bir yayın gösterilmez.",imageUrl:"/espionage-events/spy-untraced.png"}
+    ],
+    deathPreviews:[
+      {key:"MONARCH",label:"Hükümdar ölümü",title:"⚰️ Roma Hükümdarını Kaybetti",description:"Cornelius Hanedanı mensubu 68 yaşındaki Kral Marcus, ilerleyen yaşı nedeniyle hayatını kaybetti. Ölüm haberi Roma kayıtlarına geçti.",imageUrl:"/death-events/dynasty-deaths-banner.png"},
+      {key:"MALE",label:"Erkek karakter ölümü",title:"⚰️ Cassius Hayatını Kaybetti",description:"Trakya hizmetindeki 47 yaşındaki Komutan Cassius, savaş sırasında hayatını kaybetti. Ölüm haberi Atina kayıtlarına geçti.",imageUrl:"/death-events/dynasty-death-male-banner.png"},
+      {key:"FEMALE",label:"Kadın karakter ölümü",title:"⚰️ Julii Ailesi • Yas Haberi",description:"Julii ailesi mensubu 61 yaşındaki Livia, ilerleyen yaşı nedeniyle hayatını kaybetti. Ölüm haberi Roma kayıtlarına geçti.",imageUrl:"/death-events/dynasty-death-female-banner.png"}
+    ],
     placeholders: ESPIONAGE_PUBLICATION_PLACEHOLDERS,
     images: ESPIONAGE_PUBLICATION_IMAGE_KEYS.map((key) => ({ key, url: `/espionage-events/${key}` }))
   };

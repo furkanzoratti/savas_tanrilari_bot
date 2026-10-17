@@ -72,21 +72,52 @@
 .publication-live-preview small { color: #9da3af; }
 .publication-editor-image { min-height: 142px; display: grid; place-items: center; overflow: hidden; border-radius: 9px; background: rgba(255,255,255,.06); color: #aeb2bc; font-size: 12px; }
 .publication-editor-image img { width: 100%; height: 180px; object-fit: cover; }
+.publication-history-summary { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.publication-history-toolbar { grid-template-columns: repeat(3,minmax(150px,1fr)); }
+.publication-event-list { display: grid; gap: 8px; max-height: 620px; overflow: auto; padding-right: 4px; }
+.publication-event-row { display: grid; grid-template-columns: 38px minmax(0,1fr) minmax(110px,auto); align-items: start; gap: 12px; padding: 12px; border: 1px solid rgba(128,82,56,.16); border-radius: 11px; background: #faf6ef; }
+.publication-event-state { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; font-size: 17px; font-weight: 900; }
+.publication-event-state.published { background: rgba(55,118,82,.14); color: #2f704c; }
+.publication-event-state.failed { background: rgba(146,63,63,.13); color: var(--danger); }
+.publication-event-state.pending { background: rgba(154,100,47,.13); color: var(--warning); }
+.publication-event-state.unknown { background: rgba(23,36,61,.11); color: var(--navy-soft); }
+.publication-event-main > div { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 6px; }
+.publication-event-main > strong,.publication-event-main > small { display: block; }
+.publication-event-main > small,.publication-event-main > p,.publication-event-delivery small { color: var(--muted); }
+.publication-event-main > p { margin: 5px 0 0; font-size: 12px; line-height: 1.4; }
+.publication-event-error { margin-top: 8px; padding: 7px 9px; border-left: 3px solid var(--danger); border-radius: 6px; background: rgba(146,63,63,.07); color: #793737; font-size: 12px; }
+.publication-event-delivery { padding-top: 4px; text-align: right; }
+.publication-event-delivery strong,.publication-event-delivery small { display: block; }
+.publication-event-delivery small { margin-top: 3px; font-size: 11px; }
+.publication-preview-heading { margin: 18px 0 9px; color: var(--brown); font-size: 15px; }
+.publication-preview-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+.publication-preview-card { min-width: 0; display: grid; grid-template-columns: 150px minmax(0,1fr); overflow: hidden; border: 1px solid rgba(128,82,56,.17); border-radius: 11px; background: #f9f4ec; }
+.publication-preview-card img { width: 100%; height: 100%; min-height: 145px; object-fit: cover; background: #d9c8b5; }
+.publication-preview-card > div { padding: 12px; }
+.publication-preview-card h3 { margin: 8px 0 4px; font-size: 16px; }
+.publication-preview-card strong { display: block; color: var(--brown); font-size: 12px; }
+.publication-preview-card p { margin: 7px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
 
 @media (max-width: 1100px) {
   .publication-workflow { grid-template-columns: 34px 1fr; }
   .publication-workflow > b { display: none; }
   .publication-template-grid { grid-template-columns: 1fr; }
+  .publication-preview-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 780px) {
   .publication-toolbar,.template-toolbar { grid-template-columns: 1fr; }
   .publication-settlement-row { grid-template-columns: 30px minmax(0,1fr) auto; }
   .publication-settlement-row > label { grid-column: 2 / -1; }
   .publication-editor-grid { grid-template-columns: 1fr; }
+  .publication-history-toolbar { grid-template-columns: 1fr; }
+  .publication-event-row { grid-template-columns: 36px minmax(0,1fr); }
+  .publication-event-delivery { grid-column: 2; text-align: left; }
 }
 @media (max-width: 560px) {
   .publication-template-card { grid-template-columns: 1fr; }
   .publication-template-image,.publication-template-image img { min-height: 150px; max-height: 190px; }
+  .publication-preview-card { grid-template-columns: 1fr; }
+  .publication-preview-card img { max-height: 190px; }
 }
 * { box-sizing: border-box; }
 h1,h2,h3,.brand strong { font-family: Georgia,"Times New Roman",serif; }

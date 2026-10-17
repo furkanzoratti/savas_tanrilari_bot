@@ -34,6 +34,9 @@ const publicFiles = {
   "/app.css": { path: fileURLToPath(new URL("./public/app.css", import.meta.url)), type: "text/css; charset=utf-8" },
   "/app.js": { path: fileURLToPath(new URL("./public/app.js", import.meta.url)), type: "text/javascript; charset=utf-8" }
 } as const;
+const DEATH_PUBLICATION_IMAGE_KEYS=[
+  "dynasty-deaths-banner.png","dynasty-death-male-banner.png","dynasty-death-female-banner.png"
+] as const;
 
 function securityHeaders(response: ServerResponse): void {
   response.setHeader("x-content-type-options", "nosniff");
@@ -123,6 +126,17 @@ async function serveEspionageEventAsset(filename: string, response: ServerRespon
   securityHeaders(response);
   responseTiming(response);
   response.writeHead(200, { "content-type": "image/png", "cache-control": "public, max-age=3600" });
+  response.end(content);
+}
+
+async function serveDeathEventAsset(filename:string,response:ServerResponse):Promise<void> {
+  if (!(DEATH_PUBLICATION_IMAGE_KEYS as readonly string[]).includes(filename)) {
+    return json(response,404,{error:"NOT_FOUND"});
+  }
+  const content=await readFile(fileURLToPath(new URL(`../../assets/${filename}`,import.meta.url)));
+  securityHeaders(response);
+  responseTiming(response);
+  response.writeHead(200,{"content-type":"image/png","cache-control":"public, max-age=3600"});
   response.end(content);
 }
 
@@ -728,6 +742,9 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === "GET" && url.pathname.startsWith("/espionage-events/")) {
       return serveEspionageEventAsset(url.pathname.slice("/espionage-events/".length), response);
+    }
+    if (request.method === "GET" && url.pathname.startsWith("/death-events/")) {
+      return serveDeathEventAsset(url.pathname.slice("/death-events/".length),response);
     }
     if (request.method === "GET" && url.pathname in publicFiles) {
       return serveStatic(url.pathname as keyof typeof publicFiles, response);

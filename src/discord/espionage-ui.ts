@@ -125,19 +125,20 @@ export async function publishPendingEspionagePublications(
   const channels=new Map<string,Awaited<ReturnType<Client["channels"]["fetch"]>>>();
   for (const operation of await espionageService.pendingPublications(guildId)) {
     if (!isPlayerEspionageTarget(operation.target_type)) {
-      await espionageService.markPublicPosted(operation.id);
+      await espionageService.markPublicSkipped(operation.id,"Bu eski görev türü oyuncu olay yayınına açık değil.");
       continue;
     }
     const outcome:EspionagePublicationOutcome=operation.severity && operation.severity!=="NONE" ? "SUCCESS" : "FAILURE";
     try {
       const template=await espionageService.publicTemplate(guildId,operation.target_type,outcome);
       if (!template?.enabled) {
-        await espionageService.markPublicPosted(operation.id);
+        await espionageService.markPublicSkipped(operation.id,"Bu görev sonucunun olay şablonu panelden kapatılmış.");
         continue;
       }
       const channelId=operation.target_event_channel_id;
       if (!channelId) {
-        await espionageService.markPublicPosted(operation.id);
+        await espionageService.markPublicFailed(operation.id,"Hedef yerleşkenin olay kanalı eşleştirilmemiş.");
+        failed+=1;
         continue;
       }
       let channel=channels.get(channelId);
@@ -191,6 +192,8 @@ export async function publishPendingEspionagePublications(
       published+=1;
     } catch (error) {
       failed+=1;
+      const message=error instanceof Error?error.message:String(error);
+      await espionageService.markPublicFailed(operation.id,message).catch(()=>undefined);
       logger.error({error,guildId,operationId:operation.id},"Casusluk oyuncu olayı yayımlanamadı");
     }
   }

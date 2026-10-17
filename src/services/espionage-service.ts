@@ -79,6 +79,9 @@ export interface EspionageOperationView {
   resolved_at: Date | null;
   log_posted_at: Date | null;
   public_posted_at: Date | null;
+  public_delivery_status: "PENDING"|"PUBLISHED"|"FAILED"|"SKIPPED"|"UNKNOWN";
+  public_publish_attempts: number;
+  public_last_error: string|null;
 }
 
 export interface CapturedSpyView {
@@ -918,7 +921,32 @@ export const espionageService = {
   },
 
   async markPublicPosted(id: string): Promise<void> {
-    await pool.query("UPDATE espionage_operations SET public_posted_at=NOW() WHERE id=$1", [id]);
+    await pool.query(
+      `UPDATE espionage_operations
+          SET public_posted_at=NOW(),public_delivery_status='PUBLISHED',
+              public_publish_attempts=public_publish_attempts+1,public_last_error=NULL
+        WHERE id=$1`,
+      [id]
+    );
+  },
+
+  async markPublicFailed(id:string,error:string):Promise<void> {
+    await pool.query(
+      `UPDATE espionage_operations
+          SET public_delivery_status='FAILED',public_publish_attempts=public_publish_attempts+1,
+              public_last_error=$2
+        WHERE id=$1`,
+      [id,error.slice(0,1000)]
+    );
+  },
+
+  async markPublicSkipped(id:string,reason:string):Promise<void> {
+    await pool.query(
+      `UPDATE espionage_operations
+          SET public_posted_at=NOW(),public_delivery_status='SKIPPED',public_last_error=$2
+        WHERE id=$1`,
+      [id,reason.slice(0,1000)]
+    );
   },
 
   async adminList(guildId: string): Promise<EspionageOperationView[]> {

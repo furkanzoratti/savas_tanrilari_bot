@@ -38,6 +38,7 @@ function title(publication: DeathPublicationView): string {
 }
 
 function imageName(publication: DeathPublicationView): string {
+  if (publication.was_monarch) return "dynasty-deaths-banner.png";
   if (publication.subject_gender==="MALE") return "dynasty-death-male-banner.png";
   if (publication.subject_gender==="FEMALE") return "dynasty-death-female-banner.png";
   return "dynasty-deaths-banner.png";
