@@ -734,10 +734,20 @@ function romanVoteSource(vote) {
 function romanElectionVoterRows(republic, election) {
   const ballots = election.ballots || [];
   const byFamily = new Map(ballots.map((ballot) => [ballot.voterFamilyId, ballot]));
+  const preferences = new Map((election.npcPreferences || []).map((preference) => [preference.voterFamilyId, preference]));
   return republic.families.map((family) => {
     const ballot = byFamily.get(family.id);
     const senator = ballot?.senatorName || (family.members || []).find((member) => member.position === "HEAD" && member.status === "ALIVE")?.name || family.name;
-    if (!ballot) return `<div class="roman-ballot-row pending"><div><strong>${escapeHtml(family.name)}</strong><small>Senatör: ${escapeHtml(senator)}</small></div><span class="pill neutral">${Number(family.player_count) ? "Oyuncu oyu bekleniyor" : election.status === "OPEN" ? "NPC oyu kapanışta" : "Oy kullanılmadı"}</span></div>`;
+    if (!ballot) {
+      const preference = preferences.get(family.id);
+      if (!Number(family.player_count) && election.status === "OPEN") {
+        const effective = preference?.effectiveCandidateName
+          ? `${preference.effectiveCandidateName} · ${preference.effectiveCandidateFamilyName}` : "Aday bekleniyor";
+        const source = preference?.overrideCandidateId ? "Yönetici tercihi" : "Otomatik tahmin";
+        return `<div class="roman-ballot-row pending npc-preview"><div><strong>${escapeHtml(family.name)} · ${escapeHtml(senator)}</strong><small>${escapeHtml(source)}${preference?.predictedScore === null || preference?.predictedScore === undefined ? "" : ` · Karar puanı ${number(preference.predictedScore)}`}</small></div><div><b>${escapeHtml(effective)}</b><small>Oy, seçim kapanırken kesinleşir.</small></div>${(election.candidates || []).length ? `<button class="button compact" data-roman-npc-preference data-election-id="${election.id}" data-family-id="${family.id}">Değiştir</button>` : ""}</div>`;
+      }
+      return `<div class="roman-ballot-row pending"><div><strong>${escapeHtml(family.name)}</strong><small>Senatör: ${escapeHtml(senator)}</small></div><span class="pill neutral">${Number(family.player_count) ? "Oyuncu oyu bekleniyor" : "Oy kullanılmadı"}</span></div>`;
+    }
     return `<div class="roman-ballot-row"><div><strong>${escapeHtml(family.name)} · ${escapeHtml(senator)}</strong><small>${escapeHtml(romanVoteSource(ballot))}${ballot.npcScore === null || ballot.npcScore === undefined ? "" : ` · Karar puanı ${number(ballot.npcScore)}`}</small></div><div><b>${escapeHtml(ballot.candidateName)}</b><small>${escapeHtml(ballot.candidateFamilyName)} · ${number(ballot.seatWeight)} koltuk + ${number(ballot.influenceSpent)} nüfuz = ${number(ballot.totalWeight)}</small></div></div>`;
   }).join("");
 }
@@ -814,6 +824,26 @@ async function romanPoliticsPage() {
   document.querySelectorAll("[data-remove-roman-member]").forEach((button) => button.addEventListener("click", () => {
     const entry = members.get(button.dataset.removeRomanMember); if (entry) openRomanFamilyMemberRemovalEditor(entry.republic, entry.family, entry.member);
   }));
+  document.querySelectorAll("[data-roman-npc-preference]").forEach((button) => button.addEventListener("click", () => {
+    const republic = data.republics.find((item) => (item.elections || []).some((election) => election.id === button.dataset.electionId));
+    const election = republic?.elections?.find((item) => item.id === button.dataset.electionId);
+    const preference = election?.npcPreferences?.find((item) => item.voterFamilyId === button.dataset.familyId);
+    if (republic && election && preference) openRomanNpcElectionPreferenceEditor(republic, election, preference);
+  }));
+}
+
+function openRomanNpcElectionPreferenceEditor(republic, election, preference) {
+  const candidateOptions = (election.candidates || []).map((candidate) =>
+    `<option value="${candidate.id}" ${selected(candidate.id, preference.overrideCandidateId)}>${escapeHtml(candidate.candidateName)} · ${escapeHtml(candidate.familyName)}</option>`
+  ).join("");
+  openEditor("NPC seçim tercihini değiştir", `${preference.voterFamilyName} · ${preference.senatorName}`,
+    `<div class="preview-warning"><strong>Otomatik hesap: ${escapeHtml(preference.predictedCandidateName || "Henüz aday yok")}</strong><span>Yönetici tercihi seçersen bu aile seçim kapanırken belirlediğin adaya oy verir. “Otomatik hesapla” seçeneği ilişki, güven, rekabet, siyasi blok, itibar ve skandal puanlarını yeniden kullanır.</span></div><label>Oy verilecek aday<select id="roman-npc-preference-candidate"><option value="">Otomatik hesapla</option>${candidateOptions}</select></label><label>Değişiklik gerekçesi<textarea id="roman-npc-preference-reason" minlength="2" maxlength="300" rows="3" required placeholder="Örn. Senato dengesi için yönetici tercihi…"></textarea></label>`, async () => {
+      const candidateId = document.getElementById("roman-npc-preference-candidate").value || null;
+      await api(`/api/admin/roman-elections/${election.id}/npc-preferences/${preference.voterFamilyId}`, {
+        method: "POST", body: JSON.stringify({ candidateId, reason: document.getElementById("roman-npc-preference-reason").value })
+      });
+      closeEditor(); toast(`${preference.voterFamilyName} ailesinin seçim tercihi güncellendi.`); await refreshKeepingScroll(romanPoliticsPage);
+    });
 }
 
 function openRomanFamilyBusinessEditor(republic, family, catalog) {

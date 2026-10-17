@@ -17,6 +17,7 @@ const ACTION_LABELS: Record<string, string> = {
   "admin.panel.roman.member.update": "Roma aile üyesi güncellendi",
   "admin.panel.roman.member.death": "Roma aile üyesi öldü olarak işlendi",
   "admin.panel.roman.member.remove": "Roma aile üyesi kayıttan kaldırıldı",
+  "admin.panel.roman.election.npc_preference": "Roma NPC seçim tercihi güncellendi",
   "admin.panel.army.update": "Ordu bilgileri güncellendi",
   "admin.panel.army.unit.update": "Ordu mevcudu güncellendi",
   "admin.panel.army.create": "Yeni ordu oluşturuldu",

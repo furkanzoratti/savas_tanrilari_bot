@@ -645,6 +645,11 @@ async function processNpcMarriages(
         AND member.status='ALIVE' AND member.spouse_id IS NULL AND member.roman_spouse_id IS NULL AND member.age>=$2
         AND NOT EXISTS(SELECT 1 FROM espionage_captivities captivity
           WHERE captivity.captive_type='DYNASTY' AND captivity.captive_id=member.id AND captivity.status='HELD')
+        AND NOT EXISTS(SELECT 1 FROM dynasty_marriage_proposals proposal
+          WHERE proposal.status='PENDING'
+            AND member.id IN (proposal.proposer_member_id,proposal.target_member_id))
+        AND NOT EXISTS(SELECT 1 FROM roman_dynasty_marriage_proposals proposal
+          WHERE proposal.status='PENDING' AND proposal.dynasty_member_id=member.id)
       ORDER BY country.name,member.age DESC,member.name`,[guildId,MINIMUM_MARRIAGE_AGE]
   )).rows.map((row)=>({...row,age:Number(row.age)}));
   const possible:Array<{man:NpcMarriageCandidate;woman:NpcMarriageCandidate;score:number}>=[];
@@ -672,6 +677,16 @@ async function processNpcMarriages(
     const woman=await memberAcrossGuild(client,guildId,match.woman.id,true);
     if(!dynastyMemberCanMarry(man.age,man.status,man.spouse_id??man.roman_spouse_id??null)||
       !dynastyMemberCanMarry(woman.age,woman.status,woman.spouse_id??woman.roman_spouse_id??null))continue;
+    const pending=await client.query(
+      `SELECT 1 FROM dynasty_marriage_proposals proposal
+        WHERE proposal.status='PENDING'
+          AND (proposal.proposer_member_id=ANY($1::uuid[]) OR proposal.target_member_id=ANY($1::uuid[]))
+       UNION ALL
+       SELECT 1 FROM roman_dynasty_marriage_proposals proposal
+        WHERE proposal.status='PENDING' AND proposal.dynasty_member_id=ANY($1::uuid[])
+       LIMIT 1`,[[man.id,woman.id]]
+    );
+    if(pending.rowCount)continue;
     const proposal=(await client.query<{id:string}>(
       `INSERT INTO dynasty_marriage_proposals(
          guild_id,proposer_country_id,target_country_id,proposer_member_id,target_member_id,

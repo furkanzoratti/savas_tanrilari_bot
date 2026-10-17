@@ -568,7 +568,9 @@ export const romanRepublicService={
     });
   },
 
-  async nominate(input:{guildId:string;countryId:string;actorId:string;candidateName:string;gameMaster:boolean}):Promise<RomanRepublicView>{
+  async nominate(input:{guildId:string;countryId:string;actorId:string;candidateName:string;gameMaster:boolean}):Promise<{
+    view:RomanRepublicView;familyName:string;candidateName:string;influenceSpent:number;alreadyNominated:boolean;
+  }>{
     return withTransaction(async(client)=>{
       const republic=await republicRow(client,input.guildId,input.countryId);
       if(!republic)throw new GameError("Roma Cumhuriyeti kaydı bulunamadı.");
@@ -577,19 +579,38 @@ export const romanRepublicService={
       )).rows[0];
       if(!election)throw new GameError("Açık bir konsül seçimi bulunmuyor.");
       const memberFamilyId=await leaderFamily(client,republic.id,input.actorId,input.gameMaster);
-      const familyId=memberFamilyId??republic.current_consul_family_id;
+      const requestedCandidate=input.candidateName.trim();
+      const selectedMember=(await client.query<{id:string;name:string;family_id:string}>(
+        `SELECT member.id,member.name,member.family_id
+           FROM roman_family_members member
+           JOIN roman_families family ON family.id=member.family_id
+          WHERE family.republic_id=$1 AND family.status='ACTIVE' AND member.status='ALIVE'
+            AND (member.id::text=$2 OR LOWER(member.name)=LOWER($2))
+            AND ($3::boolean=TRUE OR member.family_id=$4)
+          ORDER BY member.position='HEAD' DESC,member.sort_order,member.age DESC
+          LIMIT 1`,
+        [republic.id,requestedCandidate,input.gameMaster,memberFamilyId]
+      )).rows[0];
+      if(!selectedMember)throw new GameError("Konsül adayı olacak yaşayan aile üyesi bulunamadı veya bu üye sizin ailenize ait değil.");
+      const familyId=input.gameMaster?selectedMember.family_id:memberFamilyId;
       if(!familyId)throw new GameError("Aday gösterilecek aile bulunamadı.");
       const family=(await client.query<{id:string;name:string;political_influence:number}>(
         "SELECT id,name,political_influence FROM roman_families WHERE id=$1 AND republic_id=$2 AND status='ACTIVE' FOR UPDATE",
         [familyId,republic.id]
       )).rows[0];
       if(!family)throw new GameError("Siyasi aile bulunamadı.");
-      const existingNomination=await client.query(
-        "SELECT 1 FROM roman_election_candidates WHERE election_id=$1 AND family_id=$2",[election.id,family.id]
-      );
-      if(existingNomination.rowCount)throw new GameError("Bu siyasi aile mevcut seçimde zaten bir konsül adayı gösterdi.");
+      const existingNomination=(await client.query<{candidate_name:string}>(
+        "SELECT candidate_name FROM roman_election_candidates WHERE election_id=$1 AND family_id=$2",[election.id,family.id]
+      )).rows[0];
+      if(existingNomination){
+        if(existingNomination.candidate_name.toLocaleLowerCase("tr-TR")===selectedMember.name.toLocaleLowerCase("tr-TR")){
+          return{view:(await viewWithClient(client,input.guildId,input.countryId))!,familyName:family.name,
+            candidateName:existingNomination.candidate_name,influenceSpent:0,alreadyNominated:true};
+        }
+        throw new GameError(`${family.name} mevcut seçimde zaten ${existingNomination.candidate_name} adlı adayı gösterdi.`);
+      }
       if(Number(family.political_influence)<ROMAN_CANDIDACY_INFLUENCE_COST)throw new GameError(`Adaylık için ${ROMAN_CANDIDACY_INFLUENCE_COST} siyasi nüfuz gerekir.`);
-      const candidateName=input.candidateName.trim();
+      const candidateName=selectedMember.name;
       if(candidateName.length<2||candidateName.length>80)throw new GameError("Aday adı 2-80 karakter olmalıdır.");
       const duplicateName=await client.query(
         "SELECT 1 FROM roman_election_candidates WHERE election_id=$1 AND LOWER(candidate_name)=LOWER($2)",[election.id,candidateName]
@@ -608,7 +629,8 @@ export const romanRepublicService={
         [family.id,turn,-ROMAN_CANDIDACY_INFLUENCE_COST,input.actorId,`${candidateName} konsüllüğe aday gösterildi`,JSON.stringify({electionId:election.id,candidateId:candidate.id})]
       );
       await audit(client,input.guildId,input.actorId,"ROMAN_ELECTION_NOMINATE","roman_election_candidate",candidate.id,{familyId:family.id,candidateName});
-      return (await viewWithClient(client,input.guildId,input.countryId))!;
+      return{view:(await viewWithClient(client,input.guildId,input.countryId))!,familyName:family.name,
+        candidateName,influenceSpent:ROMAN_CANDIDACY_INFLUENCE_COST,alreadyNominated:false};
     });
   },
 

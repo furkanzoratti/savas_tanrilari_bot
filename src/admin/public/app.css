@@ -675,6 +675,8 @@ textarea { resize: vertical; line-height: 1.45; }
 .roman-ballot-row > div:last-child { text-align: right; }.roman-ballot-row strong,.roman-ballot-row b,.roman-ballot-row small { display: block; }
 .roman-ballot-row strong,.roman-ballot-row b { font-size: 11px; }.roman-ballot-row small { margin-top: 2px; color: var(--muted); font-size: 9px; }
 .roman-ballot-row.pending { opacity: .76; }.roman-ballot-row.pending > span { justify-self: end; }
+.roman-ballot-row.npc-preview { grid-template-columns: minmax(0,1fr) minmax(130px,.8fr) auto; opacity: 1; }
+.roman-ballot-row.npc-preview > button { justify-self: end; }
 .roman-proposal-description { margin: 0; padding: 10px 11px 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
 .roman-vote-totals { display: grid; grid-template-columns: repeat(3,1fr); gap: 6px; padding: 10px; }
 .roman-vote-totals span { display: flex; justify-content: space-between; gap: 6px; padding: 7px; border-radius: 7px; background: var(--surface); font-size: 10px; }

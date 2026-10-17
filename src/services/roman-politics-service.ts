@@ -310,6 +310,13 @@ export async function ensureNpcElectionParticipation(client:DbClient,republicId:
         FROM roman_election_candidates candidate JOIN roman_families family ON family.id=candidate.family_id
        WHERE candidate.election_id=$1`,[election.id])).rows;
   if(!candidates.length)return;
+  const preferences=(await client.query<{voter_family_id:string;candidate_id:string}>(
+    `SELECT preference.voter_family_id,preference.candidate_id
+       FROM roman_election_npc_preferences preference
+       JOIN roman_election_candidates candidate ON candidate.id=preference.candidate_id
+      WHERE preference.election_id=$1 AND candidate.election_id=preference.election_id`,[election.id]
+  )).rows;
+  const preferredCandidateByFamily=new Map(preferences.map((preference)=>[preference.voter_family_id,preference.candidate_id]));
   for(const family of npcFamilies){
     const voted=await client.query("SELECT 1 FROM roman_election_ballots WHERE election_id=$1 AND voter_family_id=$2",[election.id,family.id]);
     if(voted.rowCount)continue;
@@ -322,7 +329,8 @@ export async function ensureNpcElectionParticipation(client:DbClient,republicId:
       ranked.push({candidateId:candidate.id,candidateFamilyId:candidate.family_id,score});
     }
     ranked.sort((left,right)=>right.score-left.score||left.candidateId.localeCompare(right.candidateId));
-    const selected=ranked[0]!;
+    const preferredCandidateId=preferredCandidateByFamily.get(family.id);
+    const selected=ranked.find((candidate)=>candidate.candidateId===preferredCandidateId)??ranked[0]!;
     const influenceSpent=Math.min(Number(family.political_influence),selected.score>=35?2:0);
     const seatWeight=Math.max(1,Number(family.senate_seats));
     const inserted=await client.query(

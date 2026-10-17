@@ -484,6 +484,16 @@ const server = createServer(async (request, response) => {
       if (!session) return;
       return json(response, 200, await adminPanelService.killDynastyMember(session.sub, dynastyMemberDeathMatch[1]!, await body(request)));
     }
+    const romanNpcElectionPreferenceMatch = request.method === "POST"
+      ? url.pathname.match(/^\/api\/admin\/roman-elections\/([0-9a-f-]+)\/npc-preferences\/([0-9a-f-]+)$/iu)
+      : null;
+    if (romanNpcElectionPreferenceMatch) {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminPanelService.setRomanNpcElectionPreference(
+        session.sub, romanNpcElectionPreferenceMatch[1]!, romanNpcElectionPreferenceMatch[2]!, await body(request)
+      ));
+    }
     const romanFamilyUpdateMatch = request.method === "PATCH"
       ? url.pathname.match(/^\/api\/admin\/roman-families\/([0-9a-f-]+)$/iu)
       : null;

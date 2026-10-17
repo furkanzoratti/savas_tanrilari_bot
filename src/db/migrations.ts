@@ -145,6 +145,7 @@ import { espionagePublicationsPanelMigration } from "./espionage-publications-pa
 import { espionagePublicationDeliveryMigration } from "./espionage-publication-delivery-migration.js";
 import { espionagePublicationActivationMigration } from "./espionage-publication-activation-migration.js";
 import { deathPublicationAutomationMigration } from "./death-publication-automation-migration.js";
+import { romanElectionNpcPreferencesMigration } from "./roman-election-npc-preferences-migration.js";
 
 export const migrations = [
   {
@@ -2507,5 +2508,6 @@ export const migrations = [
   espionagePublicationsPanelMigration,
   espionagePublicationDeliveryMigration,
   espionagePublicationActivationMigration,
-  deathPublicationAutomationMigration
+  deathPublicationAutomationMigration,
+  romanElectionNpcPreferencesMigration
 ] as const;

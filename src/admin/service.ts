@@ -40,7 +40,7 @@ import { diplomacyService } from "../services/diplomacy-service.js";
 import { warDeclarationService } from "../services/war-declaration-service.js";
 import { terminateCharacterDuties } from "../services/character-duty-lifecycle-service.js";
 import { romanRepublicService } from "../services/roman-republic-service.js";
-import { ROMAN_BUSINESSES } from "../domain/roman-republic.js";
+import { ROMAN_BUSINESSES,romanNpcDecisionScore,type RomanPoliticalBloc } from "../domain/roman-republic.js";
 
 const usableUnitTypes = (Object.keys(BATTLE_UNIT_STATS) as BattleUnitType[]).filter((unitType) => unitType !== "militia");
 const usableUnitTypeSet = new Set<string>(usableUnitTypes);
@@ -173,6 +173,11 @@ const romanFamilyMemberRemovalSchema = z.object({
 const romanFamilyBusinessPurchaseSchema = z.object({
   businessType: z.enum(["MARKET_STALL", "WORKSHOP", "BROTHEL", "BATHHOUSE", "LUDUS", "LATIFUNDIUM"]),
   settlementId: z.string().uuid(),
+  reason: z.string().trim().min(2).max(300)
+});
+
+const romanNpcElectionPreferenceSchema = z.object({
+  candidateId: z.string().uuid().nullable(),
   reason: z.string().trim().min(2).max(300)
 });
 
@@ -2143,6 +2148,53 @@ export const adminPanelService = {
            LEFT JOIN roman_families winner ON winner.id=election.winner_family_id
           WHERE election.republic_id=$1 ORDER BY election.sequence DESC LIMIT 4`,[republic.id]
       )).rows;
+      const electionIds=elections.map((election:any)=>election.id);
+      const preferences=electionIds.length?(await adminPool.query<{
+        election_id:string;voter_family_id:string;candidate_id:string;
+      }>(`SELECT election_id,voter_family_id,candidate_id
+            FROM roman_election_npc_preferences
+           WHERE election_id=ANY($1::uuid[])`,[electionIds])).rows:[];
+      const relations=(await adminPool.query<{
+        family_a_id:string;family_b_id:string;score:number;trust:number;rivalry:number;
+      }>(`SELECT family_a_id,family_b_id,score,trust,rivalry
+            FROM roman_family_relations WHERE republic_id=$1`,[republic.id])).rows;
+      const relationFor=(left:string,right:string)=>{
+        if(left===right)return{score:100,trust:100,rivalry:0};
+        return relations.find((relation)=>(relation.family_a_id===left&&relation.family_b_id===right)||
+          (relation.family_a_id===right&&relation.family_b_id===left))??{score:0,trust:50,rivalry:0};
+      };
+      const familyById=new Map(families.map((family:any)=>[family.id,family]));
+      for(const election of elections as any[]){
+        const ballotsByFamily=new Map((election.ballots??[]).map((ballot:any)=>[ballot.voterFamilyId,ballot]));
+        const preferenceByFamily=new Map(preferences.filter((preference)=>preference.election_id===election.id)
+          .map((preference)=>[preference.voter_family_id,preference.candidate_id]));
+        election.npcPreferences=families.filter((family:any)=>Number(family.player_count)===0).map((family:any)=>{
+          const ranked=(election.candidates??[]).map((candidate:any)=>{
+            const candidateFamily:any=familyById.get(candidate.familyId);
+            const relation=relationFor(family.id,candidate.familyId);
+            const score=romanNpcDecisionScore({seed:`election:${election.id}:${family.id}:${candidate.id}`,
+              bloc:family.political_bloc as RomanPoliticalBloc,category:"ADMINISTRATION",
+              relationScore:Number(relation.score),trust:Number(relation.trust),rivalry:Number(relation.rivalry),
+              proposerReputation:Number(candidateFamily?.reputation??50),proposerScandal:Number(candidateFamily?.scandal??0),
+              selfTarget:family.id===candidate.familyId});
+            return{candidateId:candidate.id,candidateName:candidate.candidateName,candidateFamilyName:candidate.familyName,score};
+          }).sort((left:any,right:any)=>right.score-left.score||left.candidateId.localeCompare(right.candidateId));
+          const automatic=ranked[0]??null;
+          const overrideCandidateId=preferenceByFamily.get(family.id) as string|undefined;
+          const override=ranked.find((candidate:any)=>candidate.candidateId===overrideCandidateId)??null;
+          const ballot:any=ballotsByFamily.get(family.id);
+          return{voterFamilyId:family.id,voterFamilyName:family.name,
+            senatorName:(family.members??[]).find((member:any)=>member.position==="HEAD"&&member.status==="ALIVE")?.name??family.name,
+            predictedCandidateId:automatic?.candidateId??null,predictedCandidateName:automatic?.candidateName??null,
+            predictedCandidateFamilyName:automatic?.candidateFamilyName??null,predictedScore:automatic?.score??null,
+            overrideCandidateId:override?.candidateId??null,overrideCandidateName:override?.candidateName??null,
+            overrideCandidateFamilyName:override?.candidateFamilyName??null,
+            effectiveCandidateId:override?.candidateId??automatic?.candidateId??null,
+            effectiveCandidateName:override?.candidateName??automatic?.candidateName??null,
+            effectiveCandidateFamilyName:override?.candidateFamilyName??automatic?.candidateFamilyName??null,
+            alreadyVoted:Boolean(ballot)};
+        });
+      }
       const proposals=(await adminPool.query(
         `SELECT proposal.id,proposal.proposal_type,proposal.category,proposal.title,proposal.description,
                 proposal.status,proposal.threshold_percent,proposal.opened_turn,proposal.closes_turn,proposal.resolved_turn,
@@ -2169,6 +2221,52 @@ export const adminPanelService = {
       businessCatalog:Object.entries(ROMAN_BUSINESSES).map(([value,business])=>({value,...business})),
       republics:result
     };
+  },
+
+  async setRomanNpcElectionPreference(actorId:string,electionId:string,familyId:string,rawInput:unknown){
+    const input=romanNpcElectionPreferenceSchema.parse(rawInput);
+    return withAdminTransaction(async(client)=>{
+      const election=(await client.query<{id:string;republic_id:string}>(
+        `SELECT election.id,election.republic_id
+           FROM roman_elections election
+           JOIN roman_republics republic ON republic.id=election.republic_id
+          WHERE election.id=$1 AND republic.guild_id=$2 AND election.status='OPEN'
+          FOR UPDATE OF election`,[electionId,adminConfig.guildId]
+      )).rows[0];
+      if(!election)throw new Error("Açık konsül seçimi bulunamadı.");
+      const family=(await client.query<{id:string;name:string}>(
+        `SELECT family.id,family.name FROM roman_families family
+          WHERE family.id=$1 AND family.republic_id=$2 AND family.status='ACTIVE'
+            AND NOT EXISTS(SELECT 1 FROM roman_family_players player
+              WHERE player.family_id=family.id AND player.status='ACTIVE')`,[familyId,election.republic_id]
+      )).rows[0];
+      if(!family)throw new Error("Yalnızca oyuncusuz Roma ailelerinin otomatik oy tercihi değiştirilebilir.");
+      if((await client.query("SELECT 1 FROM roman_election_ballots WHERE election_id=$1 AND voter_family_id=$2",[election.id,family.id])).rowCount){
+        throw new Error("Bu aile oyunu zaten kullandığı için tercihi değiştirilemez.");
+      }
+      let candidateName:string|null=null;
+      if(input.candidateId){
+        const candidate=(await client.query<{candidate_name:string}>(
+          "SELECT candidate_name FROM roman_election_candidates WHERE id=$1 AND election_id=$2",
+          [input.candidateId,election.id]
+        )).rows[0];
+        if(!candidate)throw new Error("Seçilen konsül adayı bu seçime ait değil.");
+        candidateName=candidate.candidate_name;
+        await client.query(
+          `INSERT INTO roman_election_npc_preferences(election_id,voter_family_id,candidate_id,set_by)
+           VALUES($1,$2,$3,$4)
+           ON CONFLICT(election_id,voter_family_id) DO UPDATE
+             SET candidate_id=EXCLUDED.candidate_id,set_by=EXCLUDED.set_by,updated_at=NOW()`,
+          [election.id,family.id,input.candidateId,actorId]
+        );
+      }else{
+        await client.query("DELETE FROM roman_election_npc_preferences WHERE election_id=$1 AND voter_family_id=$2",[election.id,family.id]);
+      }
+      await writeAdminAudit(client,actorId,"admin.panel.roman.election.npc_preference","roman_election",election.id,{
+        familyId:family.id,familyName:family.name,candidateId:input.candidateId,candidateName,reason:input.reason
+      });
+      return{ok:true,familyName:family.name,candidateName};
+    });
   },
 
   async purchaseRomanFamilyBusiness(actorId:string,familyId:string,rawInput:unknown){

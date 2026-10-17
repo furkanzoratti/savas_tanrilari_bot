@@ -566,11 +566,12 @@ export async function handleRomanRepublicAutocomplete(interaction:AutocompleteIn
         .slice(0,25).map((candidate)=>({name:`${candidate.candidateName} • ${candidate.familyName}`.slice(0,100),value:candidate.id})));
       return true;
     }
-    const families=ownFamily?[ownFamily]:gameMaster?view.families:[];
+    const families=gameMaster&&action==="aday-ol"?view.families:ownFamily?[ownFamily]:gameMaster?view.families:[];
     const members=families.flatMap((family)=>family.members.map((member)=>({family,member})));
     await interaction.respond(members.filter(({family,member})=>!query||
       `${member.name} ${family.name}`.toLocaleLowerCase("tr-TR").includes(query))
-      .slice(0,25).map(({family,member})=>({name:`${member.name} • ${family.name}`.slice(0,100),value:member.name})));
+      .slice(0,25).map(({family,member})=>({name:`${member.name} • ${family.name}`.slice(0,100),
+        value:action==="aday-ol"?member.id:member.name})));
     return true;
   }
   if(focused.name==="uye"||focused.name==="ebeveyn"){
@@ -834,11 +835,14 @@ export async function handleRomanRepublicCommand(interaction:ChatInputCommandInt
       return true;
     }
     if(action==="aday-ol"){
-      const updated=await romanRepublicService.nominate({
+      const result=await romanRepublicService.nominate({
         guildId:interaction.guildId,countryId:country.id,actorId:interaction.user.id,
         candidateName:interaction.options.getString("aday",true),gameMaster:isGameMaster(interaction)
       });
-      await interaction.editReply({content:`✅ **${ownFamily.name}** ailesinin konsül adayı kaydedildi; **${ROMAN_CANDIDACY_INFLUENCE_COST} nüfuz** harcandı.`,embeds:[electionEmbed(updated)],components:electionComponents(updated),files:romanFiles("election")});
+      await interaction.editReply({content:result.alreadyNominated
+        ?`ℹ️ **${result.familyName}** ailesinin adayı **${result.candidateName}** zaten kayıtlıydı; yeniden nüfuz harcanmadı.`
+        :`✅ **${result.familyName}** ailesinin konsül adayı **${result.candidateName}** kaydedildi; **${result.influenceSpent} nüfuz** harcandı.`,
+        embeds:[electionEmbed(result.view)],components:electionComponents(result.view),files:romanFiles("election")});
       await syncRomanPublicPanel(interaction.client,interaction.guildId,country.id);
       return true;
     }

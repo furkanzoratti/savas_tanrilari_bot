@@ -30,4 +30,15 @@ describe("Operasyon Masası Roma Siyaseti sayfası",()=>{
     expect(app).toContain("romanElectionVoterRows");
     expect(app).toContain("romanProposalVoterRows");
   });
+
+  it("NPC ailelerin tahmini konsül oylarını gösterir ve yönetici tercihini kaydeder",()=>{
+    const service=read("./service.ts");
+    const server=read("./server.ts");
+    const app=read("./public/app.js");
+    expect(service).toContain("romanNpcDecisionScore");
+    expect(service).toContain("setRomanNpcElectionPreference");
+    expect(server).toContain("npc-preferences");
+    expect(app).toContain("Otomatik tahmin");
+    expect(app).toContain("data-roman-npc-preference");
+  });
 });
