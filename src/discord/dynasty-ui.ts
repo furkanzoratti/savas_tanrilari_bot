@@ -503,7 +503,7 @@ export async function handleDynastyCommand(interaction:ChatInputCommandInteracti
       }):null;
       const result=crossResult??await dynastyService.attemptBirth({
         guildId:interaction.guildId,countryId:country.id,actorId:interaction.user.id,
-        parentMemberId,dynastyId:view.id
+        parentMemberId,dynastyId:view.id,allowAnyMarriedMember:true
       });
       await interaction.editReply({content:birthResultMessage(result),components:birthNameButton(result)});
       await refreshDynastyCard(interaction.client,view.id);
@@ -650,7 +650,7 @@ export async function handleDynastyCommand(interaction:ChatInputCommandInteracti
     });
     const result=crossResult??await dynastyService.attemptBirth({
       guildId:interaction.guildId,countryId:country.id,actorId:interaction.user.id,
-      parentMemberId,allowAnyMarriedMember:true
+      parentMemberId,allowAnyMarriedMember:true,allowManager:true
     });
     await interaction.editReply({content:birthResultMessage(result),components:birthNameButton(result)});
     await refreshDynastyCard(interaction.client,view.id);
@@ -810,11 +810,17 @@ export async function handleDynastyAutocomplete(interaction:AutocompleteInteract
   if(focused.name==="ebeveyn"&&sub==="cocuk-dene"){
     const context=await playerDynastyContext(interaction);
     const view=context?.view??null;
-    const monarch=view?.members.find((member)=>member.status==="ALIVE"&&member.is_monarch);
-    const candidates=(view?.members??[]).filter((member)=>{
-      if(member.status!=="ALIVE"||(!member.spouse_id&&!member.roman_spouse_id))return false;
-      if(interaction.commandName==="hanedan-yonetim")return true;
-      return member.id!==monarch?.id&&(member.mother_id===monarch?.id||member.father_id===monarch?.id);
+    const eligible=(view?.members??[])
+      .filter((member)=>member.status==="ALIVE"&&Boolean(member.spouse_id||member.roman_spouse_id))
+      .sort((left,right)=>Number(right.is_monarch)-Number(left.is_monarch)||left.name.localeCompare(right.name,"tr"));
+    const seenCouples=new Set<string>();
+    const candidates=eligible.filter((member)=>{
+      const pairKey=member.spouse_id
+        ?[member.id,member.spouse_id].sort().join("|")
+        :`roman|${member.id}|${member.roman_spouse_id}`;
+      if(seenCouples.has(pairKey))return false;
+      seenCouples.add(pairKey);
+      return true;
     });
     await interaction.respond(candidates
       .filter((member)=>!query||(member.name+" "+member.title+" "+member.spouse_name).toLocaleLowerCase("tr-TR").includes(query))

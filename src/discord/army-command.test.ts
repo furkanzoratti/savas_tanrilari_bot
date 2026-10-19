@@ -5,7 +5,7 @@ describe("kalıcı ordu komutları", () => {
   it("oyuncuya ordu kurma, asker ve komutan yönetimi sunar", () => {
     const army = commandBuilders.find((command) => command.name === "ordu");
     expect(army?.options?.map((option) => option.name)).toEqual([
-      "olustur", "asker-ekle", "asker-cikar", "kusatma-aleti-ekle", "kusatma-aleti-cikar",
+      "olustur", "asker-ekle", "asker-cikar", "havuzu-ekle", "birlestir", "kusatma-aleti-ekle", "kusatma-aleti-cikar",
       "komutan-ata", "komutan-kaldir", "bilgi", "dagit"
     ]);
     const add = army?.options?.find((option) => option.name === "asker-ekle");
@@ -15,6 +15,12 @@ describe("kalıcı ordu komutları", () => {
     expect(add?.options?.find((option) => option.name === "yerleske")).toMatchObject({ required: true, autocomplete: true });
     const addAsset = army?.options?.find((option) => option.name === "kusatma-aleti-ekle");
     expect(addAsset?.options?.find((option) => option.name === "alet")).toMatchObject({ required: true, autocomplete: true });
+    expect(army?.options?.find((option)=>option.name==="havuzu-ekle")?.options?.find((option)=>option.name==="ordu"))
+      .toMatchObject({required:true,autocomplete:true});
+    expect(army?.options?.find((option)=>option.name==="birlestir")?.options?.map((option)=>option.name))
+      .toEqual(["hedef-ordu","kaynak-ordu","onay"]);
+    expect(army?.options?.find((option)=>option.name==="birlestir")?.options?.find((option)=>option.name==="onay"))
+      .toMatchObject({required:true});
   });
 
   it("mevcut kadro komutunu korur ve yöneticiye ordu ekleme komutu verir", () => {

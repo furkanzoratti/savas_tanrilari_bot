@@ -210,6 +210,43 @@ export const cityService = {
     return (await pool.query<AcademyTrainingSession>("SELECT * FROM academy_training_sessions WHERE id=$1 AND country_id=$2", [sessionId, countryId])).rows[0] ?? null;
   },
 
+  async pendingTrainingSettlements(countryId: string): Promise<Array<{
+    settlement_id: string; settlement_name: string; status: "PENDING_ROLL" | "AWAITING_NAME";
+  }>> {
+    return (await pool.query<{
+      settlement_id: string; settlement_name: string; status: "PENDING_ROLL" | "AWAITING_NAME";
+    }>(
+      `SELECT session.settlement_id,settlement.name AS settlement_name,session.status
+         FROM academy_training_sessions session
+         JOIN settlements settlement ON settlement.id=session.settlement_id
+        WHERE session.country_id=$1 AND session.status IN ('PENDING_ROLL','AWAITING_NAME')
+        ORDER BY lower(settlement.name),session.created_at`,
+      [countryId]
+    )).rows;
+  },
+
+  async cancelTraining(input: {
+    guildId: string; actorId: string; countryId: string; settlementId: string;
+  }): Promise<{ settlementName: string; cancelled: number }> {
+    return withTransaction(async (client) => {
+      await getCountry(client, input.guildId, input.countryId);
+      const settlement = await getSettlement(client, input.countryId, input.settlementId, true);
+      const cancelled = await client.query<{ id: string }>(
+        `UPDATE academy_training_sessions
+            SET status='CANCELLED'
+          WHERE country_id=$1 AND settlement_id=$2
+            AND status IN ('PENDING_ROLL','AWAITING_NAME')
+          RETURNING id`,
+        [input.countryId, settlement.id]
+      );
+      if (!cancelled.rowCount) throw new GameError("Bu Akademide iptal edilebilecek bekleyen bir eğitim bulunmuyor.");
+      await audit(client, input.guildId, input.actorId, "ACADEMY_TRAINING_CANCEL", "settlement", settlement.id, {
+        cancelledSessionIds: cancelled.rows.map((row) => row.id)
+      });
+      return { settlementName: settlement.name, cancelled: cancelled.rowCount ?? cancelled.rows.length };
+    });
+  },
+
   async rollTraining(input: { guildId: string; actorId: string; countryId: string; sessionId: string }): Promise<AcademyTrainingSession> {
     return withTransaction(async (client) => {
       const country = await getCountry(client, input.guildId, input.countryId);

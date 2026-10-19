@@ -17,4 +17,11 @@ describe("dynasty pending birth recovery",()=>{
     expect(service).toContain("success:false,resumed:false");
     expect(service).toContain("pendingBirthId:null");
   });
+
+  it("hane oyuncusunun bütün yaşayan evli çiftleri seçmesine izin verirken yönetici geçişini ayrı tutar",()=>{
+    expect(ui).toContain("parentMemberId,dynastyId:view.id,allowAnyMarriedMember:true");
+    expect(service).toContain("allowAnyMarriedMember?:boolean;allowManager?:boolean");
+    expect(service).toContain("pendingName.initiated_by!==input.actorId&&!input.allowManager");
+    expect(service).toContain("managerOverride:Boolean(input.allowManager)");
+  });
 });

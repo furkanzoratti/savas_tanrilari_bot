@@ -149,6 +149,7 @@ import { romanElectionNpcPreferencesMigration } from "./roman-election-npc-prefe
 import { eventPublicationStatusMigration } from "./event-publication-status-migration.js";
 import { greatProjectsMigration } from "./great-projects-migration.js";
 import { nobleTraitsMigration } from "./noble-traits-migration.js";
+import { nilAcademyPendingCleanupMigration } from "./nil-academy-pending-cleanup-migration.js";
 
 export const migrations = [
   {
@@ -2515,5 +2516,6 @@ export const migrations = [
   romanElectionNpcPreferencesMigration,
   eventPublicationStatusMigration,
   greatProjectsMigration,
-  nobleTraitsMigration
+  nobleTraitsMigration,
+  nilAcademyPendingCleanupMigration
 ] as const;

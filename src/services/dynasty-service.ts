@@ -1142,7 +1142,7 @@ export const dynastyService={
 
   async attemptBirth(input:{
     guildId:string;countryId:string;actorId:string;parentMemberId?:string|null;
-    allowAnyMarriedMember?:boolean;dynastyId?:string;
+    allowAnyMarriedMember?:boolean;allowManager?:boolean;dynastyId?:string;
   }):Promise<{
     success:boolean;resumed:boolean;attemptRoll:number;ageModifier:number;pendingBirthId:string|null;childGender:DynastyGender|null;
     genderRoll:number|null;complication:"DEATH"|"ILLNESS"|"HEALTHY"|null;complicationRoll:number|null;
@@ -1170,7 +1170,7 @@ export const dynastyService={
         [dynasty.id]
       )).rows[0];
       if(pendingName){
-        if(pendingName.initiated_by!==input.actorId&&!input.allowAnyMarriedMember)
+        if(pendingName.initiated_by!==input.actorId&&!input.allowManager)
           throw new GameError("Bu hanedanda başka bir oyuncunun isimlendirmesini bekleyen çocuk bulunuyor. Doğum zarını atan oyuncu `/hanedan cocuk-dene` komutuyla isimlendirme formunu yeniden açabilir.");
         return{
           success:true,resumed:true,attemptRoll:Number(pendingName.attempt_roll),ageModifier:Number(pendingName.age_modifier),
@@ -1194,7 +1194,7 @@ export const dynastyService={
       });
       const managerBirthParent=input.allowAnyMarriedMember&&parent.status==="ALIVE"&&Boolean(parent.spouse_id);
       if(!regularBirthParent&&!managerBirthParent)
-        throw new GameError("Yalnızca hükümdar, hükümdarın evli doğrudan çocuğu veya yönetici tarafından seçilen yaşayan ve evli bir hanedan üyesi için gebelik zarı atılabilir.");
+        throw new GameError("Yalnızca hanedandaki yaşayan ve evli bir çift için gebelik zarı atılabilir.");
       if(!parent.spouse_id)throw new GameError((parent.id===ruler.id?"Hükümdarın":"Seçilen hanedan üyesinin")+" yaşayan bir eşi bulunmalıdır.");
       const spouse=await memberAcrossGuild(client,input.guildId,parent.spouse_id,true);
       if(spouse.status!=="ALIVE")throw new GameError((parent.id===ruler.id?"Hükümdarın":"Seçilen hanedan üyesinin")+" yaşayan bir eşi bulunmalıdır.");
@@ -1245,8 +1245,9 @@ export const dynastyService={
       }
       const genderRoll=randomInt(1,3);
       const childGender=newbornGender(genderRoll);
-      const directMonarchChild=parent.mother_id===ruler.id||parent.father_id===ruler.id;
-      const childRelation=parent.id===ruler.id
+      const rulerCouple=parent.id===ruler.id||spouse.id===ruler.id;
+      const directMonarchChild=[parent,spouse].some((member)=>member.mother_id===ruler.id||member.father_id===ruler.id);
+      const childRelation=rulerCouple
         ?"Hükümdarın çocuğu"
         :directMonarchChild
           ?"Hükümdarın torunu"
@@ -1264,7 +1265,7 @@ export const dynastyService={
       await addEvent(client,dynasty.id,turn,"BIRTH_AWAITING_NAME",mother.id,{
         pendingBirthId:pending.id,gender:childGender,motherName:mother.name,fatherName:father.name,
         parentMemberId:parent.id,attemptRoll,modifier,genderRoll,complicationRoll,complication,
-        managerOverride:Boolean(input.allowAnyMarriedMember)
+        managerOverride:Boolean(input.allowManager)
       });
       if(complication==="ILLNESS"){
         await client.query(

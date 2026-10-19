@@ -9,7 +9,7 @@ describe("şehir geliştirme ve Akademi komutları", () => {
     const pantheon = commandBuilders.find((command) => command.name === "panteon");
 
     expect(policy?.options?.map((option) => option.name)).toEqual(["uygula", "kaldir", "liste"]);
-    expect(academy?.options?.map((option) => option.name)).toEqual(["egit", "karakterler", "ata", "gorevden-al", "karakteri-gorevden-al"]);
+    expect(academy?.options?.map((option) => option.name)).toEqual(["egit", "karakterler", "ata", "gorevden-al", "karakteri-gorevden-al", "egitimi-iptal-et"]);
     expect(pantheon?.options?.map((option) => option.name)).toEqual(["kredi-al", "kredi-ode"]);
   });
 
@@ -62,6 +62,12 @@ describe("şehir geliştirme ve Akademi komutları", () => {
     const expectedRoles = ["SPY", "MERCHANT", "COMMANDER", "DIPLOMAT"];
     expect(train?.options?.find((option) => option.name === "elenen-gorev")?.choices?.map((choice) => choice.value)).toEqual(expectedRoles);
     expect(train?.options?.find((option) => option.name === "secilen-gorev")?.choices?.map((choice) => choice.value)).toEqual(expectedRoles);
+  });
+
+  it("tamamlanmamış Akademi eğitimini yerleşke bazında iptal ettirir",()=>{
+    const academy=commandBuilders.find((command)=>command.name==="akademi");
+    const cancel=academy?.options?.find((option)=>option.name==="egitimi-iptal-et");
+    expect(cancel?.options?.find((option)=>option.name==="yerleske")).toMatchObject({required:true,autocomplete:true});
   });
 
   it("bina yıkımında yerleşke ve bina seçimlerini otomatik tamamlar", () => {

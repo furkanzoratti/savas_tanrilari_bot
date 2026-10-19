@@ -10,6 +10,7 @@ describe("dynasty Discord commands",()=>{
     ]);
     expect(command?.options?.find((option)=>option.name==="kisi")?.options?.map((option)=>option.name)).toEqual(["uye","ulke"]);
     expect(command?.options?.find((option)=>option.name==="cocuk-dene")?.options?.map((option)=>option.name)).toEqual(["ulke","ebeveyn"]);
+    expect(command?.options?.find((option)=>option.name==="cocuk-dene")?.description).toContain("evli bir çift");
     expect(command?.options?.find((option)=>option.name==="evlilik-teklif")?.options?.map((option)=>option.name)).toEqual([
       "uye","hedef-ulke","hedef-uye","ulke"
     ]);

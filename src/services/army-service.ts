@@ -147,6 +147,13 @@ async function assertMutable(client: DbClient, armyId: string): Promise<void> {
   if (active.rowCount) throw new GameError("Bu ordu etkin bir savaşa bağlıyken kadrosu, komutanı veya kaydı değiştirilemez.");
   const raid = await client.query("SELECT 1 FROM land_raids WHERE army_id=$1 AND status='WAITING_ROLL' LIMIT 1",[armyId]);
   if (raid.rowCount) throw new GameError("Bu ordu sonuçlanmayı bekleyen bir yağma formuna bağlıyken değiştirilemez.");
+  const embarked = await client.query(
+    `SELECT 1 FROM battle_side_participants participant
+       JOIN battles battle ON battle.id=participant.battle_id
+      WHERE participant.embarked_army_id=$1 AND battle.status NOT IN ('FINISHED','CANCELLED') LIMIT 1`,
+    [armyId]
+  );
+  if (embarked.rowCount) throw new GameError("Bu ordu etkin bir deniz savaşında taşınıyorken değiştirilemez.");
 }
 
 export const armyService = {
@@ -341,6 +348,109 @@ export const armyService = {
       await client.query("UPDATE armies SET updated_at=NOW() WHERE id=$1", [army.id]);
       await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'army.units.add','army',$3,$4::jsonb)", [input.guildId, input.actorId, army.id, JSON.stringify({ settlementId: settlement.id, unitType: input.unitType, quantity: input.quantity })]);
       return loadArmy(client, army.id, input.countryId);
+    });
+  },
+
+  async allocateEntirePool(input: {
+    guildId: string; countryId: string; actorId: string; army: string;
+  }): Promise<{ army: ArmyView; allocated: number; settlements: number; unitTypes: number }> {
+    return withTransaction(async (client) => {
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`army-pool:${input.countryId}`]);
+      const army = await resolveArmy(client, input.countryId, input.army, true);
+      await assertMutable(client, army.id);
+      await client.query("SELECT id FROM settlements WHERE country_id=$1 FOR UPDATE", [input.countryId]);
+      const available = (await client.query<{
+        settlement_id: string; settlement_name: string; unit_type: BattleUnitType; available: number;
+      }>(
+        `WITH stock AS (
+           SELECT stack.settlement_id,stack.unit_type,SUM(stack.quantity)::integer AS quantity
+             FROM unit_stacks stack
+             JOIN settlements settlement ON settlement.id=stack.settlement_id
+            WHERE settlement.country_id=$1 AND stack.force_type='ARMY'
+            GROUP BY stack.settlement_id,stack.unit_type
+         ), allocated AS (
+           SELECT unit.settlement_id,unit.unit_type,SUM(unit.quantity)::integer AS quantity
+             FROM army_units unit
+             JOIN settlements settlement ON settlement.id=unit.settlement_id
+            WHERE settlement.country_id=$1
+            GROUP BY unit.settlement_id,unit.unit_type
+         )
+         SELECT stock.settlement_id,settlement.name AS settlement_name,stock.unit_type,
+                GREATEST(0,stock.quantity-COALESCE(allocated.quantity,0))::integer AS available
+           FROM stock
+           JOIN settlements settlement ON settlement.id=stock.settlement_id
+           LEFT JOIN allocated ON allocated.settlement_id=stock.settlement_id AND allocated.unit_type=stock.unit_type
+          WHERE stock.unit_type<>'militia' AND stock.quantity>COALESCE(allocated.quantity,0)
+          ORDER BY settlement.name,stock.unit_type`,
+        [input.countryId]
+      )).rows.filter((row) => Boolean(BATTLE_UNIT_STATS[row.unit_type]) && Number(row.available) > 0);
+      if (!available.length) throw new GameError("Asker havuzunda bu orduya aktarılabilecek birlik bulunmuyor.");
+      for (const row of available) {
+        await client.query(
+          `INSERT INTO army_units(army_id,settlement_id,origin_settlement_name,unit_type,quantity)
+           VALUES($1,$2,$3,$4,$5)
+           ON CONFLICT(army_id,settlement_id,unit_type) DO UPDATE
+             SET quantity=army_units.quantity+EXCLUDED.quantity`,
+          [army.id,row.settlement_id,row.settlement_name,row.unit_type,Number(row.available)]
+        );
+      }
+      const allocated = available.reduce((sum,row) => sum+Number(row.available),0);
+      const settlements = new Set(available.map((row) => row.settlement_id)).size;
+      const unitTypes = new Set(available.map((row) => row.unit_type)).size;
+      await client.query("UPDATE armies SET updated_at=NOW() WHERE id=$1", [army.id]);
+      await client.query(
+        "INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'army.pool.allocate','army',$3,$4::jsonb)",
+        [input.guildId,input.actorId,army.id,JSON.stringify({allocated,settlements,unitTypes})]
+      );
+      return { army: await loadArmy(client,army.id,input.countryId), allocated, settlements, unitTypes };
+    });
+  },
+
+  async merge(input: {
+    guildId: string; countryId: string; actorId: string; targetArmy: string; sourceArmy: string;
+  }): Promise<{ army: ArmyView; sourceName: string; movedPersonnel: number; movedSiegeAssets: number; releasedCommander: string | null }> {
+    return withTransaction(async (client) => {
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`army-merge:${input.countryId}`]);
+      const target = await resolveArmy(client,input.countryId,input.targetArmy,true);
+      const source = await resolveArmy(client,input.countryId,input.sourceArmy,true);
+      if(target.id===source.id)throw new GameError("Bir ordu kendisiyle birleştirilemez. Farklı bir kaynak ordu seçin.");
+      await assertMutable(client,target.id);
+      await assertMutable(client,source.id);
+
+      await client.query(
+        `INSERT INTO army_units(army_id,settlement_id,origin_settlement_name,unit_type,quantity)
+         SELECT $1,settlement_id,origin_settlement_name,unit_type,quantity FROM army_units WHERE army_id=$2
+         ON CONFLICT(army_id,settlement_id,unit_type) DO UPDATE
+           SET quantity=army_units.quantity+EXCLUDED.quantity,
+               origin_settlement_name=COALESCE(army_units.origin_settlement_name,EXCLUDED.origin_settlement_name)`,
+        [target.id,source.id]
+      );
+      await client.query(
+        `INSERT INTO army_siege_assets(army_id,settlement_id,asset_type,quantity,enhanced_quantity)
+         SELECT $1,settlement_id,asset_type,quantity,enhanced_quantity FROM army_siege_assets WHERE army_id=$2
+         ON CONFLICT(army_id,settlement_id,asset_type) DO UPDATE
+           SET quantity=army_siege_assets.quantity+EXCLUDED.quantity,
+               enhanced_quantity=army_siege_assets.enhanced_quantity+EXCLUDED.enhanced_quantity`,
+        [target.id,source.id]
+      );
+      const movedPersonnel=source.total;
+      const movedSiegeAssets=source.siegeAssets.reduce((sum,item)=>sum+item.quantity,0);
+      if(source.commander_character_id){
+        await client.query("UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL WHERE id=$1",[source.commander_character_id]);
+      }
+      await client.query("DELETE FROM armies WHERE id=$1",[source.id]);
+      await client.query("UPDATE armies SET updated_at=NOW() WHERE id=$1",[target.id]);
+      await client.query(
+        "INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'army.merge','army',$3,$4::jsonb)",
+        [input.guildId,input.actorId,target.id,JSON.stringify({
+          sourceArmyId:source.id,sourceArmyName:source.name,movedPersonnel,movedSiegeAssets,
+          releasedCommanderId:source.commander_character_id
+        })]
+      );
+      return {
+        army:await loadArmy(client,target.id,input.countryId),sourceName:source.name,movedPersonnel,movedSiegeAssets,
+        releasedCommander:source.commander_name
+      };
     });
   },
 

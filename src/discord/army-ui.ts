@@ -1,5 +1,6 @@
 import { MessageFlags, type ChatInputCommandInteraction } from "discord.js";
 import type { BattleUnitType } from "../domain/battle.js";
+import { number } from "../domain/format.js";
 import type { MobileSiegeAssetType } from "../services/army-service.js";
 import { armyService } from "../services/army-service.js";
 import { GameError } from "../services/game-service.js";
@@ -40,6 +41,36 @@ export async function handleArmyCommand(interaction: ChatInputCommandInteraction
     for (const page of pages.slice(1)) {
       await interaction.followUp({ embeds: page, flags: MessageFlags.Ephemeral });
     }
+    return;
+  }
+  if (sub === "havuzu-ekle") {
+    const result = await armyService.allocateEntirePool({
+      guildId: interaction.guildId, countryId: country.id, actorId: interaction.user.id,
+      army: interaction.options.getString("ordu", true)
+    });
+    await interaction.editReply({
+      content: `✅ Asker havuzundaki **${number(result.allocated)} asker**, **${result.army.name}** ordusuna tahsis edildi.\n`+
+        `Kaynak: **${number(result.settlements)} yerleşke** • Birlik türü: **${number(result.unitTypes)}**`,
+      embeds: [renderArmyEmbed(result.army)]
+    });
+    return;
+  }
+  if (sub === "birlestir") {
+    if(interaction.options.getString("onay",true).trim().toLocaleUpperCase("tr-TR")!=="BIRLESTIR")
+      throw new GameError("Orduları birleştirmek için onay alanına BIRLESTIR yazın.");
+    const result = await armyService.merge({
+      guildId: interaction.guildId, countryId: country.id, actorId: interaction.user.id,
+      targetArmy: interaction.options.getString("hedef-ordu", true),
+      sourceArmy: interaction.options.getString("kaynak-ordu", true)
+    });
+    await interaction.editReply({
+      content: `✅ **${result.sourceName}**, **${result.army.name}** ordusuna birleştirildi. Kaynak ordu kaydı kapatıldı.\n`+
+        `Aktarılan asker: **${number(result.movedPersonnel)}** • Kuşatma aleti: **${number(result.movedSiegeAssets)}**`+
+        (result.releasedCommander ? `\nKaynak ordunun komutanı **${result.releasedCommander}** görevden alındı ve yeniden müsait duruma geçti.` : ""),
+      embeds: [renderArmyEmbed(result.army)]
+    });
+    if(result.releasedCommander)await logCommanderAssignment(interaction,country.name,
+      `**${result.sourceName}** ordusu **${result.army.name}** ile birleşti; **${result.releasedCommander}** yeniden müsait duruma geçti.`);
     return;
   }
   const armyValue = interaction.options.getString("ordu", true);

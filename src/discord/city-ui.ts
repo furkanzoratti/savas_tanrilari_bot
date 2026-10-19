@@ -98,6 +98,10 @@ export async function handleCityAutocomplete(interaction: AutocompleteInteractio
   if (sub === "egit") {
     settlements = settlements.filter((item) => item.buildings.some((building) =>
       building.building_type === "academy" && building.level > 0 && ["ACTIVE","BUILDING"].includes(building.status)));
+  } else if (sub === "egitimi-iptal-et") {
+    const pending = await cityService.pendingTrainingSettlements(country.id);
+    const pendingIds = new Set(pending.map((item) => item.settlement_id));
+    settlements = settlements.filter((item) => pendingIds.has(item.id));
   } else if (sub === "ata" && assignment) {
     const buildingType = assignment === "CURIA" ? "curia" : "agora";
     settlements = settlements.filter((item) => item.buildings.some((building) => building.building_type === buildingType && building.status === "ACTIVE" && building.level >= 2));
@@ -199,6 +203,15 @@ export async function handleCityCommand(interaction: ChatInputCommandInteraction
       });
       await interaction.editReply({content:`✅ **${character.name}** kalıcı olarak Akademi kadrosundan çıkarıldı. Karakter silinmedi; tarihî kaydı korunuyor ve aktif kapasitede yer tutmuyor.`});
       await logAcademyAction(interaction,country.name,"**"+character.name+"** kalıcı olarak Akademi kadrosundan çıkarıldı.");
+      return true;
+    }
+    if (sub === "egitimi-iptal-et") {
+      const settlement = await findSettlement(country.id, interaction.options.getString("yerleske", true));
+      const result = await cityService.cancelTraining({
+        guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id, settlementId: settlement.id
+      });
+      await interaction.editReply(`✅ **${result.settlementName}** Akademisindeki tamamlanmamış eğitim iptal edildi. Ayrılmış karakter kapasitesi yeniden açıldı.`);
+      await logAcademyAction(interaction,country.name,"**"+result.settlementName+"** Akademisindeki tamamlanmamış eğitim iptal edildi.");
       return true;
     }
     const settlement = await findSettlement(country.id, interaction.options.getString("yerleske", true));

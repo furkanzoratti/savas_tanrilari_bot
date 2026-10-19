@@ -1794,9 +1794,16 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
     const country = await gameService.countryForUser(interaction.guildId, interaction.user.id);
     if (!country) { await interaction.respond([]); return; }
     const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
-    if (focused.name === "ordu") {
+    if (["ordu","hedef-ordu","kaynak-ordu"].includes(focused.name)) {
       const armies = await armyService.listCountry(country.id);
-      await interaction.respond(armies.filter((army) => !query || army.name.toLocaleLowerCase("tr-TR").includes(query)).slice(0, 25)
+      const otherArmyId=focused.name==="hedef-ordu"
+        ?interaction.options.getString("kaynak-ordu")
+        :focused.name==="kaynak-ordu"
+          ?interaction.options.getString("hedef-ordu")
+          :null;
+      await interaction.respond(armies
+        .filter((army)=>army.id!==otherArmyId)
+        .filter((army) => !query || army.name.toLocaleLowerCase("tr-TR").includes(query)).slice(0, 25)
         .map((army) => ({ name: `${army.name} • ${number(army.total)} asker${army.active_battle_id ? " • Savaşta" : ""}`.slice(0, 100), value: army.id })));
       return;
     }
