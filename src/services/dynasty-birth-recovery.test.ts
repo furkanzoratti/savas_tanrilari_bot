@@ -24,4 +24,9 @@ describe("dynasty pending birth recovery",()=>{
     expect(service).toContain("pendingName.initiated_by!==input.actorId&&!input.allowManager");
     expect(service).toContain("managerOverride:Boolean(input.allowManager)");
   });
+
+  it("elle yazılmış üye adını UUID sorgusuna göndermez",()=>{
+    expect(ui).toContain("function selectedDynastyMemberId");
+    expect(ui).toContain("açılır listedeki üyeyi seçmelisiniz");
+  });
 });

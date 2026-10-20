@@ -468,6 +468,13 @@ async function countryForAdmin(interaction:ChatInputCommandInteraction){
   return country;
 }
 
+function selectedDynastyMemberId(value:string|null,label:string):string|null{
+  if(value===null)return null;
+  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value))
+    throw new GameError(label+" için adı elle yazmak yerine açılır listedeki üyeyi seçmelisiniz.");
+  return value;
+}
+
 export async function handleDynastyCommand(interaction:ChatInputCommandInteraction):Promise<boolean>{
   if(!interaction.guildId||!["hanedan","hanedan-yonetim"].includes(interaction.commandName))return false;
   await interaction.deferReply({flags:MessageFlags.Ephemeral});
@@ -497,7 +504,7 @@ export async function handleDynastyCommand(interaction:ChatInputCommandInteracti
       const bannerKey:DynastyViewBannerKey=sub==="soyagaci"?"familyTree":sub==="veraset"?"succession":sub==="evlilikler"?"marriages":sub==="cocuklar"?"children":sub==="olumler"?"deaths":sub==="gecmis"?"history":"status";
       await interaction.editReply({embeds:[embed],files:[dynastyViewAttachment(bannerKey)]});
     }else if(sub==="cocuk-dene"){
-      const parentMemberId=interaction.options.getString("ebeveyn");
+      const parentMemberId=selectedDynastyMemberId(interaction.options.getString("ebeveyn"),"Ebeveyn");
       const crossResult=parentMemberId?await romanDynastyMarriageService.attemptDynastyBirth({
         guildId:interaction.guildId,actorId:interaction.user.id,dynastyMemberId:parentMemberId,dynastyId:view.id
       }):null;
@@ -644,7 +651,7 @@ export async function handleDynastyCommand(interaction:ChatInputCommandInteracti
   const view=await dynastyService.viewByCountry(country.id);
   if(!view)throw new GameError("Bu devlet için önce `/hanedan-yonetim olustur` kullanılmalıdır.");
   if(sub==="cocuk-dene"){
-    const parentMemberId=interaction.options.getString("ebeveyn",true);
+    const parentMemberId=selectedDynastyMemberId(interaction.options.getString("ebeveyn",true),"Ebeveyn")!;
     const crossResult=await romanDynastyMarriageService.attemptDynastyBirth({
       guildId:interaction.guildId,actorId:interaction.user.id,dynastyMemberId:parentMemberId,dynastyId:view.id
     });

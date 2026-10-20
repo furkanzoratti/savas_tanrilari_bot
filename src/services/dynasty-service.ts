@@ -10,7 +10,7 @@ import {
   dynastyMemberCanMarry,newbornGender,orderedDynastyCoupleIds,type DynastyGender,type DynastyHealth,type DynastyMemberStatus
 } from "../domain/dynasty.js";
 import {GameError} from "./game-service.js";
-import {fallbackDynastyCandidateSql,lineageAwareDynastyCandidateSql} from "./dynasty-succession.js";
+import {fallbackDynastyCandidateSql,lineageAwareDynastyCandidateSql,recomputeLineageAwareSuccessionRanksSql} from "./dynasty-succession.js";
 import {rollNobleTraitKey} from "./noble-trait-service.js";
 import type {NobleTraitKey} from "../domain/noble-traits.js";
 
@@ -300,9 +300,10 @@ async function addEvent(
   );
 }
 
-async function reconcileSuccession(
+export async function reconcileSuccession(
   client:DbClient,dynastyId:string,turn:number,countryName:string,eventTexts:string[],formerMonarchId:string|null=null
 ):Promise<void>{
+  await client.query("SELECT pg_advisory_xact_lock(hashtext($1))",["dynasty-succession:"+dynastyId]);
   const steppeTitle=(await client.query<{title_name:string;tier:"KHAN"|"LANDHOLDER"}>(`
     SELECT title.title_name,title.tier FROM dynasties dynasty
     JOIN steppe_internal_titles title ON title.id=dynasty.steppe_title_id WHERE dynasty.id=$1`,[dynastyId])).rows[0]??null;
@@ -340,6 +341,8 @@ async function reconcileSuccession(
     );
   }
   await client.query("UPDATE dynasty_members SET is_heir=FALSE WHERE dynasty_id=$1 AND id=$2",[dynastyId,monarch.id]);
+  await client.query("UPDATE dynasty_members SET succession_rank=NULL WHERE dynasty_id=$1 AND id=$2",[dynastyId,monarch.id]);
+  await client.query(recomputeLineageAwareSuccessionRanksSql,[dynastyId,monarch.id]);
   const existingHeir=(await client.query<{id:string}>(
     "SELECT id FROM dynasty_members WHERE dynasty_id=$1 AND status='ALIVE' AND is_heir=TRUE AND id<>$2 LIMIT 1",
     [dynastyId,monarch.id]
@@ -349,7 +352,12 @@ async function reconcileSuccession(
     [dynastyId,monarch.id]
   )).rows[0];
   if(next){
-    await client.query("UPDATE dynasty_members SET is_heir=(id=$2),updated_at=NOW() WHERE dynasty_id=$1 AND status='ALIVE'",[dynastyId,next.id]);
+    // Kısmi benzersiz indeks aynı hanedanda yalnızca tek yaşayan varise izin verir.
+    // Eski ve yeni varisi tek UPDATE içinde değiştirmek PostgreSQL'in satır işleme
+    // sırasına göre geçici bir çift-varis çakışması üretebilir; bu yüzden önce
+    // mevcut işareti tamamen kaldırıp ardından seçilen üyeyi varis yapıyoruz.
+    await client.query("UPDATE dynasty_members SET is_heir=FALSE,updated_at=NOW() WHERE dynasty_id=$1 AND is_heir=TRUE",[dynastyId]);
+    await client.query("UPDATE dynasty_members SET is_heir=TRUE,updated_at=NOW() WHERE dynasty_id=$1 AND id=$2 AND status='ALIVE'",[dynastyId,next.id]);
     if(existingHeir?.id!==next.id){
       await addEvent(client,dynastyId,turn,"HEIR_DESIGNATED",next.id,{name:next.name,automatic:true,malePreference:true});
       eventTexts.push(steppeTitle

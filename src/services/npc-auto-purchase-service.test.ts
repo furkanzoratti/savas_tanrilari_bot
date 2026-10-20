@@ -19,12 +19,13 @@ const config: NpcAutoPurchaseConfig = {
   scope: "ALL_PLAYERLESS"
 };
 
-function document(input: { treasury: number; militaryUsed: number; trainingRemaining: number; buildingStarted?: boolean; units?: Array<{ unit_type: string; quantity: number; status: string; force_type: string }>; levelOneBuildings?: string[]; naval?: boolean; besieged?: boolean; conquered?: boolean; steppe?: boolean; scandinavian?: boolean }): CountryDocument {
+function document(input: { treasury: number; militaryUsed: number; trainingRemaining: number; buildingStarted?: boolean; units?: Array<{ unit_type: string; quantity: number; status: string; force_type: string }>; levelOneBuildings?: string[]; naval?: boolean; besieged?: boolean; conquered?: boolean; steppe?: boolean; scandinavian?: boolean; purchaseModifiers?: CountryDocument["greatProjectModifiers"] }): CountryDocument {
   return {
     guild: { current_turn: 3 },
     country: { id: "country" },
     militaryLimit: 10_000,
     militaryUsed: input.militaryUsed,
+    greatProjectModifiers:input.purchaseModifiers,
     specialUnitUnlocks: input.steppe ? ["steppe_horse_archer","steppe_cavalry","kurgan_shieldbearer","oba_archer"] : [],
     isSteppeConfederation: Boolean(input.steppe),
     isScandinavianState: Boolean(input.scandinavian),
@@ -95,6 +96,39 @@ describe("NPC ek alım planlaması", () => {
     const plan = planCountryPurchases(document({ treasury: 30_000, militaryUsed: 0, trainingRemaining: 10_000, naval: true }), { ...config, budgetPercent: 100 }, "NAVAL_FOCUS");
     expect(plan.shipActions.length).toBeGreaterThan(0);
     expect(plan.shipActions.reduce((sum, action) => sum + action.quantity, 0)).toBeGreaterThan(0);
+  });
+
+  it("hükümdar ve proje maliyet etkilerini bina, asker ve gemi planına yansıtır",()=>{
+    const baseArmy=planCountryPurchases(
+      document({treasury:30_000,militaryUsed:0,trainingRemaining:500}),
+      {...config,budgetPercent:100,minimumReserve:0},"ARMY_ONLY",0
+    );
+    const expensiveArmy=planCountryPurchases(
+      document({treasury:30_000,militaryUsed:0,trainingRemaining:500,purchaseModifiers:{unitPurchaseDiscount:-.08}}),
+      {...config,budgetPercent:100,minimumReserve:0},"ARMY_ONLY",0
+    );
+    expect(expensiveArmy.unitActions[0]!.cost).toBeGreaterThan(baseArmy.unitActions[0]!.cost);
+
+    const discountedDevelopment=planCountryPurchases(
+      document({treasury:30_000,militaryUsed:10_000,trainingRemaining:0,purchaseModifiers:{buildingCostDiscount:.10}}),
+      {...config,budgetPercent:100,minimumReserve:0},"FULL_BUILDING_ARMY"
+    );
+    const baseDevelopment=planCountryPurchases(
+      document({treasury:30_000,militaryUsed:10_000,trainingRemaining:0}),
+      {...config,budgetPercent:100,minimumReserve:0},"FULL_BUILDING_ARMY"
+    );
+    expect(discountedDevelopment.buildingActions[0]!.cost).toBeLessThan(baseDevelopment.buildingActions[0]!.cost);
+
+    const baseNavy=planCountryPurchases(
+      document({treasury:30_000,militaryUsed:0,trainingRemaining:0,naval:true}),
+      {...config,budgetPercent:100,minimumReserve:0},"NAVAL_FOCUS",0
+    );
+    const expensiveNavy=planCountryPurchases(
+      document({treasury:30_000,militaryUsed:0,trainingRemaining:0,naval:true,purchaseModifiers:{shipPurchaseDiscount:-.08}}),
+      {...config,budgetPercent:100,minimumReserve:0},"NAVAL_FOCUS",0
+    );
+    expect(expensiveNavy.shipActions[0]!.cost/expensiveNavy.shipActions[0]!.quantity)
+      .toBeGreaterThan(baseNavy.shipActions[0]!.cost/baseNavy.shipActions[0]!.quantity);
   });
 
   it("İskandinav Gemi Odaklı alımında yalnız Hjortspring üretir", () => {

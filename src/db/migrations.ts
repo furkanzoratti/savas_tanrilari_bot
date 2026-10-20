@@ -150,6 +150,9 @@ import { eventPublicationStatusMigration } from "./event-publication-status-migr
 import { greatProjectsMigration } from "./great-projects-migration.js";
 import { nobleTraitsMigration } from "./noble-traits-migration.js";
 import { nilAcademyPendingCleanupMigration } from "./nil-academy-pending-cleanup-migration.js";
+import { dynastySuccessionRepairMigration } from "./dynasty-succession-repair-migration.js";
+import { steppeKurultayBaselineMigration } from "./steppe-kurultay-baseline-migration.js";
+import { activeCountryDynastiesMigration } from "./active-country-dynasties-migration.js";
 
 export const migrations = [
   {
@@ -2517,5 +2520,8 @@ export const migrations = [
   eventPublicationStatusMigration,
   greatProjectsMigration,
   nobleTraitsMigration,
-  nilAcademyPendingCleanupMigration
+  nilAcademyPendingCleanupMigration,
+  dynastySuccessionRepairMigration,
+  steppeKurultayBaselineMigration,
+  activeCountryDynastiesMigration
 ] as const;

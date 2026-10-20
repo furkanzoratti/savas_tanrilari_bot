@@ -7,11 +7,11 @@ import {
 } from "../domain/npc-auto-purchase.js";
 import { pool } from "../db/pool.js";
 import {
-  GameError, buildingPurchaseTerms, gameService, unitPurchaseCost,
+  GameError,buildingPurchaseTerms,gameService,unitPurchaseCost,
+  modifiedBuildingPurchaseCost,modifiedShipPurchaseCost,modifiedUnitPurchaseCost,
   type CountryDocument
 } from "./game-service.js";
 import { formableModifiers } from "../domain/formable-countries.js";
-import { shipCostMultiplier } from "../domain/resources.js";
 import { STEPPE_ARMY_UNIT_TYPES } from "../domain/steppe-army.js";
 import { SCANDINAVIAN_ARMY_UNIT_TYPES } from "../domain/scandinavian-army.js";
 import { purchasableShipTypes } from "../domain/scandinavian-navy.js";
@@ -149,7 +149,8 @@ function validBuildingCandidates(doc: CountryDocument, doctrine: NpcAutoPurchase
         const hasPort = settlement.buildings.some((building) => building.building_type === "port" && (building.status === "ACTIVE" || building.status === "BUILDING") && building.level >= 1);
         if (!hasPort) continue;
       }
-      const terms = buildingPurchaseTerms(buildingType, targetLevel, settlement.effectiveResources, policies, doc.country.active_formable_key, settlement.religionModifiers);
+      const baseTerms=buildingPurchaseTerms(buildingType,targetLevel,settlement.effectiveResources,policies,doc.country.active_formable_key,settlement.religionModifiers);
+      const terms={...baseTerms,cost:modifiedBuildingPurchaseCost(baseTerms.cost,doc.greatProjectModifiers)};
       if (terms.cost > settlement.local_treasury || terms.cost > spendLimit) continue;
       candidates.push({
         settlementId: settlement.id,
@@ -336,13 +337,13 @@ export function planCountryPurchases(
           if ((productionRemaining.get(settlement.id) ?? 0) < ship.productionPoints) return false;
           if ((harborRemaining.get(settlement.id) ?? 0) < ship.harborPoints) return false;
           if (remainingPersonnel < ship.manpower) return false;
-          const cost = Math.ceil(ship.price * Math.max(0.5, shipCostMultiplier(settlement.effectiveResources) - (modifiers.shipDiscount ?? 0) - (settlement.religionModifiers?.shipPurchaseDiscount ?? 0)));
+          const cost=modifiedShipPurchaseCost(shipType,1,settlement.effectiveResources,doc.country.active_formable_key,settlement.religionModifiers,doc.greatProjectModifiers);
           return cost <= remainingBudget && cost <= (localTreasury.get(settlement.id) ?? 0);
         }).sort((left, right) => (productionRemaining.get(right.id) ?? 0) - (productionRemaining.get(left.id) ?? 0)
           || (localTreasury.get(right.id) ?? 0) - (localTreasury.get(left.id) ?? 0));
         if (eligible[0]) {
           const settlement = eligible[0];
-          selected = { settlement, shipType, cost: Math.ceil(ship.price * Math.max(0.5, shipCostMultiplier(settlement.effectiveResources) - (modifiers.shipDiscount ?? 0) - (settlement.religionModifiers?.shipPurchaseDiscount ?? 0))) };
+          selected={settlement,shipType,cost:modifiedShipPurchaseCost(shipType,1,settlement.effectiveResources,doc.country.active_formable_key,settlement.religionModifiers,doc.greatProjectModifiers)};
           break;
         }
       }
@@ -399,7 +400,10 @@ export function planCountryPurchases(
         .map((settlement) => ({
           settlement,
           unitType,
-          cost: unitPurchaseCost(unitType, NPC_UNIT_PURCHASE_BATCH, settlement.effectiveResources, activePolicyKeys(settlement), doc.country.active_formable_key, settlement.religionModifiers)
+          cost:modifiedUnitPurchaseCost(
+            unitPurchaseCost(unitType,NPC_UNIT_PURCHASE_BATCH,settlement.effectiveResources,activePolicyKeys(settlement),doc.country.active_formable_key,settlement.religionModifiers),
+            unitType,doc.greatProjectModifiers
+          )
         }))
         .filter(({ settlement, cost }) => cost <= remainingBudget && cost <= (localTreasury.get(settlement.id) ?? 0))
         .sort((left, right) => (settlementCapacity.get(right.settlement.id) ?? 0) - (settlementCapacity.get(left.settlement.id) ?? 0)
@@ -425,7 +429,10 @@ export function planCountryPurchases(
 
   const unitActions = [...grouped.values()].map((action) => {
     const settlement = doc.settlements.find((item) => item.id === action.settlementId)!;
-    return { ...action, cost: unitPurchaseCost(action.unitType, action.quantity, settlement.effectiveResources, activePolicyKeys(settlement), doc.country.active_formable_key, settlement.religionModifiers) };
+    return {...action,cost:modifiedUnitPurchaseCost(
+      unitPurchaseCost(action.unitType,action.quantity,settlement.effectiveResources,activePolicyKeys(settlement),doc.country.active_formable_key,settlement.religionModifiers),
+      action.unitType,doc.greatProjectModifiers
+    )};
   });
   const plannedCost = buildingActions.reduce((sum, action) => sum + action.cost, 0)
     + shipActions.reduce((sum, action) => sum + action.cost, 0)

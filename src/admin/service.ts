@@ -18,7 +18,7 @@ import {
 } from "../domain/characters.js";
 import { CULTURE_GROUPS, type CultureGroup } from "../domain/cultures.js";
 import { MINIMUM_MARRIAGE_AGE,automaticDynastyRelations } from "../domain/dynasty.js";
-import {fallbackDynastyCandidateSql,lineageAwareDynastyCandidateSql} from "../services/dynasty-succession.js";
+import {fallbackDynastyCandidateSql,lineageAwareDynastyCandidateSql,recomputeLineageAwareSuccessionRanksSql} from "../services/dynasty-succession.js";
 import { settlementTransferPolicy, type SettlementTransferType } from "../domain/settlement-transfer.js";
 import { MERCENARY_COMPANIES, type MercenaryCompanyKey } from "../domain/mercenaries.js";
 import { RESOURCES, type ResourceType } from "../domain/resources.js";
@@ -479,6 +479,7 @@ async function reconcileAdminDynastySuccession(
   dynasty: { id: string; country_name: string; current_turn: number },
   formerMonarchId: string | null = null
 ) {
+  await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", ["dynasty-succession:" + dynasty.id]);
   let monarch = (await client.query<{ id: string; name: string; gender: "MALE" | "FEMALE" }>(
     "SELECT id,name,gender FROM dynasty_members WHERE dynasty_id=$1 AND status='ALIVE' AND is_monarch=TRUE LIMIT 1 FOR UPDATE",
     [dynasty.id]
@@ -505,6 +506,8 @@ async function reconcileAdminDynastySuccession(
     });
   }
   await client.query("UPDATE dynasty_members SET is_heir=FALSE WHERE dynasty_id=$1 AND id=$2", [dynasty.id, monarch.id]);
+  await client.query("UPDATE dynasty_members SET succession_rank=NULL WHERE dynasty_id=$1 AND id=$2", [dynasty.id, monarch.id]);
+  await client.query(recomputeLineageAwareSuccessionRanksSql, [dynasty.id, monarch.id]);
   const existingHeir = (await client.query<{ id: string }>(
     "SELECT id FROM dynasty_members WHERE dynasty_id=$1 AND status='ALIVE' AND is_heir=TRUE AND id<>$2 LIMIT 1",
     [dynasty.id, monarch.id]
@@ -515,7 +518,11 @@ async function reconcileAdminDynastySuccession(
   )).rows[0];
   if (heir) {
     await client.query(
-      "UPDATE dynasty_members SET is_heir=(id=$2),updated_at=NOW() WHERE dynasty_id=$1 AND status='ALIVE'",
+      "UPDATE dynasty_members SET is_heir=FALSE,updated_at=NOW() WHERE dynasty_id=$1 AND is_heir=TRUE",
+      [dynasty.id]
+    );
+    await client.query(
+      "UPDATE dynasty_members SET is_heir=TRUE,updated_at=NOW() WHERE dynasty_id=$1 AND id=$2 AND status='ALIVE'",
       [dynasty.id, heir.id]
     );
     if (existingHeir?.id !== heir.id) {

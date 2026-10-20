@@ -23,10 +23,13 @@ import { SPECIAL_UNITS, isSpecialUnitType, type SpecialUnitType } from "../domai
 import { isSteppeArmyUnitType } from "../domain/steppe-army.js";
 import { isScandinavianArmyUnitType } from "../domain/scandinavian-army.js";
 import { purchasableShipTypes } from "../domain/scandinavian-navy.js";
-import { FORMABLE_COUNTRIES, FORMABLE_TIER_LABELS, formableModifiers, formableTier, type FormableTier } from "../domain/formable-countries.js";
+import { FORMABLE_COUNTRIES, FORMABLE_TIER_LABELS, formableTier, type FormableTier } from "../domain/formable-countries.js";
 import { ESPIONAGE_TARGETS } from "../domain/espionage.js";
-import { RESOURCES, shipCostMultiplier, type ResourceType } from "../domain/resources.js";
-import { buildingPurchaseTerms, unitPurchaseCost, gameService, GameError, type CountryDetailView, type CountryDocument } from "../services/game-service.js";
+import { RESOURCES, type ResourceType } from "../domain/resources.js";
+import {
+  buildingPurchaseTerms,unitPurchaseCost,modifiedBuildingPurchaseCost,modifiedShipPurchaseCost,modifiedUnitPurchaseCost,
+  gameService,GameError,type CountryDetailView,type CountryDocument
+} from "../services/game-service.js";
 import { battleService } from "../services/battle-service.js";
 import { armyService, type MobileSiegeAssetType } from "../services/army-service.js";
 import { fleetService } from "../services/fleet-service.js";
@@ -1583,9 +1586,10 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
       if (building.key === "shipyard" && !hasPort) return [];
       if (building.key === "customs_house" && !hasPort) return [];
       const terms = buildingPurchaseTerms(building.key, next, settlement.effectiveResources, activePolicies, doc.country.active_formable_key, settlement.religionModifiers);
+      const cost=modifiedBuildingPurchaseCost(terms.cost,doc.greatProjectModifiers);
       return [{
         label: `${building.name} Sv${next}`.slice(0, 100),
-        description: `${BUILDING_CATEGORIES[building.category].label} • ${gold(terms.cost)} • ${terms.duration} tur`.slice(0, 100),
+        description: `${BUILDING_CATEGORIES[building.category].label} • ${gold(cost)} • ${terms.duration} tur`.slice(0, 100),
         value: building.key,
         default: false
       }];
@@ -1616,7 +1620,10 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
           .setPlaceholder(menuCount > 1 ? `Birim seç • ${index + 1}/${menuCount}` : "Birim seç")
           .addOptions(chunk.map(([key, unit]) => ({
             label: unit.name,
-            description: `${gold(unitPurchaseCost(key as keyof typeof UNITS, 1_000, settlement.effectiveResources, settlement.policies.filter((policy) => policy.status === "ACTIVE").map((policy) => policy.policy_key), document.country.active_formable_key, settlement.religionModifiers))} / 1.000${isSpecialUnitType(key) ? " • Özel Birlik" : ""}`,
+            description: `${gold(modifiedUnitPurchaseCost(
+              unitPurchaseCost(key as keyof typeof UNITS,1_000,settlement.effectiveResources,settlement.policies.filter((policy)=>policy.status==="ACTIVE").map((policy)=>policy.policy_key),document.country.active_formable_key,settlement.religionModifiers),
+              key as keyof typeof UNITS,document.greatProjectModifiers
+            ))} / 1.000${isSpecialUnitType(key) ? " • Özel Birlik" : ""}`,
             value: key
           })))
       );
@@ -1629,7 +1636,7 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
     if (!settlement) throw new GameError("Yerleşke bulunamadı.");
     const allowedShipTypes = new Set(purchasableShipTypes(Boolean(document.isScandinavianState)));
     const availableShips = shipChoices.filter(([key]) => allowedShipTypes.has(key));
-    await interaction.editReply({ content: "Üretilecek gemi türünü seç:", components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder().setCustomId(`sc|${countryId}|${settlementId}`).setPlaceholder("Gemi seç").addOptions(availableShips.map(([key, ship]) => ({ label: ship.name, description: `${gold(Math.ceil(ship.price * Math.max(0.5, shipCostMultiplier(settlement.effectiveResources) - (formableModifiers(document.country.active_formable_key).shipDiscount ?? 0) - settlement.religionModifiers.shipPurchaseDiscount)))} • ${ship.manpower} mürettebat • ${ship.transportCapacity} taşıma • ${ship.productionPoints}/${ship.harborPoints} üretim/rıhtım`, value: key }))))] });
+    await interaction.editReply({ content: "Üretilecek gemi türünü seç:", components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder().setCustomId(`sc|${countryId}|${settlementId}`).setPlaceholder("Gemi seç").addOptions(availableShips.map(([key, ship]) => ({ label: ship.name, description: `${gold(modifiedShipPurchaseCost(key,1,settlement.effectiveResources,document.country.active_formable_key,settlement.religionModifiers,document.greatProjectModifiers))} • ${ship.manpower} mürettebat • ${ship.transportCapacity} taşıma • ${ship.productionPoints}/${ship.harborPoints} üretim/rıhtım`, value: key }))))] });
   }
 }
 

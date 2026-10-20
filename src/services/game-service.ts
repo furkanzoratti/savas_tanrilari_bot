@@ -216,6 +216,25 @@ export function buildingPurchaseTerms(buildingType: string, targetLevel: number,
   };
 }
 
+export function modifiedBuildingPurchaseCost(baseCost:number,modifiers:GreatProjectModifiers={}):number{
+  return Math.ceil(baseCost*Math.max(0,1-(modifiers.buildingCostDiscount??0)));
+}
+
+export function modifiedUnitPurchaseCost(baseCost:number,unitType:keyof typeof UNITS,modifiers:GreatProjectModifiers={}):number{
+  return Math.ceil(baseCost*Math.max(0,1-greatProjectUnitPurchaseDiscount(unitType,modifiers)));
+}
+
+export function modifiedShipPurchaseCost(
+  shipType:keyof typeof SHIPS,quantity:number,resources:readonly ResourceType[],formableKey:FormableCountryKey|null|undefined,
+  religion:ReligionModifiers|undefined,modifiers:GreatProjectModifiers={}
+):number{
+  const ship=SHIPS[shipType];
+  return Math.ceil(ship.price*quantity*Math.max(
+    .5,
+    shipCostMultiplier(resources)-(formableModifiers(formableKey).shipDiscount??0)-(religion?.shipPurchaseDiscount??0)-greatProjectShipPurchaseDiscount(shipType,modifiers)
+  ));
+}
+
 export type MercenaryContractStatus = "PENDING" | "ACTIVE" | "UNPAID" | "ENDED" | "CANCELLED" | "DESTROYED";
 export interface MercenaryContractDocument {
   id: string; company_key: MercenaryCompanyKey; companyName: string; country_id: string; settlement_id: string;
@@ -428,6 +447,22 @@ async function applyPurchaseAgentDiscount(
   );
   await awardCharacterSpecializationProgress(client,discount.merchant_character_id,"FINANCIAL_ADVISOR");
   return discountedCost;
+}
+
+async function debitSettlementTreasury(client:DbClient,settlementId:string,cost:number):Promise<number>{
+  if(!Number.isSafeInteger(cost)||cost<0)throw new GameError("Alım bedeli güvenli biçimde hesaplanamadı.");
+  const charged=await client.query<{local_treasury:number}>(
+    `UPDATE settlements
+        SET local_treasury=local_treasury-$1
+      WHERE id=$2 AND local_treasury>=$1
+      RETURNING local_treasury`,
+    [cost,settlementId]
+  );
+  if(charged.rowCount)return Number(charged.rows[0]!.local_treasury);
+  const settlement=(await client.query<{local_treasury:number}>("SELECT local_treasury FROM settlements WHERE id=$1",[settlementId])).rows[0];
+  if(!settlement)throw new GameError("Yerleşke bulunamadı.");
+  const available=Math.max(0,Number(settlement.local_treasury));
+  throw new GameError(`Yerel hazine yetersiz. Gerekli: ${cost.toLocaleString("tr-TR")} Altın • Mevcut: ${available.toLocaleString("tr-TR")} Altın.`);
 }
 
 async function adjustCountryLocalTreasuries(client: DbClient, countryId: string, amount: number): Promise<number> {
@@ -2687,13 +2722,12 @@ export const gameService = {
       const religion = (await loadSettlementReligionModifiers(client, settlement)).modifiers;
       const baseTerms = buildingPurchaseTerms(input.buildingType, targetLevel, effectiveResources, activePolicies, country.active_formable_key, religion);
       const projectModifiers=await activeCountryModifiers(client,country.id);
-      const terms={...baseTerms,cost:Math.ceil(baseTerms.cost*(1-(projectModifiers.buildingCostDiscount??0)))};
+      const terms={...baseTerms,cost:modifiedBuildingPurchaseCost(baseTerms.cost,projectModifiers)};
       const cost = await applyPurchaseAgentDiscount(client,{
         countryId:country.id,settlementId:settlement.id,category:"BUILDING",currentTurn:guild.current_turn,cost:terms.cost
       });
-      if (settlement.local_treasury < cost) throw new GameError("Yerel hazinede yeterli altın yok.");
       const completionTurn = guild.current_turn + terms.duration;
-      await client.query("UPDATE settlements SET local_treasury=local_treasury-$1 WHERE id=$2", [cost, settlement.id]);
+      await debitSettlementTreasury(client,settlement.id,cost);
       await syncCountryTreasury(client, country.id);
       await client.query(
         `INSERT INTO buildings(settlement_id,building_type,level,target_level,status,started_turn,completion_turn,construction_paid_amount)
@@ -2792,11 +2826,14 @@ export const gameService = {
       const effectiveResources = (await settlementResourceAccess(client, country.id)).get(settlement.id) ?? [];
       const activePolicies = activePolicyKeys((await client.query<SettlementPolicyRow>("SELECT * FROM settlement_policies WHERE settlement_id=$1 AND status='ACTIVE'", [settlement.id])).rows,guild.current_turn);
       const religion = (await loadSettlementReligionModifiers(client, settlement)).modifiers;
-      const baseCost = Math.ceil(unitPurchaseCost(input.unitType, input.quantity, effectiveResources, activePolicies, country.active_formable_key, religion)*(1-greatProjectUnitPurchaseDiscount(input.unitType,projectModifiers)));
+      const baseCost = modifiedUnitPurchaseCost(
+        unitPurchaseCost(input.unitType,input.quantity,effectiveResources,activePolicies,country.active_formable_key,religion),
+        input.unitType,projectModifiers
+      );
       const cost = await applyPurchaseAgentDiscount(client,{
         countryId:country.id,settlementId:settlement.id,category:"UNITS",currentTurn:guild.current_turn,cost:baseCost
       });
-      if (settlement.local_treasury < cost) throw new GameError("Yerel hazinede yeterli altın yok.");
+      await debitSettlementTreasury(client,settlement.id,cost);
       const waves = createRecruitmentWaves(input.quantity, country.mobilization, guild.current_turn);
       const order = await client.query<{ id: string }>(
         `INSERT INTO recruitment_orders(country_id,settlement_id,unit_type,total_quantity,remaining_quantity,paid_amount,ordered_turn,population_reserved)
@@ -2805,7 +2842,6 @@ export const gameService = {
       for (const wave of waves) await client.query("INSERT INTO recruitment_waves(order_id,due_turn,quantity) VALUES($1,$2,$3)", [order.rows[0]!.id, wave.dueTurn, wave.quantity]);
       await client.query(`INSERT INTO recruitment_usage(settlement_id,acquisition_turn,quantity) VALUES($1,$2,$3)
         ON CONFLICT(settlement_id,acquisition_turn) DO UPDATE SET quantity=recruitment_usage.quantity+EXCLUDED.quantity`, [settlement.id, guild.current_turn, input.quantity]);
-      await client.query("UPDATE settlements SET local_treasury=local_treasury-$1 WHERE id=$2",[cost,settlement.id]);
       await syncCountryTreasury(client, country.id);
       await client.query("INSERT INTO transactions(country_id,settlement_id,turn,kind,amount,description) VALUES($1,$2,$3,'UNIT_PURCHASE',$4,$5)", [country.id, settlement.id, guild.current_turn, -cost, `${settlement.name}: ${input.quantity} ${unit.name}`]);
       await audit(client, input.guildId, input.actorId, "UNIT_PURCHASE", "settlement", settlement.id, { unitType: input.unitType, quantity: input.quantity, cost, waves, trainingCapacity });
@@ -2847,14 +2883,13 @@ export const gameService = {
       const cost = await applyPurchaseAgentDiscount(client,{
         countryId:country.id,settlementId:settlement.id,category:"SIEGE",currentTurn:guild.current_turn,cost:baseCost
       });
-      if (settlement.local_treasury < cost) throw new GameError("Yerel hazinede yeterli altın yok.");
+      await debitSettlementTreasury(client,settlement.id,cost);
       const completionTurn = guild.current_turn + asset.buildTurns;
       await client.query(
         `INSERT INTO siege_orders(country_id,settlement_id,asset_type,quantity,paid_amount,workshop_slots,ordered_turn,completion_turn,engineering_enhanced)
          VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
         [country.id, settlement.id, input.assetType, input.quantity, cost, slots, guild.current_turn, completionTurn, workshop >= 3 && ["ballista", "catapult"].includes(input.assetType)]
       );
-      await client.query("UPDATE settlements SET local_treasury=local_treasury-$1 WHERE id=$2", [cost, settlement.id]);
       await syncCountryTreasury(client, country.id);
       await client.query("INSERT INTO transactions(country_id,settlement_id,turn,kind,amount,description) VALUES($1,$2,$3,'SIEGE_PURCHASE',$4,$5)", [country.id, settlement.id, guild.current_turn, -cost, `${settlement.name}: ${input.quantity} ${asset.name}`]);
       await audit(client, input.guildId, input.actorId, "SIEGE_PURCHASE", "settlement", settlement.id, { assetType: input.assetType, quantity: input.quantity, cost, completionTurn, slots });
@@ -2947,14 +2982,13 @@ export const gameService = {
       if (manpower.used + personNeed > limit) throw new GameError("Gemi mürettebatı askerî personel sınırını aşıyor.");
       const effectiveResources = (await settlementResourceAccess(client, country.id)).get(settlement.id) ?? [];
       const religion = (await loadSettlementReligionModifiers(client, settlement)).modifiers;
-      const baseCost = Math.ceil(ship.price * input.quantity * Math.max(0.5, shipCostMultiplier(effectiveResources) - (formableModifiers(country.active_formable_key).shipDiscount ?? 0) - religion.shipPurchaseDiscount - greatProjectShipPurchaseDiscount(input.shipType,projectModifiers)));
+      const baseCost=modifiedShipPurchaseCost(input.shipType,input.quantity,effectiveResources,country.active_formable_key,religion,projectModifiers);
       const cost = await applyPurchaseAgentDiscount(client,{
         countryId:country.id,settlementId:settlement.id,category:"SHIPS",currentTurn:guild.current_turn,cost:baseCost
       });
-      if (settlement.local_treasury < cost) throw new GameError("Yerel hazinede yeterli altın yok.");
+      await debitSettlementTreasury(client,settlement.id,cost);
       const completionTurn = guild.current_turn + ship.buildTurns;
       await client.query(`INSERT INTO naval_orders(country_id,settlement_id,ship_type,quantity,paid_amount,ordered_turn,completion_turn) VALUES($1,$2,$3,$4,$5,$6,$7)`, [country.id, settlement.id, input.shipType, input.quantity, cost, guild.current_turn, completionTurn]);
-      await client.query("UPDATE settlements SET local_treasury=local_treasury-$1 WHERE id=$2", [cost, settlement.id]);
       await syncCountryTreasury(client, country.id);
       await client.query("INSERT INTO transactions(country_id,settlement_id,turn,kind,amount,description) VALUES($1,$2,$3,'SHIP_PURCHASE',$4,$5)", [country.id, settlement.id, guild.current_turn, -cost, `${settlement.name}: ${input.quantity} ${ship.name}`]);
       await audit(client, input.guildId, input.actorId, "SHIP_PURCHASE", "settlement", settlement.id, { shipType: input.shipType, quantity: input.quantity, cost, completionTurn });
@@ -3054,7 +3088,7 @@ export const gameService = {
       if (country.guild_id !== input.guildId) throw new GameError("Ülke bu sunucuya ait değil.");
       const settlement = (await client.query<SettlementRow>("SELECT * FROM settlements WHERE id=$1 AND country_id=$2 FOR UPDATE", [input.settlementId, country.id])).rows[0];
       if (!settlement) throw new GameError("Yerleşke bulunamadı.");
-      const balance = settlement.local_treasury + input.amount;
+      const balance = Number(settlement.local_treasury) + input.amount;
       if (balance < 0) throw new GameError("Yerleşke hazinesi sıfırın altına düşemez.");
       await client.query("UPDATE settlements SET local_treasury=$1 WHERE id=$2", [balance, settlement.id]);
       await syncCountryTreasury(client, country.id);

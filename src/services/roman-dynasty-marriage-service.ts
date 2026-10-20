@@ -6,6 +6,7 @@ import {
   type BirthComplication,type DynastyGender
 } from "../domain/dynasty.js";
 import {GameError} from "./game-service.js";
+import {killDynastyMemberFromEspionage,reconcileSuccession} from "./dynasty-service.js";
 import {rollNobleTraitKey} from "./noble-trait-service.js";
 import {romanFamilyMembership} from "./roman-family-access.js";
 
@@ -193,12 +194,11 @@ async function attemptBirth(input:{
       [mother.id,turn+MATERNAL_ILLNESS_COOLDOWN_TURNS]
     );
     if(complication==="DEATH"){
-      await client.query(
-        mother.id===roman.id
-          ?"UPDATE roman_family_members SET status='DEAD',health='HEALTHY',sick_until_turn=NULL,died_turn=$2,death_reason='Doğum komplikasyonu',dynasty_spouse_id=NULL,updated_at=NOW() WHERE id=$1"
-          :"UPDATE dynasty_members SET status='DEAD',health='HEALTHY',sick_until_turn=NULL,died_turn=$2,death_reason='Doğum komplikasyonu',roman_spouse_id=NULL,updated_at=NOW() WHERE id=$1",
+      if(mother.id===roman.id)await client.query(
+        "UPDATE roman_family_members SET status='DEAD',health='HEALTHY',sick_until_turn=NULL,died_turn=$2,death_reason='Doğum komplikasyonu',dynasty_spouse_id=NULL,updated_at=NOW() WHERE id=$1",
         [mother.id,turn]
       );
+      else await killDynastyMemberFromEspionage(client,mother.id,turn,"Doğum komplikasyonu");
       await client.query(
         mother.id===roman.id
           ?"UPDATE dynasty_members SET roman_spouse_id=NULL,updated_at=NOW() WHERE id=$1"
@@ -359,13 +359,16 @@ export const romanDynastyMarriageService={
       const session=(await client.query<{
         id:string;household_type:HouseholdType;family_id:string|null;dynasty_id:string|null;initiated_by:string;
         roman_member_id:string;dynasty_member_id:string;mother_system:HouseholdType;game_turn:number;
-        gender:DynastyGender;child_relation:string;status:string;roman_name:string;dynasty_name:string;
+        gender:DynastyGender;child_relation:string;status:string;roman_name:string;dynasty_name:string;dynasty_country_name:string;
       }>(`SELECT session.*,roman.name AS roman_name,dynasty_member.name AS dynasty_name
+                  ,dynasty_country.name AS dynasty_country_name
             FROM roman_dynasty_birth_sessions session
             JOIN roman_dynasty_marriages marriage ON marriage.id=session.marriage_id
             JOIN roman_republics republic ON republic.id=marriage.republic_id AND republic.guild_id=$2
             JOIN roman_family_members roman ON roman.id=session.roman_member_id
             JOIN dynasty_members dynasty_member ON dynasty_member.id=session.dynasty_member_id
+            JOIN dynasties dynasty ON dynasty.id=marriage.dynasty_id
+            JOIN countries dynasty_country ON dynasty_country.id=dynasty.country_id
            WHERE session.id=$1 FOR UPDATE OF session`,[input.sessionId,input.guildId])).rows[0];
       if(!session||session.status!=="PENDING_NAME")throw new GameError("Adlandırılmayı bekleyen karma hane doğumu bulunamadı.");
       if(session.household_type==="ROMAN_FAMILY"){
@@ -408,6 +411,7 @@ export const romanDynastyMarriageService={
           session.game_turn,rollNobleTraitKey()
         ])).rows[0]!.id;
         await client.query("UPDATE roman_dynasty_birth_sessions SET status='COMPLETED',dynasty_child_id=$1,completed_at=NOW() WHERE id=$2",[childId,session.id]);
+        await reconcileSuccession(client,session.dynasty_id,session.game_turn,session.dynasty_country_name,[]);
       }
       return{
         householdType:session.household_type,childId,childName:name,childGender:session.gender,

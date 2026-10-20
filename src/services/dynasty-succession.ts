@@ -50,3 +50,44 @@ export const fallbackDynastyCandidateSql=`
    ORDER BY CASE WHEN gender='MALE' THEN 0 ELSE 1 END,
             is_heir DESC,succession_rank NULLS LAST,age DESC NULLS LAST,created_at,id
    LIMIT 1 FOR UPDATE`;
+
+export const recomputeLineageAwareSuccessionRanksSql=`
+  WITH ruler AS (
+    SELECT id,mother_id,father_id
+      FROM dynasty_members
+     WHERE dynasty_id=$1 AND id=$2
+  ), ranked AS (
+    SELECT candidate.id,
+           ROW_NUMBER() OVER (ORDER BY
+             CASE
+               WHEN candidate.gender='MALE' AND (candidate.father_id=ruler.id OR candidate.mother_id=ruler.id) THEN 0
+               WHEN candidate.gender='MALE' AND (
+                 (ruler.father_id IS NOT NULL AND candidate.father_id=ruler.father_id)
+                 OR (ruler.mother_id IS NOT NULL AND candidate.mother_id=ruler.mother_id)
+               ) THEN 1
+               WHEN candidate.gender='MALE' THEN 2
+               ELSE 3
+             END,
+             CASE WHEN candidate.gender='MALE' AND (
+               candidate.father_id=ruler.id OR candidate.mother_id=ruler.id
+               OR (ruler.father_id IS NOT NULL AND candidate.father_id=ruler.father_id)
+               OR (ruler.mother_id IS NOT NULL AND candidate.mother_id=ruler.mother_id)
+             ) THEN candidate.age END DESC NULLS LAST,
+             candidate.succession_rank NULLS LAST,candidate.age DESC NULLS LAST,candidate.created_at,candidate.id
+           )::integer AS next_rank
+      FROM dynasty_members candidate
+      CROSS JOIN ruler
+     WHERE candidate.dynasty_id=$1 AND candidate.status='ALIVE' AND candidate.id<>ruler.id
+       AND (
+         (candidate.gender='MALE' AND (candidate.father_id=ruler.id OR candidate.mother_id=ruler.id))
+         OR (candidate.gender='MALE' AND (
+           (ruler.father_id IS NOT NULL AND candidate.father_id=ruler.father_id)
+           OR (ruler.mother_id IS NOT NULL AND candidate.mother_id=ruler.mother_id)
+         ))
+         OR candidate.is_heir=TRUE OR candidate.succession_rank IS NOT NULL
+       )
+  )
+  UPDATE dynasty_members member
+     SET succession_rank=ranked.next_rank,updated_at=NOW()
+    FROM ranked
+   WHERE member.id=ranked.id`;

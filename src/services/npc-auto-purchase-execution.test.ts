@@ -23,6 +23,9 @@ vi.mock("./game-service.js", () => ({
   GameError: class GameError extends Error {},
   buildingPurchaseTerms: vi.fn(() => ({ cost: 1_000, duration: 3 })),
   unitPurchaseCost: vi.fn((_type: string, quantity: number) => quantity),
+  modifiedBuildingPurchaseCost:vi.fn((cost:number)=>cost),
+  modifiedUnitPurchaseCost:vi.fn((cost:number)=>cost),
+  modifiedShipPurchaseCost:vi.fn(()=>1_000),
   gameService: {
     listCountries: mocks.listCountries,
     document: mocks.document,
