@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { DbClient } from "../db/pool.js";
 import { pool, withTransaction } from "../db/pool.js";
 import {
-  BASE_SIEGE_STARVATION_TURNS, BATTLE_TERRAINS, BATTLE_UNIT_STATS, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, SIEGE_ASSAULT_FRONTAGE, SIEGE_ATTACKER_DISMOUNT_MAP, activeSiegeAssaultAssets, applyRestrictedBattleLoss, baseRetreatRate, battleEnds, commanderClashBonus, compositionTotal, egyptianWarChariotPressureBonus, fieldPressureAfterRound, hasAssaultForce, orderState, resolveRound, restoreSiegeAttackerCasualtyTypes, roundDamageFactors, siegeAssaultAccess, siegeAssaultComposition, siegeAssaultGroups, siegeAttackerBreaks, siegeAttackerDismountedComposition, siegeAttackerRetreatExposure, siegeDefenderCaptured, siegeDefenderGroups, siegeDefenderReserveBonus, siegeDefenseModifiers, siegeFrontageProfile, siegeOrderState, siegePressureAfterRound,
+  BASE_SIEGE_STARVATION_TURNS, BATTLE_TERRAINS, BATTLE_UNIT_STATS, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, SIEGE_ASSAULT_FRONTAGE, SIEGE_ATTACKER_DISMOUNT_MAP, activeSiegeAssaultAssets, applyRestrictedBattleLoss, automaticSiegeDismountments, baseRetreatRate, battleEnds, commanderClashBonus, compositionTotal, egyptianWarChariotPressureBonus, fieldPressureAfterRound, hasAssaultForce, orderState, resolveRound, restoreSiegeAttackerCasualtyTypes, roundDamageFactors, siegeAssaultAccess, siegeAssaultComposition, siegeAssaultGroups, siegeAttackerBreaks, siegeAttackerDismountedComposition, siegeAttackerRetreatExposure, siegeDefenderCaptured, siegeDefenderGroups, siegeDefenderReserveBonus, siegeDefenseModifiers, siegeFrontageProfile, siegeOrderState, siegePressureAfterRound,
   rollBattlePool, rollNavalPool, rollSiegeSupport,
   type ArmyCompositionProfile, type BattleComposition, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain,
   type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeComposition, type SiegeDismountUnitType, type SiegeTarget, type SiegeTargets
@@ -242,9 +242,26 @@ async function resolveParticipant(client: DbClient, battleId: string, side: Batt
   return participant;
 }
 
+function automaticSteppeDismountments(side: BattleSideRow): BattleComposition {
+  if (side.composition_profile === "STEPPE") return automaticSiegeDismountments(side.composition);
+  const total: BattleComposition = {};
+  for (const participant of side.participants) {
+    if (participant.is_steppe_confederation) mergeComposition(total, automaticSiegeDismountments(participant.composition ?? {}));
+  }
+  for (const source of Object.keys(SIEGE_ATTACKER_DISMOUNT_MAP) as SiegeDismountUnitType[]) {
+    total[source] = Math.min(Math.max(0, side.composition[source] ?? 0), Math.max(0, total[source] ?? 0));
+    if (!total[source]) delete total[source];
+  }
+  return total;
+}
+
 function attackerDismountments(side: BattleSideRow): BattleComposition {
   const total: BattleComposition = {};
-  for (const participant of side.participants) mergeComposition(total, participant.dismounted_composition ?? {});
+  const automatic = automaticSteppeDismountments(side);
+  for (const participant of side.participants) {
+    if (!participant.is_steppe_confederation) mergeComposition(total, participant.dismounted_composition ?? {});
+  }
+  mergeComposition(total, automatic);
   for (const source of Object.keys(SIEGE_ATTACKER_DISMOUNT_MAP) as SiegeDismountUnitType[]) {
     total[source] = Math.min(Math.max(0, side.composition[source] ?? 0), Math.max(0, total[source] ?? 0));
     if (!total[source]) delete total[source];
@@ -2336,6 +2353,11 @@ export const battleService = {
         if (!participant) throw new GameError("Yalnız kuşatan taraftaki kendi ülkenizin süvarilerini attan indirebilirsiniz.");
       }
 
+      const participantView = view.sides.A.participants.find((row) => row.country_id === participant!.country_id);
+      if (participantView?.is_steppe_confederation) {
+        throw new GameError("Bozkır ülkelerinin bütün atlı birlikleri kuşatmada otomatik olarak yaya savaşır; ayrıca bir emir vermeniz gerekmez.");
+      }
+
       const mercenaryQuantity = Number((await client.query<{ quantity: number }>(
         `SELECT COALESCE(SUM(COALESCE((bma.initial_land->>$3)::integer,0)),0)::integer AS quantity
            FROM battle_mercenary_assignments bma
@@ -2883,6 +2905,9 @@ export const battleService = {
       const defenderAntiCavalryDamage = Math.ceil(Number(rollB.detail?.__spear_cavalry?.antiCavalryDamage ?? 0) * defense.defenderDamage * defenderReserve.damageMultiplier);
       const mantletDefense = siege ? Math.min(0.20, (view.sides.A.support_assets.mantlet ?? 0) * 0.02) : 0;
       const attackerDismounted = siege ? attackerDismountments(view.sides.A) : {};
+      const defenderDismounted = siege && view.sides.B.composition_profile === "STEPPE"
+        ? automaticSteppeDismountments(view.sides.B)
+        : {};
       const attackerEffectiveComposition = siege
         ? siegeAttackerDismountedComposition(view.sides.A.composition, attackerDismounted)
         : view.sides.A.composition;
@@ -2912,7 +2937,8 @@ export const battleService = {
               secondaryComposition: attackerRangedCasualties!,
               primaryShare: 0.70
             },
-            ...(Object.keys(attackerDismounted).length ? { casualtyDurabilityOverridesA: dismountedDurabilityOverrides(attackerDismounted) } : {})
+            ...(Object.keys(attackerDismounted).length ? { casualtyDurabilityOverridesA: dismountedDurabilityOverrides(attackerDismounted) } : {}),
+            ...(Object.keys(defenderDismounted).length ? { casualtyDurabilityOverridesB: dismountedDurabilityOverrides(defenderDismounted) } : {})
           } : {})
         });
       let disabledA=0,disabledB=0;

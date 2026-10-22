@@ -120,7 +120,13 @@ describe("ordu kompozisyonu ve güncel birlik dengesi", () => {
 
   it("bozkır kuşatma kadrosuna açık arazi bonusu taşımaz", () => {
     const result = assessArmyComposition({ kurgan_shieldbearer: 6_000, oba_archer: 4_000 }, "SIEGE_RESTRICTED", "STEPPE");
-    expect(result).toMatchObject({ tier: "STANDARD", label: "Bozkır Kuşatma Düzeni", clashMultiplier: 1, damageMultiplier: 1 });
+    expect(result).toMatchObject({ tier: "BALANCED", label: "Dengeli Bozkır Kuşatma Düzeni", clashMultiplier: 1.10, damageMultiplier: 1.05 });
+  });
+
+  it("attan inmiş dengeli bozkır ordusunu kuşatma oranlarıyla değerlendirir", () => {
+    const result = assessArmyComposition({ kurgan_shieldbearer: 4_500, oba_archer: 5_500 }, "SIEGE_RESTRICTED", "STEPPE");
+    expect(result).toMatchObject({ tier: "EXCELLENT", label: "Mükemmel Bozkır Kuşatma Düzeni", clashMultiplier: 1.15, damageMultiplier: 1.08 });
+    expect(result.roleShares.mobile).toBe(0);
   });
 
   it("İskandinav birliklerini hareketli rol aramadan kendi doktriniyle değerlendirir", () => {

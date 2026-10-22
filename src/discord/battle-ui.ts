@@ -1,5 +1,5 @@
 import { ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, ModalBuilder, StringSelectMenuBuilder, TextInputBuilder, TextInputStyle, type ButtonInteraction, type ChatInputCommandInteraction, type Client, type ModalSubmitInteraction, type StringSelectMenuInteraction } from "discord.js";
-import { BATTLE_TERRAINS, BATTLE_UNIT_STATS, FIELD_BATTLE_PRESSURE_LIMIT, LADDER_GROUP_ASSAULT_CAPACITY, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, SIEGE_ASSET_BATTLE_STATS, SIEGE_ASSAULT_FRONTAGE, SIEGE_ATTACKER_DISMOUNT_MAP, SIEGE_PRESSURE_LIMIT, SIEGE_TOWER_ASSAULT_CAPACITY, assessArmyComposition, orderState, remainingBombardments, siegeAssaultAccess, siegeAttackerDismountedComposition, siegeDefenderComposition, siegeDefenderReserveBonus, siegeDefenseModifiers, siegeFrontageProfile, siegeOrderState, type ArmyCompositionContext, type BattleComposition, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain, type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeDismountUnitType, type SiegeTarget } from "../domain/battle.js";
+import { BATTLE_TERRAINS, BATTLE_UNIT_STATS, FIELD_BATTLE_PRESSURE_LIMIT, LADDER_GROUP_ASSAULT_CAPACITY, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, SIEGE_ASSET_BATTLE_STATS, SIEGE_ASSAULT_FRONTAGE, SIEGE_ATTACKER_DISMOUNT_MAP, SIEGE_PRESSURE_LIMIT, SIEGE_TOWER_ASSAULT_CAPACITY, assessArmyComposition, automaticSiegeDismountments, orderState, remainingBombardments, siegeAssaultAccess, siegeAttackerDismountedComposition, siegeDefenderComposition, siegeDefenderReserveBonus, siegeDefenseModifiers, siegeFrontageProfile, siegeOrderState, type ArmyCompositionContext, type BattleComposition, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain, type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeDismountUnitType, type SiegeTarget } from "../domain/battle.js";
 import { NAVAL_BATTLE_ORDERS, isNavalRetreatOrder, navalFleetCondition, type NavalBattleOrder } from "../domain/naval-tactics.js";
 import { SPECIAL_UNITS } from "../domain/special-units.js";
 import { number } from "../domain/format.js";
@@ -22,16 +22,33 @@ const orderLabels: Record<string, string> = { ORDERED: "Düzenli", WORN: "Baskı
 const tierLabels: Record<string, string> = { BALANCED: "Dengeli Çarpışma", MINOR: "Hafif Üstünlük", CLEAR: "Belirgin Üstünlük", CRUSHING: "Ezici Üstünlük" };
 const navalConditionLabels = { OPERATIONAL:"Savaşabilir", DAMAGED:"Hasarlı", CRITICAL:"Zorunlu geri çekilme", OUT:"Savaş dışı" } as const;
 
-function currentCompositionLabel(view: BattleView, side: BattleSideKey): string {
-  const context: ArmyCompositionContext = view.battle.terrain === "SIEGE" ? "SIEGE_RESTRICTED" : "FIELD";
+function currentAttackerDismountments(view: BattleView): BattleComposition {
   const selectedDismountments: BattleComposition = {};
-  if (view.battle.terrain === "SIEGE" && side === "A") {
-    for (const participant of view.sides.A.participants) {
+  if (view.battle.terrain === "SIEGE") {
+    if (view.sides.A.composition_profile === "STEPPE") {
+      Object.assign(selectedDismountments, automaticSiegeDismountments(view.sides.A.composition));
+    } else for (const participant of view.sides.A.participants) {
+      const participantDismountments = participant.is_steppe_confederation
+        ? automaticSiegeDismountments(participant.composition ?? {})
+        : participant.dismounted_composition ?? {};
       for (const source of Object.keys(SIEGE_ATTACKER_DISMOUNT_MAP) as SiegeDismountUnitType[]) {
-        selectedDismountments[source] = (selectedDismountments[source] ?? 0) + Number(participant.dismounted_composition?.[source] ?? 0);
+        selectedDismountments[source] = (selectedDismountments[source] ?? 0) + Number(participantDismountments[source] ?? 0);
       }
     }
+    for (const source of Object.keys(SIEGE_ATTACKER_DISMOUNT_MAP) as SiegeDismountUnitType[]) {
+      selectedDismountments[source] = Math.min(
+        Number(view.sides.A.composition[source] ?? 0),
+        Number(selectedDismountments[source] ?? 0)
+      );
+      if (!selectedDismountments[source]) delete selectedDismountments[source];
+    }
   }
+  return selectedDismountments;
+}
+
+function currentCompositionLabel(view: BattleView, side: BattleSideKey): string {
+  const context: ArmyCompositionContext = view.battle.terrain === "SIEGE" ? "SIEGE_RESTRICTED" : "FIELD";
+  const selectedDismountments = currentAttackerDismountments(view);
   const composition: BattleComposition = view.battle.terrain === "SIEGE" && side === "B"
     ? siegeDefenderComposition(view.sides[side].composition)
     : view.battle.terrain === "SIEGE" && side === "A"
@@ -709,11 +726,13 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
       }).join("\n") || "Birlik veya gemi yok.";
       const support = Object.entries(view.sides[key].support_assets ?? {}).filter(([, q]) => (q ?? 0) > 0)
         .map(([asset, q]) => `• ${SIEGE_ASSET_BATTLE_STATS[asset as SiegeAssetType]?.label ?? asset}: **${number(q ?? 0)}** • Hedef: **${view.sides[key].support_targets?.[asset as SiegeAssetType] ?? "ASSAULT"}**`).join("\n");
-      const dismounted = key === "A" ? view.sides.A.participants.flatMap((participant) =>
-        Object.entries(participant.dismounted_composition ?? {}).filter(([, quantity]) => Number(quantity) > 0).map(([source, quantity]) => {
+      const dismounted = key === "A" ? Object.entries(currentAttackerDismountments(view))
+        .filter(([, quantity]) => Number(quantity) > 0)
+        .map(([source, quantity]) => {
           const sourceType = source as SiegeDismountUnitType;
-          return `• ${participant.country_name}: ${number(Number(quantity))} ${BATTLE_UNIT_STATS[sourceType].label} → ${BATTLE_UNIT_STATS[SIEGE_ATTACKER_DISMOUNT_MAP[sourceType]].label}`;
-        })) : [];
+          const automatic = view.sides.A.composition_profile === "STEPPE" ? " • Otomatik bozkır düzeni" : "";
+          return `• ${number(Number(quantity))} ${BATTLE_UNIT_STATS[sourceType].label} → ${BATTLE_UNIT_STATS[SIEGE_ATTACKER_DISMOUNT_MAP[sourceType]].label}${automatic}`;
+        }) : [];
       const cargo=view.battle.terrain==="NAVAL"
         ?view.sides[key].participants.map((participant)=>participant.embarked_army_name
           ?`• ${participant.country_name}: **${participant.embarked_army_name}** • ${number(Object.values(participant.embarked_army_composition??{}).reduce((sum,quantity)=>sum+Number(quantity??0),0))} asker${Number(participant.embarked_army_loss??0)>0?` • Kayıp: **-${number(Number(participant.embarked_army_loss))}**`:""}`

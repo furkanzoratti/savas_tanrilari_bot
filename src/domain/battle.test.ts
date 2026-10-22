@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BASE_SIEGE_STARVATION_TURNS, MAX_BOMBARDMENTS_PER_GAME_TURN, activeSiegeAssaultAssets, advantageTier, applyRestrictedBattleLoss, remainingBombardments, baseRetreatRate, battleEnds, commanderClashBonus, compositionTotal, engagedComposition, fieldPressureAfterRound, orderState, resolveRound, restoreSiegeAttackerCasualtyTypes, rollBattlePool, rollNavalPool, rollSiegeSupport, siegeAssaultAccess, siegeAssaultComposition, siegeAttackerBreaks, siegeAttackerDismountedComposition, siegeAttackerRetreatExposure, siegeDefenderCaptured, siegeDefenderComposition, siegeDefenderGroups, siegeDefenderReserveBonus, siegeDefenseModifiers, siegeFrontageProfile, siegeOrderState, siegePressureAfterRound } from "./battle.js";
+import { BASE_SIEGE_STARVATION_TURNS, MAX_BOMBARDMENTS_PER_GAME_TURN, activeSiegeAssaultAssets, advantageTier, applyRestrictedBattleLoss, automaticSiegeDismountments, remainingBombardments, baseRetreatRate, battleEnds, commanderClashBonus, compositionTotal, engagedComposition, fieldPressureAfterRound, orderState, resolveRound, restoreSiegeAttackerCasualtyTypes, rollBattlePool, rollNavalPool, rollSiegeSupport, siegeAssaultAccess, siegeAssaultComposition, siegeAttackerBreaks, siegeAttackerDismountedComposition, siegeAttackerRetreatExposure, siegeDefenderCaptured, siegeDefenderComposition, siegeDefenderGroups, siegeDefenderReserveBonus, siegeDefenseModifiers, siegeFrontageProfile, siegeOrderState, siegePressureAfterRound } from "./battle.js";
 
 describe("savaş motoru", () => {
   it("kuşatma açlığının temel süresini altı oyun turu kabul eder", () => {
@@ -27,6 +27,24 @@ describe("savaş motoru", () => {
     expect(restoreSiegeAttackerCasualtyTypes(original, { heavy_infantry: 1_000, oba_archer: 500 }, dismounted)).toEqual({
       heavy_infantry: 500, heavy_cavalry: 500, oba_archer: 250, steppe_horse_archer: 250
     });
+  });
+
+  it("bozkır kuşatması için bütün atlı birlikleri otomatik yaya düzenine alır", () => {
+    const original = {
+      steppe_horse_archer: 4_000,
+      steppe_cavalry: 2_500,
+      light_cavalry: 500,
+      kurgan_shieldbearer: 2_000,
+      oba_archer: 1_500
+    } as const;
+    const dismounted = automaticSiegeDismountments(original);
+    expect(dismounted).toEqual({ steppe_horse_archer: 4_000, steppe_cavalry: 2_500, light_cavalry: 500 });
+    expect(siegeAttackerDismountedComposition(original, dismounted)).toEqual({
+      light_infantry: 500,
+      kurgan_shieldbearer: 4_500,
+      oba_archer: 5_500
+    });
+    expect(original.steppe_cavalry).toBe(2_500);
   });
 
   it("saldıran atlıları kuşatma cephesinden çıkarır, yalnız manuel indirilenleri yaya olarak dahil eder", () => {

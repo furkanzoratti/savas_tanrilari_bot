@@ -253,6 +253,15 @@ export const SIEGE_ATTACKER_DISMOUNT_MAP = {
 } as const satisfies Partial<Record<BattleUnitType, BattleUnitType>>;
 export type SiegeDismountUnitType = keyof typeof SIEGE_ATTACKER_DISMOUNT_MAP;
 
+export function automaticSiegeDismountments(composition: BattleComposition): BattleComposition {
+  const dismounted: BattleComposition = {};
+  for (const source of Object.keys(SIEGE_ATTACKER_DISMOUNT_MAP) as SiegeDismountUnitType[]) {
+    const quantity = Math.max(0, Math.floor(composition[source] ?? 0));
+    if (quantity > 0) dismounted[source] = quantity;
+  }
+  return dismounted;
+}
+
 function dismountedQuantity(
   composition: BattleComposition,
   dismounted: BattleComposition,
@@ -440,10 +449,18 @@ function assessSteppeComposition(
     const siegeLine = roleShares.line + roleShares.spear;
     const siegeRanged = roleShares.ranged;
     if (dominantUnitShare >= 0.80) return { tier: "MONOTYPE", ...COMPOSITION_TIERS.MONOTYPE, label: "Tekdüze Kuşatma Kadrosu", dominantUnitShare, meaningfulUnitCount, roleShares };
-    return {
-      tier: "STANDARD", ...COMPOSITION_TIERS.STANDARD, label: siegeLine >= 0.35 && siegeRanged >= 0.15 ? "Bozkır Kuşatma Düzeni" : "Standart Kuşatma Düzeni",
-      dominantUnitShare, meaningfulUnitCount, roleShares
-    };
+    let tier: ArmyCompositionTier;
+    let label: string;
+    if (inRange(siegeLine, 0.45, 0.55) && inRange(siegeRanged, 0.45, 0.55) && dominantUnitShare <= 0.55) {
+      tier = "EXCELLENT"; label = "Mükemmel Bozkır Kuşatma Düzeni";
+    } else if (inRange(siegeLine, 0.40, 0.60) && inRange(siegeRanged, 0.40, 0.60) && dominantUnitShare <= 0.60) {
+      tier = "BALANCED"; label = "Dengeli Bozkır Kuşatma Düzeni";
+    } else if (siegeLine >= 0.25 && siegeRanged >= 0.25 && dominantUnitShare <= 0.75) {
+      tier = "STANDARD"; label = "Bozkır Kuşatma Düzeni";
+    } else {
+      tier = "LIMITED"; label = "Eksik Bozkır Kuşatma Düzeni";
+    }
+    return { tier, ...COMPOSITION_TIERS[tier], label, dominantUnitShare, meaningfulUnitCount, roleShares };
   }
 
   let tier: ArmyCompositionTier;
