@@ -197,7 +197,7 @@ describe("Akademi karakter komutları", () => {
   it("ülkenin tek Mareşalini Komutan yerine Mareşal olarak gösterir",()=>{
     const embed=charactersEmbed("Roma",[{
       id:"00000000-0000-4000-8000-000000000023",country_id:"00000000-0000-4000-8000-000000000024",
-      name:"Marcus",role:"COMMANDER",skill_bonus:3,assignment:"ARMY",assignment_ready_turn:null,
+      name:"Marcus",role:"COMMANDER",skill_bonus:3,age:42,trained_turn:23,assignment:"ARMY",assignment_ready_turn:null,
       doctrine:"OFFENSIVE",commander_victories:9,specialization:"FIELD_TACTICIAN",specialization_progress:9,
       specialization_level:3,character_status:"ACTIVE",is_admiral:false,is_marshal:true,
       unavailable_until_turn:null,trained_settlement_name:"Roma",assigned_settlement_name:null,
@@ -205,12 +205,13 @@ describe("Akademi karakter komutları", () => {
       operation_status:null,operation_progress:null,operation_goal:null,target_country_name:null,target_settlement_name:null
     }]).toJSON();
     expect(embed.description).toContain("**Marcus** — Mareşal (+3)");
+    expect(embed.description).toContain("**42 yaş**");
     expect(embed.description).not.toContain("**Marcus** — Komutan");
   });
 
   it("karakterlerim çıktısını komuta kadrosu ve her görev türü için ayrı forma böler",()=>{
     const base={
-      country_id:"00000000-0000-4000-8000-000000000040",assignment:"NONE",assignment_ready_turn:null,
+      country_id:"00000000-0000-4000-8000-000000000040",age:20,trained_turn:45,assignment:"NONE",assignment_ready_turn:null,
       doctrine:null,commander_victories:0,specialization:null,specialization_progress:0,specialization_level:0,
       character_status:"ACTIVE",is_admiral:false,is_marshal:false,unavailable_until_turn:null,
       trained_settlement_name:null,assigned_settlement_name:null,assigned_country_name:null,assigned_army_name:null,
@@ -242,7 +243,7 @@ describe("Akademi karakter komutları", () => {
   it("tutsak casusun tutulduğu şehri açıkça gösterir",()=>{
     const embed=charactersEmbed("Arvernler",[{
       id:"00000000-0000-4000-8000-000000000031",country_id:"00000000-0000-4000-8000-000000000032",
-      name:"Pessinus",role:"SPY",skill_bonus:0,assignment:"CAPTURED",assignment_ready_turn:null,
+      name:"Pessinus",role:"SPY",skill_bonus:0,age:31,trained_turn:34,assignment:"CAPTURED",assignment_ready_turn:null,
       doctrine:null,commander_victories:0,specialization:null,specialization_progress:0,specialization_level:0,
       character_status:"ACTIVE",is_admiral:false,unavailable_until_turn:null,trained_settlement_name:null,
       assigned_settlement_name:"Roma",assigned_country_name:"Roma",assigned_army_name:null,assigned_fleet_name:null,

@@ -267,6 +267,7 @@ export const cityService = {
   async nameCharacter(input: { guildId: string; actorId: string; countryId: string; sessionId: string; name: string }): Promise<CountryCharacter> {
     return withTransaction(async (client) => {
       await getCountry(client, input.guildId, input.countryId);
+      const guild = await guildState(client,input.guildId);
       const session = (await client.query<AcademyTrainingSession>("SELECT * FROM academy_training_sessions WHERE id=$1 AND country_id=$2 FOR UPDATE", [input.sessionId, input.countryId])).rows[0];
       if (!session || session.status !== "AWAITING_NAME" || !session.result_role) throw new GameError("İsimlendirmeye hazır bir Akademi karakteri bulunamadı.");
       const name = input.name.trim().replace(/\s+/g, " ");
@@ -274,9 +275,9 @@ export const cityService = {
       const duplicate = await client.query("SELECT 1 FROM country_characters WHERE country_id=$1 AND lower(name)=lower($2)", [input.countryId, name]);
       if (duplicate.rowCount) throw new GameError("Bu ülkede aynı isimli bir karakter zaten bulunuyor.");
       const created = await client.query<CountryCharacter>(
-        `INSERT INTO country_characters(country_id,trained_settlement_id,name,role,skill_bonus,trained_turn,trained_by)
-         VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *,NULL::text AS assigned_settlement_name,NULL::text AS trained_settlement_name`,
-        [input.countryId, session.settlement_id, name, session.result_role, session.skill_bonus, session.acquisition_turn, input.actorId]
+        `INSERT INTO country_characters(country_id,trained_settlement_id,name,role,skill_bonus,trained_turn,trained_by,age)
+         VALUES($1,$2,$3,$4,$5,$6,$7,20) RETURNING *,NULL::text AS assigned_settlement_name,NULL::text AS trained_settlement_name`,
+        [input.countryId, session.settlement_id, name, session.result_role, session.skill_bonus, guild.current_turn, input.actorId]
       );
       const character = created.rows[0]!;
       await client.query("UPDATE academy_training_sessions SET status='COMPLETED',character_id=$1 WHERE id=$2", [character.id, session.id]);

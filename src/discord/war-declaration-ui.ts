@@ -180,7 +180,7 @@ export function renderActiveWarSelectionRows(wars:OfficialWarView[]):Array<Actio
 
 function compactWarFront(names:string[],leader:string,flag:CountryFlagResolver):string{
   const participants=names.length?names:[leader];
-  return participants.map((name)=>`${flag(name,name===leader?"👑":"▫️")} ${name===leader?`**${name}**`:name}`).join(" · ");
+  return participants.map((name)=>`${flag(name,"🏳️")} ${name===leader?`**${name}**`:name}`).join(" · ");
 }
 
 export function renderActiveWarPages(wars:OfficialWarView[],flag:CountryFlagResolver=fallbackCountryFlag):EmbedBuilder[]{
@@ -195,7 +195,7 @@ export function renderActiveWarPages(wars:OfficialWarView[],flag:CountryFlagReso
     const embed=new EmbedBuilder()
       .setColor(0x9f252c)
       .setTitle(`⚔️ Devam Eden Devlet Savaşları${pages.length>1?` • ${pageIndex+1}/${pages.length}`:""}`)
-      .setDescription(`Sunucuda **${wars.length} aktif savaş** bulunuyor. 👑 işareti cephe liderini gösterir.`)
+      .setDescription(`Sunucuda **${wars.length} aktif savaş** bulunuyor.`)
       .setFooter({text:`Aktif savaşlar • Sayfa ${pageIndex+1}/${pages.length}`});
     for(const war of page){
       const type=war.war_type==="PACT"?"Pakt Savaşı":war.war_type==="FACTION"?"Çok Taraflı Savaş":"Devlet Savaşı";
@@ -203,8 +203,8 @@ export function renderActiveWarPages(wars:OfficialWarView[],flag:CountryFlagReso
       const details=[
         `🎯 **Hedef:** ${goal}`,
         `⚖️ **Savaş dengesi:** ${war.attacker_country_name} açısından ${Number(war.attacker_score)>0?"+":""}${Number(war.attacker_score)}`,
-        `${flag(war.attacker_country_name,"🔴")} **Saldıran:** ${compactWarFront(war.attacker_participant_names,war.attacker_country_name,flag)}`,
-        `${flag(war.defender_country_name,"🔵")} **Savunan:** ${compactWarFront(war.defender_participant_names,war.defender_country_name,flag)}`,
+        `**Saldıran:** ${compactWarFront(war.attacker_participant_names,war.attacker_country_name,flag)}`,
+        `**Savunan:** ${compactWarFront(war.defender_participant_names,war.defender_country_name,flag)}`,
         `🏷️ ${type}  •  ⏳ **Tur ${war.started_turn}**`
       ].join("\n").slice(0,900);
       embed.addFields({

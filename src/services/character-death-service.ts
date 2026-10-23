@@ -17,6 +17,20 @@ export async function markCharacterDead(input: {
     [characterId,reason]
   );
   await client.query(
+    `UPDATE merchant_operations
+        SET status='CANCELLED',updated_at=NOW()
+      WHERE merchant_character_id=$1
+        AND status IN ('PENDING_ACCEPTANCE','TRAVELING','ACTIVE','CONTROLLED')`,
+    [characterId]
+  );
+  await client.query(
+    `UPDATE diplomat_operations
+        SET status='CANCELLED',updated_at=NOW(),
+            completion_text=CASE WHEN COALESCE(completion_text,'')='' THEN $2 ELSE completion_text END
+      WHERE diplomat_character_id=$1 AND status IN ('TRAVELING','ACTIVE','PAUSED')`,
+    [characterId,reason]
+  );
+  await client.query(
     `UPDATE missionary_operations
         SET status='CANCELLED',updated_at=NOW()
       WHERE missionary_character_id=$1 AND status IN ('TRAVELING','ACTIVE')`,
@@ -29,6 +43,25 @@ export async function markCharacterDead(input: {
       WHERE governorship.character_id=$1 AND governorship.status='ACTIVE'
         AND guild.discord_id=governorship.guild_id`,
     [characterId,reason]
+  );
+  await client.query("DELETE FROM settlement_assimilation_diplomats WHERE character_id=$1",[characterId]);
+  await client.query("UPDATE armies SET commander_character_id=NULL,updated_at=NOW() WHERE commander_character_id=$1",[characterId]);
+  await client.query("UPDATE fleets SET commander_character_id=NULL,updated_at=NOW() WHERE commander_character_id=$1",[characterId]);
+  await client.query("UPDATE battle_sides SET chief_commander_character_id=NULL WHERE chief_commander_character_id=$1",[characterId]);
+  await client.query(
+    "UPDATE naval_blockades SET admiral_character_id=NULL,admiral_specialization_level=0 WHERE admiral_character_id=$1",
+    [characterId]
+  );
+  await client.query(
+    "UPDATE naval_raids SET admiral_character_id=NULL,admiral_specialization_level=0 WHERE admiral_character_id=$1",
+    [characterId]
+  );
+  await client.query(
+    `UPDATE country_characters
+        SET assignment='NONE',assigned_settlement_id=NULL,protected_character_id=NULL,
+            assignment_ready_turn=NULL,unavailable_until_turn=NULL
+      WHERE protected_character_id=$1 AND character_status='ACTIVE'`,
+    [characterId]
   );
   const deceased=(await client.query<{country_id:string;is_marshal:boolean}>(
     `UPDATE country_characters

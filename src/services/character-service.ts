@@ -17,6 +17,8 @@ import { fallbackReligionDistribution, loadCountryReligionProfile, loadReligionD
 import { isAcquisitionTurn } from "../domain/mobilization.js";
 import { syncCountryPrimaryCulture } from "./culture-service.js";
 import {activeCountryModifiers} from "./country-modifier-service.js";
+import {dynastyDeathFailureMaximum,dynastyDeathSaveFailed} from "../domain/dynasty.js";
+import {markCharacterDead} from "./character-death-service.js";
 
 export const MISSIONARY_PURCHASE_COST = 2_000;
 export const MISSIONARY_LIMIT_PER_COUNTRY = 5;
@@ -29,6 +31,8 @@ export interface CharacterView {
   name: string;
   role: CharacterRole;
   skill_bonus: number;
+  age: number;
+  trained_turn: number;
   assignment: string;
   assignment_ready_turn: number | null;
   doctrine: CommanderDoctrine | null;
@@ -449,6 +453,7 @@ export const characterService = {
   async list(countryId: string): Promise<CharacterView[]> {
     return (await pool.query<CharacterView>(
       `SELECT character.id,character.country_id,character.name,character.role,character.skill_bonus,
+              character.age,character.trained_turn,
               CASE WHEN kidnapping.id IS NOT NULL OR captivity.target_settlement_id IS NOT NULL THEN 'CAPTURED' ELSE character.assignment END AS assignment,
               character.assignment_ready_turn,character.doctrine,
               character.commander_victories,character.specialization,character.specialization_progress,
@@ -1057,6 +1062,48 @@ export async function processCharacterTurn(
       religionBonusCache.set(countryId,bonuses);
       return bonuses;
     };
+    await client.query(
+      `UPDATE country_characters character
+          SET age=GREATEST(20,20+$2-character.trained_turn)
+         FROM countries country
+        WHERE country.id=character.country_id AND country.guild_id=$1
+          AND character.character_status<>'DEAD'`,
+      [guildId,turn]
+    );
+    const elderlyCharacters=(await client.query<{
+      id:string;name:string;age:number;trained_settlement_id:string|null;country_name:string;
+    }>(
+      `SELECT character.id,character.name,character.age,character.trained_settlement_id,
+              country.name AS country_name
+         FROM country_characters character
+         JOIN countries country ON country.id=character.country_id
+        WHERE country.guild_id=$1 AND country.status='ACTIVE'
+          AND character.character_status='ACTIVE' AND character.age>60
+          AND (character.last_age_death_check_turn IS NULL OR character.last_age_death_check_turn<$2)
+        ORDER BY character.age DESC,character.name
+        FOR UPDATE OF character`,
+      [guildId,turn]
+    )).rows;
+    for(const character of elderlyCharacters){
+      const roll=randomInt(1,21);
+      const age=Number(character.age);
+      const failureMaximum=dynastyDeathFailureMaximum(age);
+      const died=dynastyDeathSaveFailed(age,roll);
+      await client.query(
+        "UPDATE country_characters SET last_age_death_check_turn=$1 WHERE id=$2",
+        [turn,character.id]
+      );
+      if(died){
+        await markCharacterDead({
+          client,characterId:character.id,deathSettlementId:character.trained_settlement_id,
+          reason:"İlerleyen yaşı nedeniyle görevi sona erdi.",deathReason:"Yaşlılık • Ölüm zarı: 1d20 "+roll
+        });
+      }
+      logs.push(
+        "🎲 **"+character.country_name+" • "+character.name+"** — "+age+" yaş\n"+
+        "↳ Akademi karakteri ölüm zarı: **1d20 "+roll+"** • Ölüm aralığı: **1–"+failureMaximum+"** • Sonuç: **"+(died?"ÖLDÜ":"HAYATTA")+"**"
+      );
+    }
     await client.query(
       "UPDATE country_characters SET unavailable_until_turn=NULL,assignment='NONE',assigned_settlement_id=NULL,assignment_ready_turn=NULL WHERE unavailable_until_turn IS NOT NULL AND unavailable_until_turn<=$1",
       [turn]

@@ -110,7 +110,9 @@ describe("resmî savaş ilanları ve barış duyuruları", () => {
     expect(pages[0]!.toJSON().fields).toHaveLength(6);
     expect(pages[1]!.toJSON().fields).toHaveLength(1);
     const first=JSON.stringify(pages[0]!.toJSON());
-    expect(first).toContain("👑 **Roma**");
+    expect(first).toContain("🏳️ **Roma**");
+    expect(first).not.toContain("👑");
+    expect(first).not.toContain("işareti cephe liderini gösterir");
     expect(first).toContain("Saldıran");
     expect(first).toContain("Savunan");
     expect(first).toContain("Çok Taraflı Savaş");

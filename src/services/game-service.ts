@@ -107,6 +107,7 @@ export interface SettlementPolicyRow {
 }
 export interface CountryCharacter {
   id: string; country_id: string; name: string; role: CharacterRole; skill_bonus: number;
+  age: number;
   character_status: "ACTIVE" | "DEAD" | "DISMISSED";
   is_admiral: boolean;
   is_marshal?: boolean;
