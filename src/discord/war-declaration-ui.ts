@@ -232,8 +232,8 @@ export function renderActiveWarDetail(detail:OfficialWarDetailView,flag:CountryF
     .addFields(
       {name:"🎯 Yapısal Savaş Hedefi",value:fieldValue(goal)},
       {name:"⚖️ Güncel Savaş Dengesi",value:fieldValue(`**${war.attacker_country_name}** açısından **${Number(war.attacker_score)>0?"+":""}${Number(war.attacker_score)} / 100**`)},
-      {name:`${attackerFlag} Saldıran Cephe`,value:fieldValue(war.attacker_participant_names.map((name)=>`${flag(name,"▫️")} ${name}`).join("\n")),inline:true},
-      {name:`${defenderFlag} Savunan Cephe`,value:fieldValue(war.defender_participant_names.map((name)=>`${flag(name,"▫️")} ${name}`).join("\n")),inline:true},
+      {name:"🔴 Saldıran Cephe",value:fieldValue(war.attacker_participant_names.map((name)=>`${flag(name,"▫️")} ${name}`).join("\n")),inline:true},
+      {name:"🔵 Savunan Cephe",value:fieldValue(war.defender_participant_names.map((name)=>`${flag(name,"▫️")} ${name}`).join("\n")),inline:true},
       {name:"🩸 Toplam Muharebe Kayıpları",value:fieldValue(`${attackerFlag} ${war.attacker_country_name}: **${number(detail.attackerLosses)}**\n${defenderFlag} ${war.defender_country_name}: **${number(detail.defenderLosses)}**`)},
       {name:"🚩 Aktif İşgaller",value:fieldValue(activeOccupations.length
         ?activeOccupations.map((occupation)=>`**${occupation.settlement_name}** • ${flag(occupation.occupier_country_name,"🚩")} ${occupation.occupier_country_name} işgali • İşgal skoru **+${number(Number(occupation.score_points))}** • Barış bedeli **${number(Number(occupation.peace_cost??0))}**`).join("\n")

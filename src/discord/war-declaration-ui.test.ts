@@ -155,7 +155,10 @@ describe("resmî savaş ilanları ve barış duyuruları", () => {
         legal_owner_country_id:"kartaca",legal_owner_country_name:"Kartaca",started_turn:13,status:"ACTIVE",ended_turn:null,score_points:25
       }]
     });
+    const overview=embeds[0]!.toJSON();
     const text=JSON.stringify(embeds.map((embed)=>embed.toJSON()));
+    expect(overview.fields?.some((field)=>field.name==="🔴 Saldıran Cephe")).toBe(true);
+    expect(overview.fields?.some((field)=>field.name==="🔵 Savunan Cephe")).toBe(true);
     expect(text).toContain("29 / 100");
     expect(text).toContain("450");
     expect(text).toContain("800");
