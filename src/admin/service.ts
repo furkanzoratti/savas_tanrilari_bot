@@ -2758,7 +2758,7 @@ export const adminPanelService = {
 
   async battles() {
     const rows = (await adminPool.query(
-      `SELECT battle.id,battle.terrain,battle.status,battle.round_number,battle.siege_phase,
+      `SELECT battle.id,battle.terrain,battle.status,battle.round_number,battle.siege_phase,battle.state_war_id,
               battle.narrative,battle.winner_side,battle.finish_reason,battle.created_at,battle.updated_at,
               battle.wall_current_hp,battle.wall_max_hp,battle.gate_current_hp,battle.gate_max_hp,
               settlement.name AS defender_settlement_name,
@@ -2766,6 +2766,7 @@ export const adminPanelService = {
               side_a.initial_total AS initial_a,side_a.total_losses AS losses_a,side_a.pressure AS pressure_a,
               COALESCE(rebel_b.display_name,country_b.name) AS country_b_name,side_b.current_total AS current_b,
               side_b.initial_total AS initial_b,side_b.total_losses AS losses_b,side_b.pressure AS pressure_b,
+              score_event.game_turn,score_event.side AS score_side,score_event.points AS score_points,
               COALESCE((
                 SELECT jsonb_agg(jsonb_build_object(
                   'contractId',assignment.contract_id,
@@ -2791,6 +2792,13 @@ export const adminPanelService = {
          LEFT JOIN countries country_b ON country_b.id=side_b.country_id
          LEFT JOIN rebel_factions rebel_b ON rebel_b.id=side_b.rebel_faction_id
          LEFT JOIN settlements settlement ON settlement.id=battle.defender_settlement_id
+         LEFT JOIN LATERAL (
+           SELECT event.game_turn,event.side,SUM(event.points)::integer AS points
+             FROM state_war_score_events event
+            WHERE event.battle_id=battle.id AND event.event_type='BATTLE'
+            GROUP BY event.game_turn,event.side
+            ORDER BY event.game_turn DESC LIMIT 1
+         ) score_event ON TRUE
         WHERE battle.guild_id=$1
         ORDER BY CASE WHEN battle.status IN ('FINISHED','CANCELLED') THEN 1 ELSE 0 END,
                  battle.updated_at DESC
@@ -2798,6 +2806,73 @@ export const adminPanelService = {
       [adminConfig.guildId]
     )).rows as Array<Record<string, unknown>>;
     return rows.map((row) => ({ ...row, mercenaries: mercenaryAssignmentViews(row.mercenaries) }));
+  },
+
+  async battleHistory(battleId: string) {
+    if (!z.string().uuid().safeParse(battleId).success) throw new Error("Geçersiz muharebe kimliği.");
+    const battle = (await adminPool.query<{
+      id:string;terrain:string;status:string;round_number:number;winner_side:"A"|"B"|null;finish_reason:string|null;
+      narrative:string;created_at:Date;updated_at:Date;defender_settlement_name:string|null;
+      country_a_name:string|null;country_b_name:string|null;initial_a:number;initial_b:number;current_a:number;current_b:number;
+      losses_a:number;losses_b:number;game_turn:number|null;score_side:"ATTACKER"|"DEFENDER"|null;score_points:number;
+    }>(
+      `SELECT battle.id,battle.terrain,battle.status,battle.round_number,battle.winner_side,battle.finish_reason,
+              battle.narrative,battle.created_at,battle.updated_at,settlement.name AS defender_settlement_name,
+              COALESCE(rebel_a.display_name,country_a.name) AS country_a_name,
+              COALESCE(rebel_b.display_name,country_b.name) AS country_b_name,
+              COALESCE(side_a.initial_total,0)::integer AS initial_a,COALESCE(side_a.current_total,0)::integer AS current_a,
+              COALESCE(side_a.total_losses,0)::integer AS losses_a,
+              COALESCE(side_b.initial_total,0)::integer AS initial_b,COALESCE(side_b.current_total,0)::integer AS current_b,
+              COALESCE(side_b.total_losses,0)::integer AS losses_b,
+              score_event.game_turn,score_event.side AS score_side,COALESCE(score_event.points,0)::integer AS score_points
+         FROM battles battle
+         LEFT JOIN battle_sides side_a ON side_a.battle_id=battle.id AND side_a.side_key='A'
+         LEFT JOIN countries country_a ON country_a.id=side_a.country_id
+         LEFT JOIN rebel_factions rebel_a ON rebel_a.id=side_a.rebel_faction_id
+         LEFT JOIN battle_sides side_b ON side_b.battle_id=battle.id AND side_b.side_key='B'
+         LEFT JOIN countries country_b ON country_b.id=side_b.country_id
+         LEFT JOIN rebel_factions rebel_b ON rebel_b.id=side_b.rebel_faction_id
+         LEFT JOIN settlements settlement ON settlement.id=battle.defender_settlement_id
+         LEFT JOIN LATERAL (
+           SELECT event.game_turn,event.side,SUM(event.points)::integer AS points
+             FROM state_war_score_events event
+            WHERE event.battle_id=battle.id AND event.event_type='BATTLE'
+            GROUP BY event.game_turn,event.side ORDER BY event.game_turn DESC LIMIT 1
+         ) score_event ON TRUE
+        WHERE battle.id=$1 AND battle.guild_id=$2`,[battleId,adminConfig.guildId]
+    )).rows[0];
+    if (!battle) throw new Error("Muharebe bulunamadı.");
+    const [roundResult,rollResult]=await Promise.all([
+      adminPool.query<{
+        round_number:number;tier:string;winner_side:"A"|"B"|null;loss_a:number;loss_b:number;
+        pressure_a:number;pressure_b:number;order_a:string;order_b:string;wall_damage:number;gate_damage:number;
+        retreat_loss_a:number;retreat_loss_b:number;created_at:Date;
+      }>(`SELECT round_number,tier,winner_side,loss_a,loss_b,pressure_a,pressure_b,order_a,order_b,
+                 wall_damage,gate_damage,retreat_loss_a,retreat_loss_b,created_at
+            FROM battle_rounds WHERE battle_id=$1 ORDER BY round_number`,[battleId]),
+      adminPool.query<{
+        round_number:number;side_key:"A"|"B";roller_user_id:string;clash_total:number;damage_total:number;
+        wall_damage:number;gate_damage:number;detail:unknown;is_proxy:boolean;manual:boolean;
+      }>(`SELECT round_number,side_key,roller_user_id,clash_total,damage_total,wall_damage,gate_damage,
+                 detail,is_proxy,manual FROM battle_rolls WHERE battle_id=$1 ORDER BY round_number,side_key`,[battleId])
+    ]);
+    const rollsByRound=new Map<number,typeof rollResult.rows>();
+    for(const roll of rollResult.rows){
+      const list=rollsByRound.get(Number(roll.round_number))??[];
+      list.push({...roll,round_number:Number(roll.round_number),clash_total:Number(roll.clash_total),damage_total:Number(roll.damage_total),wall_damage:Number(roll.wall_damage),gate_damage:Number(roll.gate_damage)});
+      rollsByRound.set(Number(roll.round_number),list);
+    }
+    let remainingA=Number(battle.initial_a),remainingB=Number(battle.initial_b);
+    const rounds=roundResult.rows.map((round)=>{
+      remainingA=Math.max(0,remainingA-Number(round.loss_a)-Number(round.retreat_loss_a));
+      remainingB=Math.max(0,remainingB-Number(round.loss_b)-Number(round.retreat_loss_b));
+      return {...round,round_number:Number(round.round_number),loss_a:Number(round.loss_a),loss_b:Number(round.loss_b),
+        retreat_loss_a:Number(round.retreat_loss_a),retreat_loss_b:Number(round.retreat_loss_b),pressure_a:Number(round.pressure_a),
+        pressure_b:Number(round.pressure_b),wall_damage:Number(round.wall_damage),gate_damage:Number(round.gate_damage),
+        remaining_a:remainingA,remaining_b:remainingB,rolls:rollsByRound.get(Number(round.round_number))??[]};
+    });
+    return {battle:{...battle,initial_a:Number(battle.initial_a),initial_b:Number(battle.initial_b),current_a:Number(battle.current_a),
+      current_b:Number(battle.current_b),losses_a:Number(battle.losses_a),losses_b:Number(battle.losses_b),score_points:Number(battle.score_points)},rounds};
   },
 
   async battleManualRosters(battleId: string) {

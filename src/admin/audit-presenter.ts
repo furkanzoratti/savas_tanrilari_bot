@@ -4,6 +4,7 @@ const ACTION_LABELS: Record<string, string> = {
   "admin.panel.settlement.update": "Yerleşke bilgileri güncellendi",
   "admin.panel.character.update": "Karakter bilgileri güncellendi",
   "admin.panel.character.assignment.cancel": "Karakter görevi iptal edildi",
+  "admin.panel.governorship.end": "Valilik yönetici tarafından sona erdirildi",
   "admin.panel.vassalage.end": "Vassallık yönetici tarafından sona erdirildi",
   "admin.panel.bulk.apply": "Toplu yönetici işlemi uygulandı",
   "admin.panel.health.repair": "Oyun sağlığı sorunu onarıldı",
@@ -100,7 +101,7 @@ const ENTITY_LABELS: Record<string, string> = {
   steppe_hegemony_war_call: "Hanlar Hanı savaş çağrısı",
   roman_family: "Roma siyasi ailesi", roman_family_member: "Roma aile üyesi",
   bulk_operation: "Toplu işlem",
-  health_issue: "Oyun sağlığı bulgusu", espionage_public_template: "Casusluk olay metni",
+  health_issue: "Oyun sağlığı bulgusu", espionage_public_template: "Casusluk olay metni", governorship: "Valilik",
   ADMIN_DATA: "Oyun verisi"
 };
 

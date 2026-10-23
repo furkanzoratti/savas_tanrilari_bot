@@ -3215,16 +3215,15 @@ export const gameService = {
 
       const dueAssimilations = (await client.query<{
         settlement_id: string; settlement_name: string; country_id: string; country_name: string;
-        conquered_turn: number; character_id: string | null; diplomat_name: string | null; diplomat_skill_bonus: number | null; governorship_id: string | null;
+        conquered_turn: number; character_id: string | null; diplomat_name: string | null; diplomat_skill_bonus: number | null;
       }>(
         `SELECT s.id AS settlement_id,s.name AS settlement_name,c.id AS country_id,c.name AS country_name,
-                s.conquered_turn,COALESCE(assignment.character_id,governorship.character_id) AS character_id,
-                character.name AS diplomat_name,character.skill_bonus AS diplomat_skill_bonus,governorship.id AS governorship_id
+                s.conquered_turn,assignment.character_id,
+                character.name AS diplomat_name,character.skill_bonus AS diplomat_skill_bonus
            FROM settlements s
            JOIN countries c ON c.id=s.country_id
            LEFT JOIN settlement_assimilation_diplomats assignment ON assignment.settlement_id=s.id
-           LEFT JOIN settlement_governorships governorship ON governorship.settlement_id=s.id AND governorship.status='ACTIVE' AND governorship.focus='INTEGRATION'
-           LEFT JOIN country_characters character ON character.id=COALESCE(assignment.character_id,governorship.character_id)
+           LEFT JOIN country_characters character ON character.id=assignment.character_id
           WHERE c.guild_id=$1 AND c.status='ACTIVE' AND s.is_conquered=TRUE AND s.conquered_turn IS NOT NULL
           ORDER BY s.name FOR UPDATE OF s`,
         [guildId]
@@ -3243,8 +3242,7 @@ export const gameService = {
         await client.query("UPDATE settlements SET is_conquered=FALSE,conquered_turn=NULL WHERE id=$1", [item.settlement_id]);
         await client.query("DELETE FROM settlement_assimilation_diplomats WHERE settlement_id=$1", [item.settlement_id]);
         if (item.character_id) {
-          if (item.governorship_id) await forceEndGovernorshipForSettlement(client,item.settlement_id,newTurn,"Yerleşkenin bütünleşmesi tamamlandı.",actorId);
-          else await client.query("UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL,assignment_ready_turn=NULL WHERE id=$1", [item.character_id]);
+          await client.query("UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL,assignment_ready_turn=NULL WHERE id=$1", [item.character_id]);
           await awardCharacterSpecializationProgress(client,item.character_id,"PROVINCIAL_GOVERNOR");
         }
         assimilatedSettlementDetails.push({ countryName: item.country_name, settlementName: item.settlement_name, diplomatName: item.diplomat_name });

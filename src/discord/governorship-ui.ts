@@ -51,7 +51,6 @@ function focusDescription(focus: GovernorFocus): string {
     case "REVENUE": return "Yerel geliri artırır; huzursuzluk her tur bir miktar yükselebilir.";
     case "PUBLIC_ORDER": return "Gelirden feragat ederek isyan ilerlemesini her tur düşürür.";
     case "RECONSTRUCTION": return "Refahı artırır ve yerleşkedeki bina maliyetlerini düşürür.";
-    case "INTEGRATION": return "Fethedilmiş yerleşkenin bütünleşme sürecini hızlandırır.";
   }
 }
 
@@ -60,8 +59,7 @@ function focusEffect(focus: GovernorFocus, skill: number, specializationLevel: n
   const modifiers = governorModifiers(focus, administration);
   if (focus === "REVENUE") return `Gelir **+%${Math.round((modifiers.incomeMultiplier - 1) * 100)}** • İsyan ilerlemesi turda **+${modifiers.rebellionDelta}**`;
   if (focus === "PUBLIC_ORDER") return `Gelir **-%${Math.round((1 - modifiers.incomeMultiplier) * 100)}** • İsyan ilerlemesi turda **${modifiers.rebellionDelta}**`;
-  if (focus === "RECONSTRUCTION") return `Refah turda **+${modifiers.prosperityDelta}** • Bina maliyeti **-%${Math.round((1 - modifiers.buildingCostMultiplier) * 100)}**`;
-  return `Bütünleşme ilerlemesi • Yönetim gücü **${administration}**`;
+  return `Refah turda **+${modifiers.prosperityDelta}** • Bina maliyeti **-%${Math.round((1 - modifiers.buildingCostMultiplier) * 100)}**`;
 }
 
 function governorshipCard(item: GovernorshipView): string {

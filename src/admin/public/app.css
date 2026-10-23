@@ -211,6 +211,32 @@ nav { display: grid; gap: 5px; overflow-y: auto; padding-right: 2px; scrollbar-w
 .kpi:nth-child(even)::after { background: var(--navy-soft); }
 .kpi span { display: block; color: var(--muted); }
 .kpi strong { display: block; margin: 6px 0 2px; font-size: 25px; font-weight: 600; }
+.governorship-hero { align-items: center; padding: 21px 23px; border: 1px solid rgba(128,82,56,.24); border-radius: 15px; background: linear-gradient(120deg,rgba(247,242,233,.96),rgba(225,211,192,.86)); }
+.governorship-hero h1 { font-family: Georgia,"Times New Roman",serif; color: var(--navy); }
+.governorship-toolbar { display: grid; grid-template-columns: minmax(240px,1.5fr) minmax(170px,.75fr) minmax(170px,.75fr) auto; gap: 10px; align-items: end; margin: 12px 0; }
+.governorship-toolbar label { margin: 0; }
+.governorship-toolbar > span { align-self: center; justify-self: end; color: var(--muted); font-size: 12px; font-weight: 700; }
+.governorship-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
+.governorship-card { display: grid; gap: 13px; position: relative; overflow: hidden; }
+.governorship-card::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: linear-gradient(var(--navy-soft),var(--brown)); }
+.governorship-card-head,.governorship-card-actions { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.governorship-card-head h2 { margin: 0; font-family: Georgia,"Times New Roman",serif; font-size: 20px; }
+.governorship-card-head p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+.governorship-effect { padding: 13px 14px; border: 1px solid rgba(128,82,56,.23); border-radius: 10px; background: linear-gradient(145deg,#eee3d4,#f8f3eb); }
+.governorship-effect span,.governorship-effect strong,.governorship-effect small,.governorship-last-effect span,.governorship-last-effect strong { display: block; }
+.governorship-effect span,.governorship-last-effect span { color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.governorship-effect strong { margin-top: 5px; color: var(--navy); line-height: 1.45; }
+.governorship-effect small { margin-top: 5px; color: var(--brown); }
+.governorship-stats { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
+.governorship-stats > div { padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg); }
+.governorship-stats span,.governorship-stats strong,.governorship-stats small { display: block; }
+.governorship-stats span { color: var(--muted); font-size: 10px; }
+.governorship-stats strong { margin-top: 4px; }
+.governorship-stats small { margin-top: 3px; color: var(--muted); font-size: 9px; }
+.governorship-last-effect { padding-left: 11px; border-left: 3px solid var(--brown); }
+.governorship-last-effect strong { margin-top: 4px; font-size: 12px; font-weight: 600; }
+.governorship-card-actions { align-items: center; padding-top: 11px; border-top: 1px solid var(--line); }
+.governorship-card-actions > span { color: var(--muted); font-size: 11px; }
 .content-grid { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(260px, .55fr); gap: 12px; margin-top: 12px; }
 .card-head, .section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .card-head h2, .card-head h3, .section-head strong { margin: 0; font-size: 16px; }
@@ -385,6 +411,90 @@ tr[data-open-settlement] { cursor: pointer; }
 .battle-mercenaries > span { color: var(--muted); font-size: 12px; }
 .battle-mercenaries b { color: var(--text); }
 .siege-list { display: grid; gap: 12px; }
+.battle-command-hero,.state-war-hero { padding: 22px 24px; border: 1px solid color-mix(in srgb,var(--brown) 32%,var(--line)); border-radius: 15px; background: linear-gradient(115deg,color-mix(in srgb,var(--brown) 10%,var(--surface)),var(--surface) 55%,color-mix(in srgb,var(--navy) 7%,var(--surface))); box-shadow: 0 14px 35px rgba(42,34,25,.08); }
+.battle-command-hero p,.state-war-hero p { max-width: 760px; }
+.battle-hero-stats { display: grid; grid-template-columns: repeat(3,minmax(92px,1fr)); gap: 8px; }
+.battle-hero-stats > span { min-width: 98px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.24); }
+.battle-hero-stats small,.battle-hero-stats strong { display: block; }
+.battle-hero-stats small { color: var(--muted); font-size: 9px; text-transform: uppercase; }
+.battle-hero-stats strong { margin-top: 4px; color: var(--navy); font: 700 20px Georgia,serif; }
+.active-battle-card { border-left: 4px solid var(--brown); box-shadow: 0 10px 28px rgba(42,34,25,.07); }
+.battle-history-groups,.state-war-list { display: grid; gap: 18px; }
+.battle-turn-group { padding: 15px; border: 1px solid var(--line); border-radius: 14px; background: color-mix(in srgb,var(--surface) 78%,transparent); }
+.battle-turn-heading { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 12px; color: var(--brown); font-size: 10px; font-weight: 800; letter-spacing: .12em; }
+.battle-turn-heading strong { color: var(--muted); letter-spacing: normal; }
+.battle-record { position: relative; overflow: hidden; }
+.battle-record::before { position: absolute; inset: 0 0 auto; height: 3px; background: linear-gradient(90deg,var(--brown) 0 50%,var(--navy) 50%); content: ""; }
+.battle-strength-flow { display: grid; grid-template-columns: minmax(0,1fr) 28px minmax(0,1fr); gap: 8px; align-items: center; margin-top: 12px; }
+.battle-strength-flow > div { display: grid; grid-template-columns: 1fr auto; gap: 3px 8px; padding: 10px; border-radius: 9px; background: var(--surface-2); }
+.battle-strength-flow > div:last-child { text-align: right; }
+.battle-strength-flow small,.battle-strength-flow span { color: var(--muted); font-size: 9px; }
+.battle-strength-flow strong { font-size: 17px; }
+.battle-strength-flow b { color: var(--danger); }
+.battle-strength-flow i { color: var(--muted); font-style: normal; text-align: center; }
+.battle-side-labels { display: flex; justify-content: space-between; gap: 10px; margin: 5px 10px 10px; color: var(--muted); font-size: 10px; }
+.battle-score-award { display: flex; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: 8px; background: rgba(145,101,66,.08); color: var(--muted); font-size: 10px; }
+.battle-score-award strong { color: var(--brown); }
+.battle-history-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+.battle-history-summary > div { padding: 14px; border-radius: 10px; background: var(--surface-2); }
+.battle-history-summary small,.battle-history-summary strong,.battle-history-summary span { display: block; }
+.battle-history-summary strong { margin: 5px 0; font-size: 20px; }
+.battle-history-summary span { color: var(--danger); font-size: 11px; }
+.battle-round-timeline { display: grid; gap: 8px; }
+.battle-round-record { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); overflow: hidden; }
+.battle-round-record > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; cursor: pointer; }
+.battle-round-record > summary span,.battle-round-record > summary small { display: block; }
+.battle-round-record > summary small { margin-top: 3px; color: var(--muted); }
+.battle-round-record > summary > strong { color: var(--danger); font-size: 10px; }
+.battle-round-body { padding: 0 14px 14px; }
+.battle-round-outcome,.battle-roll-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.battle-round-outcome > span,.battle-roll-grid > div { padding: 10px; border-radius: 8px; background: var(--surface-2); }
+.battle-round-outcome small,.battle-round-outcome b,.battle-round-outcome em { display: block; }
+.battle-round-outcome em { margin-top: 3px; color: var(--muted); font-size: 9px; font-style: normal; }
+.battle-roll-grid { margin-top: 9px; }
+.battle-roll-grid h4,.battle-roll-grid p { margin: 0 0 6px; }
+.battle-roll-grid > div > small { color: var(--muted); }
+.battle-dice-units { display: grid; gap: 4px; margin: 8px 0; }
+.battle-dice-units > span { padding: 6px 7px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+.battle-dice-units b,.battle-dice-units small { display: block; }
+.battle-dice-units small { margin-top: 2px; color: var(--muted); }
+.state-war-card { padding: 0; overflow: hidden; }
+.state-war-card > summary { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 18px 20px; cursor: pointer; list-style: none; background: linear-gradient(100deg,color-mix(in srgb,var(--brown) 9%,var(--surface)),var(--surface)); }
+.state-war-card > summary::-webkit-details-marker { display: none; }
+.state-war-card > summary h2,.state-war-card > summary p { margin: 3px 0; }
+.state-war-card > summary p { color: var(--muted); }
+.war-summary-numbers { display: grid; grid-template-columns: repeat(3,minmax(82px,1fr)); gap: 7px; }
+.war-summary-numbers > span { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.war-summary-numbers small,.war-summary-numbers strong { display: block; }
+.war-summary-numbers small { color: var(--muted); font-size: 8px; }
+.war-summary-numbers strong { margin-top: 3px; }
+.state-war-body { display: grid; gap: 16px; padding: 18px 20px 22px; border-top: 1px solid var(--line); }
+.war-score-panel { display: grid; grid-template-columns: minmax(160px,1fr) minmax(220px,2fr) minmax(160px,1fr); align-items: center; gap: 12px; }
+.war-score-panel > div:first-child,.war-score-panel > div:last-child { display: flex; justify-content: space-between; gap: 8px; }
+.war-score-panel > div:last-child { flex-direction: row-reverse; text-align: right; }
+.war-score-track { position: relative; height: 10px; border-radius: 99px; background: linear-gradient(90deg,var(--brown),#d8c6ae 50%,var(--navy)); }
+.war-score-track::after { position: absolute; left: 50%; top: -4px; width: 1px; height: 18px; background: var(--text); opacity: .35; content: ""; }
+.war-score-track i { position: absolute; top: 50%; width: 18px; height: 18px; border: 3px solid var(--surface); border-radius: 50%; background: var(--text); transform: translate(-50%,-50%); box-shadow: 0 2px 8px rgba(0,0,0,.2); }
+.war-front-grid,.war-admin-grid,.war-intelligence-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.war-front-grid > section,.war-admin-grid > div,.war-intelligence-grid > section { padding: 13px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-2); }
+.war-front-grid > section:first-child { border-top: 3px solid var(--brown); }
+.war-front-grid > section:last-child { border-top: 3px solid var(--navy); }
+.war-front-grid header { margin-bottom: 9px; }
+.war-front-grid header span,.war-front-grid header strong,.war-front-grid header small { display: block; }
+.war-front-grid header span { color: var(--muted); font-size: 8px; font-weight: 800; letter-spacing: .11em; }
+.war-front-grid header strong { margin: 4px 0; }
+.war-front-grid header small { color: var(--danger); }
+.war-participant-row,.war-event-row { display: grid; grid-template-columns: minmax(0,1fr) auto auto; align-items: center; gap: 9px; padding: 8px 0; border-top: 1px solid var(--line); }
+.war-participant-row strong,.war-participant-row small,.war-event-row strong,.war-event-row small { display: block; }
+.war-participant-row small,.war-event-row small { margin-top: 2px; color: var(--muted); }
+.war-participant-row > span,.war-event-row em { color: var(--muted); font-size: 9px; font-style: normal; }
+.war-admin-grid h3 { margin: 0 0 10px; }
+.war-battle-list { display: grid; gap: 6px; }
+.war-battle-row { display: grid; grid-template-columns: minmax(260px,1.5fr) minmax(110px,.5fr) minmax(110px,.5fr) 90px; gap: 12px; align-items: center; width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); color: var(--text); text-align: left; cursor: pointer; }
+.war-battle-row:hover { border-color: var(--brown); background: var(--surface); }
+.war-battle-row strong,.war-battle-row small,.war-battle-row b { display: block; }
+.war-battle-row small { margin-top: 3px; color: var(--muted); }
+.war-battle-row em { color: var(--brown); font-style: normal; font-weight: 700; text-align: right; }
 .army-unit-editor { display: grid; gap: 7px; }
 .army-unit-line { display: grid; grid-template-columns: minmax(0, 1fr) 160px; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg); }
 .army-unit-line strong, .army-unit-line small { display: block; }
@@ -976,6 +1086,13 @@ textarea { resize: vertical; line-height: 1.45; }
   .npc-purchase-toolbar > div { grid-column: 1 / -1; }
   .simulation-settings { align-items: stretch; flex-direction: column; }
   .simulation-side-grid,.simulation-result-grid { grid-template-columns: 1fr; }
+  .war-front-grid,.war-admin-grid,.war-intelligence-grid { grid-template-columns: 1fr; }
+  .war-battle-row { grid-template-columns: minmax(220px,1fr) 110px 110px; }
+  .war-battle-row > em { grid-column: 1 / -1; text-align: left; }
+  .governorship-grid { grid-template-columns: 1fr; }
+  .governorship-toolbar { grid-template-columns: 1fr 1fr; }
+  .governorship-toolbar > label:first-child,.governorship-toolbar > span { grid-column: 1 / -1; }
+  .governorship-toolbar > span { justify-self: start; }
 }
 @media (max-width: 620px) {
   .audit-item { grid-template-columns: 12px minmax(0,1fr); }
@@ -995,6 +1112,9 @@ textarea { resize: vertical; line-height: 1.45; }
   .loading-grid { grid-template-columns: 1fr; }
   .page-head, .card-head, .section-head { align-items: stretch; flex-direction: column; }
   .kpi-grid, .detail-grid, .form-grid { grid-template-columns: 1fr; }
+  .governorship-toolbar,.governorship-stats { grid-template-columns: 1fr; }
+  .governorship-toolbar > label:first-child,.governorship-toolbar > span { grid-column: auto; }
+  .governorship-card-head,.governorship-card-actions { align-items: stretch; flex-direction: column; }
   .data-row { grid-template-columns: 1fr auto; }
   .data-row > :nth-child(2), .data-row > :nth-child(3) { display: none; }
   .unit-row { grid-template-columns: 1fr 100px 38px; }
@@ -1052,4 +1172,14 @@ textarea { resize: vertical; line-height: 1.45; }
   .simulation-submit,.simulation-result-head { align-items: stretch; flex-direction: column; }
   .simulation-submit .button { min-width: 0; }
   .simulation-unit-row { grid-template-columns: minmax(0,1fr) 92px 38px; }
+  .battle-command-hero,.state-war-hero,.state-war-card > summary { align-items: stretch; flex-direction: column; }
+  .battle-hero-stats,.war-summary-numbers { grid-template-columns: repeat(3,minmax(0,1fr)); }
+  .battle-strength-flow,.battle-history-summary,.battle-round-outcome,.battle-roll-grid { grid-template-columns: 1fr; }
+  .battle-strength-flow > i { transform: rotate(90deg); }
+  .battle-strength-flow > div:last-child { text-align: left; }
+  .war-score-panel { grid-template-columns: 1fr; }
+  .war-score-panel > div:last-child { flex-direction: row; text-align: left; }
+  .war-battle-row { grid-template-columns: 1fr; }
+  .war-participant-row,.war-event-row { grid-template-columns: minmax(0,1fr) auto; }
+  .war-participant-row > button,.war-participant-row > b,.war-event-row > em { grid-column: 2; }
 }

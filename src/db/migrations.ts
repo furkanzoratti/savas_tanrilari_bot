@@ -157,6 +157,7 @@ import { structuredWarPeaceGovernorshipMigration } from "./structured-war-peace-
 import { academyCharacterAgingMigration } from "./academy-character-aging-migration.js";
 import { worldHistoryMigration } from "./world-history-migration.js";
 import { warScoreCostMigration } from "./war-score-cost-migration.js";
+import { governorshipFocusCleanupMigration } from "./governorship-focus-cleanup-migration.js";
 
 export const migrations = [
   {
@@ -2531,5 +2532,6 @@ export const migrations = [
   structuredWarPeaceGovernorshipMigration,
   academyCharacterAgingMigration,
   worldHistoryMigration,
-  warScoreCostMigration
+  warScoreCostMigration,
+  governorshipFocusCleanupMigration
 ] as const;

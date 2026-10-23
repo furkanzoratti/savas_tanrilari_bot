@@ -24,6 +24,8 @@ import { GameError } from "../services/game-service.js";
 import { adminEspionagePublicationService } from "./espionage-publication-service.js";
 import { ESPIONAGE_PUBLICATION_IMAGE_KEYS } from "../domain/espionage-publications.js";
 import {adminGreatProjectService} from "./great-project-admin-service.js";
+import { adminGovernorshipService } from "./governorship-admin-service.js";
+import { adminStateWarService } from "./state-war-admin-service.js";
 
 const logger = pino({ level: adminConfig.logLevel });
 const responseStartedAt = new WeakMap<ServerResponse, number>();
@@ -199,6 +201,15 @@ const server = createServer(async (request, response) => {
       const session=requireMutation(request,response);if(!session)return;
       return json(response,200,await adminGreatProjectService.mutate(session.sub,await body(request)));
     }
+    if (request.method === "GET" && url.pathname === "/api/governorships") {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await adminGovernorshipService.dashboard());
+    }
+    if (request.method === "POST" && url.pathname === "/api/governorships/end") {
+      const session = requireMutation(request, response);
+      if (!session) return;
+      return json(response, 200, await adminGovernorshipService.end(session.sub, await body(request)));
+    }
     if (request.method === "GET" && url.pathname === "/api/battle-simulation/catalog") {
       if (!requireSession(request, response)) return;
       return json(response, 200, battleSimulationService.catalog());
@@ -284,6 +295,15 @@ const server = createServer(async (request, response) => {
       if (!requireSession(request, response)) return;
       return json(response, 200, await adminPanelService.battles());
     }
+    if (request.method === "GET" && url.pathname === "/api/state-wars") {
+      if (!requireSession(request, response)) return;
+      return json(response, 200, await adminStateWarService.dashboard());
+    }
+    const stateWarDetailMatch=request.method==="GET"?url.pathname.match(/^\/api\/state-wars\/([0-9a-f-]+)$/iu):null;
+    if(stateWarDetailMatch){
+      if(!requireSession(request,response))return;
+      return json(response,200,await adminStateWarService.detail(stateWarDetailMatch[1]!));
+    }
     if (request.method === "GET" && url.pathname === "/api/rebellions") {
       if (!requireSession(request, response)) return;
       return json(response, 200, await adminRebellionService.dashboard());
@@ -297,6 +317,11 @@ const server = createServer(async (request, response) => {
     if (battleManualRostersMatch) {
       if (!requireSession(request, response)) return;
       return json(response, 200, await adminPanelService.battleManualRosters(battleManualRostersMatch[1]!));
+    }
+    const battleHistoryMatch=request.method==="GET"?url.pathname.match(/^\/api\/battles\/([0-9a-f-]+)\/history$/iu):null;
+    if(battleHistoryMatch){
+      if(!requireSession(request,response))return;
+      return json(response,200,await adminPanelService.battleHistory(battleHistoryMatch[1]!));
     }
     if (request.method === "GET" && (url.pathname === "/api/active-battles" || url.pathname === "/api/sieges")) {
       if (!requireSession(request, response)) return;
@@ -676,6 +701,16 @@ const server = createServer(async (request, response) => {
       const session = requireMutation(request, response);
       if (!session) return;
       return json(response, 200, await adminPanelService.removeBattleManualRoster(session.sub, battleManualRosterRemoveMatch[1]!, await body(request)));
+    }
+    const stateWarParticipantMatch=request.method==="POST"?url.pathname.match(/^\/api\/admin\/state-wars\/([0-9a-f-]+)\/participants$/iu):null;
+    if(stateWarParticipantMatch){
+      const session=requireMutation(request,response);if(!session)return;
+      return json(response,200,await adminStateWarService.mutateParticipant(session.sub,stateWarParticipantMatch[1]!,await body(request)));
+    }
+    const stateWarLeaderMatch=request.method==="POST"?url.pathname.match(/^\/api\/admin\/state-wars\/([0-9a-f-]+)\/leader$/iu):null;
+    if(stateWarLeaderMatch){
+      const session=requireMutation(request,response);if(!session)return;
+      return json(response,200,await adminStateWarService.changeLeader(session.sub,stateWarLeaderMatch[1]!,await body(request)));
     }
     const armyUpdateMatch = request.method === "PATCH" ? url.pathname.match(/^\/api\/admin\/armies\/([0-9a-f-]+)$/iu) : null;
     if (armyUpdateMatch) {

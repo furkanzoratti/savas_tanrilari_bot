@@ -133,14 +133,13 @@ export const governorshipService = {
     if (!(input.focus in GOVERNOR_FOCUSES)) throw new GameError("Geçersiz valilik odağı.");
     return withTransaction(async (client) => {
       const turn = await currentTurn(client, input.guildId);
-      const settlement = (await client.query<{ id: string; country_id: string; is_conquered: boolean }>(
-        "SELECT id,country_id,is_conquered FROM settlements WHERE id=$1 FOR UPDATE", [input.settlementId]
+      const settlement = (await client.query<{ id: string; country_id: string }>(
+        "SELECT id,country_id FROM settlements WHERE id=$1 FOR UPDATE", [input.settlementId]
       )).rows[0];
       if (!settlement || settlement.country_id !== input.countryId) throw new GameError("Yerleşke bu devlete ait değil.");
       if ((await client.query("SELECT 1 FROM settlement_occupations WHERE settlement_id=$1 AND status='ACTIVE'", [settlement.id])).rowCount) {
         throw new GameError("İşgal altındaki bir yerleşkeye vali atanamaz.");
       }
-      if (input.focus === "INTEGRATION" && !settlement.is_conquered) throw new GameError("Bütünleşme odağı yalnızca henüz asimile edilmemiş yerleşkelerde kullanılabilir.");
       const character = (await client.query<{ id: string; country_id: string; role: string; assignment: string; character_status: string }>(
         "SELECT id,country_id,role,assignment,character_status FROM country_characters WHERE id=$1 FOR UPDATE", [input.characterId]
       )).rows[0];
@@ -170,9 +169,6 @@ export const governorshipService = {
       )).rows[0];
       if (!row || row.country_id !== input.countryId || row.status !== "ACTIVE") throw new GameError("Etkin valilik görevi bulunamadı.");
       if (turn < Number(row.last_focus_turn) + 2) throw new GameError(`Valilik odağı en erken Tur ${Number(row.last_focus_turn) + 2} tarihinde değiştirilebilir.`);
-      if (input.focus === "INTEGRATION" && !(await client.query("SELECT 1 FROM settlements WHERE id=$1 AND is_conquered=TRUE", [row.settlement_id])).rowCount) {
-        throw new GameError("Bütünleşme odağı yalnızca henüz asimile edilmemiş yerleşkelerde kullanılabilir.");
-      }
       await client.query("UPDATE settlement_governorships SET focus=$2,last_focus_turn=$3,updated_at=NOW() WHERE id=$1", [row.id, input.focus, turn]);
       return (await client.query<GovernorshipView>(`${viewSql} WHERE governorship.id=$1`, [row.id])).rows[0]!;
     });

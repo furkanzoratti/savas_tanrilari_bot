@@ -1,8 +1,7 @@
 export const GOVERNOR_FOCUSES = {
   REVENUE: { label: "Gelir İdaresi" },
   PUBLIC_ORDER: { label: "Kamu Düzeni" },
-  RECONSTRUCTION: { label: "Yeniden İmar" },
-  INTEGRATION: { label: "Bütünleşme" }
+  RECONSTRUCTION: { label: "Yeniden İmar" }
 } as const;
 
 export type GovernorFocus = keyof typeof GOVERNOR_FOCUSES;
@@ -27,7 +26,5 @@ export function governorModifiers(focus: GovernorFocus, administration: number):
       return { incomeMultiplier: 0.95, rebellionDelta: -(2 + rating), prosperityDelta: 0, buildingCostMultiplier: 1 };
     case "RECONSTRUCTION":
       return { incomeMultiplier: 1, rebellionDelta: 0, prosperityDelta: 2, buildingCostMultiplier: 0.95 };
-    case "INTEGRATION":
-      return { incomeMultiplier: 1, rebellionDelta: 0, prosperityDelta: 0, buildingCostMultiplier: 1 };
   }
 }
