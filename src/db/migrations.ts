@@ -155,6 +155,7 @@ import { steppeKurultayBaselineMigration } from "./steppe-kurultay-baseline-migr
 import { activeCountryDynastiesMigration } from "./active-country-dynasties-migration.js";
 import { structuredWarPeaceGovernorshipMigration } from "./structured-war-peace-governorship-migration.js";
 import { academyCharacterAgingMigration } from "./academy-character-aging-migration.js";
+import { worldHistoryMigration } from "./world-history-migration.js";
 
 export const migrations = [
   {
@@ -2527,5 +2528,6 @@ export const migrations = [
   steppeKurultayBaselineMigration,
   activeCountryDynastiesMigration,
   structuredWarPeaceGovernorshipMigration,
-  academyCharacterAgingMigration
+  academyCharacterAgingMigration,
+  worldHistoryMigration
 ] as const;

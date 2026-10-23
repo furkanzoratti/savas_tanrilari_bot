@@ -96,6 +96,7 @@ import {
 import { decodeUnitTypeFromCustomId, encodeUnitTypeForCustomId } from "./unit-custom-id.js";
 import {greatProjectService,GreatProjectError} from "../services/great-project-service.js";
 import {handleGovernorshipButton,handleGovernorshipCommand,handleGovernorshipSelect} from "./governorship-ui.js";
+import {handleWorldHistoryChannelCommand,publishTurnChronicle} from "./world-history-ui.js";
 
 function settlementSelect(customId: string, settlements: Array<{ id: string; name: string; population: number }>, placeholder: string) {
   if (!settlements.length) throw new GameError("Bu ülkeye ait yerleşke bulunmuyor.");
@@ -510,6 +511,9 @@ async function handleTurn(interaction: ChatInputCommandInteraction): Promise<voi
     }
     await refreshActiveBattleCards(interaction.client, interaction.guildId);
     await refreshRomanPublicPanels(interaction.client,interaction.guildId);
+    await publishTurnChronicle(interaction.client,interaction.guildId,result.turn).catch((error)=>
+      logger.error({error,guildId:interaction.guildId,turn:result.turn},"Tur tarihçesi hazırlanamadı")
+    );
     embeds = turnAnnouncementCards({
       kind: "ADVANCE", turn: result.turn, acquisition: result.acquisition,
       completedBuildings: result.completedBuildings, recruitmentArrivals: result.recruitmentArrivals,
@@ -834,6 +838,9 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
     }
     await refreshActiveBattleCards(interaction.client, interaction.guildId);
     await refreshRomanPublicPanels(interaction.client,interaction.guildId);
+    await publishTurnChronicle(interaction.client,interaction.guildId,result.turn).catch((error)=>
+      logger.error({error,guildId:interaction.guildId,turn:result.turn},"Tur tarihçesi hazırlanamadı")
+    );
     const announcementCards = turnAnnouncementCards({
       kind: "ADVANCE", turn: result.turn, acquisition: result.acquisition,
       completedBuildings: result.completedBuildings, recruitmentArrivals: result.recruitmentArrivals,
@@ -1178,6 +1185,10 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
   if (await handleWarDeclarationCommand(interaction)) return;
   if (await handleGovernorshipCommand(interaction)) return;
   if (await handleSteppeHegemonyCommand(interaction)) return;
+  if(interaction.commandName==="tarihce-kanali"){
+    await handleWorldHistoryChannelCommand(interaction);
+    return;
+  }
   if (await handleDiplomacyCommand(interaction)) return;
   if (await handleCityCommand(interaction)) return;
   if (interaction.commandName === "hazine-hareketleri") {

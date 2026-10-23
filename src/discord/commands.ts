@@ -459,6 +459,12 @@ export const commandBuilders = [
     .addChannelOption((option) => option.setName("kanal").setDescription("Savaş ilanları ve barış duyurularının gönderileceği metin kanalı")
       .addChannelTypes(ChannelType.GuildText)),
   new SlashCommandBuilder()
+    .setName("tarihce-kanali").setDescription("Yalnızca yönetici: her tur dünya tarihçesinin yayımlanacağı kanalı ayarlar")
+    .addStringOption((option) => option.setName("islem").setDescription("Kanal işlemi").setRequired(true)
+      .addChoices({ name: "Ayarla", value: "set" }, { name: "Kapat", value: "clear" }))
+    .addChannelOption((option) => option.setName("kanal").setDescription("Tur tarihçelerinin gönderileceği metin kanalı")
+      .addChannelTypes(ChannelType.GuildText)),
+  new SlashCommandBuilder()
     .setName("hos-geldin").setDescription("Yalnızca yönetici: yeni üye karşılama kanalını ve mesajını ayarlar")
     .addStringOption((option) => option.setName("islem").setDescription("İşlem").setRequired(true)
       .addChoices({ name: "Ayarla", value: "set" }, { name: "Kapat", value: "clear" }))
