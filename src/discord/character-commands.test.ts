@@ -205,7 +205,8 @@ describe("Akademi karakter komutları", () => {
       operation_status:null,operation_progress:null,operation_goal:null,target_country_name:null,target_settlement_name:null
     }]).toJSON();
     expect(embed.description).toContain("**Marcus** — Mareşal (+3)");
-    expect(embed.description).toContain("**42 yaş**");
+    expect(embed.description).toContain("**42**");
+    expect(embed.description).not.toContain("42 yaş");
     expect(embed.description).not.toContain("**Marcus** — Komutan");
   });
 

@@ -194,7 +194,7 @@ function characterLine(character: CharacterView): string {
     details.push("Yaydığı din: "+RELIGIONS[character.missionary_operation_religion_key].label);
   }
   if (character.unavailable_until_turn !== null) details.push("Tur " + character.unavailable_until_turn + " sonuna dek kullanılamaz");
-  return roleEmoji + " **" + character.name + "** — " + roleLabel + " (+" + character.skill_bonus + ") • **"+character.age+" yaş**\n↳ " + details.join(" • ");
+  return roleEmoji + " **" + character.name + "** — " + roleLabel + " (+" + character.skill_bonus + ") • **"+character.age+"**\n↳ " + details.join(" • ");
 }
 
 function deadCharacterLine(character: CharacterView): string {
@@ -202,7 +202,7 @@ function deadCharacterLine(character: CharacterView): string {
   const roleLabel = character.role === "COMMANDER" && character.is_admiral ? "Amiral"
     : character.role === "COMMANDER" && character.is_marshal ? "Mareşal" : role.label;
   const deathPlace = character.death_settlement_name ?? "Bilinmiyor";
-  return "💀 **" + character.name + "** — " + roleLabel + " (+" + character.skill_bonus + ") • **"+character.age+" yaş**\n↳ Öldüğü şehir: **" + deathPlace + "**";
+  return "💀 **" + character.name + "** — " + roleLabel + " (+" + character.skill_bonus + ") • **"+character.age+"**\n↳ Öldüğü şehir: **" + deathPlace + "**";
 }
 
 export interface CharacterCapacitySummary {

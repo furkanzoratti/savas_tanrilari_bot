@@ -245,7 +245,7 @@ export function renderActiveWarDetail(detail:OfficialWarDetailView,flag:CountryF
       {name:`${defenderFlag} Savunan Cephe`,value:fieldValue(war.defender_participant_names.map((name)=>`${flag(name,"▫️")} ${name}`).join("\n")),inline:true},
       {name:"🩸 Toplam Muharebe Kayıpları",value:fieldValue(`${attackerFlag} ${war.attacker_country_name}: **${number(detail.attackerLosses)}**\n${defenderFlag} ${war.defender_country_name}: **${number(detail.defenderLosses)}**`)},
       {name:"🚩 Aktif İşgaller",value:fieldValue(activeOccupations.length
-        ?activeOccupations.map((occupation)=>`**${occupation.settlement_name}** • ${flag(occupation.occupier_country_name,"🚩")} ${occupation.occupier_country_name} işgali • **+${number(Number(occupation.score_points))} puan**`).join("\n")
+        ?activeOccupations.map((occupation)=>`**${occupation.settlement_name}** • ${flag(occupation.occupier_country_name,"🚩")} ${occupation.occupier_country_name} işgali • İşgal skoru **+${number(Number(occupation.score_points))}** • Barış bedeli **${number(Number(occupation.peace_cost??0))}**`).join("\n")
         :"Aktif işgal bulunmuyor.")}
     )
     .setFooter({text:"Aşağıdaki seçim kutusundan aynı sayfadaki başka bir savaşa geçebilirsin."});
@@ -316,8 +316,18 @@ function peaceWizardPayload(wizard:PendingPeaceWizard,detail:OfficialWarDetailVi
   );
   const selectedOccupations=activeOccupations.filter((occupation)=>wizard.settlementIds.includes(occupation.settlement_id));
   const payerName=wizard.payer==="PROPOSER"?proposerName:wizard.payer==="RECEIVER"?receiverName:null;
+  const proposerSide=war.attacker_country_id===wizard.proposerCountryId?"ATTACKER":"DEFENDER";
+  const scoreBudget=Math.max(0,proposerSide==="ATTACKER"?Number(war.attacker_score):-Number(war.attacker_score));
+  const landCost=selectedOccupations.reduce((sum,occupation)=>sum+Number(occupation.peace_cost??0)
+    *(occupation.occupier_country_id===wizard.proposerCountryId?1:-1),0);
+  const indemnityCost=wizard.indemnityAmount>0
+    ?Math.ceil(wizard.indemnityAmount/1_000)*(wizard.payer==="RECEIVER"?1:-1)
+    :0;
+  const demandCost=selectedOccupations.reduce((sum,occupation)=>sum+(occupation.occupier_country_id===wizard.proposerCountryId
+    ?Number(occupation.peace_cost??0):0),0)+Math.max(0,indemnityCost);
+  const concessionCost=Math.abs(Math.min(0,landCost))+Math.abs(Math.min(0,indemnityCost));
   const landSummary=selectedOccupations.length
-    ?`${selectedOccupations.map((occupation)=>`• **${occupation.settlement_name}** → **${occupation.occupier_country_name}**`).join("\n")}\n_Yalnızca yerleşkeyi fiilen işgal eden taraf nihai devri alabilir._`
+    ?`${selectedOccupations.map((occupation)=>`• **${occupation.settlement_name}** → **${occupation.occupier_country_name}** • ${occupation.occupier_country_id===wizard.proposerCountryId?"Talep":"Taviz"} **${number(Number(occupation.peace_cost??0))}**`).join("\n")}\n_Yalnızca yerleşkeyi fiilen işgal eden taraf nihai devri alabilir._`
     :"Toprak devri talep edilmiyor.";
   const embed=new EmbedBuilder().setColor(0x3c8b5c).setTitle("🕊️ Barış Teklifi Hazırlama Masası")
     .setDescription(`**${proposerName}** → **${receiverName}**\nSeçimler henüz karşı tarafa gönderilmedi; aşağıdaki önizlemeyi dilediğin kadar değiştirebilirsin.`)
@@ -325,12 +335,13 @@ function peaceWizardPayload(wizard:PendingPeaceWizard,detail:OfficialWarDetailVi
       {name:"⚔️ Savaş",value:fieldValue(`${war.attacker_country_name} — ${war.defender_country_name}\n🎯 ${WAR_GOALS[war.goal_type]?.label??war.war_goal} • ⚖️ ${war.attacker_country_name} açısından ${Number(war.attacker_score)>0?"+":""}${Number(war.attacker_score)}`)},
       ...longTextFields("🗺️ Toprak Maddeleri",landSummary),
       {name:"💰 Altın Maddesi",value:fieldValue(wizard.indemnityAmount>0&&payerName?`**${payerName}** ${gold(wizard.indemnityAmount)} ödeyecek.`:"Altın ödemesi talep edilmiyor."),inline:true},
+      {name:"⚖️ Talep Bütçesi",value:fieldValue(`Toprak dengesi **${landCost>=0?"+":""}${number(landCost)}** • Altın dengesi **${indemnityCost>=0?"+":""}${number(indemnityCost)}**\nTalep **${number(demandCost)} / ${number(scoreBudget)}** savaş skoru • Verilen taviz **${number(concessionCost)}**${demandCost>scoreBudget?"\n❌ Mevcut savaş skoru bu teklif için yetersiz.":""}`)},
       {name:"📜 Anlaşma Metni",value:fieldValue(wizard.terms||"Henüz anlaşma metni yazılmadı.")}
     )
     .setFooter({text:"Teklifi Gönder düğmesi bütün maddeleri son kez doğrular ve karşı cephe liderine yollar."});
   const landOptions=activeOccupations.slice(0,25).map((occupation)=>({
       label:occupation.settlement_name.slice(0,100),
-      description:`${occupation.occupier_country_name} işgali • ${occupation.occupier_country_name} devletine devredilir`.slice(0,100),
+      description:`İşgal +${number(Number(occupation.score_points))} • Barış bedeli ${number(Number(occupation.peace_cost??0))} • ${occupation.occupier_country_name}`.slice(0,100),
       value:occupation.settlement_id,default:wizard.settlementIds.includes(occupation.settlement_id)
     }));
   const landMenu=new StringSelectMenuBuilder().setCustomId(`peace_land_select|${wizard.token}`)
@@ -370,8 +381,10 @@ export function renderPeaceOffer(offer: PeaceOfferView): EmbedBuilder {
     ? `**${offer.payer_country_name}** → **${offer.recipient_country_name}**\n${gold(offer.indemnity_amount)}`
     : "Tazminat talep edilmiyor.";
   const structured=(offer.structured_terms??[]).map((term)=>{
-    if(term.term_type==="TRANSFER_SETTLEMENT")return `• **Yerleşke Devri:** ${term.settlement_name} → ${term.target_country_name}`;
-    if(term.term_type==="INDEMNITY")return `• **Tazminat:** ${term.source_country_name} → ${term.target_country_name} • ${gold(Number(term.amount??0))}`;
+    const cost=Number(term.war_score_cost??0);
+    const scoreText=cost===0?"":` • ${cost>0?"Talep":"Taviz"} **${number(Math.abs(cost))}** skor`;
+    if(term.term_type==="TRANSFER_SETTLEMENT")return `• **Yerleşke Devri:** ${term.settlement_name} → ${term.target_country_name}${scoreText}`;
+    if(term.term_type==="INDEMNITY")return `• **Tazminat:** ${term.source_country_name} → ${term.target_country_name} • ${gold(Number(term.amount??0))}${scoreText}`;
     return `• **${PEACE_TERM_TYPES[term.term_type]}**`;
   }).join("\n")||"• Beyaz Barış";
   return new EmbedBuilder()
@@ -383,7 +396,8 @@ export function renderPeaceOffer(offer: PeaceOfferView): EmbedBuilder {
       { name: "📥 Teklif Edilen", value: fieldValue(offer.receiver_country_name), inline: true },
       ...longTextFields("📜 Barış Şartları", offer.terms),
       ...longTextFields("🧾 Bağlayıcı Maddeler",structured),
-      { name: "💰 Savaş Tazminatı", value: fieldValue(indemnity) }
+      { name: "💰 Savaş Tazminatı", value: fieldValue(indemnity) },
+      { name: "⚖️ Talep Edilen Savaş Skoru", value: fieldValue(`**${number(Number(offer.total_war_score_cost??0))}**`) }
     )
     .setFooter({ text: "Yalnızca hedef devletin oyuncuları veya oyun yöneticisi yanıtlayabilir." });
 }

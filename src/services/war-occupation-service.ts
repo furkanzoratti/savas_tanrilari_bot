@@ -1,7 +1,9 @@
 import type { DbClient } from "../db/pool.js";
-import { clampWarScore, type WarSide } from "../domain/war-objectives.js";
+import { type WarSide } from "../domain/war-objectives.js";
+import {battleWarScorePoints} from "../domain/war-score.js";
 import { GameError } from "./game-error.js";
 import { forceEndGovernorshipForSettlement } from "./governorship-service.js";
+import {recalculateWarScore} from "./war-score-service.js";
 
 async function addScoreEvent(client: DbClient, input: {
   warId: string; side: WarSide; eventType: "BATTLE" | "OCCUPATION" | "TARGET_OCCUPATION" | "CAPITAL_OCCUPATION";
@@ -13,11 +15,7 @@ async function addScoreEvent(client: DbClient, input: {
     [input.warId, input.side, input.eventType, input.points, input.gameTurn, input.battleId ?? null,
       input.settlementId ?? null, input.sourceKey, JSON.stringify(input.details ?? {})]
   );
-  if (!inserted.rowCount) return false;
-  const current = Number((await client.query<{ attacker_score: number }>("SELECT attacker_score FROM state_wars WHERE id=$1 FOR UPDATE", [input.warId])).rows[0]?.attacker_score ?? 0);
-  const delta = input.side === "ATTACKER" ? input.points : -input.points;
-  await client.query("UPDATE state_wars SET attacker_score=$2 WHERE id=$1", [input.warId, clampWarScore(current + delta)]);
-  return true;
+  return Boolean(inserted.rowCount);
 }
 
 export async function linkOfficialWarToBattle(client: DbClient, battleId: string, firstCountryId: string, secondCountryId: string): Promise<string | null> {
@@ -74,18 +72,29 @@ export async function recordOfficialWarBattleOutcome(client: DbClient, battleId:
       ORDER BY participant.is_primary DESC LIMIT 1`, [battle.id, stateWarId, battle.winner_side]
   )).rows[0];
   if (!winner) return;
-  const battlePoints = battle.terrain === "FIELD" ? 6 : battle.terrain === "AMBUSH" ? 5 : battle.terrain === "NAVAL" ? 5 : 4;
-  await addScoreEvent(client, {
+  const sides=(await client.query<{
+    side_key:"A"|"B";initial_total:number;current_total:number;total_losses:number;
+  }>("SELECT side_key,initial_total,current_total,total_losses FROM battle_sides WHERE battle_id=$1 AND side_key IN ('A','B')",[battle.id])).rows;
+  const winnerBattleSide=sides.find((side)=>side.side_key===battle.winner_side);
+  const loserBattleSide=sides.find((side)=>side.side_key!==battle.winner_side);
+  const battlePoints=winnerBattleSide&&loserBattleSide?battleWarScorePoints({
+    winnerInitial:Number(winnerBattleSide.initial_total),loserInitial:Number(loserBattleSide.initial_total),
+    winnerLosses:Number(winnerBattleSide.total_losses),loserLosses:Number(loserBattleSide.total_losses),
+    loserRemaining:Number(loserBattleSide.current_total)
+  }):0;
+  if(battlePoints>0)await addScoreEvent(client, {
     warId: stateWarId, side: winner.war_side, eventType: "BATTLE", points: battlePoints,
     gameTurn: Number(battle.current_turn), battleId: battle.id, sourceKey: `battle:${battle.id}`,
-    details: { terrain: battle.terrain, winnerCountryId: winner.country_id }
+    details: { terrain: battle.terrain, winnerCountryId: winner.country_id,
+      totalEngaged:Number(winnerBattleSide!.initial_total)+Number(loserBattleSide!.initial_total),
+      winnerLosses:Number(winnerBattleSide!.total_losses),loserLosses:Number(loserBattleSide!.total_losses) }
   });
+  await recalculateWarScore(client,stateWarId);
   if (battle.terrain !== "SIEGE" || battle.winner_side !== "A" || !battle.defender_settlement_id) return;
 
-  const settlement = (await client.query<{ id: string; country_id: string; capital: boolean }>(
-    `SELECT settlement.id,settlement.country_id,(country.capital_settlement_id=settlement.id) AS capital
-       FROM settlements settlement JOIN countries country ON country.id=settlement.country_id
-      WHERE settlement.id=$1 FOR UPDATE OF settlement`, [battle.defender_settlement_id]
+  const settlement = (await client.query<{ id: string; country_id: string }>(
+    `SELECT settlement.id,settlement.country_id FROM settlements settlement
+      WHERE settlement.id=$1 FOR UPDATE`, [battle.defender_settlement_id]
   )).rows[0];
   if (!settlement || settlement.country_id === winner.country_id) return;
   const ownerSide = (await client.query<{ side: WarSide }>(
@@ -101,31 +110,18 @@ export async function recordOfficialWarBattleOutcome(client: DbClient, battleId:
     await client.query("UPDATE settlement_occupations SET status='ENDED',ended_turn=$2,ended_reason='Yeni kuşatma sonucu işgal değişti.',ended_at=NOW() WHERE id=$1", [existing.id, battle.current_turn]);
   }
   await forceEndGovernorshipForSettlement(client, settlement.id, Number(battle.current_turn), "Yerleşke savaş sırasında işgal edildi.", actorId);
-  await client.query(
+  const occupationId=(await client.query<{id:string}>(
     `INSERT INTO settlement_occupations(guild_id,war_id,settlement_id,occupier_country_id,legal_owner_country_id,started_turn,started_by_battle_id)
-     VALUES($1,$2,$3,$4,$5,$6,$7)`,
+     VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
     [battle.guild_id, stateWarId, settlement.id, winner.country_id, settlement.country_id, battle.current_turn, battle.id]
-  );
+  )).rows[0]!.id;
+  const scoreSnapshot=await recalculateWarScore(client,stateWarId);
+  const province=scoreSnapshot.provinces.find((item)=>item.id===settlement.id);
   await addScoreEvent(client, {
-    warId: stateWarId, side: winner.war_side, eventType: "OCCUPATION", points: 10,
+    warId: stateWarId, side: winner.war_side, eventType: "OCCUPATION", points:Math.max(1,province?.occupationScore??1),
     gameTurn: Number(battle.current_turn), battleId: battle.id, settlementId: settlement.id,
-    sourceKey: `occupation:${stateWarId}:${settlement.id}`, details: { occupierCountryId: winner.country_id }
+    sourceKey: `occupation:${occupationId}`, details: { occupierCountryId: winner.country_id,peaceCost:province?.peaceCost??null }
   });
-  const war = (await client.query<{ goal_target_settlement_id: string | null }>("SELECT goal_target_settlement_id FROM state_wars WHERE id=$1", [stateWarId])).rows[0];
-  if (war?.goal_target_settlement_id === settlement.id) {
-    await addScoreEvent(client, {
-      warId: stateWarId, side: winner.war_side, eventType: "TARGET_OCCUPATION", points: 10,
-      gameTurn: Number(battle.current_turn), battleId: battle.id, settlementId: settlement.id,
-      sourceKey: `target-occupation:${stateWarId}:${settlement.id}`, details: {}
-    });
-  }
-  if (settlement.capital) {
-    await addScoreEvent(client, {
-      warId: stateWarId, side: winner.war_side, eventType: "CAPITAL_OCCUPATION", points: 5,
-      gameTurn: Number(battle.current_turn), battleId: battle.id, settlementId: settlement.id,
-      sourceKey: `capital-occupation:${stateWarId}:${settlement.id}`, details: {}
-    });
-  }
 }
 
 export async function endWarOccupations(client: DbClient, warId: string, turn: number, reason: string, exceptSettlementIds: string[] = []): Promise<number> {
