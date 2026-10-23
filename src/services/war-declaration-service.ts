@@ -81,7 +81,9 @@ export interface OfficialWarOccupationView {
   id: string;
   settlement_id: string;
   settlement_name: string;
+  occupier_country_id: string;
   occupier_country_name: string;
+  legal_owner_country_id: string;
   legal_owner_country_name: string;
   started_turn: number;
   status: "ACTIVE" | "ENDED";
@@ -464,7 +466,8 @@ export const warDeclarationService = {
       ),
       pool.query<OfficialWarOccupationView>(
         `SELECT occupation.id,occupation.settlement_id,settlement.name AS settlement_name,
-                occupier.name AS occupier_country_name,owner.name AS legal_owner_country_name,
+                occupation.occupier_country_id,occupier.name AS occupier_country_name,
+                occupation.legal_owner_country_id,owner.name AS legal_owner_country_name,
                 occupation.started_turn,occupation.status,occupation.ended_turn,
                 COALESCE((SELECT SUM(event.points)::integer FROM state_war_score_events event
                            WHERE event.war_id=occupation.war_id AND event.settlement_id=occupation.settlement_id
@@ -829,6 +832,7 @@ export const warDeclarationService = {
     guildId: string; actorId: string; warId: string; proposerCountryId: string;
     receiverCountryId: string; terms: string; indemnityAmount: number; payerCountryId: string | null;
     settlementId?: string | null; settlementRecipientCountryId?: string | null;
+    settlementTransfers?: Array<{ settlementId: string; recipientCountryId: string }>;
   }): Promise<PeaceOfferView> {
     const terms = input.terms.trim();
     if (terms.length < 2 || terms.length > 2000) throw new GameError("Barış şartları 2–2.000 karakter arasında olmalıdır.");
@@ -838,6 +842,15 @@ export const warDeclarationService = {
       throw new GameError("Tazminatı ödeyecek taraf belirtilmelidir: BEN veya HEDEF.");
     }
     if (input.indemnityAmount === 0 && input.payerCountryId !== null) throw new GameError("Tazminat yoksa ödeme yapacak devlet seçilemez.");
+    const settlementTransfers = [...(input.settlementTransfers ?? (input.settlementId
+      ? [{ settlementId: input.settlementId, recipientCountryId: input.settlementRecipientCountryId ?? "" }]
+      : []))].sort((first, second) => first.settlementId.localeCompare(second.settlementId));
+    if (!input.settlementId && input.settlementRecipientCountryId && !input.settlementTransfers) {
+      throw new GameError("Yerleşke seçilmeden toprağı alacak taraf belirlenemez.");
+    }
+    if (new Set(settlementTransfers.map((transfer) => transfer.settlementId)).size !== settlementTransfers.length) {
+      throw new GameError("Aynı yerleşke bir barış teklifinde yalnızca bir kez devredilebilir.");
+    }
     return withTransaction(async (client) => {
       await lockTurnAndCountries(client, input.guildId, [input.proposerCountryId, input.receiverCountryId]);
       const war = (await client.query<{ attacker_country_id: string; defender_country_id: string; status: string }>(
@@ -854,20 +867,18 @@ export const warDeclarationService = {
       const recipientCountryId = input.indemnityAmount > 0
         ? (input.payerCountryId === input.proposerCountryId ? input.receiverCountryId : input.proposerCountryId)
         : null;
-      let settlementSourceCountryId: string | null = null;
-      if (input.settlementId) {
-        if (![input.proposerCountryId,input.receiverCountryId].includes(input.settlementRecipientCountryId ?? "")) {
+      const verifiedTransfers: Array<{ settlementId: string; sourceCountryId: string; recipientCountryId: string }> = [];
+      for (const transfer of settlementTransfers) {
+        if (![input.proposerCountryId,input.receiverCountryId].includes(transfer.recipientCountryId)) {
           throw new GameError("Yerleşkeyi alacak savaş tarafı seçilmelidir.");
         }
         const occupation = (await client.query<{ legal_owner_country_id: string; occupier_country_id: string }>(
           `SELECT legal_owner_country_id,occupier_country_id FROM settlement_occupations
-            WHERE war_id=$1 AND settlement_id=$2 AND status='ACTIVE' FOR UPDATE`, [input.warId,input.settlementId]
+            WHERE war_id=$1 AND settlement_id=$2 AND status='ACTIVE' FOR UPDATE`, [input.warId,transfer.settlementId]
         )).rows[0];
         if (!occupation) throw new GameError("Barışla devredilecek yerleşke bu savaşta aktif biçimde işgal edilmiş olmalıdır.");
-        if (occupation.occupier_country_id !== input.settlementRecipientCountryId) throw new GameError("Yerleşkeyi yalnızca onu işgal eden savaş tarafı alabilir.");
-        settlementSourceCountryId = occupation.legal_owner_country_id;
-      } else if (input.settlementRecipientCountryId) {
-        throw new GameError("Yerleşke seçilmeden toprağı alacak taraf belirlenemez.");
+        if (occupation.occupier_country_id !== transfer.recipientCountryId) throw new GameError("Yerleşkeyi yalnızca onu işgal eden savaş tarafı alabilir.");
+        verifiedTransfers.push({ settlementId: transfer.settlementId, sourceCountryId: occupation.legal_owner_country_id, recipientCountryId: transfer.recipientCountryId });
       }
       if (input.indemnityAmount > 0) {
         const payer = await client.query<{ total: number; count: number }>(
@@ -887,11 +898,11 @@ export const warDeclarationService = {
       );
       const id = created.rows[0]!.id;
       let sortOrder=0;
-      if (input.settlementId) {
+      for (const transfer of verifiedTransfers) {
         await client.query(
           `INSERT INTO peace_offer_terms(peace_offer_id,term_type,source_country_id,target_country_id,settlement_id,sort_order)
            VALUES($1,'TRANSFER_SETTLEMENT',$2,$3,$4,$5)`,
-          [id,settlementSourceCountryId,input.settlementRecipientCountryId,input.settlementId,sortOrder++]
+          [id,transfer.sourceCountryId,transfer.recipientCountryId,transfer.settlementId,sortOrder++]
         );
       }
       if (input.indemnityAmount > 0) {

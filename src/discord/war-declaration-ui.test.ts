@@ -8,6 +8,7 @@ vi.hoisted(() => {
 });
 
 import { commandBuilders } from "./commands.js";
+import { countryFlagEmojiName } from "./country-flag-emojis.js";
 import {
   WAR_DECLARATION_BANNER_PATH, WAR_DECLARATION_BANNER_URL,
   PEACE_TREATY_BANNER_PATH, PEACE_TREATY_BANNER_URL
@@ -15,12 +16,31 @@ import {
 import { parsePeaceIndemnity, renderActiveWarDetail, renderActiveWarPages, renderActiveWarSelectionRows, renderPeaceAnnouncement, renderPeaceOffer, renderWarDeclaration, renderWarEndAnnouncement, renderWarInvitation } from "./war-declaration-ui.js";
 
 describe("resmî savaş ilanları ve barış duyuruları", () => {
+  it("devlet adlarını sunucudaki bayrak emoji adlarına eşler", () => {
+    expect(countryFlagEmojiName("Bosporos Krallığı")).toBe("bosporoc");
+    expect(countryFlagEmojiName("Büyük Britanya")).toBe("britanya");
+    expect(countryFlagEmojiName("Nil İmparatorluğu")).toBe("nilimp");
+    expect(countryFlagEmojiName("Satraplar")).toBe("satraplar");
+    expect(countryFlagEmojiName("Baykal Devleti")).toBeNull();
+  });
+
   it("oyuncu ve yönetici savaş komutlarını ayrı ayrı kaydeder", () => {
     const names = commandBuilders.map((command) => command.name);
     expect(names).toEqual(expect.arrayContaining([
       "savas-ilan-kanali", "savas-ilani", "pakt-savasi", "savas-cagrisi", "savas-yapilandir", "baris-teklifi", "aktif-savaslar", "savas-sonlandir"
     ]));
     expect(commandBuilders.find((command) => command.name === "yonetim")?.options?.length).toBeLessThanOrEqual(25);
+    const peaceCommand = commandBuilders.find((command) => command.name === "baris-teklifi");
+    expect(peaceCommand?.description).toContain("görsel form");
+    expect(peaceCommand?.options?.map((option) => option.name)).toEqual(["ulke"]);
+  });
+
+  it("valilik komutunda görsel divanı ve geriye dönük yönetim alt komutlarını korur", () => {
+    const governorship = commandBuilders.find((command) => command.name === "valilik");
+    expect(governorship?.options?.map((option) => option.name)).toEqual([
+      "listele", "ata", "odak-degistir", "gorevden-al"
+    ]);
+    expect(governorship?.options?.find((option) => option.name === "listele")?.description).toContain("divanını açar");
   });
 
   it("mevcut savaşları bütün yönetici yapılandırma işlemleriyle düzenleyebilir", () => {
@@ -125,8 +145,8 @@ describe("resmî savaş ilanları ve barış duyuruları", () => {
         {id:"event",side:"ATTACKER",event_type:"OCCUPATION",points:10,game_turn:13,battle_id:"battle",settlement_id:"sirakuza",settlement_name:"Siraküza",battle_terrain:"SIEGE"}
       ],
       occupations:[{
-        id:"occupation",settlement_id:"sirakuza",settlement_name:"Siraküza",occupier_country_name:"Roma",
-        legal_owner_country_name:"Kartaca",started_turn:13,status:"ACTIVE",ended_turn:null,score_points:25
+        id:"occupation",settlement_id:"sirakuza",settlement_name:"Siraküza",occupier_country_id:"roma",occupier_country_name:"Roma",
+        legal_owner_country_id:"kartaca",legal_owner_country_name:"Kartaca",started_turn:13,status:"ACTIVE",ended_turn:null,score_points:25
       }]
     });
     const text=JSON.stringify(embeds.map((embed)=>embed.toJSON()));

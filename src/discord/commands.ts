@@ -557,12 +557,7 @@ export const commandBuilders = [
       ))
       .addStringOption((option) => option.setName("ulke").setDescription("Yeni savaş lideri olacak katılımcı devlet").setRequired(true))),
   new SlashCommandBuilder()
-    .setName("baris-teklifi").setDescription("Savaşta olduğunuz devlete şartlı veya tazminatlı barış teklif eder")
-    .addStringOption((option) => option.setName("hedef-ulke").setDescription("Barış teklif edilecek savaş tarafı").setRequired(true))
-    .addStringOption((option) => option.setName("devredilecek-yerleske").setDescription("Bu savaşta işgal edilmiş ve barışta devredilecek yerleşke adı"))
-    .addStringOption((option) => option.setName("topragi-alan").setDescription("Yerleşkeyi alacak taraf").addChoices(
-      {name:"Teklif eden (BEN)",value:"BEN"},{name:"Teklif edilen (HEDEF)",value:"HEDEF"}
-    ))
+    .setName("baris-teklifi").setDescription("Aktif savaş için toprak ve altın maddelerini görsel formdan hazırlar")
     .addStringOption(countryOption),
   new SlashCommandBuilder()
     .setName("aktif-savaslar").setDescription("Devam eden bütün resmî devlet savaşlarını herkese açık listeler"),
@@ -1228,7 +1223,7 @@ export const commandBuilders = [
       .addStringOption((o) => o.setName("tutsak").setDescription("İnfaz edilecek karakter veya soylu").setRequired(true).setAutocomplete(true))),
   new SlashCommandBuilder()
     .setName("valilik").setDescription("Diplomatları yerleşkelere vali olarak ata ve idari odağı yönet")
-    .addSubcommand((sub)=>sub.setName("listele").setDescription("Devletin etkin valiliklerini gösterir").addStringOption(countryOption))
+    .addSubcommand((sub)=>sub.setName("listele").setDescription("Valilik divanını açar; vali ata, odak değiştir ve valilikleri yönet").addStringOption(countryOption))
     .addSubcommand((sub)=>sub.setName("ata").setDescription("Müsait bir diplomatı yerleşkeye en az iki tur için vali atar")
       .addStringOption((o)=>o.setName("yerleske").setDescription("Vali atanacak yerleşkenin tam adı").setRequired(true))
       .addStringOption((o)=>o.setName("diplomat").setDescription("Müsait diplomatın tam adı").setRequired(true))

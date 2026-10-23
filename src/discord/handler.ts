@@ -95,7 +95,7 @@ import {
 } from "./roman-republic-ui.js";
 import { decodeUnitTypeFromCustomId, encodeUnitTypeForCustomId } from "./unit-custom-id.js";
 import {greatProjectService,GreatProjectError} from "../services/great-project-service.js";
-import {handleGovernorshipCommand} from "./governorship-ui.js";
+import {handleGovernorshipButton,handleGovernorshipCommand,handleGovernorshipSelect} from "./governorship-ui.js";
 
 function settlementSelect(customId: string, settlements: Array<{ id: string; name: string; population: number }>, placeholder: string) {
   if (!settlements.length) throw new GameError("Bu ülkeye ait yerleşke bulunmuyor.");
@@ -1536,6 +1536,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
 }
 
 async function handleSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+  if (await handleGovernorshipSelect(interaction)) return;
   if (await handleWarDeclarationSelect(interaction)) return;
   if (await handleRomanRepublicSelect(interaction)) return;
   if (await handleSteppeHegemonySelect(interaction)) return;
@@ -1644,6 +1645,7 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
 }
 
 async function handleButton(interaction: ButtonInteraction): Promise<void> {
+  if (await handleGovernorshipButton(interaction)) return;
   if (await handleRomanRepublicButton(interaction)) return;
   if (await handleSteppeHegemonyButton(interaction)) return;
   if (await handleDynastyButton(interaction)) return;
