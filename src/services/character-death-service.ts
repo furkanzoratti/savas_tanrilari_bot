@@ -22,6 +22,14 @@ export async function markCharacterDead(input: {
       WHERE missionary_character_id=$1 AND status IN ('TRAVELING','ACTIVE')`,
     [characterId]
   );
+  await client.query(
+    `UPDATE settlement_governorships governorship
+        SET status='ENDED',ended_turn=guild.current_turn,ended_reason=$2,updated_at=NOW()
+       FROM guilds guild
+      WHERE governorship.character_id=$1 AND governorship.status='ACTIVE'
+        AND guild.discord_id=governorship.guild_id`,
+    [characterId,reason]
+  );
   const deceased=(await client.query<{country_id:string;is_marshal:boolean}>(
     `UPDATE country_characters
         SET character_status='DEAD',died_at=COALESCE(died_at,NOW()),

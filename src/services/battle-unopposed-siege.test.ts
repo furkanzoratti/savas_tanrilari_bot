@@ -49,6 +49,8 @@ describe("unopposed siege publication",()=>{
         battle.status="FINISHED";battle.winner_side="A";battle.finish_reason=String(params?.[0]??"");battle.losses_applied_at=new Date();
         return {rows:[],rowCount:1};
       }
+      if(sql.includes("battle.state_war_id"))return {rows:[{...battle,state_war_id:null,current_turn:24}],rowCount:1};
+      if(sql.includes("FROM battle_side_participants")&&sql.includes("is_primary=TRUE"))return {rows:[],rowCount:0};
       if(sql.startsWith("UPDATE battle_sides SET initial_composition")||sql.startsWith("UPDATE battle_side_participants SET initial_composition")||sql.includes("INSERT INTO audit_logs"))return {rows:[],rowCount:1};
       throw new Error(`Unexpected query: ${sql}`);
     }} as unknown as DbClient;

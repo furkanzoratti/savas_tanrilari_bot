@@ -10,6 +10,7 @@ import {renewRomanSenateSeats,type RomanSenateRenewalResult} from "./roman-senat
 import { GameError } from "./game-service.js";
 import {DEFAULT_ROMAN_FAMILIES,DEFAULT_ROMAN_FAMILY_MEMBERS} from "../domain/roman-family-seed.js";
 import {romanFamilyAccess,romanFamilyMembership,type RomanFamilyAccess} from "./roman-family-access.js";
+import {assertSettlementNotOccupied} from "./war-occupation-service.js";
 
 export interface RomanFamilyView {
   id:string;name:string;treasury:number;politicalInfluence:number;senateSeats:number;
@@ -505,6 +506,7 @@ export const romanRepublicService={
         [input.countryId,input.settlement.trim()]
       )).rows[0];
       if(!settlement)throw new GameError("İşletmenin kurulacağı Roma yerleşkesi bulunamadı.");
+      await assertSettlementNotOccupied(client,settlement.id);
       const turn=await currentTurn(client,input.guildId);
       const business=(await client.query<{id:string}>(
         `INSERT INTO roman_family_businesses(family_id,settlement_id,business_type,purchase_cost,turn_income,acquired_turn)

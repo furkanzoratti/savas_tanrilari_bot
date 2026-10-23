@@ -20,7 +20,7 @@ const assignmentLabels: Record<string,string> = {
   COUNTERINTELLIGENCE_TRAVELING_SETTLEMENT: "Yerleşke karşı casusluğuna gidiyor",
   COUNTERINTELLIGENCE_COUNTRY: "Ülke karşı casusluğu",
   COUNTERINTELLIGENCE_SETTLEMENT: "Yerleşke karşı casusluğu", PERSONAL_GUARD: "Kişisel koruma",
-  ASSIMILATION: "Asimilasyon", MERCHANT_LOCAL_TRAVELING: "Yerel ticarete gidiyor",
+  ASSIMILATION: "Asimilasyon", GOVERNOR: "Vali", MERCHANT_LOCAL_TRAVELING: "Yerel ticarete gidiyor",
   MERCHANT_LOCAL: "Yerel ticaret", MERCHANT_FOREIGN_PENDING: "Ticari imtiyaz onayı bekliyor",
   MERCHANT_FOREIGN_TRAVELING: "Yabancı ticari imtiyaza gidiyor",
   MERCHANT_FOREIGN: "Yabancı ticari imtiyaz", MERCHANT_PURCHASE: "Satın alma temsilciliği",

@@ -34,6 +34,7 @@ import type { ReligionKey } from "../domain/religions.js";
 import { loadSettlementReligionModifiers } from "./religion-service.js";
 import { applyBattleNavalCargoLosses } from "./naval-cargo-loss-service.js";
 import { rebelMilitaryPower } from "../domain/stability.js";
+import { assertSettlementNotOccupied, linkOfficialWarToBattle, recordOfficialWarBattleOutcome } from "./war-occupation-service.js";
 
 export type BattleStatus = "DRAFT" | "WAITING_FIRST_ROLL" | "WAITING_SECOND_ROLL" | "READY_TO_RESOLVE" | "FINISHED" | "CANCELLED";
 
@@ -1358,7 +1359,12 @@ async function applyLossesToDocuments(client: DbClient, battleId: string, guildI
 
   if (garrisonLossSettlements.size) {
     const currentTurn = Number((await client.query<{ current_turn: number }>("SELECT current_turn FROM guilds WHERE discord_id=$1", [guildId])).rows[0]?.current_turn ?? 1);
+    const capturedSettlementId=(await client.query<{defender_settlement_id:string|null}>(
+      "SELECT defender_settlement_id FROM battles WHERE id=$1 AND terrain='SIEGE' AND status='FINISHED' AND winner_side='A'",
+      [battleId]
+    )).rows[0]?.defender_settlement_id??null;
     for (const settlementId of garrisonLossSettlements) {
+      if(settlementId===capturedSettlementId)continue;
       await scheduleMandatoryGarrisonReplenishment(client, { settlementId, currentTurn, reason: "BATTLE_LOSS" });
     }
   }
@@ -1642,6 +1648,7 @@ export const battleService = {
          VALUES($1,'A',$2,TRUE,$3::jsonb,$3::jsonb),($1,'B',$4,TRUE,$5::jsonb,$5::jsonb)`,
         [id,a.id,JSON.stringify(compositionA),b.id,JSON.stringify(compositionB)]
       );
+      if (a.kind === "COUNTRY" && b.kind === "COUNTRY") await linkOfficialWarToBattle(client, id, a.id, b.id);
       if(steppeConflictId)await client.query("UPDATE steppe_internal_conflicts SET battle_id=$2,updated_at=NOW() WHERE id=$1",[steppeConflictId,id]);
       if (defenderSettlementId&&b.kind!=="REBEL") {
         const garrisonComposition = Object.fromEntries((await client.query<{ unit_type: string; quantity: number }>(
@@ -2266,6 +2273,7 @@ export const battleService = {
         [attacker.country_ids, input.settlementName]
       )).rows[0];
       if (!settlement) throw new GameError("Ödeme yapılacak saldırgan yerleşkesi bulunamadı.");
+      await assertSettlementNotOccupied(client,settlement.id);
       const maintenanceDebt = await client.query("SELECT 1 FROM settlements WHERE country_id=$1 AND local_treasury<0 LIMIT 1", [settlement.country_id]);
       if (maintenanceDebt.rowCount) throw new GameError("Ödenmemiş bakım açığı giderilmeden saha kuşatma aleti alınamaz.");
       if (input.assetType === "ram") {
@@ -2488,6 +2496,7 @@ export const battleService = {
         if(view.sides.A.rebel_faction_id){
           await applyRebelOccupationOutcome(client,battle.id,"A",input.guildId,input.actorId);
         }
+        await recordOfficialWarBattleOutcome(client,battle.id,input.actorId);
         await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'battle.siege.unopposed','battle',$3,$4::jsonb)",[
           input.guildId,input.actorId,battle.id,JSON.stringify({defenderSettlementId:battle.defender_settlement_id,winnerSide:"A"})
         ]);
@@ -2635,6 +2644,7 @@ export const battleService = {
       await client.query("UPDATE battles SET status='FINISHED',winner_side=$1,finish_reason=$2,updated_at=NOW() WHERE id=$3",[
         pursuerSide,finishReason,active.id
       ]);
+      await recordOfficialWarBattleOutcome(client,active.id,input.actorId);
       const currentTurn=Number((await client.query<{current_turn:number}>("SELECT current_turn FROM guilds WHERE discord_id=$1",[input.guildId])).rows[0]?.current_turn??0);
       await recordCommanderVictory(client,active.id,pursuerSide,currentTurn);
       const report=await applyLossesToDocuments(client,active.id,input.guildId,input.actorId);
@@ -3097,6 +3107,7 @@ export const battleService = {
         }
         const currentTurn = Number((await client.query<{ current_turn: number }>("SELECT current_turn FROM guilds WHERE discord_id=$1", [input.guildId])).rows[0]?.current_turn ?? 0);
         await recordCommanderVictory(client,active.id,winner,currentTurn);
+        await recordOfficialWarBattleOutcome(client,active.id,input.actorId);
       }
       const report = ended ? await applyLossesToDocuments(client, active.id, input.guildId, input.actorId) : [];
       if(ended&&naval)await persistBattleHullDamage(client,active.id);
@@ -3157,6 +3168,7 @@ export const battleService = {
       if(view.sides[winner].rebel_faction_id){
         await applyRebelOccupationOutcome(client,active.id,winner,input.guildId,input.actorId);
       }
+      await recordOfficialWarBattleOutcome(client,active.id,input.actorId);
       const currentTurn = Number((await client.query<{ current_turn: number }>("SELECT current_turn FROM guilds WHERE discord_id=$1", [input.guildId])).rows[0]?.current_turn ?? 0);
       await recordCommanderVictory(client,active.id,winner,currentTurn);
       const report = await applyLossesToDocuments(client, active.id, input.guildId, input.actorId);
@@ -3176,6 +3188,7 @@ export const battleService = {
       if(winnerIsRebel){
         await applyRebelOccupationOutcome(client,active.id,input.winner,input.guildId,input.actorId);
       }
+      await recordOfficialWarBattleOutcome(client,active.id,input.actorId);
       const currentTurn = Number((await client.query<{ current_turn: number }>("SELECT current_turn FROM guilds WHERE discord_id=$1", [input.guildId])).rows[0]?.current_turn ?? 0);
       await recordCommanderVictory(client,active.id,input.winner,currentTurn);
       const report = await applyLossesToDocuments(client, active.id, input.guildId, input.actorId);

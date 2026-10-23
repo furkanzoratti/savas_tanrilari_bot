@@ -153,6 +153,7 @@ import { nilAcademyPendingCleanupMigration } from "./nil-academy-pending-cleanup
 import { dynastySuccessionRepairMigration } from "./dynasty-succession-repair-migration.js";
 import { steppeKurultayBaselineMigration } from "./steppe-kurultay-baseline-migration.js";
 import { activeCountryDynastiesMigration } from "./active-country-dynasties-migration.js";
+import { structuredWarPeaceGovernorshipMigration } from "./structured-war-peace-governorship-migration.js";
 
 export const migrations = [
   {
@@ -2523,5 +2524,6 @@ export const migrations = [
   nilAcademyPendingCleanupMigration,
   dynastySuccessionRepairMigration,
   steppeKurultayBaselineMigration,
-  activeCountryDynastiesMigration
+  activeCountryDynastiesMigration,
+  structuredWarPeaceGovernorshipMigration
 ] as const;

@@ -30,6 +30,13 @@ export async function terminateCharacterDuties(
       WHERE missionary_character_id=$1 AND status IN ('TRAVELING','ACTIVE')`,[characterId]
   );
   await client.query("DELETE FROM settlement_assimilation_diplomats WHERE character_id=$1",[characterId]);
+  await client.query(
+    `UPDATE settlement_governorships governorship
+        SET status='ENDED',ended_turn=guild.current_turn,ended_reason=$2,updated_at=NOW()
+       FROM guilds guild
+      WHERE governorship.character_id=$1 AND governorship.status='ACTIVE'
+        AND guild.discord_id=governorship.guild_id`,[characterId,reason]
+  );
   await client.query("UPDATE armies SET commander_character_id=NULL WHERE commander_character_id=$1",[characterId]);
   await client.query("UPDATE fleets SET commander_character_id=NULL WHERE commander_character_id=$1",[characterId]);
   await client.query(
@@ -122,6 +129,10 @@ export async function cleanupEliminatedCountry(
     `DELETE FROM settlement_assimilation_diplomats assignment
       USING country_characters character
       WHERE assignment.character_id=character.id AND character.country_id=$1`,[input.countryId]
+  );
+  await client.query(
+    `UPDATE settlement_governorships SET status='ENDED',ended_turn=$2,ended_reason=$3,updated_at=NOW()
+      WHERE country_id=$1 AND status='ACTIVE'`,[input.countryId,input.turn,input.reason]
   );
   await client.query(
     `UPDATE academy_training_sessions SET status='CANCELLED'

@@ -12,7 +12,7 @@ import {
   WAR_DECLARATION_BANNER_PATH, WAR_DECLARATION_BANNER_URL,
   PEACE_TREATY_BANNER_PATH, PEACE_TREATY_BANNER_URL
 } from "./assets.js";
-import { parsePeaceIndemnity, renderActiveWarPages, renderPeaceAnnouncement, renderPeaceOffer, renderWarDeclaration, renderWarEndAnnouncement, renderWarInvitation } from "./war-declaration-ui.js";
+import { parsePeaceIndemnity, renderActiveWarDetail, renderActiveWarPages, renderActiveWarSelectionRows, renderPeaceAnnouncement, renderPeaceOffer, renderWarDeclaration, renderWarEndAnnouncement, renderWarInvitation } from "./war-declaration-ui.js";
 
 describe("resmî savaş ilanları ve barış duyuruları", () => {
   it("oyuncu ve yönetici savaş komutlarını ayrı ayrı kaydeder", () => {
@@ -94,6 +94,49 @@ describe("resmî savaş ilanları ve barış duyuruları", () => {
     expect(first).toContain("Saldıran");
     expect(first).toContain("Savunan");
     expect(first).toContain("Çok Taraflı Savaş");
+    const selections=renderActiveWarSelectionRows(Array.from({length:7},(_,index)=>({...base,id:`war-${index}`})));
+    expect(selections).toHaveLength(2);
+    expect(selections[0]!.toJSON().components[0]?.custom_id).toBe("active_war_detail|0");
+    expect(selections[0]!.toJSON().components[0]?.options).toHaveLength(6);
+  });
+
+  it("seçilen savaşın puan, kayıp, muharebe ve işgal ayrıntılarını gösterir",()=>{
+    const war={
+      id:"war",guild_id:"guild",attacker_country_id:"roma",attacker_country_name:"Roma",
+      defender_country_id:"kartaca",defender_country_name:"Kartaca",war_goal:"Sicilya'nın güvenliği",
+      goal_type:"CONQUEST" as const,goal_target_country_id:"kartaca",goal_target_country_name:"Kartaca",
+      goal_target_settlement_id:"sirakuza",goal_target_settlement_name:"Siraküza",attacker_score:29,
+      war_type:"COUNTRY" as const,attacker_pact_id:null,attacker_pact_name:null,
+      defender_pact_id:null,defender_pact_name:null,attacker_participant_names:["Roma"],
+      defender_participant_names:["Kartaca"],attacker_diplomatic_ally_names:[],defender_diplomatic_ally_names:[],
+      reason:"Sınır anlaşmazlığı",declaration:"İlan",status:"ACTIVE" as const,started_turn:12,ended_turn:null,
+      winner_country_id:null,winner_country_name:null,end_outcome:null,end_description:null,channel_id:null,message_id:null
+    };
+    const embeds=renderActiveWarDetail({
+      war,attackerLosses:450,defenderLosses:800,
+      battles:[{
+        id:"battle",terrain:"SIEGE",status:"FINISHED",round_number:3,winner_side:"A",finish_reason:"Şehir düştü",
+        defender_settlement_name:"Siraküza",country_a_name:"Roma",country_b_name:"Kartaca",
+        official_side_a:"ATTACKER",official_side_b:"DEFENDER",initial_a:5000,current_a:4550,losses_a:450,
+        initial_b:3000,current_b:2200,losses_b:800,battle_score_side:"ATTACKER",battle_score_points:4,
+        casualties:[{side_key:"A",force_type:"legionary",loss:450},{side_key:"B",force_type:"hoplite",loss:800}]
+      }],
+      scoreEvents:[
+        {id:"event",side:"ATTACKER",event_type:"OCCUPATION",points:10,game_turn:13,battle_id:"battle",settlement_id:"sirakuza",settlement_name:"Siraküza",battle_terrain:"SIEGE"}
+      ],
+      occupations:[{
+        id:"occupation",settlement_id:"sirakuza",settlement_name:"Siraküza",occupier_country_name:"Roma",
+        legal_owner_country_name:"Kartaca",started_turn:13,status:"ACTIVE",ended_turn:null,score_points:25
+      }]
+    });
+    const text=JSON.stringify(embeds.map((embed)=>embed.toJSON()));
+    expect(text).toContain("29 / 100");
+    expect(text).toContain("450");
+    expect(text).toContain("800");
+    expect(text).toContain("Siraküza");
+    expect(text).toContain("Lejyoner");
+    expect(text).toContain("+4 Saldıran");
+    expect(text).toContain("+10");
   });
 
   it("barış teklifinde tazminatı ve ödeyen tarafı açıklar", () => {

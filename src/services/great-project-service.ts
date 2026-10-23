@@ -87,6 +87,8 @@ export const greatProjectService={
         "SELECT id,name,local_treasury FROM settlements WHERE id=$1 AND country_id=$2 FOR UPDATE",[input.settlementId,input.countryId]
       )).rows[0];
       if(!settlement)throw new GreatProjectError("Yerleşke bulunamadı veya artık bu devlete ait değil.");
+      if((await client.query("SELECT 1 FROM settlement_occupations WHERE settlement_id=$1 AND status='ACTIVE'",[settlement.id])).rowCount)
+        throw new GreatProjectError("İşgal altındaki yerleşkede büyük proje başlatılamaz.");
       const definition=greatProjectForSettlement(settlement.name);
       if(!definition)throw new GreatProjectError("Bu yerleşkeye tanımlanmış bir büyük proje yok.");
       if((await client.query("SELECT 1 FROM settlement_great_projects WHERE settlement_id=$1 OR (guild_id=$2 AND project_key=$3) LIMIT 1",[settlement.id,input.guildId,definition.key])).rowCount)

@@ -22,6 +22,7 @@ function dominantBelief(settlement:CountryDocument["settlements"][number]):strin
 
 function settlementStatus(settlement:CountryDocument["settlements"][number]):string{
   if(settlement.rebellion_active)return "🔥 Açık İsyan";
+  if(settlement.isOccupied)return `🚩 İşgal Altında${settlement.occupierCountryName?` • ${settlement.occupierCountryName}`:""}`;
   if(settlement.isBesieged)return "🏰 Kuşatma Altında";
   if(settlement.is_conquered)return "⚠️ Asimilasyon Sürüyor";
   if(settlement.ruin_stage>0)return "🏚️ Haraplık Etkisi";

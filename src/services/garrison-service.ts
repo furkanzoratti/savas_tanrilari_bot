@@ -8,6 +8,7 @@ import {
   type GarrisonComposition
 } from "../domain/garrison.js";
 import { activeCountryModifiers } from "./country-modifier-service.js";
+import { isSettlementOccupied } from "./war-occupation-service.js";
 
 export type GarrisonReplenishmentReason = "CONQUEST" | "BATTLE_LOSS" | "ROUTINE";
 
@@ -72,6 +73,7 @@ export async function scheduleMandatoryGarrisonReplenishment(
     [input.settlementId]
   )).rows[0];
   if (!settlement) return null;
+  if (await isSettlementOccupied(client, settlement.id)) return null;
 
   const active = await client.query(
     "SELECT 1 FROM garrison_replenishment_orders WHERE settlement_id=$1 AND status='BUILDING' LIMIT 1",
@@ -199,6 +201,10 @@ export async function scheduleAllMissingGarrisons(
   const settlements = (await client.query<{ id: string }>(
     `SELECT s.id FROM settlements s JOIN countries c ON c.id=s.country_id
       WHERE c.guild_id=$1
+        AND NOT EXISTS (
+          SELECT 1 FROM settlement_occupations occupation
+           WHERE occupation.settlement_id=s.id AND occupation.status='ACTIVE'
+        )
         AND NOT EXISTS (
           SELECT 1 FROM garrison_replenishment_orders gro
            WHERE gro.settlement_id=s.id AND gro.status='BUILDING'

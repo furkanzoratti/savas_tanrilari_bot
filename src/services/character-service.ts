@@ -10,6 +10,7 @@ import type { CharacterRole } from "../domain/types.js";
 import { CHARACTER_ROLES, caravanseraiForeignConcessionBonus } from "../domain/catalog.js";
 import { greatPowerService } from "./great-power-service.js";
 import { GameError } from "./game-service.js";
+import { assertSettlementNotOccupied } from "./war-occupation-service.js";
 import { awardCharacterSpecializationProgress, chooseCharacterSpecialization } from "./character-specialization-progress.js";
 import { convertReligionDistribution, religionConversionPercent, RELIGIONS, type ReligionKey } from "../domain/religions.js";
 import { fallbackReligionDistribution, loadCountryReligionProfile, loadReligionDistributions } from "./religion-service.js";
@@ -310,6 +311,7 @@ export const characterService = {
         [input.settlementId,input.countryId,input.guildId]
       )).rows[0];
       if(!source)throw new GameError("Misyonerin alınacağı yerleşke bulunamadı.");
+      await assertSettlementNotOccupied(client,source.id);
       if(source.is_conquered)throw new GameError("Fethedilmiş yerleşke asimile edilmeden Misyoner alınamaz.");
       const name=input.name.trim();
       if(name.length<2||name.length>60)throw new GameError("Misyoner adı 2-60 karakter arasında olmalıdır.");

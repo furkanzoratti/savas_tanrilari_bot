@@ -9,6 +9,8 @@ import { ESPIONAGE_PREPARATIONS, ESPIONAGE_TARGETS, PLAYER_ESPIONAGE_TARGETS } f
 import { ADMIRAL_DOCTRINES, ADMIRAL_SPECIALIZATIONS, CHARACTER_SPECIALIZATIONS, COMMANDER_DOCTRINES } from "../domain/characters.js";
 import { ACADEMY_ROLE_ORDER } from "../domain/academy.js";
 import { ROMAN_OFFICES,ROMAN_RELATION_ACTIONS,ROMAN_SENATE_PROPOSALS,romanBusinessChoices } from "../domain/roman-republic.js";
+import { WAR_GOALS } from "../domain/war-objectives.js";
+import { GOVERNOR_FOCUSES } from "../domain/governorship.js";
 
 const countryOption = (option: any) => option.setName("ulke").setDescription("Yalnızca DM: işlem yapılacak ülke").setRequired(false);
 const romanCountryOption = (option: any) => option.setName("ulke").setDescription("Yalnızca DM/yönetici: Roma devleti").setRequired(false).setAutocomplete(true);
@@ -505,12 +507,18 @@ export const commandBuilders = [
   new SlashCommandBuilder()
     .setName("savas-ilani").setDescription("Bir devlete resmî savaş ilan eder ve savaşlar kanalında duyurur")
     .addStringOption((option) => option.setName("hedef-ulke").setDescription("Savaş ilan edilecek devlet").setRequired(true))
+    .addStringOption((option) => option.setName("hedef-turu").setDescription("İlanla birlikte kilitlenecek yapısal savaş hedefi").setRequired(true)
+      .addChoices(...Object.entries(WAR_GOALS).filter(([key])=>key!=="LEGACY").map(([value,goal])=>({name:goal.label,value}))))
+    .addStringOption((option) => option.setName("hedef-yerleske").setDescription("Toprak Fethi/İadesi için karşı devletteki yerleşke adı"))
     .addStringOption(countryOption),
   new SlashCommandBuilder()
     .setName("pakt-savasi").setDescription("Lideri olduğunuz pakt adına bir devlete veya başka pakta savaş ilan eder")
     .addStringOption((option) => option.setName("saldiran-pakt").setDescription("Savaşı başlatacak ve lideri olduğunuz pakt").setRequired(true))
+    .addStringOption((option) => option.setName("hedef-turu").setDescription("İlanla birlikte kilitlenecek yapısal savaş hedefi").setRequired(true)
+      .addChoices(...Object.entries(WAR_GOALS).filter(([key])=>key!=="LEGACY").map(([value,goal])=>({name:goal.label,value}))))
     .addStringOption((option) => option.setName("hedef-pakt").setDescription("Savaş ilan edilecek pakt; hedef devlet seçildiyse boş bırakın"))
     .addStringOption((option) => option.setName("hedef-ulke").setDescription("Savaş ilan edilecek devlet; hedef pakt seçildiyse boş bırakın"))
+    .addStringOption((option) => option.setName("hedef-yerleske").setDescription("Toprak Fethi/İadesi için hedef cephe liderindeki yerleşke adı"))
     .addStringOption(countryOption),
   new SlashCommandBuilder()
     .setName("savas-cagrisi").setDescription("Savaş lideri olarak bir devleti kendi cephenize çağırır")
@@ -551,6 +559,10 @@ export const commandBuilders = [
   new SlashCommandBuilder()
     .setName("baris-teklifi").setDescription("Savaşta olduğunuz devlete şartlı veya tazminatlı barış teklif eder")
     .addStringOption((option) => option.setName("hedef-ulke").setDescription("Barış teklif edilecek savaş tarafı").setRequired(true))
+    .addStringOption((option) => option.setName("devredilecek-yerleske").setDescription("Bu savaşta işgal edilmiş ve barışta devredilecek yerleşke adı"))
+    .addStringOption((option) => option.setName("topragi-alan").setDescription("Yerleşkeyi alacak taraf").addChoices(
+      {name:"Teklif eden (BEN)",value:"BEN"},{name:"Teklif edilen (HEDEF)",value:"HEDEF"}
+    ))
     .addStringOption(countryOption),
   new SlashCommandBuilder()
     .setName("aktif-savaslar").setDescription("Devam eden bütün resmî devlet savaşlarını herkese açık listeler"),
@@ -1214,6 +1226,23 @@ export const commandBuilders = [
       .addStringOption((o) => o.setName("tutsak").setDescription("Serbest bırakılacak karakter veya soylu").setRequired(true).setAutocomplete(true)))
     .addSubcommand((sub) => sub.setName("esir-infaz-et").setDescription("Kaçırılmış bir karakteri veya soyluyu kalıcı olarak öldürür")
       .addStringOption((o) => o.setName("tutsak").setDescription("İnfaz edilecek karakter veya soylu").setRequired(true).setAutocomplete(true))),
+  new SlashCommandBuilder()
+    .setName("valilik").setDescription("Diplomatları yerleşkelere vali olarak ata ve idari odağı yönet")
+    .addSubcommand((sub)=>sub.setName("listele").setDescription("Devletin etkin valiliklerini gösterir").addStringOption(countryOption))
+    .addSubcommand((sub)=>sub.setName("ata").setDescription("Müsait bir diplomatı yerleşkeye en az iki tur için vali atar")
+      .addStringOption((o)=>o.setName("yerleske").setDescription("Vali atanacak yerleşkenin tam adı").setRequired(true))
+      .addStringOption((o)=>o.setName("diplomat").setDescription("Müsait diplomatın tam adı").setRequired(true))
+      .addStringOption((o)=>o.setName("odak").setDescription("Valilik odağı").setRequired(true).addChoices(
+        ...Object.entries(GOVERNOR_FOCUSES).map(([value,item])=>({name:item.label,value}))
+      )).addStringOption(countryOption))
+    .addSubcommand((sub)=>sub.setName("odak-degistir").setDescription("En az iki tur kullanılan valilik odağını değiştirir")
+      .addStringOption((o)=>o.setName("yerleske").setDescription("Valiliğin bulunduğu yerleşkenin tam adı").setRequired(true))
+      .addStringOption((o)=>o.setName("odak").setDescription("Yeni valilik odağı").setRequired(true).addChoices(
+        ...Object.entries(GOVERNOR_FOCUSES).map(([value,item])=>({name:item.label,value}))
+      )).addStringOption(countryOption))
+    .addSubcommand((sub)=>sub.setName("gorevden-al").setDescription("Asgari görev süresi dolmuş valiyi görevden alır")
+      .addStringOption((o)=>o.setName("yerleske").setDescription("Valiliğin bulunduğu yerleşkenin tam adı").setRequired(true))
+      .addStringOption(countryOption)),
   new SlashCommandBuilder()
     .setName("buyuk-gucler").setDescription("Yalnızca yönetici: Büyük Güçler sıralamasını yönetir")
     .addSubcommand((sub) => sub.setName("kanal").setDescription("Günlük Büyük Güçler paylaşım kanalını ayarlar")

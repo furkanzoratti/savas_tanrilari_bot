@@ -86,7 +86,7 @@ import { publishPendingDeathPublications } from "./death-publication-ui.js";
 import { handleDiplomacyButton, handleDiplomacyCommand } from "./diplomacy-ui.js";
 import { handleSteppeHegemonyAutocomplete,handleSteppeHegemonyButton,handleSteppeHegemonyCommand,handleSteppeHegemonySelect } from "./steppe-hegemony-ui.js";
 import { handlePlayerAutoPurchaseButton, handlePlayerAutoPurchaseCommand } from "./player-auto-purchase-ui.js";
-import { handleWarDeclarationButton, handleWarDeclarationCommand, handleWarDeclarationModal } from "./war-declaration-ui.js";
+import { handleWarDeclarationButton, handleWarDeclarationCommand, handleWarDeclarationModal, handleWarDeclarationSelect } from "./war-declaration-ui.js";
 import { mercenaryCompanyAutocompleteAllowed, mercenarySubcommandRequiresGameMaster } from "./mercenary-access.js";
 import { handleGreatGamesButton, handleGreatGamesCommand, handleGreatGamesModal, handleGreatGamesSelect } from "./great-games-ui-v2.js";
 import {
@@ -95,6 +95,7 @@ import {
 } from "./roman-republic-ui.js";
 import { decodeUnitTypeFromCustomId, encodeUnitTypeForCustomId } from "./unit-custom-id.js";
 import {greatProjectService,GreatProjectError} from "../services/great-project-service.js";
+import {handleGovernorshipCommand} from "./governorship-ui.js";
 
 function settlementSelect(customId: string, settlements: Array<{ id: string; name: string; population: number }>, placeholder: string) {
   if (!settlements.length) throw new GameError("Bu ülkeye ait yerleşke bulunmuyor.");
@@ -1175,6 +1176,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
   if (await handleCharacterCommand(interaction)) return;
   if (await handleEspionageCommand(interaction)) return;
   if (await handleWarDeclarationCommand(interaction)) return;
+  if (await handleGovernorshipCommand(interaction)) return;
   if (await handleSteppeHegemonyCommand(interaction)) return;
   if (await handleDiplomacyCommand(interaction)) return;
   if (await handleCityCommand(interaction)) return;
@@ -1534,6 +1536,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
 }
 
 async function handleSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+  if (await handleWarDeclarationSelect(interaction)) return;
   if (await handleRomanRepublicSelect(interaction)) return;
   if (await handleSteppeHegemonySelect(interaction)) return;
   if (await handleBattleSelect(interaction)) return;

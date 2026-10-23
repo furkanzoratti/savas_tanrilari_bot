@@ -11,6 +11,7 @@ import { settlementResourceAccess } from "./resource-service.js";
 import { GameError, type AcademyTrainingSession, type CountryCharacter, type SettlementPolicyRow } from "./game-service.js";
 import { ensureCountryMarshal } from "./marshal-service.js";
 import {activeCountryModifiers} from "./country-modifier-service.js";
+import {assertSettlementNotOccupied} from "./war-occupation-service.js";
 
 interface CountryRow { id: string; guild_id: string; name: string; active_formable_key: FormableCountryKey | null }
 interface GuildRow { current_turn: number; acquisition_interval: number; turn_phase: string }
@@ -149,6 +150,7 @@ export const cityService = {
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`academy:${input.settlementId}`]);
       await getCountry(client, input.guildId, input.countryId);
       const settlement = await getSettlement(client, input.countryId, input.settlementId, true);
+      await assertSettlementNotOccupied(client,settlement.id);
       const guild = await guildState(client, input.guildId);
       if (!isAcquisitionTurn(guild.current_turn, guild.acquisition_interval)) throw new GameError("Akademi eğitimi yalnızca Alım Turunda başlatılabilir.");
       const level = await activeBuildingLevel(client, settlement.id, "academy");

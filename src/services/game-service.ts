@@ -53,8 +53,12 @@ import { applyCapitalIncomeBonus, applyCapitalPopulationBonus } from "../domain/
 import {applyGreatProjectIncome,greatProjectByKey,greatProjectShipPurchaseDiscount,greatProjectUnitPurchaseDiscount,greatProjectUnitUpkeepDiscount,type GreatProjectModifiers} from "../domain/great-projects.js";
 import {completeDueGreatProjects} from "./great-project-service.js";
 import {activeCountryModifiers} from "./country-modifier-service.js";
+import { activeGovernorForSettlement, forceEndGovernorshipForSettlement, processGovernorshipTurn } from "./governorship-service.js";
+import { governorAdministration, governorModifiers } from "../domain/governorship.js";
+import { assertSettlementNotOccupied, isSettlementOccupied } from "./war-occupation-service.js";
+import { GameError } from "./game-error.js";
 
-export class GameError extends Error {}
+export { GameError } from "./game-error.js";
 
 interface GuildRow { discord_id: string; current_turn: number; turn_phase: string; acquisition_interval: number; army_composition_activation_turn: number | null; culture_military_penalty_enabled: boolean }
 interface CountryRow { id: string; guild_id: string; name: string; treasury: number; mobilization: Mobilization; mobilization_started_turn: number | null; manpower_over_limit_since_turn: number | null; manpower_penalty_active: boolean; discord_role_id: string | null; status: "ACTIVE" | "YOK_EDİLDİ"; destroyed_turn: number | null; destroyed_reason: string | null; active_formable_key: FormableCountryKey | null; primary_culture_group: CultureGroup; war_exhaustion: number; is_steppe_state: boolean; is_scandinavian_state: boolean; capital_settlement_id: string | null }
@@ -107,7 +111,7 @@ export interface CountryCharacter {
   is_admiral: boolean;
   is_marshal?: boolean;
   specialization: string | null; specialization_progress: number; specialization_level: number;
-  assignment: "NONE" | "CURIA" | "AGORA" | "ARMY" | "FLEET" | "ESPIONAGE" | "ESPIONAGE_RETURNING" | "CAPTURED" | "COUNTERINTELLIGENCE_TRAVELING_COUNTRY" | "COUNTERINTELLIGENCE_TRAVELING_SETTLEMENT" | "COUNTERINTELLIGENCE_COUNTRY" | "COUNTERINTELLIGENCE_SETTLEMENT" | "ASSIMILATION"; assignment_ready_turn: number | null; trained_settlement_id: string | null;
+  assignment: "NONE" | "CURIA" | "AGORA" | "ARMY" | "FLEET" | "ESPIONAGE" | "ESPIONAGE_RETURNING" | "CAPTURED" | "COUNTERINTELLIGENCE_TRAVELING_COUNTRY" | "COUNTERINTELLIGENCE_TRAVELING_SETTLEMENT" | "COUNTERINTELLIGENCE_COUNTRY" | "COUNTERINTELLIGENCE_SETTLEMENT" | "ASSIMILATION" | "GOVERNOR"; assignment_ready_turn: number | null; trained_settlement_id: string | null;
   assigned_settlement_id: string | null; assigned_settlement_name: string | null; assigned_country_name: string | null; assigned_army_name: string | null; assigned_fleet_name: string | null;
   trained_settlement_name: string | null; trained_turn: number;
 }
@@ -296,6 +300,8 @@ export interface CountryDocument {
     slotLimit: number;
     constructionLimit: number;
     isBesieged?: boolean;
+    isOccupied?: boolean;
+    occupierCountryName?: string | null;
     incomePenalty?: SettlementIncomePenaltyRow | null;
     rebelFaction: null | { faction_type: string; display_name:string; personnel: number; military_power: number; composition: Record<string,number>; restoration_country_name: string | null };
     rebellionRisk: number;
@@ -1516,6 +1522,7 @@ export const gameService = {
       if (country.guild_id !== input.guildId) throw new GameError("Ulke bu sunucuya ait degil.");
       const settlement = (await client.query<SettlementRow>("SELECT * FROM settlements WHERE id=$1 AND country_id=$2 FOR UPDATE", [input.settlementId, country.id])).rows[0];
       if (!settlement) throw new GameError("Yerleske bulunamadi.");
+      await assertSettlementNotOccupied(client, settlement.id);
       const company = MERCENARY_COMPANIES[input.companyKey];
       if (!company) throw new GameError("Parali asker sirketi bulunamadi.");
       if (await settlementIsBesieged(client, settlement.id)) throw new GameError("Kusatma altindaki yerleskeye parali asker kiralanamaz.");
@@ -1559,6 +1566,7 @@ export const gameService = {
       if (country.guild_id !== input.guildId) throw new GameError("Ülke bu sunucuya ait değil.");
       const settlement = (await client.query<SettlementRow>("SELECT * FROM settlements WHERE id=$1 AND country_id=$2 FOR UPDATE", [input.settlementId, country.id])).rows[0];
       if (!settlement) throw new GameError("Yerleşke bulunamadı.");
+      await assertSettlementNotOccupied(client, settlement.id);
       const company = MERCENARY_COMPANIES[input.companyKey];
       if (!company) throw new GameError("Paralı asker şirketi bulunamadı.");
       const terms = (await countryMercenaryPrices(client,country))[input.companyKey];
@@ -1730,8 +1738,8 @@ export const gameService = {
     });
   },
 
-  async transferSettlement(input: { guildId: string; actorId: string; sourceCountryId: string; targetCountryId: string; settlementId: string; transferType?: SettlementTransferType; transferTurn?: number | null }): Promise<{ settlementName: string; sourceName: string; targetName: string; transferType: SettlementTransferType; transferLabel: string; transferTurn: number; cancelledRecruitmentOrders: number; endedTrades: number; enslavedGarrison: number; removedArmyPersonnel: number; preservedArmyPersonnel: number; evacuatedArmyPopulation: number; transferredShips: number; shipTransferDestination: string | null; relocatedFleets: number; cancelledOwnRepairShips:number; cancelledForeignRepairShips:number; removedShips: number; removedSiegeAssets: number; destroyedMercenaryContracts: number; newGarrisonPersonnel: number; newGarrisonCost: number; newGarrisonCompletionTurn: number | null; lastStandDetails: LastStandEvent[] }> {
-    return withTransaction(async (client) => {
+  async transferSettlement(input: { guildId: string; actorId: string; sourceCountryId: string; targetCountryId: string; settlementId: string; transferType?: SettlementTransferType; transferTurn?: number | null; transactionClient?: DbClient }): Promise<{ settlementName: string; sourceName: string; targetName: string; transferType: SettlementTransferType; transferLabel: string; transferTurn: number; cancelledRecruitmentOrders: number; endedTrades: number; enslavedGarrison: number; removedArmyPersonnel: number; preservedArmyPersonnel: number; evacuatedArmyPopulation: number; transferredShips: number; shipTransferDestination: string | null; relocatedFleets: number; cancelledOwnRepairShips:number; cancelledForeignRepairShips:number; removedShips: number; removedSiegeAssets: number; destroyedMercenaryContracts: number; newGarrisonPersonnel: number; newGarrisonCost: number; newGarrisonCompletionTurn: number | null; lastStandDetails: LastStandEvent[] }> {
+    const execute = async (client: DbClient) => {
       const transferType = input.transferType ?? "CONQUEST";
       const transferPolicy = settlementTransferPolicy(transferType);
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`turn:${input.guildId}`]);
@@ -1770,6 +1778,7 @@ export const gameService = {
       if (!Number.isInteger(transferTurn) || transferTurn < 0 || transferTurn > guild.current_turn) {
         throw new GameError(`İşlem turu 0 ile mevcut Tur ${guild.current_turn} arasında bir tam sayı olmalıdır.`);
       }
+      await forceEndGovernorshipForSettlement(client,settlement.id,transferTurn,"Yerleşke devredildi.",input.actorId);
       await recordSettlementClaim(client,source.id,settlement.id,transferTurn);
       await recordSettlementClaim(client,target.id,settlement.id,transferTurn);
       const cancelledSiege = await client.query("UPDATE siege_orders SET status='CANCELLED' WHERE settlement_id=$1 AND status='BUILDING' RETURNING id", [settlement.id]);
@@ -1900,7 +1909,8 @@ export const gameService = {
         newGarrisonPersonnel: newGarrison?.personnel ?? 0, newGarrisonCost: newGarrison?.cost ?? 0,
         newGarrisonCompletionTurn: newGarrison?.completionTurn ?? null,lastStandDetails
       };
-    });
+    };
+    return input.transactionClient ? execute(input.transactionClient) : withTransaction(execute);
   },
   async document(countryId: string, options: { includeArmies?: boolean } = {}): Promise<CountryDocument> {
     const client = await pool.connect();
@@ -1932,6 +1942,12 @@ export const gameService = {
           WHERE defender_settlement_id=ANY($1::uuid[]) AND terrain='SIEGE' AND status NOT IN ('DRAFT','FINISHED','CANCELLED')`,
         [settlementIds]
       )).rows.map((row) => row.settlement_id) : []);
+      const occupationRows=settlementIds.length?(await client.query<{settlement_id:string;occupier_country_name:string}>(
+        `SELECT occupation.settlement_id,country.name AS occupier_country_name
+           FROM settlement_occupations occupation JOIN countries country ON country.id=occupation.occupier_country_id
+          WHERE occupation.settlement_id=ANY($1::uuid[]) AND occupation.status='ACTIVE'`,[settlementIds]
+      )).rows:[];
+      const occupationBySettlement=new Map(occupationRows.map((row)=>[row.settlement_id,row.occupier_country_name]));
       const rebelFactions=settlementIds.length?(await client.query<{
         settlement_id:string;faction_type:string;display_name:string;personnel:number;military_power:number;composition:Record<string,number>;restoration_country_name:string|null;
       }>(`SELECT faction.settlement_id,faction.faction_type,faction.display_name,faction.personnel,faction.military_power,faction.composition,
@@ -2127,6 +2143,7 @@ export const gameService = {
       let totalPayableBreakdown: IncomeBreakdown = { building: 0, tax: 0, landTrade: 0, seaTrade: 0 };
       let totalUpkeep = 0;
       const enriched = settlements.map((settlement) => {
+        const occupierCountryName=occupationBySettlement.get(settlement.id)??null;
         const isCapital=country.capital_settlement_id===settlement.id;
         const religionDistribution=religionDistributions.get(settlement.id)??fallbackReligionDistribution(settlement);
         const religion=religionDistributionModifiers(religionDistribution,dominantReligionProfile?.key??null,settlement.religion_key);
@@ -2173,7 +2190,7 @@ export const gameService = {
           settlement.culture_group,
           country.primary_culture_group
         );
-        const incomeBreakdown=applyCapitalIncomeBonus(cultureAdjustedIncome,isCapital);
+        const incomeBreakdown=occupierCountryName?{building:0,tax:0,landTrade:0,seaTrade:0}:applyCapitalIncomeBonus(cultureAdjustedIncome,isCapital);
         const normalPopulationGain = Math.floor(applyFormablePopulationModifiers(calculatePopulationGain({
           population: settlement.population,
           buildings: activeBuildings,
@@ -2183,7 +2200,7 @@ export const gameService = {
           marshalPartial,
           religionPopulationGrowthPercent: religion.populationGrowthPercent
         }), settlement.ruin_stage, country.active_formable_key)*(1+(projectModifiers.populationGrowthPercent??0)));
-        const populationGain=settlement.rebellion_active?0:applyCapitalPopulationBonus(Math.floor(normalPopulationGain*prosperity.populationMultiplier),isCapital);
+        const populationGain=settlement.rebellion_active||Boolean(occupierCountryName)?0:applyCapitalPopulationBonus(Math.floor(normalPopulationGain*prosperity.populationMultiplier),isCapital);
         const settlementUnits = units.filter((unit) => unit.settlement_id === settlement.id);
         const displacedUnits = displacedSupport.get(settlement.id) ?? [];
         const displacedArmyPersonnel = supportedPersonnel(displacedUnits);
@@ -2244,6 +2261,8 @@ export const gameService = {
           slotLimit: buildingSlotLimit(settlement.population, activeBuildings.some((building) => building.buildingType === "port")),
           constructionLimit: activePolicies.includes("MASTER_ARCHITECTURE") ? 3 : 2,
           isBesieged: besiegedSettlementIds.has(settlement.id),
+          isOccupied:Boolean(occupierCountryName),
+          occupierCountryName,
           incomePenalty,
           rebelFaction:rebelFactions.find((faction)=>faction.settlement_id===settlement.id)??null,
           rebellionRisk:Number(stabilityRows.find((row)=>row.settlement_id===settlement.id)?.unrest_risk??0),
@@ -2690,6 +2709,7 @@ export const gameService = {
       const settlementResult = await client.query<SettlementRow>("SELECT * FROM settlements WHERE id=$1 AND country_id=$2 FOR UPDATE", [input.settlementId, input.countryId]);
       const settlement = settlementResult.rows[0];
       if (!settlement) throw new GameError("Yerleşke bulunamadı.");
+      await assertSettlementNotOccupied(client, settlement.id);
       if (await settlementIsBesieged(client, settlement.id)) throw new GameError("Savunan konumunda aktif kuşatma bulunan yerleşke yeni bina emri veremez.");
       const definition = BUILDINGS[input.buildingType];
       if (!definition) throw new GameError("Bina türü bulunamadı.");
@@ -2722,7 +2742,9 @@ export const gameService = {
       const religion = (await loadSettlementReligionModifiers(client, settlement)).modifiers;
       const baseTerms = buildingPurchaseTerms(input.buildingType, targetLevel, effectiveResources, activePolicies, country.active_formable_key, religion);
       const projectModifiers=await activeCountryModifiers(client,country.id);
-      const terms={...baseTerms,cost:modifiedBuildingPurchaseCost(baseTerms.cost,projectModifiers)};
+      const governor=await activeGovernorForSettlement(client,settlement.id);
+      const governorCostMultiplier=governor?.focus==="RECONSTRUCTION"?0.95:1;
+      const terms={...baseTerms,cost:Math.ceil(modifiedBuildingPurchaseCost(baseTerms.cost,projectModifiers)*governorCostMultiplier)};
       const cost = await applyPurchaseAgentDiscount(client,{
         countryId:country.id,settlementId:settlement.id,category:"BUILDING",currentTurn:guild.current_turn,cost:terms.cost
       });
@@ -2774,6 +2796,7 @@ export const gameService = {
       if (country.guild_id !== input.guildId) throw new GameError("Ülke bu sunucuya ait değil.");
       const settlement = (await client.query<SettlementRow>("SELECT * FROM settlements WHERE id=$1 AND country_id=$2 FOR UPDATE", [input.settlementId, country.id])).rows[0];
       if (!settlement) throw new GameError("Yerleşke bulunamadı.");
+      await assertSettlementNotOccupied(client, settlement.id);
       if (settlement.is_conquered) throw new GameError("Fethedilmiş yerleşke asimile edilmeden asker yetiştiremez.");
       if (await settlementIsBesieged(client, settlement.id)) throw new GameError("Kuşatma altındaki yerleşke yeni asker emri veremez.");
       if (await countryHasMaintenanceDebt(client, country.id)) throw new GameError("Ödenmemiş bakım açığı giderilmeden yeni asker emri verilemez.");
@@ -2860,6 +2883,7 @@ export const gameService = {
       if (country.guild_id !== input.guildId) throw new GameError("Ülke bu sunucuya ait değil.");
       const settlement = (await client.query<SettlementRow>("SELECT * FROM settlements WHERE id=$1 AND country_id=$2 FOR UPDATE", [input.settlementId, country.id])).rows[0];
       if (!settlement) throw new GameError("Yerleşke bulunamadı.");
+      await assertSettlementNotOccupied(client, settlement.id);
       if (await settlementIsBesieged(client, settlement.id)) throw new GameError("Kuşatma altındaki yerleşke yeni kuşatma aleti üretim emri veremez.");
       if (await countryHasMaintenanceDebt(client, country.id)) throw new GameError("Ödenmemiş bakım açığı giderilmeden kuşatma aleti üretilemez.");
       const workshop = (await client.query<{ level: number }>("SELECT level FROM buildings WHERE settlement_id=$1 AND building_type='engineering' AND status IN ('ACTIVE','BUILDING')", [settlement.id])).rows[0]?.level ?? 0;
@@ -2946,6 +2970,7 @@ export const gameService = {
       }
       const settlement = (await client.query<SettlementRow>("SELECT * FROM settlements WHERE id=$1 AND country_id=$2 FOR UPDATE", [input.settlementId, country.id])).rows[0];
       if (!settlement) throw new GameError("Yerleşke bulunamadı.");
+      await assertSettlementNotOccupied(client, settlement.id);
       if (settlement.is_conquered) throw new GameError("Fethedilmiş yerleşke asimile edilmeden gemi üretemez.");
       if (await settlementIsBesieged(client, settlement.id)) throw new GameError("Kuşatma altındaki yerleşke yeni gemi emri veremez.");
       if (await countryHasMaintenanceDebt(client, country.id)) throw new GameError("Ödenmemiş bakım açığı giderilmeden yeni gemi emri verilemez.");
@@ -3130,6 +3155,7 @@ export const gameService = {
       }
       const lastStandDetails=lastStandProcess.events;
       const christianSpreadDetails=await processChristianPassiveSpread(client,guildId,newTurn,actorId);
+      await processGovernorshipTurn(client,guildId,newTurn,actorId);
       const stability=await processStabilityTurn(client,guildId,newTurn,actorId);
 
       const mercenaryArrivalDetails: Array<{ countryName: string; settlementName: string; companyName: string; upkeep: number }> = [];
@@ -3188,15 +3214,16 @@ export const gameService = {
 
       const dueAssimilations = (await client.query<{
         settlement_id: string; settlement_name: string; country_id: string; country_name: string;
-        conquered_turn: number; character_id: string | null; diplomat_name: string | null; diplomat_skill_bonus: number | null;
+        conquered_turn: number; character_id: string | null; diplomat_name: string | null; diplomat_skill_bonus: number | null; governorship_id: string | null;
       }>(
         `SELECT s.id AS settlement_id,s.name AS settlement_name,c.id AS country_id,c.name AS country_name,
-                s.conquered_turn,assignment.character_id,character.name AS diplomat_name,
-                character.skill_bonus AS diplomat_skill_bonus
+                s.conquered_turn,COALESCE(assignment.character_id,governorship.character_id) AS character_id,
+                character.name AS diplomat_name,character.skill_bonus AS diplomat_skill_bonus,governorship.id AS governorship_id
            FROM settlements s
            JOIN countries c ON c.id=s.country_id
            LEFT JOIN settlement_assimilation_diplomats assignment ON assignment.settlement_id=s.id
-           LEFT JOIN country_characters character ON character.id=assignment.character_id
+           LEFT JOIN settlement_governorships governorship ON governorship.settlement_id=s.id AND governorship.status='ACTIVE' AND governorship.focus='INTEGRATION'
+           LEFT JOIN country_characters character ON character.id=COALESCE(assignment.character_id,governorship.character_id)
           WHERE c.guild_id=$1 AND c.status='ACTIVE' AND s.is_conquered=TRUE AND s.conquered_turn IS NOT NULL
           ORDER BY s.name FOR UPDATE OF s`,
         [guildId]
@@ -3215,7 +3242,8 @@ export const gameService = {
         await client.query("UPDATE settlements SET is_conquered=FALSE,conquered_turn=NULL WHERE id=$1", [item.settlement_id]);
         await client.query("DELETE FROM settlement_assimilation_diplomats WHERE settlement_id=$1", [item.settlement_id]);
         if (item.character_id) {
-          await client.query("UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL,assignment_ready_turn=NULL WHERE id=$1", [item.character_id]);
+          if (item.governorship_id) await forceEndGovernorshipForSettlement(client,item.settlement_id,newTurn,"Yerleşkenin bütünleşmesi tamamlandı.",actorId);
+          else await client.query("UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL,assignment_ready_turn=NULL WHERE id=$1", [item.character_id]);
           await awardCharacterSpecializationProgress(client,item.character_id,"PROVINCIAL_GOVERNOR");
         }
         assimilatedSettlementDetails.push({ countryName: item.country_name, settlementName: item.settlement_name, diplomatName: item.diplomat_name });
@@ -3334,6 +3362,10 @@ export const gameService = {
           let upkeep = 0;
           let populationGain=0;
           for (const settlement of settlements) {
+            const occupied=await isSettlementOccupied(client,settlement.id);
+            const governor=await activeGovernorForSettlement(client,settlement.id);
+            const administration=governor?governorAdministration(Number(governor.skill_bonus),governor.specialization==="PROVINCIAL_GOVERNOR"?Number(governor.specialization_level):0):0;
+            const governorEffect=governor?governorModifiers(governor.focus,administration):null;
             const isCapital=country.capital_settlement_id===settlement.id;
             const religion=religionDistributionModifiers(
               religionDistributions.get(settlement.id)??fallbackReligionDistribution(settlement),
@@ -3371,7 +3403,7 @@ export const gameService = {
             const economy={...baseEconomy,gross:applyGreatProjectIncome(baseEconomy.gross,projectModifiers),payable:applyGreatProjectIncome(baseEconomy.payable,projectModifiers)};
             const prosperity=prosperityTier(Number(settlement.prosperity));
             const normalPopulationGain=Math.floor(applyFormablePopulationModifiers(calculatePopulationGain({ population: settlement.population, buildings: active, ruinStage: settlement.ruin_stage, mobilization: country.mobilization, resources: effectiveResources, marshalPartial, religionPopulationGrowthPercent: religion.populationGrowthPercent }), settlement.ruin_stage, country.active_formable_key)*(1+(projectModifiers.populationGrowthPercent??0)));
-            const popGain=settlement.rebellion_active?0:applyCapitalPopulationBonus(Math.floor(normalPopulationGain*prosperity.populationMultiplier),isCapital);
+            const popGain=settlement.rebellion_active||occupied?0:applyCapitalPopulationBonus(Math.floor(normalPopulationGain*prosperity.populationMultiplier),isCapital);
             populationGain+=popGain;
             const incomePenalty = (await client.query<SettlementIncomePenaltyRow>(
               "SELECT settlement_id,penalty_percent,remaining_acquisition_turns,reason,created_turn FROM settlement_income_penalties WHERE settlement_id=$1 FOR UPDATE",
@@ -3409,7 +3441,16 @@ export const gameService = {
               settlement.culture_group,
               country.primary_culture_group
             );
-            const capitalAdjustedIncome=applyCapitalIncomeBonus(cultureAdjustedIncome,isCapital);
+            const capitalAdjustedIncome=occupied
+              ? {building:0,tax:0,landTrade:0,seaTrade:0}
+              : scaleIncome(applyCapitalIncomeBonus(cultureAdjustedIncome,isCapital),governorEffect?.incomeMultiplier??1);
+            if(governor){
+              const baseBeforeGovernor=occupied?0:incomeTotal(applyCapitalIncomeBonus(cultureAdjustedIncome,isCapital));
+              await client.query(
+                "UPDATE settlement_governorship_turns SET income_bonus=$1 WHERE governorship_id=$2 AND game_turn=$3",
+                [incomeTotal(capitalAdjustedIncome)-baseBeforeGovernor,governor.id,newTurn]
+              );
+            }
             const cultureIncomeDeduction = Math.max(
               0,
               incomeTotal(adjustedSettlementIncome)-incomeTotal(cultureAdjustedIncome)
@@ -3454,6 +3495,8 @@ export const gameService = {
               cultureIncomeDeduction ? "Yabancı kültür geliri ×0,80 −"+cultureIncomeDeduction.toLocaleString("tr-TR") : null,
               isCapital ? "Başkent: gelir ve nüfus artışı +%1" : null,
               settlement.rebellion_active ? "Açık isyan: gelir ve nüfus artışı durdu" : `Refah ${settlement.prosperity}/100 • ${prosperity.label} ×${prosperity.incomeMultiplier.toFixed(2)}`,
+              occupied ? "Savaş işgali: gelir ve nüfus artışı durdu; alımlar kapalı" : null,
+              governor ? `Vali: ${governor.character_name} • ${governor.focus}` : null,
               activeBlockade ? "Deniz ablukası %"+blockadePercent+" −"+blockadeDeduction.toLocaleString("tr-TR") : null,
               raidIncomeDeduction ? "Deniz yağması gelir kaybı −"+raidIncomeDeduction.toLocaleString("tr-TR") : null,
               ...activePolicies.map((policy)=>CITY_POLICIES[policy].label),
@@ -3465,8 +3508,8 @@ export const gameService = {
                ) VALUES($1,$2,$3,'ACQUISITION_SETTLEMENT',$4,$5,$6,$7::jsonb)`,
               [country.id,settlement.id,newTurn,settlementNet,settlement.name+" Alım Turu gelir ve giderleri",
                 Number(settlement.local_treasury)+settlementNet,JSON.stringify({
-                  buildingIncome:cultureAdjustedIncome.building,taxIncome:cultureAdjustedIncome.tax,
-                  landTradeIncome:cultureAdjustedIncome.landTrade,seaTradeIncome:cultureAdjustedIncome.seaTrade,
+                  buildingIncome:capitalAdjustedIncome.building,taxIncome:capitalAdjustedIncome.tax,
+                  landTradeIncome:capitalAdjustedIncome.landTrade,seaTradeIncome:capitalAdjustedIncome.seaTrade,
                   buildingUpkeep:economy.buildingUpkeep,unitUpkeep,displacedArmyUpkeep,shipUpkeep,
                   penaltyDeduction,mobilizationDeduction,blockadeDeduction,blockadePercent,
                   cultureIncomeDeduction,raidIncomeDeduction,raidIncomeDeductionPending:Math.max(0,pendingRaidDeduction-raidIncomeDeduction),
