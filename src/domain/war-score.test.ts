@@ -1,6 +1,6 @@
 import {describe,expect,it} from "vitest";
 import {
-  battleWarScorePoints,calculateWarBalance,indemnityWarScoreCost,
+  battleQualifiesForWarScore,battleWarScorePoints,calculateWarBalance,indemnityWarScoreCost,
   ordinaryPeaceLeavesSettlement,peaceDemandWarScoreCost,provinceWarValues
 } from "./war-score.js";
 
@@ -40,6 +40,12 @@ describe("dinamik savaş skoru ve barış bedeli",()=>{
     expect(large).toBeGreaterThan(small);
     expect(large).toBeLessThanOrEqual(15);
     expect(battleWarScorePoints({winnerInitial:1_000,loserInitial:0,winnerLosses:0,loserLosses:0,loserRemaining:0})).toBe(0);
+  });
+
+  it("kuşatma muharebesi puanı için en az beş bin savunmacı ister",()=>{
+    expect(battleQualifiesForWarScore("SIEGE",4_999)).toBe(false);
+    expect(battleQualifiesForWarScore("SIEGE",5_000)).toBe(true);
+    expect(battleQualifiesForWarScore("OPEN_PLAIN",100)).toBe(true);
   });
 
   it("tam işgali muharebe farkından bağımsız olarak 100 savaş skoruna sabitler",()=>{

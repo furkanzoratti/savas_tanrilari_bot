@@ -1,6 +1,6 @@
 import type { DbClient } from "../db/pool.js";
 import { type WarSide } from "../domain/war-objectives.js";
-import {battleWarScorePoints} from "../domain/war-score.js";
+import {battleQualifiesForWarScore,battleWarScorePoints} from "../domain/war-score.js";
 import { GameError } from "./game-error.js";
 import { forceEndGovernorshipForSettlement } from "./governorship-service.js";
 import {recalculateWarScore} from "./war-score-service.js";
@@ -77,7 +77,9 @@ export async function recordOfficialWarBattleOutcome(client: DbClient, battleId:
   }>("SELECT side_key,initial_total,current_total,total_losses FROM battle_sides WHERE battle_id=$1 AND side_key IN ('A','B')",[battle.id])).rows;
   const winnerBattleSide=sides.find((side)=>side.side_key===battle.winner_side);
   const loserBattleSide=sides.find((side)=>side.side_key!==battle.winner_side);
-  const battlePoints=winnerBattleSide&&loserBattleSide?battleWarScorePoints({
+  const defenderBattleSide=sides.find((side)=>side.side_key==="B");
+  const battlePoints=winnerBattleSide&&loserBattleSide&&defenderBattleSide
+    &&battleQualifiesForWarScore(battle.terrain,Number(defenderBattleSide.initial_total))?battleWarScorePoints({
     winnerInitial:Number(winnerBattleSide.initial_total),loserInitial:Number(loserBattleSide.initial_total),
     winnerLosses:Number(winnerBattleSide.total_losses),loserLosses:Number(loserBattleSide.total_losses),
     loserRemaining:Number(loserBattleSide.current_total)

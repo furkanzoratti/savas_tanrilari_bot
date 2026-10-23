@@ -140,8 +140,12 @@ describe("resmî savaş ilanları ve barış duyuruları", () => {
         id:"battle",terrain:"SIEGE",status:"FINISHED",round_number:3,winner_side:"A",finish_reason:"Şehir düştü",
         defender_settlement_name:"Siraküza",country_a_name:"Roma",country_b_name:"Kartaca",
         official_side_a:"ATTACKER",official_side_b:"DEFENDER",initial_a:5000,current_a:4550,losses_a:450,
-        initial_b:3000,current_b:2200,losses_b:800,battle_score_side:"ATTACKER",battle_score_points:4,
-        casualties:[{side_key:"A",force_type:"legionary",loss:450},{side_key:"B",force_type:"hoplite",loss:800}]
+        initial_b:3000,current_b:2200,losses_b:800,battle_score_side:"ATTACKER",battle_score_points:4
+      },{
+        id:"active-siege",terrain:"SIEGE",status:"WAITING_FIRST_ROLL",round_number:1,winner_side:null,finish_reason:null,
+        defender_settlement_name:"Gizli Kale",country_a_name:"Roma",country_b_name:"Kartaca",
+        official_side_a:"ATTACKER",official_side_b:"DEFENDER",initial_a:9999,current_a:9999,losses_a:0,
+        initial_b:4999,current_b:4999,losses_b:0,battle_score_side:null,battle_score_points:0
       }],
       scoreEvents:[
         {id:"event",side:"ATTACKER",event_type:"OCCUPATION",points:10,game_turn:13,battle_id:"battle",settlement_id:"sirakuza",settlement_name:"Siraküza",battle_terrain:"SIEGE"}
@@ -156,7 +160,10 @@ describe("resmî savaş ilanları ve barış duyuruları", () => {
     expect(text).toContain("450");
     expect(text).toContain("800");
     expect(text).toContain("Siraküza");
-    expect(text).toContain("Lejyoner");
+    expect(text).not.toContain("Lejyoner");
+    expect(text).not.toContain("4550/5000");
+    expect(text).not.toContain("Gizli Kale");
+    expect(text).not.toContain("9999");
     expect(text).toContain("+4 Saldıran");
     expect(text).toContain("+10");
   });

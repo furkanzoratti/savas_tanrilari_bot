@@ -1,8 +1,9 @@
 import {clampWarScore,type WarSide} from "./war-objectives.js";
 
-export const WAR_SCORE_MODEL_VERSION=2;
+export const WAR_SCORE_MODEL_VERSION=3;
 export const MAX_BATTLE_SCORE_COMPONENT=40;
 export const INDEMNITY_GOLD_PER_WAR_SCORE=1_000;
+export const MIN_SIEGE_DEFENDERS_FOR_BATTLE_SCORE=5_000;
 
 export interface ProvinceWarValueInput{
   id:string;
@@ -90,6 +91,10 @@ export function battleWarScorePoints(input:{
   const decisiveBonus=advantage>=.6?3:advantage>=.35?2:advantage>=.15?1:0;
   const annihilationBonus=input.loserRemaining<=0?2:0;
   return Math.max(1,Math.min(15,sizePoints+decisiveBonus+annihilationBonus));
+}
+
+export function battleQualifiesForWarScore(terrain:string,defenderInitial:number):boolean{
+  return terrain!=="SIEGE"||Math.max(0,Math.trunc(defenderInitial))>=MIN_SIEGE_DEFENDERS_FOR_BATTLE_SCORE;
 }
 
 export function calculateWarBalance(input:{

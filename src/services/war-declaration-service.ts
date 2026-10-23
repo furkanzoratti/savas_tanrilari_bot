@@ -76,7 +76,6 @@ export interface OfficialWarBattleView {
   losses_b: number;
   battle_score_side: WarSide | null;
   battle_score_points: number;
-  casualties: Array<{ side_key: "A" | "B"; force_type: string; loss: number }>;
 }
 
 export interface OfficialWarOccupationView {
@@ -460,13 +459,7 @@ export const warDeclarationService = {
                 COALESCE(side_b.initial_total,0)::integer AS initial_b,
                 COALESCE(side_b.current_total,0)::integer AS current_b,
                 COALESCE(side_b.total_losses,0)::integer AS losses_b,
-                score.side AS battle_score_side,COALESCE(score.points,0)::integer AS battle_score_points,
-                COALESCE((SELECT jsonb_agg(jsonb_build_object(
-                  'side_key',casualty.side_key,'force_type',casualty.force_type,
-                  'loss',casualty.calculated_loss
-                ) ORDER BY casualty.side_key,casualty.force_type)
-                  FROM battle_casualty_applications casualty
-                 WHERE casualty.battle_id=battle.id AND casualty.calculated_loss>0),'[]'::jsonb) AS casualties
+                score.side AS battle_score_side,COALESCE(score.points,0)::integer AS battle_score_points
            FROM battles battle
            LEFT JOIN battle_sides side_a ON side_a.battle_id=battle.id AND side_a.side_key='A'
            LEFT JOIN countries country_a ON country_a.id=side_a.country_id

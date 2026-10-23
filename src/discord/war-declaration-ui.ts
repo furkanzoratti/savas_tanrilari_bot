@@ -4,12 +4,11 @@ import {
   type ButtonInteraction, type ChatInputCommandInteraction, type ModalSubmitInteraction,
   type StringSelectMenuInteraction, type TextChannel
 } from "discord.js";
-import { BATTLE_UNIT_STATS, NAVAL_UNIT_STATS, type BattleUnitType, type NavalUnitType } from "../domain/battle.js";
 import { gold, number } from "../domain/format.js";
 import { gameService, GameError } from "../services/game-service.js";
 import { diplomacyService } from "../services/diplomacy-service.js";
 import {
-  warDeclarationService, type OfficialWarBattleView, type OfficialWarDetailView, type OfficialWarView,
+  warDeclarationService, type OfficialWarDetailView, type OfficialWarView,
   type PeaceOfferView, type WarEndOutcome, type WarInvitationView, type WarSide
 } from "../services/war-declaration-service.js";
 import { PEACE_TERM_TYPES, WAR_GOALS, type WarGoalType } from "../domain/war-objectives.js";
@@ -216,16 +215,8 @@ export function renderActiveWarPages(wars:OfficialWarView[],flag:CountryFlagReso
   });
 }
 
-function forceTypeLabel(forceType:string):string{
-  return BATTLE_UNIT_STATS[forceType as BattleUnitType]?.label
-    ??NAVAL_UNIT_STATS[forceType as NavalUnitType]?.label
-    ??forceType.replaceAll("_"," ");
-}
-
-function battleCasualtyText(battle:OfficialWarBattleView,side:"A"|"B"):string{
-  if(battle.status!=="FINISHED")return "";
-  const rows=battle.casualties.filter((row)=>row.side_key===side&&Number(row.loss)>0);
-  return rows.length?rows.map((row)=>`${forceTypeLabel(row.force_type)} −${number(Number(row.loss))}`).join(" · "):"";
+function publicBattleType(terrain:string):string{
+  return terrain==="SIEGE"?"Kuşatma Savaşı":terrain==="NAVAL"?"Deniz Muharebesi":"Meydan Muharebesi";
 }
 
 export function renderActiveWarDetail(detail:OfficialWarDetailView,flag:CountryFlagResolver=fallbackCountryFlag):EmbedBuilder[]{
@@ -252,25 +243,22 @@ export function renderActiveWarDetail(detail:OfficialWarDetailView,flag:CountryF
 
   const battleEmbeds:EmbedBuilder[]=[];
   const battlesPerEmbed=6;
-  const displayedBattles=detail.battles.slice(0,42);
+  const publicBattles=detail.battles.filter((battle)=>!(battle.terrain==="SIEGE"&&!['FINISHED','CANCELLED'].includes(battle.status)));
+  const displayedBattles=publicBattles.slice(0,42);
   for(let index=0;index<displayedBattles.length;index+=battlesPerEmbed){
     const chunk=displayedBattles.slice(index,index+battlesPerEmbed);
     const embed=new EmbedBuilder().setColor(0x6f4a2f)
-      .setTitle(`⚔️ Muharebeler${detail.battles.length>battlesPerEmbed?` • ${Math.floor(index/battlesPerEmbed)+1}/${Math.ceil(Math.min(detail.battles.length,42)/battlesPerEmbed)}`:""}`)
-      .setDescription(`Toplam **${detail.battles.length} muharebe** kaydı${detail.battles.length>42?" • En güncel 42 kayıt gösteriliyor":""}.`);
+      .setTitle(`⚔️ Muharebeler${publicBattles.length>battlesPerEmbed?` • ${Math.floor(index/battlesPerEmbed)+1}/${Math.ceil(Math.min(publicBattles.length,42)/battlesPerEmbed)}`:""}`)
+      .setDescription(`Toplam **${publicBattles.length} sonuçlanmış veya açık meydan/deniz muharebesi** kaydı${publicBattles.length>42?" • En güncel 42 kayıt gösteriliyor":""}. Etkin kuşatmalar sonuçlanana kadar burada gösterilmez.`);
     for(const battle of chunk){
       const score=battle.battle_score_points>0
         ?` • Savaş puanı: **+${number(Number(battle.battle_score_points))} ${battle.battle_score_side==="ATTACKER"?"Saldıran":"Savunan"}**`
         :"";
-      const casualtyA=battleCasualtyText(battle,"A");
-      const casualtyB=battleCasualtyText(battle,"B");
       embed.addFields({
-        name:`${warTerrainLabels[battle.terrain]??battle.terrain}${battle.defender_settlement_name?` • ${battle.defender_settlement_name}`:""}`.slice(0,256),
+        name:publicBattleType(battle.terrain),
         value:fieldValue([
-          `${flag(battle.country_a_name,"🔴")} **${battle.country_a_name}:** ${number(Number(battle.losses_a))} kayıp • ${number(Number(battle.current_a))}/${number(Number(battle.initial_a))} kalan`,
-          casualtyA?`_Türler: ${casualtyA}_`:"",
-          `${flag(battle.country_b_name,"🔵")} **${battle.country_b_name}:** ${number(Number(battle.losses_b))} kayıp • ${number(Number(battle.current_b))}/${number(Number(battle.initial_b))} kalan`,
-          casualtyB?`_Türler: ${casualtyB}_`:"",
+          `${flag(battle.country_a_name,"🔴")} **${battle.country_a_name}:** ${number(Number(battle.losses_a))} toplam kayıp`,
+          `${flag(battle.country_b_name,"🔵")} **${battle.country_b_name}:** ${number(Number(battle.losses_b))} toplam kayıp`,
           `**Durum:** ${warBattleStatusLabels[battle.status]??battle.status} • ${number(Number(battle.round_number))} savaş turu${score}`
         ].filter(Boolean).join("\n"))
       });
@@ -280,7 +268,7 @@ export function renderActiveWarDetail(detail:OfficialWarDetailView,flag:CountryF
 
   const eventLines=detail.scoreEvents.slice(0,30).map((event)=>{
     const side=event.side==="ATTACKER"?war.attacker_country_name:war.defender_country_name;
-    const subject=event.settlement_name??(event.battle_terrain?warTerrainLabels[event.battle_terrain]??event.battle_terrain:null);
+    const subject=event.settlement_name??(event.battle_terrain?publicBattleType(event.battle_terrain):null);
     return `• **Tur ${number(Number(event.game_turn))}** • ${flag(side,event.side==="ATTACKER"?"🔴":"🔵")} ${side}: **+${number(Number(event.points))}** — ${warScoreEventLabels[event.event_type]??event.event_type}${subject?` • ${subject}`:""}`;
   });
   const scoreEmbed=new EmbedBuilder().setColor(0xc59b45).setTitle("⚖️ Savaş Puanı Hareketleri")
