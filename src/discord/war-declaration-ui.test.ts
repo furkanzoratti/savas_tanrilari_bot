@@ -41,6 +41,13 @@ describe("resmî savaş ilanları ve barış duyuruları", () => {
       "listele", "ata", "odak-degistir", "gorevden-al"
     ]);
     expect(governorship?.options?.find((option) => option.name === "listele")?.description).toContain("divanını açar");
+    for (const subcommand of governorship?.options ?? []) {
+      expect(subcommand.options?.find((option) => option.name === "ulke")).toMatchObject({ required: false, autocomplete: true });
+      const settlement = subcommand.options?.find((option) => option.name === "yerleske");
+      if (settlement) expect(settlement).toMatchObject({ required: true, autocomplete: true });
+    }
+    const appoint = governorship?.options?.find((option) => option.name === "ata");
+    expect(appoint?.options?.find((option) => option.name === "diplomat")).toMatchObject({ required: true, autocomplete: true });
   });
 
   it("mevcut savaşları bütün yönetici yapılandırma işlemleriyle düzenleyebilir", () => {

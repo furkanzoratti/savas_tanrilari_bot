@@ -237,13 +237,10 @@ Milisler normal marketten satın alınamaz. Yalnızca politika, etkinlik veya y�
 • Standart personel yükü: **200 kişi**
 • Hazır olma süresi: **1 rol turu**
 • Her yerleşkede en fazla 1 Gözcü bulunabilir.
-• Aynı eyalette aynı devlete ait en fazla 1 Gözcü bulunabilir.
 
 Gözcü yalnızca Alım Turunda `/gozcu-alimi` ile satın alınabilir. Normal 100 kişilik asker alım kuralından muaftır.
 
-Gözcü, satın alındığı yerleşkeye bağlı sabit bir birliktir ve aktif askerî personel sınırı ile Eğitim Kapasitesinden 200 kişi kullanır.
-
-Koordinatlı keşif sistemi kullanıldığında Gözcü, bağlı olduğu yerleşkenin Hex'i ile çevresindeki komşu Hex'leri kapsar.
+Gözcü, satın alındığı yerleşkeye bağlı sabit bir birliktir ve aktif askerî personel sınırı ile Eğitim Kapasitesinden 200 kişi kullanır. Koordinatlı Hex hareketi kapalı olduğundan bölgesel Hex kapsaması uygulanmaz.
 
 Yerleşke düşerse bağlı Gözcü kaydı imha edilir.
 

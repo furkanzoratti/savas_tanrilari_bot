@@ -13,6 +13,7 @@ import { WAR_GOALS } from "../domain/war-objectives.js";
 import { GOVERNOR_FOCUSES } from "../domain/governorship.js";
 
 const countryOption = (option: any) => option.setName("ulke").setDescription("Yalnızca DM: işlem yapılacak ülke").setRequired(false);
+const selectableCountryOption = (option: any) => option.setName("ulke").setDescription("Yalnızca DM: işlem yapılacak ülkeyi yazıp seçin").setRequired(false).setAutocomplete(true);
 const romanCountryOption = (option: any) => option.setName("ulke").setDescription("Yalnızca DM/yönetici: Roma devleti").setRequired(false).setAutocomplete(true);
 const requiredRomanCountryOption = (option: any) => option.setName("ulke").setDescription("Roma Cumhuriyeti devleti").setRequired(true).setAutocomplete(true);
 const steppeCountryOption = (option: any) => option.setName("ulke").setDescription("Yalnızca DM/yönetici: Xiongnu, Dingling veya Xianbei").setRequired(false).setAutocomplete(true);
@@ -677,6 +678,10 @@ export const commandBuilders = [
     .setName("gemi-alimi").setDescription("Etkileşimli gemi alımı başlatır")
     .addStringOption(countryOption),
   new SlashCommandBuilder()
+    .setName("gozcu-alimi").setDescription("Yerleşkeye bir Gözcü Birliği alır")
+    .addStringOption((option) => option.setName("yerleske").setDescription("Gözcünün bağlı olacağı yerleşkeyi yazıp seçin").setRequired(true).setAutocomplete(true))
+    .addStringOption(selectableCountryOption),
+  new SlashCommandBuilder()
     .setName("kusatma-uretimi").setDescription("Mühendislik Atölyesinde kuşatma aleti üretir")
     .addStringOption((option) => option.setName("yerleske").setDescription("Üretim yapacak yerleşke").setRequired(true))
     .addStringOption((option) => option.setName("alet").setDescription("Üretilecek kuşatma aleti").setRequired(true)
@@ -1229,21 +1234,21 @@ export const commandBuilders = [
       .addStringOption((o) => o.setName("tutsak").setDescription("İnfaz edilecek karakter veya soylu").setRequired(true).setAutocomplete(true))),
   new SlashCommandBuilder()
     .setName("valilik").setDescription("Diplomatları yerleşkelere vali olarak ata ve idari odağı yönet")
-    .addSubcommand((sub)=>sub.setName("listele").setDescription("Valilik divanını açar; vali ata, odak değiştir ve valilikleri yönet").addStringOption(countryOption))
+    .addSubcommand((sub)=>sub.setName("listele").setDescription("Valilik divanını açar; vali ata, odak değiştir ve valilikleri yönet").addStringOption(selectableCountryOption))
     .addSubcommand((sub)=>sub.setName("ata").setDescription("Müsait bir diplomatı yerleşkeye en az iki tur için vali atar")
-      .addStringOption((o)=>o.setName("yerleske").setDescription("Vali atanacak yerleşkenin tam adı").setRequired(true))
-      .addStringOption((o)=>o.setName("diplomat").setDescription("Müsait diplomatın tam adı").setRequired(true))
+      .addStringOption((o)=>o.setName("yerleske").setDescription("Vali atanacak yerleşkeyi yazıp seçin").setRequired(true).setAutocomplete(true))
+      .addStringOption((o)=>o.setName("diplomat").setDescription("Müsait diplomatı yazıp seçin").setRequired(true).setAutocomplete(true))
       .addStringOption((o)=>o.setName("odak").setDescription("Valilik odağı").setRequired(true).addChoices(
         ...Object.entries(GOVERNOR_FOCUSES).map(([value,item])=>({name:item.label,value}))
-      )).addStringOption(countryOption))
+      )).addStringOption(selectableCountryOption))
     .addSubcommand((sub)=>sub.setName("odak-degistir").setDescription("En az iki tur kullanılan valilik odağını değiştirir")
-      .addStringOption((o)=>o.setName("yerleske").setDescription("Valiliğin bulunduğu yerleşkenin tam adı").setRequired(true))
+      .addStringOption((o)=>o.setName("yerleske").setDescription("Etkin valiliği yazıp seçin").setRequired(true).setAutocomplete(true))
       .addStringOption((o)=>o.setName("odak").setDescription("Yeni valilik odağı").setRequired(true).addChoices(
         ...Object.entries(GOVERNOR_FOCUSES).map(([value,item])=>({name:item.label,value}))
-      )).addStringOption(countryOption))
+      )).addStringOption(selectableCountryOption))
     .addSubcommand((sub)=>sub.setName("gorevden-al").setDescription("Asgari görev süresi dolmuş valiyi görevden alır")
-      .addStringOption((o)=>o.setName("yerleske").setDescription("Valiliğin bulunduğu yerleşkenin tam adı").setRequired(true))
-      .addStringOption(countryOption)),
+      .addStringOption((o)=>o.setName("yerleske").setDescription("Etkin valiliği yazıp seçin").setRequired(true).setAutocomplete(true))
+      .addStringOption(selectableCountryOption)),
   new SlashCommandBuilder()
     .setName("buyuk-gucler").setDescription("Yalnızca yönetici: Büyük Güçler sıralamasını yönetir")
     .addSubcommand((sub) => sub.setName("kanal").setDescription("Günlük Büyük Güçler paylaşım kanalını ayarlar")

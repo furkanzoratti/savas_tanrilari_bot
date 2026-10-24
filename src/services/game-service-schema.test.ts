@@ -26,7 +26,15 @@ describe("game service karakter şeması", () => {
     const source=readFileSync(new URL("./game-service.ts",import.meta.url),"utf8");
     expect(source).toContain("WHERE id=$2 AND local_treasury>=$1");
     expect(source).toContain("Yerel hazine yetersiz. Gerekli:");
-    expect(source.match(/await debitSettlementTreasury\(client,settlement\.id,cost\)/g)).toHaveLength(4);
+    expect(source.match(/await debitSettlementTreasury\(client,\s*settlement\.id,\s*cost\)/g)).toHaveLength(5);
     expect(source).not.toContain('if (settlement.local_treasury < cost) throw new GameError("Yerel hazinede yeterli altın yok.")');
+  });
+
+  it("yerleşkeye bağlı Gözcü Birliği alımını koordinatlı hareketten bağımsız tutar",()=>{
+    const source=readFileSync(new URL("./game-service.ts",import.meta.url),"utf8");
+    expect(source).toContain("async purchaseObserver");
+    expect(source).toContain("unit_type='observer'");
+    expect(source).toContain("OBSERVER_PURCHASE");
+    expect(source).not.toContain("Gözcü Birliği ve koordinatlı hareket sistemi kullanımdan kaldırıldı.");
   });
 });

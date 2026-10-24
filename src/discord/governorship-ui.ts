@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
 import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, StringSelectMenuBuilder,
-  type ButtonInteraction, type ChatInputCommandInteraction, type StringSelectMenuInteraction
+  type AutocompleteInteraction, type ButtonInteraction, type ChatInputCommandInteraction, type StringSelectMenuInteraction
 } from "discord.js";
 import { GOVERNOR_FOCUSES, governorAdministration, governorModifiers, type GovernorFocus } from "../domain/governorship.js";
 import { characterService } from "../services/character-service.js";
 import { gameService, GameError } from "../services/game-service.js";
 import { governorshipService, type GovernorshipView } from "../services/governorship-service.js";
-import { assertCountryAccess, resolveCountry } from "./auth.js";
+import { assertCountryAccess, isGameMaster, resolveCountry } from "./auth.js";
 
 type GovernorshipInteraction = ButtonInteraction | StringSelectMenuInteraction;
 type PanelView = "DASHBOARD" | "APPOINT" | "MANAGE";
@@ -195,6 +195,57 @@ async function openInteractivePanel(interaction: ChatInputCommandInteraction, co
   };
   panelStates.set(state.token, state);
   await interaction.editReply(await dashboardPayload(state));
+}
+
+export async function handleGovernorshipAutocomplete(interaction: AutocompleteInteraction): Promise<boolean> {
+  if (interaction.commandName !== "valilik" || !interaction.guildId) return false;
+  const focused = interaction.options.getFocused(true);
+  if (!["ulke", "yerleske", "diplomat"].includes(focused.name)) return false;
+  const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
+  if (focused.name === "ulke") {
+    const countries = isGameMaster(interaction)
+      ? await gameService.listCountries(interaction.guildId)
+      : [await gameService.countryForUser(interaction.guildId, interaction.user.id)].filter((item) => item !== null);
+    await interaction.respond(countries
+      .filter((item) => !query || item.name.toLocaleLowerCase("tr-TR").includes(query))
+      .slice(0, 25)
+      .map((item) => ({ name: item.name.slice(0, 100), value: item.name })));
+    return true;
+  }
+  const requestedCountry = interaction.options.getString("ulke");
+  const country = requestedCountry && isGameMaster(interaction)
+    ? await gameService.countryByName(interaction.guildId, requestedCountry)
+    : await gameService.countryForUser(interaction.guildId, interaction.user.id);
+  if (!country) { await interaction.respond([]); return true; }
+  const subcommand = interaction.options.getSubcommand(false) ?? "";
+  if (focused.name === "diplomat") {
+    const diplomats = (await characterService.list(country.id)).filter((item) =>
+      item.role === "DIPLOMAT" && item.character_status === "ACTIVE" && item.assignment === "NONE" && !item.kidnapped
+    );
+    await interaction.respond(diplomats
+      .filter((item) => !query || item.name.toLocaleLowerCase("tr-TR").includes(query))
+      .slice(0, 25)
+      .map((item) => ({
+        name: `${item.name} • Yetenek +${item.skill_bonus}${item.specialization === "PROVINCIAL_GOVERNOR" ? ` • Eyalet Valisi Sv${item.specialization_level}` : ""}`.slice(0, 100),
+        value: item.name
+      })));
+    return true;
+  }
+  const active = await governorshipService.list(country.id);
+  if (subcommand === "ata") {
+    const governed = new Set(active.map((item) => item.settlement_id));
+    const settlements = (await gameService.listSettlements(country.id)).filter((item) => !governed.has(item.id));
+    await interaction.respond(settlements
+      .filter((item) => !query || item.name.toLocaleLowerCase("tr-TR").includes(query))
+      .slice(0, 25)
+      .map((item) => ({ name: `${item.name} • ${Number(item.population).toLocaleString("tr-TR")} nüfus`.slice(0, 100), value: item.name })));
+    return true;
+  }
+  await interaction.respond(active
+    .filter((item) => !query || `${item.settlement_name} ${item.character_name}`.toLocaleLowerCase("tr-TR").includes(query))
+    .slice(0, 25)
+    .map((item) => ({ name: `${item.settlement_name} • ${item.character_name}`.slice(0, 100), value: item.settlement_name })));
+  return true;
 }
 
 export async function handleGovernorshipSelect(interaction: StringSelectMenuInteraction): Promise<boolean> {

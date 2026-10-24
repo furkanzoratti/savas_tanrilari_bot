@@ -2786,7 +2786,7 @@ export const gameService = {
   },
 
   async purchaseUnits(input: { guildId: string; actorId: string; countryId: string; settlementId: string; unitType: keyof typeof UNITS; quantity: number }): Promise<{ cost: number; waves: Array<{ dueTurn: number; quantity: number }> }> {
-    if (input.unitType === "observer") throw new GameError("Gözcü Birliği ve koordinatlı hareket sistemi kullanımdan kaldırıldı.");
+    if (input.unitType === "observer") throw new GameError("Gözcü Birliği için ayrı /gozcu-alimi komutu kullanılmalıdır.");
     if (input.unitType === "militia") throw new GameError("Milis marketten satın alınamaz; yalnızca şehir politikalarıyla oluşturulabilir.");
     if (input.quantity < 100 || input.quantity % 100 !== 0) throw new GameError("Asker alımı en az 100 kişi ve 100'ün katları hâlinde yapılmalıdır.");
     return withTransaction(async (client) => {
@@ -2870,6 +2870,77 @@ export const gameService = {
       await client.query("INSERT INTO transactions(country_id,settlement_id,turn,kind,amount,description) VALUES($1,$2,$3,'UNIT_PURCHASE',$4,$5)", [country.id, settlement.id, guild.current_turn, -cost, `${settlement.name}: ${input.quantity} ${unit.name}`]);
       await audit(client, input.guildId, input.actorId, "UNIT_PURCHASE", "settlement", settlement.id, { unitType: input.unitType, quantity: input.quantity, cost, waves, trainingCapacity });
       return { cost, waves };
+    });
+  },
+
+  async purchaseObserver(input: { guildId: string; actorId: string; countryId: string; settlementId: string }): Promise<{ cost: number; dueTurn: number }> {
+    return withTransaction(async (client) => {
+      const guild = await getGuild(client, input.guildId);
+      if (!isAcquisitionTurn(guild.current_turn, guild.acquisition_interval)) throw new GameError("Gözcü alımı yalnızca Alım Turunda yapılabilir.");
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`country:${input.countryId}`]);
+      const country = await getCountry(client, input.countryId);
+      if (country.guild_id !== input.guildId) throw new GameError("Ülke bu sunucuya ait değil.");
+      const settlement = (await client.query<SettlementRow>(
+        "SELECT * FROM settlements WHERE id=$1 AND country_id=$2 FOR UPDATE", [input.settlementId, country.id]
+      )).rows[0];
+      if (!settlement) throw new GameError("Yerleşke bulunamadı.");
+      await assertSettlementNotOccupied(client, settlement.id);
+      if (settlement.is_conquered) throw new GameError("Fethedilmiş yerleşke asimile edilmeden Gözcü Birliği yetiştiremez.");
+      if (await settlementIsBesieged(client, settlement.id)) throw new GameError("Kuşatma altındaki yerleşke Gözcü Birliği yetiştiremez.");
+      if (await countryHasMaintenanceDebt(client, country.id)) throw new GameError("Ödenmemiş bakım açığı giderilmeden Gözcü Birliği alınamaz.");
+      const existing = await client.query(
+        `SELECT 1 FROM unit_stacks WHERE settlement_id=$1 AND unit_type='observer' AND quantity>0
+         UNION ALL
+         SELECT 1 FROM recruitment_orders WHERE settlement_id=$1 AND unit_type='observer' AND status='TRAINING' LIMIT 1`,
+        [settlement.id]
+      );
+      if (existing.rowCount) throw new GameError("Bu yerleşkede zaten bir Gözcü Birliği var veya eğitiliyor.");
+
+      const personLoad = 200;
+      const marshalPartial = await hasActiveMarshalPartialMobilization(client, country.id, country.mobilization);
+      const localUsed = await settlementManpower(client, settlement.id);
+      const localLimit = settlementMobilizationLimit(
+        cultureMilitaryPopulation(
+          settlement.population, settlement.culture_group, country.primary_culture_group,
+          guild.culture_military_penalty_enabled
+        ), country.mobilization, marshalPartial
+      );
+      if (localUsed + personLoad > localLimit) throw new GameError("Yerleşkenin Ordu Limitinde Gözcü Birliği için yer yok.");
+      const trainingCapacity = settlementTrainingCapacity(settlement.population, country.mobilization, marshalPartial);
+      const usage = (await client.query<{ quantity: number }>(
+        "SELECT quantity FROM recruitment_usage WHERE settlement_id=$1 AND acquisition_turn=$2 FOR UPDATE",
+        [settlement.id, guild.current_turn]
+      )).rows[0]?.quantity ?? 0;
+      if (usage + personLoad > trainingCapacity) throw new GameError("Bu Alım Turundaki Eğitim Kapasitesi Gözcü Birliği için yeterli değil.");
+      const manpower = await countryManpower(client, country.id);
+      const projectModifiers = await activeCountryModifiers(client, country.id);
+      const limit = Math.floor(militaryLimit(manpower.militaryPopulation, country.mobilization, marshalPartial) * (1 + (projectModifiers.militaryLimitPercent ?? 0)));
+      if (manpower.used + personLoad > limit) throw new GameError("Askerî personel sınırında Gözcü Birliği için yer yok.");
+
+      const cost = await applyPurchaseAgentDiscount(client, {
+        countryId: country.id, settlementId: settlement.id, category: "UNITS", currentTurn: guild.current_turn,
+        cost: UNITS.observer.price
+      });
+      await debitSettlementTreasury(client, settlement.id, cost);
+      const dueTurn = guild.current_turn + 1;
+      const order = await client.query<{ id: string }>(
+        `INSERT INTO recruitment_orders(country_id,settlement_id,unit_type,total_quantity,remaining_quantity,paid_amount,ordered_turn,population_reserved)
+         VALUES($1,$2,'observer',$3,$3,$4,$5,FALSE) RETURNING id`,
+        [country.id, settlement.id, personLoad, cost, guild.current_turn]
+      );
+      await client.query("INSERT INTO recruitment_waves(order_id,due_turn,quantity) VALUES($1,$2,$3)", [order.rows[0]!.id, dueTurn, personLoad]);
+      await client.query(
+        `INSERT INTO recruitment_usage(settlement_id,acquisition_turn,quantity) VALUES($1,$2,$3)
+         ON CONFLICT(settlement_id,acquisition_turn) DO UPDATE SET quantity=recruitment_usage.quantity+EXCLUDED.quantity`,
+        [settlement.id, guild.current_turn, personLoad]
+      );
+      await syncCountryTreasury(client, country.id);
+      await client.query(
+        "INSERT INTO transactions(country_id,settlement_id,turn,kind,amount,description) VALUES($1,$2,$3,'OBSERVER_PURCHASE',$4,$5)",
+        [country.id, settlement.id, guild.current_turn, -cost, `${settlement.name}: 1 Gözcü Birliği`]
+      );
+      await audit(client, input.guildId, input.actorId, "OBSERVER_PURCHASE", "settlement", settlement.id, { cost, personLoad, dueTurn });
+      return { cost, dueTurn };
     });
   },
 

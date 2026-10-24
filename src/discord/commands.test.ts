@@ -55,7 +55,10 @@ describe("yönetim komutları", () => {
   });
 
   it("atölye, saha aleti ve asimilasyon komutlarını kaydeder", () => {
-    expect(commandBuilders.some((command) => command.name === "gozcu-alimi")).toBe(false);
+    const observerPurchase = commandBuilders.find((command) => command.name === "gozcu-alimi");
+    expect(observerPurchase).toBeDefined();
+    expect(observerPurchase?.options?.find((option) => option.name === "yerleske")).toMatchObject({ required: true, autocomplete: true });
+    expect(observerPurchase?.options?.find((option) => option.name === "ulke")).toMatchObject({ required: false, autocomplete: true });
     expect(commandBuilders.some((command) => command.name === "hareket")).toBe(false);
     expect(commandBuilders.some((command) => command.name === "harita")).toBe(false);
     expect(commandBuilders.some((command) => command.name === "kusatma-uretimi")).toBe(true);

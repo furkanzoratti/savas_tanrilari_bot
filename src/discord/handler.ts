@@ -95,7 +95,7 @@ import {
 } from "./roman-republic-ui.js";
 import { decodeUnitTypeFromCustomId, encodeUnitTypeForCustomId } from "./unit-custom-id.js";
 import {greatProjectService,GreatProjectError} from "../services/great-project-service.js";
-import {handleGovernorshipButton,handleGovernorshipCommand,handleGovernorshipSelect} from "./governorship-ui.js";
+import {handleGovernorshipAutocomplete,handleGovernorshipButton,handleGovernorshipCommand,handleGovernorshipSelect} from "./governorship-ui.js";
 import {handleWorldHistoryChannelCommand,publishTurnChronicle} from "./world-history-ui.js";
 
 function settlementSelect(customId: string, settlements: Array<{ id: string; name: string; population: number }>, placeholder: string) {
@@ -1444,6 +1444,15 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     await interaction.editReply({ content: `✅ ${number(quantity)} **${UNITS[unitType].name}** terhis edildi. Birlikte kalan: **${number(result.remaining)}**. Terhis kalıcıdır ve ücret iadesi sağlamaz.` });
   } else if (interaction.commandName === "gemi-alimi") {
     await startPurchase(interaction, "ship");
+  } else if (interaction.commandName === "gozcu-alimi") {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
+    await assertCountryExecutiveAccess(interaction, country.id);
+    const settlement = await findSettlement(country.id, interaction.options.getString("yerleske", true));
+    const result = await gameService.purchaseObserver({
+      guildId: interaction.guildId!, actorId: interaction.user.id, countryId: country.id, settlementId: settlement.id
+    });
+    await interaction.editReply({ content: `✅ **${settlement.name}** için bir **Gözcü Birliği** eğitime alındı. **${gold(result.cost)}** ödendi; **Tur ${result.dueTurn}** hazır olacak.` });
   } else if (interaction.commandName === "kusatma-uretimi") {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const country = await resolveCountry(interaction, interaction.options.getString("ulke"));
@@ -1742,7 +1751,35 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
   if (await handleCharacterAutocomplete(interaction)) return;
   if (await handleEspionageAutocomplete(interaction)) return;
   if (await handleCityAutocomplete(interaction)) return;
+  if (await handleGovernorshipAutocomplete(interaction)) return;
   const focused = interaction.options.getFocused(true);
+  if (interaction.commandName === "gozcu-alimi") {
+    if (!interaction.guildId) { await interaction.respond([]); return; }
+    const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
+    if (focused.name === "ulke") {
+      const countries = isGameMaster(interaction)
+        ? await gameService.listCountries(interaction.guildId)
+        : [await gameService.countryForUser(interaction.guildId, interaction.user.id)].filter((item) => item !== null);
+      await interaction.respond(countries
+        .filter((item) => !query || item.name.toLocaleLowerCase("tr-TR").includes(query))
+        .slice(0, 25)
+        .map((item) => ({ name: item.name.slice(0, 100), value: item.name })));
+      return;
+    }
+    if (focused.name === "yerleske") {
+      const requestedCountry = interaction.options.getString("ulke");
+      const country = requestedCountry && isGameMaster(interaction)
+        ? await gameService.countryByName(interaction.guildId, requestedCountry)
+        : await gameService.countryForUser(interaction.guildId, interaction.user.id);
+      if (!country) { await interaction.respond([]); return; }
+      const settlements = await gameService.listSettlements(country.id);
+      await interaction.respond(settlements
+        .filter((item) => !query || item.name.toLocaleLowerCase("tr-TR").includes(query))
+        .slice(0, 25)
+        .map((item) => ({ name: `${item.name} • ${number(Number(item.population))} nüfus`.slice(0, 100), value: item.id })));
+      return;
+    }
+  }
   if (interaction.commandName === "ozel-birlik-yetkisi" && focused.name === "birlik") {
     if (!isGameMaster(interaction)) { await interaction.respond([]); return; }
     const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
