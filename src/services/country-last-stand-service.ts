@@ -140,6 +140,15 @@ async function eliminateCountry(
   };
 }
 
+export async function eliminateCountryByPeaceAnnexation(
+  client:DbClient,input:{guildId:string;countryId:string;countryName:string;turn:number;actorId:string;discordRoleId:string|null}
+):Promise<LastStandEvent>{
+  return eliminateCountry(client,{
+    ...input,
+    reason:"Bütün yerleşkeleri barış antlaşmasıyla ilhak edildiği için devlet sona erdi."
+  });
+}
+
 export async function startLastStand(
   client:DbClient,input:{guildId:string;countryId:string;countryName:string;turn:number;actorId:string;discordRoleId:string|null}
 ):Promise<LastStandEvent>{

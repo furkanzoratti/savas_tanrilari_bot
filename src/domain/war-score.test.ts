@@ -1,7 +1,7 @@
 import {describe,expect,it} from "vitest";
 import {
   battleQualifiesForWarScore,battleWarScorePoints,calculateWarBalance,indemnityWarScoreCost,
-  ordinaryPeaceLeavesSettlement,peaceDemandWarScoreCost,provinceWarValues
+  fullAnnexationWarScoreCosts,peaceDemandWarScoreCost,provinceWarValues
 } from "./war-score.js";
 
 const provinces=provinceWarValues([
@@ -54,10 +54,13 @@ describe("dinamik savaş skoru ve barış bedeli",()=>{
     expect(calculateWarBalance({attackerOccupation:30,defenderOccupation:0,battleNet:500})).toBe(70);
   });
 
-  it("normal barışta son yerleşkenin devrini ve bedelsiz yüksek tazminatı engelleyen kuralları sağlar",()=>{
-    expect(ordinaryPeaceLeavesSettlement(4,3)).toBe(true);
-    expect(ordinaryPeaceLeavesSettlement(4,4)).toBe(false);
-    expect(ordinaryPeaceLeavesSettlement(1,1)).toBe(false);
+  it("tam ilhakın bütün toprak bedellerini oransal olarak toplam 100 skora sığdırır",()=>{
+    expect(fullAnnexationWarScoreCosts([80,50,20])).toEqual([54,33,13]);
+    expect(fullAnnexationWarScoreCosts([5])).toEqual([100]);
+    expect(fullAnnexationWarScoreCosts([])).toEqual([]);
+  });
+
+  it("tazminat ve toplam talep kurallarını sağlar",()=>{
     expect(indemnityWarScoreCost(1)).toBe(1);
     expect(indemnityWarScoreCost(10_001)).toBe(11);
     expect(peaceDemandWarScoreCost([35,-80,12])).toBe(47);

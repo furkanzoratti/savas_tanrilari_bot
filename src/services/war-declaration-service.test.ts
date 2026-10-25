@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
 vi.hoisted(() => {
@@ -48,5 +49,15 @@ describe("barış tazminatının şehir hazinelerine dağıtılması", () => {
   it("eksi veya güvensiz tazminat tutarlarını reddeder", () => {
     expect(() => proportionalTreasuryAllocation(-1, [{ id: "a", name: "A", weight: 1 }])).toThrow();
     expect(() => proportionalTreasuryAllocation(Number.MAX_SAFE_INTEGER + 1, [{ id: "a", name: "A", weight: 1 }])).toThrow();
+  });
+});
+
+describe("barış antlaşmasıyla tam ilhak",()=>{
+  it("son yerleşke yasağını kaldırır ve kabulde barış devri ile doğrudan ilhak temizliği uygular",()=>{
+    const source=readFileSync(new URL("./war-declaration-service.ts",import.meta.url),"utf8");
+    expect(source).not.toContain("Devlette en az bir yerleşke bırakılmalıdır");
+    expect(source).toContain("applyFullAnnexationCosts");
+    expect(source).toContain('transferType:"PEACE_TRANSFER"');
+    expect(source).toContain("eliminateOnLastSettlement:annexedCountryIds.has(term.source_country_id)");
   });
 });

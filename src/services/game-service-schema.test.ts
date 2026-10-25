@@ -16,6 +16,13 @@ describe("game service karakter şeması", () => {
     expect(source).toContain("recoverLastStand(client");
   });
 
+  it("barışla tam ilhak edilen devleti Son Direniş başlatmadan kapatabilir",()=>{
+    const source=readFileSync(new URL("./game-service.ts",import.meta.url),"utf8");
+    expect(source).toContain("eliminateOnLastSettlement?: boolean");
+    expect(source).toContain("eliminateCountryByPeaceAnnexation(client,lastSettlementInput)");
+    expect(source).toContain(":await startLastStand(client,lastSettlementInput)");
+  });
+
   it("yükseltmedeki limanı dokuzuncu bina slotu için etkin sayar",()=>{
     const source=readFileSync(new URL("./game-service.ts",import.meta.url),"utf8");
     const portSlotQueries=source.match(/building_type='port' AND status IN \('ACTIVE','BUILDING'\) AND level>0/g)??[];

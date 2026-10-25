@@ -31,7 +31,7 @@ import { dominantReligionFromDistributions, religionBeliefShares, religionDistri
 import { fallbackReligionDistribution, loadReligionDistributions, loadSettlementReligionModifiers, resetSettlementReligionDistribution } from "./religion-service.js";
 import { applyCultureIncomeEffect, cultureMilitaryPopulation } from "../domain/culture-effects.js";
 import { syncCountryPrimaryCulture, syncGuildPrimaryCultures } from "./culture-service.js";
-import { processLastStandsForTurn, recordSettlementClaim, recoverLastStand, startLastStand, type LastStandEvent } from "./country-last-stand-service.js";
+import { eliminateCountryByPeaceAnnexation, processLastStandsForTurn, recordSettlementClaim, recoverLastStand, startLastStand, type LastStandEvent } from "./country-last-stand-service.js";
 import { cleanupEliminatedCountry } from "./character-duty-lifecycle-service.js";
 import { processStabilityTurn, type StabilityTurnResult } from "./stability-service.js";
 import {
@@ -1739,7 +1739,7 @@ export const gameService = {
     });
   },
 
-  async transferSettlement(input: { guildId: string; actorId: string; sourceCountryId: string; targetCountryId: string; settlementId: string; transferType?: SettlementTransferType; transferTurn?: number | null; transactionClient?: DbClient }): Promise<{ settlementName: string; sourceName: string; targetName: string; transferType: SettlementTransferType; transferLabel: string; transferTurn: number; cancelledRecruitmentOrders: number; endedTrades: number; enslavedGarrison: number; removedArmyPersonnel: number; preservedArmyPersonnel: number; evacuatedArmyPopulation: number; transferredShips: number; shipTransferDestination: string | null; relocatedFleets: number; cancelledOwnRepairShips:number; cancelledForeignRepairShips:number; removedShips: number; removedSiegeAssets: number; destroyedMercenaryContracts: number; newGarrisonPersonnel: number; newGarrisonCost: number; newGarrisonCompletionTurn: number | null; lastStandDetails: LastStandEvent[] }> {
+  async transferSettlement(input: { guildId: string; actorId: string; sourceCountryId: string; targetCountryId: string; settlementId: string; transferType?: SettlementTransferType; transferTurn?: number | null; eliminateOnLastSettlement?: boolean; transactionClient?: DbClient }): Promise<{ settlementName: string; sourceName: string; targetName: string; transferType: SettlementTransferType; transferLabel: string; transferTurn: number; cancelledRecruitmentOrders: number; endedTrades: number; enslavedGarrison: number; removedArmyPersonnel: number; preservedArmyPersonnel: number; evacuatedArmyPopulation: number; transferredShips: number; shipTransferDestination: string | null; relocatedFleets: number; cancelledOwnRepairShips:number; cancelledForeignRepairShips:number; removedShips: number; removedSiegeAssets: number; destroyedMercenaryContracts: number; newGarrisonPersonnel: number; newGarrisonCost: number; newGarrisonCompletionTurn: number | null; lastStandDetails: LastStandEvent[] }> {
     const execute = async (client: DbClient) => {
       const transferType = input.transferType ?? "CONQUEST";
       const transferPolicy = settlementTransferPolicy(transferType);
@@ -1882,10 +1882,13 @@ export const gameService = {
       });
       if(recovered)lastStandDetails.push(recovered);
       if(remainingSourceSettlements===0){
-        lastStandDetails.push(await startLastStand(client,{
+        const lastSettlementInput={
           guildId:input.guildId,countryId:source.id,countryName:source.name,turn:transferTurn,
           actorId:input.actorId,discordRoleId:source.discord_role_id
-        }));
+        };
+        lastStandDetails.push(input.eliminateOnLastSettlement
+          ?await eliminateCountryByPeaceAnnexation(client,lastSettlementInput)
+          :await startLastStand(client,lastSettlementInput));
       }
       await audit(client, input.guildId, input.actorId, "SETTLEMENT_TRANSFER", "settlement", settlement.id, {
         fromCountryId: source.id, toCountryId: target.id, transferType, transferTurn, conqueredTurn: transferPolicy.conquered ? transferTurn : null, cancelledRecruitmentOrders: activeOrders.rows.length, cancelledNavalOrders: cancelledNaval.rowCount ?? 0, cancelledSiegeOrders: cancelledSiege.rowCount ?? 0, endedTrades: trades.rowCount ?? 0,

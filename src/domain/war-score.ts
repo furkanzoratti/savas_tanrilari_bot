@@ -120,6 +120,20 @@ export function peaceDemandWarScoreCost(termCosts:number[]):number{
   return termCosts.reduce((total,cost)=>total+Math.max(0,Math.trunc(cost)),0);
 }
 
-export function ordinaryPeaceLeavesSettlement(totalSettlements:number,transferredSettlements:number):boolean{
-  return Math.max(0,Math.trunc(totalSettlements))-Math.max(0,Math.trunc(transferredSettlements))>=1;
+export function fullAnnexationWarScoreCosts(rawCosts:number[]):number[]{
+  if(!rawCosts.length)return[];
+  const weights=rawCosts.map((cost)=>Math.max(0,Math.abs(Math.trunc(cost))));
+  const total=weights.reduce((sum,cost)=>sum+cost,0);
+  if(total<=0)return rawCosts.map(()=>0);
+  const allocations=weights.map((weight,index)=>{
+    const exact=weight/total*100;
+    const points=Math.floor(exact);
+    return{index,points,fraction:exact-points};
+  });
+  let remainder=100-allocations.reduce((sum,item)=>sum+item.points,0);
+  allocations.sort((left,right)=>right.fraction-left.fraction||left.index-right.index);
+  for(let index=0;remainder>0;index=(index+1)%allocations.length,remainder-=1)allocations[index]!.points+=1;
+  const result=Array<number>(rawCosts.length).fill(0);
+  for(const allocation of allocations)result[allocation.index]=allocation.points;
+  return result;
 }

@@ -2,7 +2,7 @@ import { pool, withTransaction, type DbClient } from "../db/pool.js";
 import { gameService, GameError } from "./game-service.js";
 import { PEACE_TERM_TYPES, WAR_GOALS, validateWarGoalTarget, warGoalLabel, type PeaceTermType, type WarGoalType } from "../domain/war-objectives.js";
 import { endWarOccupations } from "./war-occupation-service.js";
-import {availableWarScore,indemnityWarScoreCost,ordinaryPeaceLeavesSettlement,peaceDemandWarScoreCost} from "../domain/war-score.js";
+import {availableWarScore,fullAnnexationWarScoreCosts,indemnityWarScoreCost,peaceDemandWarScoreCost} from "../domain/war-score.js";
 import {ensureGuildWarScores,recalculateWarScore,refreshWarScore} from "./war-score-service.js";
 
 export interface OfficialWarView {
@@ -86,6 +86,7 @@ export interface OfficialWarOccupationView {
   occupier_country_name: string;
   legal_owner_country_id: string;
   legal_owner_country_name: string;
+  legal_owner_settlement_count:number;
   started_turn: number;
   status: "ACTIVE" | "ENDED";
   ended_turn: number | null;
@@ -175,6 +176,7 @@ export interface PeaceResolution {
   war: OfficialWarView;
   deductions: TreasuryAllocation[];
   credits: TreasuryAllocation[];
+  annexedCountries:Array<{countryId:string;countryName:string;discordRoleId:string|null}>;
 }
 
 interface TreasuryRow {
@@ -377,25 +379,38 @@ async function synchronizeTreasury(client: DbClient, countryId: string): Promise
   );
 }
 
-async function assertOrdinaryPeaceLeavesSettlement(
+type PeaceSettlementTransferCost={
+  settlementId:string;
+  sourceCountryId:string;
+  recipientCountryId:string;
+  warScoreCost:number;
+};
+
+async function applyFullAnnexationCosts(
   client: DbClient,
-  transfers: Array<{ sourceCountryId: string; settlementId: string }>
-): Promise<void> {
-  const transfersByCountry=new Map<string,Set<string>>();
-  for(const transfer of transfers){
-    const settlements=transfersByCountry.get(transfer.sourceCountryId)??new Set<string>();
-    settlements.add(transfer.settlementId);
-    transfersByCountry.set(transfer.sourceCountryId,settlements);
+  transfers:PeaceSettlementTransferCost[]
+):Promise<{transfers:PeaceSettlementTransferCost[];annexedCountryIds:Set<string>}>{
+  const adjusted=transfers.map((transfer)=>({...transfer}));
+  const transfersByCountry=new Map<string,PeaceSettlementTransferCost[]>();
+  for(const transfer of adjusted){
+    transfersByCountry.set(transfer.sourceCountryId,[...(transfersByCountry.get(transfer.sourceCountryId)??[]),transfer]);
   }
-  for(const [countryId,settlements] of [...transfersByCountry.entries()].sort(([left],[right])=>left.localeCompare(right))){
-    const country=(await client.query<{name:string}>("SELECT name FROM countries WHERE id=$1 FOR UPDATE",[countryId])).rows[0];
-    const settlementCount=Number((await client.query<{count:number}>(
-      "SELECT COUNT(*)::integer AS count FROM settlements WHERE country_id=$1",[countryId]
-    )).rows[0]?.count??0);
-    if(country&&!ordinaryPeaceLeavesSettlement(settlementCount,settlements.size)){
-      throw new GameError(`Normal barış antlaşması ${country.name} devletini tamamen ilhak edemez. Devlette en az bir yerleşke bırakılmalıdır.`);
+  const annexedCountryIds=new Set<string>();
+  for(const [countryId,countryTransfers] of [...transfersByCountry.entries()].sort(([left],[right])=>left.localeCompare(right))){
+    const ownedSettlements=(await client.query<{id:string}>(
+      "SELECT id FROM settlements WHERE country_id=$1 ORDER BY id FOR UPDATE",[countryId]
+    )).rows;
+    const selectedIds=new Set(countryTransfers.map((transfer)=>transfer.settlementId));
+    if(!ownedSettlements.length||!ownedSettlements.every((settlement)=>selectedIds.has(settlement.id)))continue;
+    const direction=Math.sign(countryTransfers[0]?.warScoreCost??0)||1;
+    if(countryTransfers.some((transfer)=>(Math.sign(transfer.warScoreCost)||direction)!==direction)){
+      throw new GameError("Aynı devletin tam ilhak maddeleri iki farklı yöne devredilemez.");
     }
+    const costs=fullAnnexationWarScoreCosts(countryTransfers.map((transfer)=>transfer.warScoreCost));
+    countryTransfers.forEach((transfer,index)=>{transfer.warScoreCost=direction*(costs[index]??0);});
+    annexedCountryIds.add(countryId);
   }
+  return{transfers:adjusted,annexedCountryIds};
 }
 
 export const warDeclarationService = {
@@ -491,6 +506,7 @@ export const warDeclarationService = {
         `SELECT occupation.id,occupation.settlement_id,settlement.name AS settlement_name,
                 occupation.occupier_country_id,occupier.name AS occupier_country_name,
                 occupation.legal_owner_country_id,owner.name AS legal_owner_country_name,
+                (SELECT COUNT(*)::integer FROM settlements owned WHERE owned.country_id=occupation.legal_owner_country_id) AS legal_owner_settlement_count,
                 occupation.started_turn,occupation.status,occupation.ended_turn,
                 occupation.occupation_score_points AS score_points,0::integer AS peace_cost
            FROM settlement_occupations occupation
@@ -916,12 +932,19 @@ export const warDeclarationService = {
           recipientCountryId:transfer.recipientCountryId,warScoreCost:direction*province.peaceCost
         });
       }
-      await assertOrdinaryPeaceLeavesSettlement(client,verifiedTransfers);
+      const annexation=await applyFullAnnexationCosts(client,verifiedTransfers);
+      const pricedTransfers=annexation.transfers;
+      if(pricedTransfers.some((transfer)=>annexation.annexedCountryIds.has(transfer.recipientCountryId))){
+        throw new GameError("Tamamen ilhak edilecek bir devlete aynı antlaşmada yerleşke devredilemez.");
+      }
+      if(input.indemnityAmount>0&&[input.payerCountryId,recipientCountryId].some((countryId)=>countryId&&annexation.annexedCountryIds.has(countryId))){
+        throw new GameError("Tam ilhak antlaşmasına ayrıca altın tazminatı eklenemez; yerel hazineler yerleşkelerle birlikte devredilir.");
+      }
       const indemnityCost=input.indemnityAmount>0
         ?indemnityWarScoreCost(input.indemnityAmount)*(recipientCountryId===input.proposerCountryId?1:-1)
         :0;
       const totalWarScoreCost=peaceDemandWarScoreCost([
-        ...verifiedTransfers.map((transfer)=>transfer.warScoreCost),indemnityCost
+        ...pricedTransfers.map((transfer)=>transfer.warScoreCost),indemnityCost
       ]);
       if(totalWarScoreCost>scoreBudget){
         throw new GameError(`Barış taleplerinin toplam maliyeti ${totalWarScoreCost} savaş skoru; kullanılabilir skorunuz ${scoreBudget}. Talepleri azaltın veya savaşta üstünlüğünüzü artırın.`);
@@ -944,7 +967,7 @@ export const warDeclarationService = {
       );
       const id = created.rows[0]!.id;
       let sortOrder=0;
-      for (const transfer of verifiedTransfers) {
+      for (const transfer of pricedTransfers) {
         await client.query(
           `INSERT INTO peace_offer_terms(peace_offer_id,term_type,source_country_id,target_country_id,settlement_id,sort_order,war_score_cost)
            VALUES($1,'TRANSFER_SETTLEMENT',$2,$3,$4,$5,$6)`,
@@ -960,7 +983,8 @@ export const warDeclarationService = {
       }
       if (sortOrder===0) await client.query("INSERT INTO peace_offer_terms(peace_offer_id,term_type,sort_order) VALUES($1,'WHITE_PEACE',0)",[id]);
       await audit(client, input.guildId, input.actorId, "PEACE_OFFER_CREATE", "peace_offer", id, {
-        ...input,terms,recipientCountryId,turn,totalWarScoreCost,scoreBudget,proposerSide
+        ...input,terms,recipientCountryId,turn,totalWarScoreCost,scoreBudget,proposerSide,
+        fullAnnexationCountryIds:[...annexation.annexedCountryIds]
       });
       return (await offerById(client, id))!;
     });
@@ -1005,6 +1029,7 @@ export const warDeclarationService = {
         id:string;settlement_id:string;source_country_id:string;target_country_id:string;war_score_cost:number;
       }>(`SELECT id,settlement_id,source_country_id,target_country_id,war_score_cost FROM peace_offer_terms
             WHERE peace_offer_id=$1 AND term_type='TRANSFER_SETTLEMENT' ORDER BY sort_order,id FOR UPDATE`,[input.offerId])).rows:[];
+      let annexedCountryIds=new Set<string>();
       if(input.accept){
         const scoreSnapshot=await recalculateWarScore(client,locked.war_id);
         const proposerSide:WarSide=locked.proposer_country_id===activeWar.attacker_country_id?"ATTACKER":"DEFENDER";
@@ -1036,12 +1061,34 @@ export const warDeclarationService = {
           totalWarScoreCost=peaceDemandWarScoreCost(legacyTermCosts);
           await client.query("UPDATE peace_offers SET total_war_score_cost=$2 WHERE id=$1",[input.offerId,totalWarScoreCost]);
         }
+        const annexation=await applyFullAnnexationCosts(client,transferTerms.map((term)=>({
+          settlementId:term.settlement_id,sourceCountryId:term.source_country_id,
+          recipientCountryId:term.target_country_id,warScoreCost:Number(term.war_score_cost)
+        })));
+        annexedCountryIds=annexation.annexedCountryIds;
+        for(const priced of annexation.transfers){
+          const term=transferTerms.find((candidate)=>candidate.settlement_id===priced.settlementId)!;
+          if(Number(term.war_score_cost)===priced.warScoreCost)continue;
+          term.war_score_cost=priced.warScoreCost;
+          await client.query("UPDATE peace_offer_terms SET war_score_cost=$2 WHERE id=$1",[term.id,priced.warScoreCost]);
+        }
+        if(transferTerms.some((term)=>annexedCountryIds.has(term.target_country_id))){
+          throw new GameError("Barış kabul edilemedi: tamamen ilhak edilecek bir devlete aynı antlaşmada yerleşke devredilemez.");
+        }
+        if(Number(locked.indemnity_amount)>0&&[locked.payer_country_id,locked.recipient_country_id].some((countryId)=>countryId&&annexedCountryIds.has(countryId))){
+          throw new GameError("Barış kabul edilemedi: tam ilhak antlaşmasına ayrıca altın tazminatı eklenemez.");
+        }
+        const currentIndemnityCost=Number(locked.indemnity_amount)>0
+          ?indemnityWarScoreCost(Number(locked.indemnity_amount))
+            *(locked.recipient_country_id===locked.proposer_country_id?1:-1)
+          :0;
+        totalWarScoreCost=peaceDemandWarScoreCost([
+          ...transferTerms.map((term)=>Number(term.war_score_cost)),currentIndemnityCost
+        ]);
+        await client.query("UPDATE peace_offers SET total_war_score_cost=$2 WHERE id=$1",[input.offerId,totalWarScoreCost]);
         if(totalWarScoreCost>scoreBudget){
           throw new GameError(`Barış kabul edilemedi: teklif ${totalWarScoreCost} savaş skoru gerektiriyor, teklif eden tarafın güncel kullanılabilir skoru ${scoreBudget}.`);
         }
-        await assertOrdinaryPeaceLeavesSettlement(client,transferTerms.map((term)=>({
-          sourceCountryId:term.source_country_id,settlementId:term.settlement_id
-        })));
       }
       const turn = await currentTurn(client, input.guildId);
       const deductions: TreasuryAllocation[] = [];
@@ -1079,6 +1126,7 @@ export const warDeclarationService = {
         );
       }
       const transferredSettlementIds:string[]=[];
+      const annexedCountries:PeaceResolution["annexedCountries"]=[];
       for(const term of transferTerms){
         const occupation=(await client.query(
           "SELECT 1 FROM settlement_occupations WHERE war_id=$1 AND settlement_id=$2 AND occupier_country_id=$3 AND legal_owner_country_id=$4 AND status='ACTIVE' FOR UPDATE",
@@ -1086,10 +1134,16 @@ export const warDeclarationService = {
         ));
         if(!occupation.rowCount)throw new GameError("Barış kabul edilemedi: devredilecek yerleşkenin işgal durumu değişmiş.");
         await client.query("UPDATE settlement_occupations SET status='ENDED',ended_turn=$2,ended_reason='Barış antlaşmasıyla nihai devir başlatıldı.',ended_at=NOW() WHERE war_id=$1 AND settlement_id=$3 AND status='ACTIVE'",[locked.war_id,turn,term.settlement_id]);
-        await gameService.transferSettlement({
+        const transferResult=await gameService.transferSettlement({
           guildId:input.guildId,actorId:input.actorId,sourceCountryId:term.source_country_id,targetCountryId:term.target_country_id,
-          settlementId:term.settlement_id,transferType:"CONQUEST",transferTurn:turn,transactionClient:client
+          settlementId:term.settlement_id,transferType:"PEACE_TRANSFER",transferTurn:turn,
+          eliminateOnLastSettlement:annexedCountryIds.has(term.source_country_id),transactionClient:client
         });
+        for(const event of transferResult.lastStandDetails){
+          if(event.kind==="FAILED"&&annexedCountryIds.has(event.countryId))annexedCountries.push({
+            countryId:event.countryId,countryName:event.countryName,discordRoleId:event.discordRoleId
+          });
+        }
         transferredSettlementIds.push(term.settlement_id);
       }
       await client.query("UPDATE peace_offers SET status=$2,resolved_turn=$3,resolved_by=$4,resolved_at=NOW() WHERE id=$1",
@@ -1105,7 +1159,7 @@ export const warDeclarationService = {
       }
       await audit(client, input.guildId, input.actorId, input.accept ? "PEACE_OFFER_ACCEPT" : "PEACE_OFFER_REJECT", "peace_offer", input.offerId,
         { ...input, indemnity: locked.indemnity_amount, deductions, credits, turn });
-      return { offer: (await offerById(client, input.offerId))!, war: (await warById(client, locked.war_id))!, deductions, credits };
+      return { offer: (await offerById(client, input.offerId))!, war: (await warById(client, locked.war_id))!, deductions, credits, annexedCountries };
     });
   },
 
