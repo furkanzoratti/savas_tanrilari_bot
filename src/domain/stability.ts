@@ -14,6 +14,10 @@ export const REBEL_FACTION_LABELS: Record<RebelFactionType, string> = {
 
 export interface StabilityFactor { label: string; adjustment: number }
 
+export function occupationWarExhaustion(occupiedSettlements:number,capitalOccupied:boolean):number{
+  return Math.min(15,Math.max(0,Math.trunc(occupiedSettlements))*3)+(capitalOccupied?5:0);
+}
+
 export interface RebellionPressureInput {
   prosperity: number;
   unrestActive: boolean;

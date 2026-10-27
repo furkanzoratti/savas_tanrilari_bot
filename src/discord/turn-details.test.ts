@@ -79,7 +79,9 @@ describe("ayrıntılı tur ilerletme kartı", () => {
           activeWars: 1,
           newBattleLosses: 1_000,
           raidsSuffered: 0,
-          settlementsLost: 0
+          settlementsLost: 0,
+          occupiedSettlements: 0,
+          capitalOccupied: false
         })),
         settlements: rows.map((index) => ({
           countryName: `Ülke ${index}`,

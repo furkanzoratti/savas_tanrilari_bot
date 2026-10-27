@@ -18,9 +18,16 @@ describe("dinamik savaş skoru ve barış bedeli",()=>{
     expect(provinces.filter((province)=>province.side==="DEFENDER").reduce((sum,province)=>sum+province.occupationScore,0)).toBe(100);
   });
 
-  it("barış bedelini işgal skorundan ayrı tutar ve ülkenin tamamını 100 puana sığdırmaz",()=>{
+  it("her devletin kendi teslimiyet puanını ayrıca 100 üzerinden dağıtır",()=>{
+    for(const countryId of ["a","d"]){
+      expect(provinces.filter((province)=>province.countryId===countryId)
+        .reduce((sum,province)=>sum+province.countryOccupationScore,0)).toBe(100);
+    }
+  });
+
+  it("barış bedelini eski modele göre düşürür ve değerli şehirleri daha pahalı tutar",()=>{
     const defender=provinces.filter((province)=>province.countryId==="d");
-    expect(defender.reduce((sum,province)=>sum+province.peaceCost,0)).toBeGreaterThan(100);
+    expect(defender.reduce((sum,province)=>sum+province.peaceCost,0)).toBeLessThanOrEqual(110);
     expect(defender.find((province)=>province.id==="d-capital")!.peaceCost)
       .toBeGreaterThan(defender.find((province)=>province.id==="d-town")!.peaceCost);
   });

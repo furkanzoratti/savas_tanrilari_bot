@@ -60,4 +60,11 @@ describe("barış antlaşmasıyla tam ilhak",()=>{
     expect(source).toContain('transferType:"PEACE_TRANSFER"');
     expect(source).toContain("eliminateOnLastSettlement:annexedCountryIds.has(term.source_country_id)");
   });
+
+  it("işgal edilen toprağı fiilî işgalciyle aynı cephedeki başka bir devlete devredebilir",()=>{
+    const source=readFileSync(new URL("./war-declaration-service.ts",import.meta.url),"utf8");
+    expect(source).toContain("occupierSide!==recipientSide");
+    expect(source).toContain("toprağı alacak devlet artık fiilî işgalciyle aynı cephede değil");
+    expect(source).toContain("countryScoreBudget");
+  });
 });

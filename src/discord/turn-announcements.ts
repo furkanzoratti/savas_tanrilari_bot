@@ -43,7 +43,7 @@ export interface TurnAnnouncementInput {
   }>;
   stability?:{
     enabled:boolean;
-    warExhaustion:Array<{countryName:string;before:number;after:number;activeWars:number;newBattleLosses:number;raidsSuffered:number;settlementsLost:number}>;
+    warExhaustion:Array<{countryName:string;before:number;after:number;activeWars:number;newBattleLosses:number;raidsSuffered:number;settlementsLost:number;occupiedSettlements:number;capitalOccupied:boolean}>;
     settlements:Array<{countryName:string;settlementName:string;prosperityBefore:number;prosperityAfter:number;rebellionBefore:number;rebellionAfter:number;unrestRisk:number;roll:number|null;factionType:string|null;factionName:string|null;outbreak:boolean;rebelPersonnel:number;rebelMilitaryPower:number}>;
   };
   romanFamilyIncomeDetails?:Array<{familyName:string;businessIncome:number;consulStipend:number;total:number}>;
@@ -268,7 +268,7 @@ export function turnAnnouncement(input: TurnAnnouncementInput): EmbedBuilder {
   if(input.stability?.warExhaustion.length)embed.addFields({
     name:"⚔️ Savaş Yorgunluğu",
     value:fieldValue(input.stability.warExhaustion.map((item)=>
-      `• **${item.countryName}** — ${item.before} → **${item.after}**${item.activeWars?` • ${item.activeWars} savaş`:" • Barışta toparlanma"}${item.newBattleLosses?` • ${item.newBattleLosses.toLocaleString("tr-TR")} yeni kayıp`:""}${item.raidsSuffered?` • ${item.raidsSuffered} yağma`:""}${item.settlementsLost?` • ${item.settlementsLost} toprak kaybı`:""}`
+      `• **${item.countryName}** — ${item.before} → **${item.after}**${item.activeWars?` • ${item.activeWars} savaş`:" • Barışta toparlanma"}${item.newBattleLosses?` • ${item.newBattleLosses.toLocaleString("tr-TR")} yeni kayıp`:""}${item.raidsSuffered?` • ${item.raidsSuffered} yağma`:""}${item.settlementsLost?` • ${item.settlementsLost} toprak kaybı`:""}${item.occupiedSettlements?` • ${item.occupiedSettlements} işgal${item.capitalOccupied?" • başkent işgal altında":""}`:""}`
     ))
   });
   const outbreaks=input.stability?.settlements.filter((item)=>item.outbreak)??[];

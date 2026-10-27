@@ -36,6 +36,7 @@ const pendingWarDialogs = new Map<string, PendingWarDialog>();
 
 type PendingPeaceWizard={
   token:string;guildId:string;userId:string;proposerCountryId:string;warId:string|null;
+  landRecipientCountryId:string|null;
   settlementIds:string[];
   payer:"NONE"|"PROPOSER"|"RECEIVER";indemnityAmount:number;terms:string;
 };
@@ -227,6 +228,9 @@ export function renderActiveWarDetail(detail:OfficialWarDetailView,flag:CountryF
   const defenderFlag=flag(war.defender_country_name,"🔵");
   const goal=`${WAR_GOALS[war.goal_type]?.label??war.war_goal}${war.goal_target_settlement_name?` • ${war.goal_target_settlement_name}`:""}`;
   const activeOccupations=detail.occupations.filter((occupation)=>occupation.status==="ACTIVE");
+  const countryOccupationLines=detail.countryOccupationScores
+    .filter((item)=>item.score>0)
+    .map((item)=>`${flag(item.country_name,item.side==="ATTACKER"?"🔴":"🔵")} **${item.country_name}:** ${number(item.score)} / 100`);
   const overview=new EmbedBuilder()
     .setColor(0x9f252c)
     .setTitle(`${attackerFlag} ${war.attacker_country_name} — ${defenderFlag} ${war.defender_country_name}`)
@@ -237,8 +241,11 @@ export function renderActiveWarDetail(detail:OfficialWarDetailView,flag:CountryF
       {name:"🔴 Saldıran Cephe",value:fieldValue(war.attacker_participant_names.map((name)=>`${flag(name,"▫️")} ${name}`).join("\n")),inline:true},
       {name:"🔵 Savunan Cephe",value:fieldValue(war.defender_participant_names.map((name)=>`${flag(name,"▫️")} ${name}`).join("\n")),inline:true},
       {name:"🩸 Toplam Muharebe Kayıpları",value:fieldValue(`${attackerFlag} ${war.attacker_country_name}: **${number(detail.attackerLosses)}**\n${defenderFlag} ${war.defender_country_name}: **${number(detail.defenderLosses)}**`)},
+      {name:"🏳️ Devlet Bazlı Teslimiyet",value:fieldValue(countryOccupationLines.length
+        ?`${countryOccupationLines.join("\n")}\n_Bu değer her devletin kendi topraklarının işgal oranıdır; tam işgal edilen devlet 100/100 olur._`
+        :"Hiçbir devletin toprağı işgal altında değil.")},
       {name:"🚩 Aktif İşgaller",value:fieldValue(activeOccupations.length
-        ?activeOccupations.map((occupation)=>`**${occupation.settlement_name}** • ${flag(occupation.occupier_country_name,"🚩")} ${occupation.occupier_country_name} işgali • İşgal skoru **+${number(Number(occupation.score_points))}** • Barış bedeli **${number(Number(occupation.peace_cost??0))}**`).join("\n")
+        ?activeOccupations.map((occupation)=>`**${occupation.settlement_name}** • ${flag(occupation.occupier_country_name,"🚩")} ${occupation.occupier_country_name} işgali • Cephe **+${number(Number(occupation.score_points))}** • Devlet **+${number(Number(occupation.country_score_points))}** • Barış bedeli **${number(Number(occupation.peace_cost??0))}**`).join("\n")
         :"Aktif işgal bulunmuyor.")}
     )
     .setFooter({text:"Aşağıdaki seçim kutusundan aynı sayfadaki başka bir savaşa geçebilirsin."});
@@ -301,8 +308,15 @@ function peaceWizardPayload(wizard:PendingPeaceWizard,detail:OfficialWarDetailVi
   const receiverId=war.attacker_country_id===wizard.proposerCountryId?war.defender_country_id:war.attacker_country_id;
   const proposerName=war.attacker_country_id===wizard.proposerCountryId?war.attacker_country_name:war.defender_country_name;
   const receiverName=war.attacker_country_id===wizard.proposerCountryId?war.defender_country_name:war.attacker_country_name;
+  const participantById=new Map(detail.participants.map((participant)=>[participant.country_id,participant]));
+  const proposerSide=participantById.get(wizard.proposerCountryId)?.side
+    ??(war.attacker_country_id===wizard.proposerCountryId?"ATTACKER":"DEFENDER");
+  const landRecipient=participantById.get(wizard.landRecipientCountryId??wizard.proposerCountryId)
+    ??participantById.get(wizard.proposerCountryId);
+  if(!landRecipient)throw new GameError("Barış formunda teklif eden devletin savaş cephesi bulunamadı.");
+  wizard.landRecipientCountryId=landRecipient.country_id;
   const activeOccupations=detail.occupations.filter((occupation)=>
-    occupation.status==="ACTIVE"&&[wizard.proposerCountryId,receiverId].includes(occupation.occupier_country_id)
+    occupation.status==="ACTIVE"&&participantById.get(occupation.occupier_country_id)?.side===landRecipient.side
   );
   const selectedOccupations=activeOccupations.filter((occupation)=>wizard.settlementIds.includes(occupation.settlement_id));
   const displayedCostBySettlement=new Map(selectedOccupations.map((occupation)=>[
@@ -320,18 +334,38 @@ function peaceWizardPayload(wizard:PendingPeaceWizard,detail:OfficialWarDetailVi
     fullAnnexationOwnerIds.add(ownerId);
   }
   const payerName=wizard.payer==="PROPOSER"?proposerName:wizard.payer==="RECEIVER"?receiverName:null;
-  const proposerSide=war.attacker_country_id===wizard.proposerCountryId?"ATTACKER":"DEFENDER";
-  const scoreBudget=Math.max(0,proposerSide==="ATTACKER"?Number(war.attacker_score):-Number(war.attacker_score));
+  const overallScoreBudget=Math.max(0,proposerSide==="ATTACKER"?Number(war.attacker_score):-Number(war.attacker_score));
+  const demandedOwnerIds=new Set(selectedOccupations
+    .filter(()=>landRecipient.side===proposerSide)
+    .map((occupation)=>occupation.legal_owner_country_id));
+  const countryScoreBudget=Math.max(0,...detail.countryOccupationScores
+    .filter((item)=>demandedOwnerIds.has(item.country_id)&&item.side!==proposerSide)
+    .map((item)=>Number(item.score)));
+  const scoreBudget=Math.max(overallScoreBudget,countryScoreBudget);
   const landCost=selectedOccupations.reduce((sum,occupation)=>sum+Number(displayedCostBySettlement.get(occupation.settlement_id)??0)
-    *(occupation.occupier_country_id===wizard.proposerCountryId?1:-1),0);
+    *(landRecipient.side===proposerSide?1:-1),0);
   const indemnityCost=wizard.indemnityAmount>0
     ?Math.ceil(wizard.indemnityAmount/1_000)*(wizard.payer==="RECEIVER"?1:-1)
     :0;
-  const demandCost=selectedOccupations.reduce((sum,occupation)=>sum+(occupation.occupier_country_id===wizard.proposerCountryId
+  const demandCost=selectedOccupations.reduce((sum,occupation)=>sum+(landRecipient.side===proposerSide
     ?Number(displayedCostBySettlement.get(occupation.settlement_id)??0):0),0)+Math.max(0,indemnityCost);
+  const demandedCostByCountry=new Map<string,number>();
+  if(landRecipient.side===proposerSide){
+    for(const occupation of selectedOccupations){
+      demandedCostByCountry.set(occupation.legal_owner_country_id,
+        (demandedCostByCountry.get(occupation.legal_owner_country_id)??0)+Number(displayedCostBySettlement.get(occupation.settlement_id)??0));
+    }
+  }
+  if(indemnityCost>0)demandedCostByCountry.set(receiverId,(demandedCostByCountry.get(receiverId)??0)+indemnityCost);
+  const countryScoreById=new Map(detail.countryOccupationScores.map((item)=>[item.country_id,Number(item.score)]));
+  const countryBudgetViolation=[...demandedCostByCountry.entries()].find(([countryId,cost])=>
+    cost>Math.max(overallScoreBudget,countryScoreById.get(countryId)??0));
+  const countryBudgetViolationName=countryBudgetViolation
+    ?detail.participants.find((item)=>item.country_id===countryBudgetViolation[0])?.country_name??"Hedef devlet"
+    :null;
   const concessionCost=Math.abs(Math.min(0,landCost))+Math.abs(Math.min(0,indemnityCost));
   const landSummary=selectedOccupations.length
-    ?`${selectedOccupations.map((occupation)=>`• **${occupation.settlement_name}** → **${occupation.occupier_country_name}** • ${occupation.occupier_country_id===wizard.proposerCountryId?"Talep":"Taviz"} **${number(Number(displayedCostBySettlement.get(occupation.settlement_id)??0))}**`).join("\n")}${fullAnnexationOwnerIds.size?`\n\n🏴 **Tam ilhak:** ${[...fullAnnexationOwnerIds].map((ownerId)=>selectedByOwner.get(ownerId)?.[0]?.legal_owner_country_name).filter(Boolean).join(", ")} • Toprak bedeli toplam **100** savaş skoru.`:""}\n_Yalnızca yerleşkeyi fiilen işgal eden taraf nihai devri alabilir._`
+    ?`${selectedOccupations.map((occupation)=>`• **${occupation.settlement_name}** → **${landRecipient.country_name}** • ${landRecipient.side===proposerSide?"Talep":"Taviz"} **${number(Number(displayedCostBySettlement.get(occupation.settlement_id)??0))}**`).join("\n")}${fullAnnexationOwnerIds.size?`\n\n🏴 **Tam ilhak:** ${[...fullAnnexationOwnerIds].map((ownerId)=>selectedByOwner.get(ownerId)?.[0]?.legal_owner_country_name).filter(Boolean).join(", ")} • Toprak bedeli toplam **100** savaş skoru.`:""}\n_Topraklar, fiilî işgalciyle aynı cephede bulunan seçili devlete devredilir._`
     :"Toprak devri talep edilmiyor.";
   const embed=new EmbedBuilder().setColor(0x3c8b5c).setTitle("🕊️ Barış Teklifi Hazırlama Masası")
     .setDescription(`**${proposerName}** → **${receiverName}**\nSeçimler henüz karşı tarafa gönderilmedi; aşağıdaki önizlemeyi dilediğin kadar değiştirebilirsin.`)
@@ -339,7 +373,7 @@ function peaceWizardPayload(wizard:PendingPeaceWizard,detail:OfficialWarDetailVi
       {name:"⚔️ Savaş",value:fieldValue(`${war.attacker_country_name} — ${war.defender_country_name}\n🎯 ${WAR_GOALS[war.goal_type]?.label??war.war_goal} • ⚖️ ${war.attacker_country_name} açısından ${Number(war.attacker_score)>0?"+":""}${Number(war.attacker_score)}`)},
       ...longTextFields("🗺️ Toprak Maddeleri",landSummary),
       {name:"💰 Altın Maddesi",value:fieldValue(wizard.indemnityAmount>0&&payerName?`**${payerName}** ${gold(wizard.indemnityAmount)} ödeyecek.`:"Altın ödemesi talep edilmiyor."),inline:true},
-      {name:"⚖️ Talep Bütçesi",value:fieldValue(`Toprak dengesi **${landCost>=0?"+":""}${number(landCost)}** • Altın dengesi **${indemnityCost>=0?"+":""}${number(indemnityCost)}**\nTalep **${number(demandCost)} / ${number(scoreBudget)}** savaş skoru • Verilen taviz **${number(concessionCost)}**${demandCost>scoreBudget?"\n❌ Mevcut savaş skoru bu teklif için yetersiz.":""}`)},
+      {name:"⚖️ Talep Bütçesi",value:fieldValue(`Toprak dengesi **${landCost>=0?"+":""}${number(landCost)}** • Altın dengesi **${indemnityCost>=0?"+":""}${number(indemnityCost)}**\nTalep **${number(demandCost)} / ${number(scoreBudget)}** savaş skoru • Cephe bütçesi **${number(overallScoreBudget)}**${countryScoreBudget?` • İlgili devlet teslimiyeti **${number(countryScoreBudget)}/100**`:""} • Verilen taviz **${number(concessionCost)}**${demandCost>scoreBudget?"\n❌ Mevcut savaş skoru bu teklif için yetersiz.":""}${countryBudgetViolation?`\n❌ ${countryBudgetViolationName} devletinden istenen **${number(countryBudgetViolation[1])}** skor, bu devlete karşı kullanılabilir bütçeyi aşıyor.`:""}`)},
       {name:"📜 Anlaşma Metni",value:fieldValue(wizard.terms||"Henüz anlaşma metni yazılmadı.")}
     )
     .setFooter({text:"Teklifi Gönder düğmesi bütün maddeleri son kez doğrular ve karşı cephe liderine yollar."});
@@ -356,6 +390,13 @@ function peaceWizardPayload(wizard:PendingPeaceWizard,detail:OfficialWarDetailVi
   const landRow=new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
     landMenu
   );
+  const recipientRow=new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+    new StringSelectMenuBuilder().setCustomId(`peace_land_recipient_select|${wizard.token}`)
+      .setPlaceholder("Toprakları alacak devleti seç")
+      .addOptions(detail.participants.slice(0,25).map((participant)=>(
+        {label:participant.country_name.slice(0,100),description:`${participant.side==="ATTACKER"?"Saldıran":"Savunan"} cephe`,value:participant.country_id,default:participant.country_id===landRecipient.country_id}
+      )))
+  );
   const payerRow=new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
     new StringSelectMenuBuilder().setCustomId(`peace_payer_select|${wizard.token}`).setPlaceholder("Altın ödemesinin yönünü seç").addOptions(
       {label:"Altın maddesi yok",description:"Teklifte tazminat bulunmaz",value:"NONE",default:wizard.payer==="NONE"},
@@ -365,12 +406,13 @@ function peaceWizardPayload(wizard:PendingPeaceWizard,detail:OfficialWarDetailVi
   );
   const buttonRow=new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(`peace_wizard_edit|${wizard.token}`).setLabel("Metin ve Altını Düzenle").setEmoji("✍️").setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId(`peace_wizard_send|${wizard.token}`).setLabel("Teklifi Gönder").setEmoji("🕊️").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`peace_wizard_send|${wizard.token}`).setLabel("Teklifi Gönder").setEmoji("🕊️").setStyle(ButtonStyle.Success)
+      .setDisabled(demandCost>scoreBudget||Boolean(countryBudgetViolation)),
     new ButtonBuilder().setCustomId(`peace_wizard_clear_lands|${wizard.token}`).setLabel("Toprağı Temizle").setEmoji("🧹").setStyle(ButtonStyle.Secondary).setDisabled(!wizard.settlementIds.length),
     new ButtonBuilder().setCustomId(`peace_wizard_back|${wizard.token}`).setLabel("Savaşı Değiştir").setEmoji("↩️").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(`peace_wizard_cancel|${wizard.token}`).setLabel("İptal").setStyle(ButtonStyle.Secondary)
   );
-  return{embeds:[embed],components:[landRow,payerRow,buttonRow],receiverId};
+  return{embeds:[embed],components:[landRow,recipientRow,payerRow,buttonRow],receiverId};
 }
 
 function warInvitationButtons(id: string): ActionRowBuilder<ButtonBuilder> {
@@ -689,7 +731,7 @@ export async function handleWarDeclarationCommand(interaction: ChatInputCommandI
   const proposer=await resolveCountry(interaction,interaction.options.getString("ulke"));
   const wizard:PendingPeaceWizard={
     token:interaction.id,guildId:interaction.guildId,userId:interaction.user.id,proposerCountryId:proposer.id,warId:null,
-    settlementIds:[],payer:"NONE",indemnityAmount:0,
+    landRecipientCountryId:proposer.id,settlementIds:[],payer:"NONE",indemnityAmount:0,
     terms:"Taraflar arasında barış sağlanacak ve kabul edilen bağlayıcı maddeler uygulanacaktır."
   };
   rememberPeaceWizard(wizard);
@@ -876,11 +918,14 @@ async function sendPeaceWizardOffer(interaction:ButtonInteraction,wizard:Pending
   if(!wizard.terms.trim())throw new GameError("Barış teklifinde bir anlaşma metni bulunmalıdır.");
   if(wizard.payer!=="NONE"&&wizard.indemnityAmount<=0)throw new GameError("Altın ödeyecek taraf seçildi; ödeme tutarını **Metin ve Altını Düzenle** düğmesinden girin.");
   const payerCountryId=wizard.payer==="PROPOSER"?wizard.proposerCountryId:wizard.payer==="RECEIVER"?receiverCountryId:null;
+  const participantById=new Map(detail.participants.map((participant)=>[participant.country_id,participant]));
+  const recipient=participantById.get(wizard.landRecipientCountryId??wizard.proposerCountryId);
+  if(!recipient)throw new GameError("Toprakları alacak devlet bu savaşın aktif katılımcısı değil.");
   const settlementTransfers=detail.occupations
     .filter((occupation)=>occupation.status==="ACTIVE"
-      &&[wizard.proposerCountryId,receiverCountryId].includes(occupation.occupier_country_id)
+      &&participantById.get(occupation.occupier_country_id)?.side===recipient.side
       &&wizard.settlementIds.includes(occupation.settlement_id))
-    .map((occupation)=>({settlementId:occupation.settlement_id,recipientCountryId:occupation.occupier_country_id}));
+    .map((occupation)=>({settlementId:occupation.settlement_id,recipientCountryId:recipient.country_id}));
   if(settlementTransfers.length!==wizard.settlementIds.length)throw new GameError("Seçilen toprak maddelerinden birinin işgal durumu değişti. Seçimleri yenileyin.");
   const offer=await warDeclarationService.createPeaceOffer({
     guildId:interaction.guildId!,actorId:interaction.user.id,warId:war.id,
@@ -915,7 +960,7 @@ export async function handleWarDeclarationButton(interaction: ButtonInteraction)
     }
     if(action==="peace_wizard_back"){
       await interaction.deferUpdate();
-      wizard.warId=null;wizard.settlementIds=[];
+      wizard.warId=null;wizard.landRecipientCountryId=wizard.proposerCountryId;wizard.settlementIds=[];
       wizard.payer="NONE";wizard.indemnityAmount=0;
       const wars=await warDeclarationService.activeWars(interaction.guildId);
       await interaction.editReply(peaceWarSelectionPayload(wizard,wars));
@@ -1043,7 +1088,7 @@ export async function handleWarDeclarationButton(interaction: ButtonInteraction)
 
 export async function handleWarDeclarationSelect(interaction:StringSelectMenuInteraction):Promise<boolean>{
   const [action,contextValue]=interaction.customId.split("|");
-  if(!["active_war_detail","peace_war_select","peace_land_select","peace_payer_select"].includes(action??""))return false;
+  if(!["active_war_detail","peace_war_select","peace_land_select","peace_land_recipient_select","peace_payer_select"].includes(action??""))return false;
   if(!interaction.guildId)throw new GameError("Bu işlem yalnızca bir Discord sunucusunda kullanılabilir.");
   if(action==="active_war_detail"){
     const pageIndex=Math.max(0,Number.parseInt(contextValue??"0",10)||0);
@@ -1072,7 +1117,7 @@ export async function handleWarDeclarationSelect(interaction:StringSelectMenuInt
     if(![detail.war.attacker_country_id,detail.war.defender_country_id].includes(wizard.proposerCountryId)){
       throw new GameError("Barış teklifini yalnızca savaş cephelerinden birinin lider devleti gönderebilir.");
     }
-    wizard.warId=warId;wizard.settlementIds=[];
+    wizard.warId=warId;wizard.landRecipientCountryId=wizard.proposerCountryId;wizard.settlementIds=[];
     wizard.payer="NONE";wizard.indemnityAmount=0;
     await interaction.editReply(peaceWizardPayload(wizard,detail));
     return true;
@@ -1082,10 +1127,16 @@ export async function handleWarDeclarationSelect(interaction:StringSelectMenuInt
   if(!detail)throw new GameError("Seçilen savaş artık aktif değil.");
   if(action==="peace_land_select"){
     const settlementIds=interaction.values;
-    const leaderIds=[detail.war.attacker_country_id,detail.war.defender_country_id];
-    const validIds=new Set(detail.occupations.filter((item)=>item.status==="ACTIVE"&&leaderIds.includes(item.occupier_country_id)).map((item)=>item.settlement_id));
+    const participantById=new Map(detail.participants.map((participant)=>[participant.country_id,participant]));
+    const recipientSide=participantById.get(wizard.landRecipientCountryId??wizard.proposerCountryId)?.side;
+    const validIds=new Set(detail.occupations.filter((item)=>item.status==="ACTIVE"&&participantById.get(item.occupier_country_id)?.side===recipientSide).map((item)=>item.settlement_id));
     if(settlementIds.some((settlementId)=>!validIds.has(settlementId)))throw new GameError("Seçilen yerleşkelerden biri artık bu savaşta aktif işgal altında değil.");
     wizard.settlementIds=[...new Set(settlementIds)];
+  }else if(action==="peace_land_recipient_select"){
+    const recipientId=interaction.values[0];
+    if(!recipientId||!detail.participants.some((participant)=>participant.country_id===recipientId))throw new GameError("Toprakları alacak devlet bu savaşın aktif katılımcısı değil.");
+    wizard.landRecipientCountryId=recipientId;
+    wizard.settlementIds=[];
   }else{
     const payer=interaction.values[0] as PendingPeaceWizard["payer"]|undefined;
     if(!payer||!["NONE","PROPOSER","RECEIVER"].includes(payer))throw new GameError("Altın ödemesinin yönü geçersiz.");

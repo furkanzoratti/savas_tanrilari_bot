@@ -1,6 +1,6 @@
 import {clampWarScore,type WarSide} from "./war-objectives.js";
 
-export const WAR_SCORE_MODEL_VERSION=3;
+export const WAR_SCORE_MODEL_VERSION=4;
 export const MAX_BATTLE_SCORE_COMPONENT=40;
 export const INDEMNITY_GOLD_PER_WAR_SCORE=1_000;
 export const MIN_SIEGE_DEFENDERS_FOR_BATTLE_SCORE=5_000;
@@ -20,6 +20,7 @@ export interface ProvinceWarValueInput{
 
 export interface ProvinceWarValue extends ProvinceWarValueInput{
   occupationScore:number;
+  countryOccupationScore:number;
   peaceCost:number;
 }
 
@@ -57,23 +58,29 @@ export function provinceWarValues(provinces:ProvinceWarValueInput[]):ProvinceWar
   }
   const byCountry=new Map<string,ProvinceWarValueInput[]>();
   for(const province of provinces)byCountry.set(province.countryId,[...(byCountry.get(province.countryId)??[]),province]);
+  const countryOccupationById=new Map<string,number>();
   const peaceById=new Map<string,number>();
   for(const countryProvinces of byCountry.values()){
+    for(const [id,points] of allocateHundred(countryProvinces))countryOccupationById.set(id,points);
     const count=countryProvinces.length;
     const populationTotal=countryProvinces.reduce((sum,item)=>sum+Math.max(0,item.population),0);
     const incomeTotal=countryProvinces.reduce((sum,item)=>sum+Math.max(0,item.income),0);
     const infrastructureTotal=countryProvinces.reduce((sum,item)=>sum+Math.max(0,item.infrastructure),0);
     for(const province of countryProvinces){
-      let cost=50/count
-        +55*safeShare(province.population,populationTotal,count)
-        +35*safeShare(province.income,incomeTotal,count)
-        +20*safeShare(province.infrastructure,infrastructureTotal,count)
-        +(province.capital?15:0)+(province.coastal?3:0)+(province.greatProject?10:0);
-      if(province.warGoal)cost*=.8;
-      peaceById.set(province.id,Math.max(5,Math.min(80,Math.ceil(cost))));
+      let cost=15/count
+        +40*safeShare(province.population,populationTotal,count)
+        +25*safeShare(province.income,incomeTotal,count)
+        +10*safeShare(province.infrastructure,infrastructureTotal,count)
+        +(province.capital?8:0)+(province.coastal?2:0)+(province.greatProject?6:0);
+      if(province.warGoal)cost*=.75;
+      peaceById.set(province.id,Math.max(3,Math.min(60,Math.ceil(cost))));
     }
   }
-  return provinces.map((province)=>({...province,occupationScore:occupationById.get(province.id)??0,peaceCost:peaceById.get(province.id)??5}));
+  return provinces.map((province)=>({...province,
+    occupationScore:occupationById.get(province.id)??0,
+    countryOccupationScore:countryOccupationById.get(province.id)??0,
+    peaceCost:peaceById.get(province.id)??3
+  }));
 }
 
 export function battleWarScorePoints(input:{

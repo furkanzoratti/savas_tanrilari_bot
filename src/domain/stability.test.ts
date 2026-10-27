@@ -1,7 +1,13 @@
 import { describe,expect,it } from "vitest";
-import { assessRebellionPressure,chooseRebelFaction,nextRebellionProgress,projectRebellionTurn,prosperityTier,rebelComposition,rebelFactionName,rebelMilitaryPower,rebelPersonnel,rebelSiegeTrain } from "./stability.js";
+import { assessRebellionPressure,chooseRebelFaction,nextRebellionProgress,occupationWarExhaustion,projectRebellionTurn,prosperityTier,rebelComposition,rebelFactionName,rebelMilitaryPower,rebelPersonnel,rebelSiegeTrain } from "./stability.js";
 
 describe("stability domain",()=>{
+  it("aktif işgalleri ve başkent işgalini savaş yorgunluğuna ekler",()=>{
+    expect(occupationWarExhaustion(0,false)).toBe(0);
+    expect(occupationWarExhaustion(2,false)).toBe(6);
+    expect(occupationWarExhaustion(2,true)).toBe(11);
+    expect(occupationWarExhaustion(20,true)).toBe(20);
+  });
   it("applies prosperity tiers at their boundaries",()=>{
     expect(prosperityTier(24).incomeMultiplier).toBe(0.8);
     expect(prosperityTier(50).incomeMultiplier).toBe(1);

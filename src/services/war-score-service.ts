@@ -17,6 +17,7 @@ export interface WarScoreSnapshot{
   defenderOccupation:number;
   battleNet:number;
   provinces:ProvinceWarValue[];
+  countryOccupationScores:Array<{countryId:string;side:WarSide;score:number}>;
 }
 
 async function provinceInputs(client:Pick<DbClient,"query">,warId:string):Promise<ProvinceWarValueInput[]>{
@@ -62,6 +63,7 @@ export async function recalculateWarScore(client:DbClient,warId:string):Promise<
         FROM settlement_occupations WHERE war_id=$1 AND status='ACTIVE' FOR UPDATE`,[warId])).rows;
   let attackerOccupation=0;
   let defenderOccupation=0;
+  const countryOccupationScores=new Map<string,number>(provinces.map((province)=>[province.countryId,0]));
   for(const occupation of occupations){
     const province=bySettlement.get(occupation.settlement_id);
     const occupierSide=countrySide.get(occupation.occupier_country_id);
@@ -72,6 +74,10 @@ export async function recalculateWarScore(client:DbClient,warId:string):Promise<
     }
     if(occupierSide==="ATTACKER")attackerOccupation+=points;
     else if(occupierSide==="DEFENDER")defenderOccupation+=points;
+    if(province&&occupierSide&&ownerSide&&occupierSide!==ownerSide){
+      countryOccupationScores.set(occupation.legal_owner_country_id,
+        (countryOccupationScores.get(occupation.legal_owner_country_id)??0)+province.countryOccupationScore);
+    }
   }
   const battleNet=Number((await client.query<{total:number}>(
     `SELECT COALESCE(SUM(CASE WHEN side='ATTACKER' THEN points ELSE -points END),0)::integer AS total
@@ -82,7 +88,12 @@ export async function recalculateWarScore(client:DbClient,warId:string):Promise<
     "UPDATE state_wars SET attacker_score=$2,war_score_model_version=$3 WHERE id=$1",
     [warId,attackerScore,WAR_SCORE_MODEL_VERSION]
   );
-  return{attackerScore,attackerOccupation,defenderOccupation,battleNet,provinces};
+  return{
+    attackerScore,attackerOccupation,defenderOccupation,battleNet,provinces,
+    countryOccupationScores:[...countryOccupationScores.entries()].map(([countryId,score])=>({
+      countryId,side:countrySide.get(countryId)!,score:Math.min(100,score)
+    })).sort((left,right)=>left.side.localeCompare(right.side)||left.countryId.localeCompare(right.countryId))
+  };
 }
 
 export async function refreshWarScore(warId:string):Promise<WarScoreSnapshot>{

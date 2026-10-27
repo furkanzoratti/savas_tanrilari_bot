@@ -143,6 +143,14 @@ describe("resmî savaş ilanları ve barış duyuruları", () => {
     };
     const embeds=renderActiveWarDetail({
       war,attackerLosses:450,defenderLosses:800,
+      participants:[
+        {war_id:"war",country_id:"roma",country_name:"Roma",side:"ATTACKER",join_source:"DECLARATION",joined_turn:12},
+        {war_id:"war",country_id:"kartaca",country_name:"Kartaca",side:"DEFENDER",join_source:"DECLARATION",joined_turn:12}
+      ],
+      countryOccupationScores:[
+        {country_id:"roma",country_name:"Roma",side:"ATTACKER",score:0},
+        {country_id:"kartaca",country_name:"Kartaca",side:"DEFENDER",score:100}
+      ],
       battles:[{
         id:"battle",terrain:"SIEGE",status:"FINISHED",round_number:3,winner_side:"A",finish_reason:"Şehir düştü",
         defender_settlement_name:"Siraküza",country_a_name:"Roma",country_b_name:"Kartaca",
@@ -159,7 +167,8 @@ describe("resmî savaş ilanları ve barış duyuruları", () => {
       ],
       occupations:[{
         id:"occupation",settlement_id:"sirakuza",settlement_name:"Siraküza",occupier_country_id:"roma",occupier_country_name:"Roma",
-        legal_owner_country_id:"kartaca",legal_owner_country_name:"Kartaca",started_turn:13,status:"ACTIVE",ended_turn:null,score_points:25
+        legal_owner_country_id:"kartaca",legal_owner_country_name:"Kartaca",legal_owner_settlement_count:1,
+        started_turn:13,status:"ACTIVE",ended_turn:null,score_points:25,country_score_points:100,peace_cost:40
       }]
     });
     const overview=embeds[0]!.toJSON();
@@ -170,6 +179,8 @@ describe("resmî savaş ilanları ve barış duyuruları", () => {
     expect(text).toContain("450");
     expect(text).toContain("800");
     expect(text).toContain("Siraküza");
+    expect(text).toContain("Kartaca:** 100 / 100");
+    expect(text).toContain("Devlet **+100**");
     expect(text).not.toContain("Lejyoner");
     expect(text).not.toContain("4550/5000");
     expect(text).not.toContain("Gizli Kale");

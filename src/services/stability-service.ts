@@ -2,7 +2,7 @@ import { randomInt } from "node:crypto";
 import type { DbClient } from "../db/pool.js";
 import {
   REBEL_FACTION_LABELS, assessRebellionPressure, nextRebellionProgress, prosperityTier,
-  rebelComposition, rebelFactionName, rebelMilitaryPower, rebelPersonnel, rebelSiegeTrain,
+  occupationWarExhaustion,rebelComposition, rebelFactionName, rebelMilitaryPower, rebelPersonnel, rebelSiegeTrain,
   type RebelFactionType
 } from "../domain/stability.js";
 import {RELIGIONS,type ReligionKey} from "../domain/religions.js";
@@ -31,6 +31,7 @@ interface SettlementStabilityRow {
 export interface WarExhaustionTurnDetail {
   countryName: string; before: number; after: number; activeWars: number;
   newBattleLosses: number; raidsSuffered: number; settlementsLost: number;
+  occupiedSettlements:number;capitalOccupied:boolean;
 }
 
 export interface SettlementStabilityTurnDetail {
@@ -81,6 +82,15 @@ async function processWarExhaustion(client: DbClient, guildId: string, newTurn: 
       `SELECT COUNT(*)::integer AS count FROM settlement_ownership_history
         WHERE previous_country_id=$1 AND acquired_turn=$2 AND new_country_id<>$1`, [country.id,newTurn-1]
     )).rows[0]?.count ?? 0);
+    const occupationPressure=(await client.query<{count:number;capital_occupied:boolean}>(
+      `SELECT COUNT(*)::integer AS count,
+              COALESCE(BOOL_OR(owner.capital_settlement_id=occupation.settlement_id),FALSE) AS capital_occupied
+         FROM settlement_occupations occupation
+         JOIN countries owner ON owner.id=occupation.legal_owner_country_id
+        WHERE occupation.legal_owner_country_id=$1 AND occupation.status='ACTIVE'`,[country.id]
+    )).rows[0];
+    const occupiedSettlements=Number(occupationPressure?.count??0);
+    const capitalOccupied=Boolean(occupationPressure?.capital_occupied);
     let delta = 0;
     if (!activeWarRows.length) delta = -10;
     else {
@@ -90,6 +100,7 @@ async function processWarExhaustion(client: DbClient, guildId: string, newTurn: 
       else if (longestWar>=4) delta += 2;
       delta += Math.min(10,Math.floor(newBattleLosses/2_500));
       delta += raidsSuffered*3+settlementsLost*8;
+      delta += occupationWarExhaustion(occupiedSettlements,capitalOccupied);
     }
     const before = Number(country.war_exhaustion);
     const after = clamp(before+delta,0,100);
@@ -98,11 +109,13 @@ async function processWarExhaustion(client: DbClient, guildId: string, newTurn: 
          country_id,game_turn,exhaustion_before,exhaustion_after,active_wars,new_battle_losses,raids_suffered,settlements_lost,details
        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)`,
       [country.id,newTurn,before,after,activeWarRows.length,newBattleLosses,raidsSuffered,settlementsLost,
-        JSON.stringify({delta,longestWar:activeWarRows.length?Math.max(...activeWarRows.map((war)=>newTurn-Number(war.started_turn))):0})]
+        JSON.stringify({delta,longestWar:activeWarRows.length?Math.max(...activeWarRows.map((war)=>newTurn-Number(war.started_turn))):0,
+          occupiedSettlements,capitalOccupied})]
     );
     await client.query("UPDATE countries SET war_exhaustion=$1,stability_observed_battle_losses=$2 WHERE id=$3", [after,totalBattleLosses,country.id]);
-    if (before!==after || newBattleLosses || raidsSuffered || settlementsLost) details.push({
-      countryName:country.name,before,after,activeWars:activeWarRows.length,newBattleLosses,raidsSuffered,settlementsLost
+    if (before!==after || newBattleLosses || raidsSuffered || settlementsLost || occupiedSettlements) details.push({
+      countryName:country.name,before,after,activeWars:activeWarRows.length,newBattleLosses,raidsSuffered,settlementsLost,
+      occupiedSettlements,capitalOccupied
     });
   }
   return details;
