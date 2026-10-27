@@ -3,18 +3,21 @@ export const SETTLEMENT_TRANSFER_TYPES = {
     label: "Fetih",
     historyType: "CONQUEST",
     conquered: true,
+    violent: true,
     restorationClaim: true
   },
   PEACE_TRANSFER: {
     label: "Barış Antlaşması",
     historyType: "PEACE_TRANSFER",
-    conquered: false,
+    conquered: true,
+    violent: false,
     restorationClaim: true
   },
   VOLUNTARY_TRANSFER: {
     label: "Dostça Devir",
     historyType: "VOLUNTARY_TRANSFER",
     conquered: false,
+    violent: false,
     restorationClaim: false
   }
 } as const;

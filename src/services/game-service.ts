@@ -1806,8 +1806,8 @@ export const gameService = {
         [settlement.id]
       )).rows;
       const remainingGarrison = remainingGarrisonRows.reduce((sum, row) => sum + Number(row.quantity), 0);
-      const enslavedExistingGarrison = transferPolicy.conquered ? Math.min(Number(settlement.population), remainingGarrison) : 0;
-      const enslavedGarrison = transferPolicy.conquered ? enslavedExistingGarrison + cancelledGarrisonTrainees : 0;
+      const enslavedExistingGarrison = transferPolicy.violent ? Math.min(Number(settlement.population), remainingGarrison) : 0;
+      const enslavedGarrison = transferPolicy.violent ? enslavedExistingGarrison + cancelledGarrisonTrainees : 0;
       if (remainingSourceSettlements > 0) {
         await client.query("DELETE FROM army_siege_assets WHERE settlement_id=$1", [settlement.id]);
       }
