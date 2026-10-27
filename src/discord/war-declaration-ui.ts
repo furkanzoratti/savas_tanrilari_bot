@@ -149,7 +149,7 @@ const warBattleStatusLabels:Record<string,string>={
 
 const warScoreEventLabels:Record<string,string>={
   BATTLE:"Muharebe zaferi",OCCUPATION:"Yerleşke işgali",TARGET_OCCUPATION:"Savaş hedefi işgali",
-  CAPITAL_OCCUPATION:"Başkent işgali",GM_ADJUSTMENT:"Yönetici düzenlemesi"
+  CAPITAL_OCCUPATION:"Başkent işgali",BLOCKADE:"Liman ablukası",GM_ADJUSTMENT:"Yönetici düzenlemesi"
 };
 
 function activeWarChunks(wars:OfficialWarView[]):OfficialWarView[][]{

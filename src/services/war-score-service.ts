@@ -81,7 +81,7 @@ export async function recalculateWarScore(client:DbClient,warId:string):Promise<
   }
   const battleNet=Number((await client.query<{total:number}>(
     `SELECT COALESCE(SUM(CASE WHEN side='ATTACKER' THEN points ELSE -points END),0)::integer AS total
-       FROM state_war_score_events WHERE war_id=$1 AND event_type IN ('BATTLE','GM_ADJUSTMENT')`,[warId]
+       FROM state_war_score_events WHERE war_id=$1 AND event_type IN ('BATTLE','BLOCKADE','GM_ADJUSTMENT')`,[warId]
   )).rows[0]?.total??0);
   const attackerScore=calculateWarBalance({attackerOccupation,defenderOccupation,battleNet});
   await client.query(

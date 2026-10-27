@@ -1,6 +1,6 @@
 import {clampWarScore,type WarSide} from "./war-objectives.js";
 
-export const WAR_SCORE_MODEL_VERSION=4;
+export const WAR_SCORE_MODEL_VERSION=5;
 export const MAX_BATTLE_SCORE_COMPONENT=40;
 export const INDEMNITY_GOLD_PER_WAR_SCORE=1_000;
 export const MIN_SIEGE_DEFENDERS_FOR_BATTLE_SCORE=5_000;

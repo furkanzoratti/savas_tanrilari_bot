@@ -8,6 +8,7 @@ import {
   type NavalRaidTier
 } from "../domain/naval-operations.js";
 import { GameError } from "./game-service.js";
+import {recalculateWarScore} from "./war-score-service.js";
 
 export interface NavalBlockadeView {
   id: string;
@@ -176,6 +177,34 @@ async function syncCountryTreasury(client: DbClient, countryId: string): Promise
   );
 }
 
+async function awardBlockadeWarScore(client:DbClient,input:{
+  blockadeId:string;blockaderCountryId:string;targetCountryId:string;targetSettlementId:string;gameTurn:number;
+}):Promise<{warId:string;side:"ATTACKER"|"DEFENDER";awarded:boolean}|null>{
+  const war=(await client.query<{war_id:string;side:"ATTACKER"|"DEFENDER"}>(
+    `SELECT war.id AS war_id,blockader.side
+       FROM state_wars war
+       JOIN state_war_participants blockader
+         ON blockader.war_id=war.id AND blockader.country_id=$1
+       JOIN state_war_participants target
+         ON target.war_id=war.id AND target.country_id=$2 AND target.side<>blockader.side
+      WHERE war.status='ACTIVE'
+      ORDER BY war.created_at DESC LIMIT 1`,[input.blockaderCountryId,input.targetCountryId]
+  )).rows[0];
+  if(!war)return null;
+  const inserted=await client.query(
+    `INSERT INTO state_war_score_events(
+       war_id,side,event_type,points,game_turn,settlement_id,source_key,details
+     ) VALUES($1,$2,'BLOCKADE',2,$3,$4,$5,$6::jsonb)
+     ON CONFLICT(source_key) DO NOTHING RETURNING id`,
+    [war.war_id,war.side,input.gameTurn,input.targetSettlementId,
+      `blockade:${war.war_id}:${input.targetSettlementId}`,
+      JSON.stringify({blockadeId:input.blockadeId,blockaderCountryId:input.blockaderCountryId,targetCountryId:input.targetCountryId})]
+  );
+  const awarded=Boolean(inserted.rowCount);
+  if(awarded)await recalculateWarScore(client,war.war_id);
+  return{warId:war.war_id,side:war.side,awarded};
+}
+
 export const navalOperationsService = {
   async startBlockade(input: { guildId: string; actorId: string; blockaderCountryId: string; fleetId: string; targetCountryId: string; targetSettlementId: string }): Promise<NavalBlockadeView> {
     return withTransaction(async (client) => {
@@ -210,7 +239,14 @@ export const navalOperationsService = {
         [input.guildId,input.blockaderCountryId,fleet.id,input.targetCountryId,input.targetSettlementId,lossPercent,
           fleet.commander_character_id,fleet.admiral_specialization_level,turn,siegeBattleId,starvationAdjusted,input.actorId]
       )).rows[0]!;
-      await audit(client,input.guildId,input.actorId,"naval.blockade.start",created.id,{ fleetId:fleet.id,targetSettlementId:input.targetSettlementId,lossPercent,starvationAdjusted });
+      const warScore=await awardBlockadeWarScore(client,{
+        blockadeId:created.id,blockaderCountryId:input.blockaderCountryId,targetCountryId:input.targetCountryId,
+        targetSettlementId:input.targetSettlementId,gameTurn:turn
+      });
+      await audit(client,input.guildId,input.actorId,"naval.blockade.start",created.id,{
+        fleetId:fleet.id,targetSettlementId:input.targetSettlementId,lossPercent,starvationAdjusted,
+        warScore:warScore?.awarded?{warId:warScore.warId,side:warScore.side,points:2}:null
+      });
       return loadBlockade(client,created.id);
     });
   },

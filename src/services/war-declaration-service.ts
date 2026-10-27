@@ -47,7 +47,7 @@ export type WarSide = "ATTACKER" | "DEFENDER";
 export interface OfficialWarScoreEventView {
   id: string;
   side: WarSide;
-  event_type: "BATTLE" | "OCCUPATION" | "TARGET_OCCUPATION" | "CAPITAL_OCCUPATION" | "GM_ADJUSTMENT";
+  event_type: "BATTLE" | "OCCUPATION" | "TARGET_OCCUPATION" | "CAPITAL_OCCUPATION" | "BLOCKADE" | "GM_ADJUSTMENT";
   points: number;
   game_turn: number;
   battle_id: string | null;
