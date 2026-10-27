@@ -648,11 +648,6 @@ export const commandBuilders = [
     .setName("buyuk-proje").setDescription("Devletinin elindeki büyük proje alanlarını görüntüler ve inşaat başlatır")
     .addStringOption(countryOption),
   new SlashCommandBuilder()
-    .setName("bina-yik").setDescription("Bir yerleşkedeki binayı anında ve ücret iadesiz yıkar")
-    .addStringOption((o) => o.setName("yerleske").setDescription("Binası yıkılacak yerleşke").setRequired(true).setAutocomplete(true))
-    .addStringOption((o) => o.setName("bina").setDescription("Yıkılacak bina").setRequired(true).setAutocomplete(true))
-    .addStringOption(countryOption),
-  new SlashCommandBuilder()
     .setName("asker-alimi").setDescription("Etkileşimli asker alımı başlatır")
     .addStringOption(countryOption),
   new SlashCommandBuilder()

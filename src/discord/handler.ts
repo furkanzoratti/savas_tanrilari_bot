@@ -1411,21 +1411,6 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
       available.slice(index*5,index*5+5).map((item)=>new ButtonBuilder().setCustomId(`gp|${country.id}|${item.settlementId}`).setLabel(`${item.settlementName}: İnşa Et`.slice(0,80)).setStyle(ButtonStyle.Success))
     ));
     await interaction.editReply({embeds:[embed],components});
-  } else if (interaction.commandName === "bina-yik") {
-    if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
-    await interaction.deferReply({flags:MessageFlags.Ephemeral});
-    const country=await resolveCountry(interaction,interaction.options.getString("ulke"));
-    const settlement=await findSettlement(country.id,interaction.options.getString("yerleske",true));
-    const result=await gameService.demolishBuilding({
-      guildId:interaction.guildId,actorId:interaction.user.id,countryId:country.id,settlementId:settlement.id,
-      buildingType:interaction.options.getString("bina",true)
-    });
-    const notes=[
-      result.releasedCharacters?`${result.releasedCharacters} bina görevlisi müsait duruma geçti.`:null,
-      result.cancelledTraining?`${result.cancelledTraining} tamamlanmamış Akademi eğitimi iptal edildi.`:null,
-      result.cancelledProduction?`${result.cancelledProduction} tamamlanmamış üretim emri ücret iadesiz iptal edildi.`:null
-    ].filter(Boolean);
-    await interaction.editReply(`🏚️ **${settlement.name}** yerleşkesindeki **${result.buildingName}${result.level>0?` Sv${result.level}`:" inşaatı"}** anında yıkıldı. Bina etkileri kaldırıldı ve altın iadesi yapılmadı.${notes.length?"\n"+notes.join("\n"):""}`);
   } else if (interaction.commandName === "asker-alimi") {
     await startPurchase(interaction, "unit");
   } else if (interaction.commandName === "otomatik-alim") {
@@ -1820,34 +1805,6 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
       .slice(0, 25)
       .map(([value, unit]) => ({ name: unit.name.slice(0, 100), value })));
     return;
-  }
-  if(interaction.commandName==="bina-yik"){
-    if(!interaction.guildId){await interaction.respond([]);return;}
-    const requested=isGameMaster(interaction)?interaction.options.getString("ulke"):null;
-    const country=requested
-      ?await gameService.countryByName(interaction.guildId,requested)
-      :await gameService.countryForUser(interaction.guildId,interaction.user.id);
-    if(!country){await interaction.respond([]);return;}
-    const query=String(focused.value).toLocaleLowerCase("tr-TR").trim();
-    if(focused.name==="yerleske"){
-      const settlements=await gameService.listSettlements(country.id);
-      await interaction.respond(settlements.filter((item)=>!query||item.name.toLocaleLowerCase("tr-TR").includes(query))
-        .slice(0,25).map((item)=>({name:item.name.slice(0,100),value:item.id})));
-      return;
-    }
-    if(focused.name==="bina"){
-      const settlementValue=interaction.options.getString("yerleske");
-      if(!settlementValue){await interaction.respond([]);return;}
-      let settlement;
-      try{settlement=await findSettlement(country.id,settlementValue);}catch{await interaction.respond([]);return;}
-      const buildings=await gameService.demolishableBuildings(country.id,settlement.id);
-      await interaction.respond(buildings.filter((item)=>!query||item.buildingName.toLocaleLowerCase("tr-TR").includes(query))
-        .slice(0,25).map((item)=>({
-          name:`${item.buildingName} • ${item.level>0?`Sv${item.level}`:`Sv${item.targetLevel??1} inşaatı`} • ${item.status}`.slice(0,100),
-          value:item.buildingType
-        })));
-      return;
-    }
   }
   if (interaction.commandName === "ordu") {
     if (!interaction.guildId) { await interaction.respond([]); return; }

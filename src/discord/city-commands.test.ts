@@ -70,10 +70,8 @@ describe("şehir geliştirme ve Akademi komutları", () => {
     expect(cancel?.options?.find((option)=>option.name==="yerleske")).toMatchObject({required:true,autocomplete:true});
   });
 
-  it("bina yıkımında yerleşke ve bina seçimlerini otomatik tamamlar", () => {
-    const demolition = commandBuilders.find((command) => command.name === "bina-yik");
-    expect(demolition?.options?.find((option) => option.name === "yerleske")).toMatchObject({required:true,autocomplete:true});
-    expect(demolition?.options?.find((option) => option.name === "bina")).toMatchObject({required:true,autocomplete:true});
+  it("oyuncu komutlarında bina yıkımını sunmaz", () => {
+    expect(commandBuilders.some((command) => command.name === "bina-yik")).toBe(false);
   });
 
   it("tur duyurusunda politika, huzursuzluk, erzak ve kredi sonuçlarını gösterir", () => {
