@@ -21,6 +21,7 @@ import {
 
 const number=(value:number)=>value.toLocaleString("tr-TR");
 const age=(value:number|null)=>value===null?"yaş bilinmiyor":number(value)+" yaş";
+const UUID_PATTERN=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const dynastyViewAttachment=(key:DynastyViewBannerKey)=>{
   const asset=dynastyViewAsset(key);
   return new AttachmentBuilder(asset.path,{name:asset.name});
@@ -470,7 +471,7 @@ async function countryForAdmin(interaction:ChatInputCommandInteraction){
 
 function selectedDynastyMemberId(value:string|null,label:string):string|null{
   if(value===null)return null;
-  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value))
+  if(!UUID_PATTERN.test(value))
     throw new GameError(label+" için adı elle yazmak yerine açılır listedeki üyeyi seçmelisiniz.");
   return value;
 }
@@ -513,6 +514,21 @@ export async function handleDynastyCommand(interaction:ChatInputCommandInteracti
         parentMemberId,dynastyId:view.id,allowAnyMarriedMember:true
       });
       await interaction.editReply({content:birthResultMessage(result),components:birthNameButton(result)});
+      await refreshDynastyCard(interaction.client,view.id);
+    }else if(sub==="yerel-soylu-evlilik"){
+      const memberId=selectedDynastyMemberId(interaction.options.getString("uye",true),"Hanedan üyesi")!;
+      const result=await dynastyService.marryLocalNoble({
+        guildId:interaction.guildId,countryId:country.id,dynastyId:view.id,memberId,
+        candidateKey:interaction.options.getString("aday",true),actorId:interaction.user.id
+      });
+      const trait=nobleTraitByKey(result.traitKey);
+      await interaction.editReply({embeds:[new EmbedBuilder()
+        .setColor(0xc59b45).setTitle("💍 Yerel Soylu Evliliği")
+        .setDescription(
+          "**"+result.memberName+"** ile **"+result.spouseName+"** evlendi.\n\n"+
+          "**Haneye katılan eş:** "+result.spouseName+" • "+result.spouseAge+" yaş • "+result.cultureLabel+"\n"+
+          "**Soylu traiti:** "+(trait?.name??result.traitKey)
+        ).setFooter({text:country.name+" • "+view.name})]});
       await refreshDynastyCard(interaction.client,view.id);
     }else if(sub==="evlilik-teklif"){
       const targetCountryName=interaction.options.getString("hedef-ulke",true);
@@ -836,11 +852,29 @@ export async function handleDynastyAutocomplete(interaction:AutocompleteInteract
       })));
     return true;
   }
+  if(focused.name==="aday"&&sub==="yerel-soylu-evlilik"){
+    const context=await playerDynastyContext(interaction);
+    const memberId=interaction.options.getString("uye");
+    if(!context||!memberId||!UUID_PATTERN.test(memberId)){await interaction.respond([]);return true;}
+    const candidates=await dynastyService.localNobleMarriageCandidates({
+      guildId:interaction.guildId,countryId:context.country.id,dynastyId:context.view.id,memberId
+    });
+    await interaction.respond(candidates.filter((candidate)=>!query||
+      (candidate.name+" "+candidate.cultureLabel+" "+candidate.age).toLocaleLowerCase("tr-TR").includes(query)
+    ).slice(0,25).map((candidate)=>({
+      name:(candidate.title+" "+candidate.name+" • "+candidate.age+" yaş • "+candidate.cultureLabel).slice(0,100),
+      value:candidate.key
+    })));
+    return true;
+  }
   if(["uye","es","anne","baba","hedef-uye","birinci-uye","ikinci-uye"].includes(focused.name)){
     let view:DynastyView|null=null;
     let externalCandidates:Awaited<ReturnType<typeof dynastyService.marriageCandidatesForCountry>>|null=null;
     let marriageSelection=false;
     if(sub==="evlilik-teklif"&&focused.name==="uye"){
+      view=(await playerDynastyContext(interaction))?.view??null;
+      marriageSelection=true;
+    }else if(sub==="yerel-soylu-evlilik"&&focused.name==="uye"){
       view=(await playerDynastyContext(interaction))?.view??null;
       marriageSelection=true;
     }else if(sub==="evlilik-teklif"&&focused.name==="hedef-uye"){
@@ -868,7 +902,8 @@ export async function handleDynastyAutocomplete(interaction:AutocompleteInteract
     }
     const selectedMember=interaction.options.getString("uye");
     const candidates=(externalCandidates??view?.members??[]).filter((member)=>member.status==="ALIVE"&&member.id!==selectedMember)
-      .filter((member)=>!marriageSelection||(member.age!==null&&member.age>=MINIMUM_MARRIAGE_AGE&&!member.spouse_id&&!member.roman_spouse_id));
+      .filter((member)=>!marriageSelection||(member.age!==null&&member.age>=MINIMUM_MARRIAGE_AGE&&
+        (!(member.spouse_id||member.roman_spouse_id)||("spouse_status" in member&&member.spouse_status==="DEAD"))));
     await interaction.respond(candidates.filter((member)=>!query||(member.name+" "+member.title+("dynasty_name" in member?" "+member.dynasty_name:"")).toLocaleLowerCase("tr-TR").includes(query)).slice(0,25).map((member)=>({
       name:(member.title+" "+member.name+("dynasty_name" in member?" • "+member.dynasty_name:"")+" • "+age(member.age)).slice(0,100),value:member.id
     })));

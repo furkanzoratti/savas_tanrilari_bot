@@ -8,6 +8,9 @@ describe("kültürel NPC hanedan adları",()=>{
     expect(culturalDynastyNameCandidates("CIMBRIC","MALE")).toContain("Boiorix");
     expect(culturalDynastyNameCandidates("CHAEDINIAN","FEMALE")).toContain("Signy");
     expect(culturalDynastyNameCandidates("GAUT_SUIONIC","MALE")).toContain("Hygelac");
+    expect(culturalDynastyNameCandidates("DINGLING","FEMALE")).toContain("Altana");
+    expect(culturalDynastyNameCandidates("XIANBEI","MALE")).toContain("Tanshihuai");
+    expect(culturalDynastyNameCandidates("XIONGNU","MALE")).toContain("Modu");
   });
 
   it("hanedanda kullanılan adı tekrar etmez",()=>{

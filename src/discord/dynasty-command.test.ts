@@ -6,11 +6,14 @@ describe("dynasty Discord commands",()=>{
     const command=commandBuilders.find((item)=>item.name==="hanedan");
     expect(command?.options?.map((option)=>option.name)).toEqual([
       "bilgi","kisi","soyagaci","veraset","evlilikler","cocuklar","olumler","gecmis","durum",
-      "cocuk-dene","evlilik-teklif","evlilik-cevapla","evlilik-teklifleri","evlilik-geri-cek"
+      "cocuk-dene","yerel-soylu-evlilik","evlilik-teklif","evlilik-cevapla","evlilik-teklifleri","evlilik-geri-cek"
     ]);
     expect(command?.options?.find((option)=>option.name==="kisi")?.options?.map((option)=>option.name)).toEqual(["uye","ulke"]);
     expect(command?.options?.find((option)=>option.name==="cocuk-dene")?.options?.map((option)=>option.name)).toEqual(["ulke","ebeveyn"]);
     expect(command?.options?.find((option)=>option.name==="cocuk-dene")?.description).toContain("evli bir çift");
+    expect(command?.options?.find((option)=>option.name==="yerel-soylu-evlilik")?.options?.map((option)=>option.name)).toEqual([
+      "uye","aday","ulke"
+    ]);
     expect(command?.options?.find((option)=>option.name==="evlilik-teklif")?.options?.map((option)=>option.name)).toEqual([
       "uye","hedef-ulke","hedef-uye","ulke"
     ]);

@@ -2,6 +2,7 @@ import {randomInt} from "node:crypto";
 import {pool,withTransaction,type DbClient} from "../db/pool.js";
 import type {CultureGroup} from "../domain/cultures.js";
 import {availableCulturalDynastyName} from "../domain/dynasty-names.js";
+import {localNobleMarriageCandidates,type LocalNobleCandidate} from "../domain/dynasty-local-nobles.js";
 import {
   BIRTH_ATTEMPT_COOLDOWN_TURNS,MATERNAL_ILLNESS_COOLDOWN_TURNS,
   automaticDynastyRelations,
@@ -217,6 +218,43 @@ function requireMarriageEligibility(member:DynastyMemberView,label:string):void{
   if(member.age<MINIMUM_MARRIAGE_AGE)throw new GameError(label+" henüz "+MINIMUM_MARRIAGE_AGE+" yaşını doldurmadı.");
   if(member.spouse_id||member.roman_spouse_id)throw new GameError(label+" zaten evli.");
   if(!dynastyMemberCanMarry(member.age,member.status,member.spouse_id??member.roman_spouse_id??null))throw new GameError(label+" evlilik koşullarını karşılamıyor.");
+}
+
+function requireLocalNobleMarriageEligibility(member:DynastyMemberView):void{
+  if(member.status!=="ALIVE")throw new GameError(member.name+" hayatta değil.");
+  if(member.kidnapped)throw new GameError(member.name+" kaçırılmış durumda olduğu için evlendirilemez.");
+  if(member.age===null)throw new GameError(member.name+" için yaş bilgisi girilmeden evlilik yapılamaz.");
+  if(member.age<MINIMUM_MARRIAGE_AGE)throw new GameError(member.name+" henüz "+MINIMUM_MARRIAGE_AGE+" yaşını doldurmadı.");
+  if((member.spouse_id||member.roman_spouse_id)&&member.spouse_status!=="DEAD")throw new GameError(member.name+" zaten evli.");
+}
+
+async function localNobleCandidatesForMember(
+  client:DbClient,input:{guildId:string;countryId:string;dynastyId?:string;memberId:string},lock=false
+):Promise<{dynasty:{id:string;name:string;country_name:string};member:DynastyMemberView;turn:number;candidates:LocalNobleCandidate[]} >{
+  if(lock)await activeCountry(client,input.guildId,input.countryId);
+  else{
+    const active=await client.query(
+      "SELECT 1 FROM countries WHERE id=$1 AND guild_id=$2 AND status='ACTIVE'",
+      [input.countryId,input.guildId]
+    );
+    if(!active.rowCount)throw new GameError("Etkin devlet bulunamadı.");
+  }
+  const dynasty=await dynastyForContext(client,input.guildId,input.countryId,input.dynastyId,lock);
+  if(lock)await lockMarriageMembers(client,[input.memberId]);
+  const member=await memberForDynasty(client,dynasty.id,input.memberId,lock);
+  requireLocalNobleMarriageEligibility(member);
+  const culture=(await client.query<{primary_culture_group:CultureGroup}>(
+    "SELECT primary_culture_group FROM countries WHERE id=$1 AND guild_id=$2",
+    [input.countryId,input.guildId]
+  )).rows[0]?.primary_culture_group??"UNASSIGNED";
+  const turn=await currentTurn(client,input.guildId);
+  const names=(await client.query<{name:string}>(
+    "SELECT name FROM dynasty_members WHERE dynasty_id=$1",[dynasty.id]
+  )).rows.map((row)=>row.name);
+  return{dynasty,member,turn,candidates:localNobleMarriageCandidates({
+    dynastyId:dynasty.id,memberId:member.id,memberGender:member.gender,memberAge:member.age!,
+    cultureGroup:culture,currentTurn:turn,usedNames:names
+  })};
 }
 
 async function lockMarriageMembers(client:DbClient,memberIds:string[]):Promise<void>{
@@ -841,6 +879,69 @@ export const dynastyService={
            AND ($3::uuid IS NULL OR dynasty.id<>$3)
          ORDER BY dynasty.name,member.is_monarch DESC,member.is_heir DESC,member.age DESC`,
       [guildId,countryId,excludeDynastyId??null])).rows;
+  },
+
+  async localNobleMarriageCandidates(input:{
+    guildId:string;countryId:string;dynastyId?:string;memberId:string;
+  }):Promise<LocalNobleCandidate[]>{
+    return withTransaction(async(client)=>(await localNobleCandidatesForMember(client,input)).candidates);
+  },
+
+  async marryLocalNoble(input:{
+    guildId:string;countryId:string;dynastyId?:string;memberId:string;candidateKey:string;actorId:string;
+  }):Promise<{
+    dynastyId:string;memberId:string;memberName:string;spouseId:string;spouseName:string;
+    spouseAge:number;spouseGender:DynastyGender;cultureLabel:string;traitKey:NobleTraitKey;
+  }>{
+    return withTransaction(async(client)=>{
+      const context=await localNobleCandidatesForMember(client,input,true);
+      const candidate=context.candidates.find((item)=>item.key===input.candidateKey);
+      if(!candidate)throw new GameError("Seçilen yerel soylu adayı artık geçerli değil. Aday listesini yeniden açın.");
+      const pending=await client.query(
+        `SELECT 1 FROM dynasty_marriage_proposals
+          WHERE status='PENDING' AND (proposer_member_id=$1 OR target_member_id=$1)
+         UNION ALL
+         SELECT 1 FROM roman_dynasty_marriage_proposals
+          WHERE status='PENDING' AND dynasty_member_id=$1 LIMIT 1`,[context.member.id]
+      );
+      if(pending.rowCount)throw new GameError("Bu üye için bekleyen bir evlilik teklifi var. Önce teklifi sonuçlandırın veya geri çekin.");
+      const traitKey=rollNobleTraitKey();
+      if(context.member.spouse_id&&context.member.spouse_status==="DEAD"){
+        await client.query(
+          "UPDATE dynasty_members SET spouse_id=NULL,updated_at=NOW() WHERE id=$1 AND spouse_id=$2",
+          [context.member.spouse_id,context.member.id]
+        );
+      }
+      if(context.member.roman_spouse_id&&context.member.spouse_status==="DEAD"){
+        await client.query(
+          "UPDATE roman_family_members SET dynasty_spouse_id=NULL,updated_at=NOW() WHERE id=$1 AND dynasty_spouse_id=$2",
+          [context.member.roman_spouse_id,context.member.id]
+        );
+      }
+      const spouse=(await client.query<{id:string}>(
+        `INSERT INTO dynasty_members(
+           dynasty_id,name,gender,age,title,relation,status,health,is_monarch,is_heir,
+           succession_rank,spouse_id,born_turn,trait_key
+         ) VALUES($1,$2,$3,$4,$5,'Yerel soylu eş','ALIVE','HEALTHY',FALSE,FALSE,NULL,$6,$7,$8)
+         RETURNING id`,
+        [context.dynasty.id,candidate.name,candidate.gender,candidate.age,candidate.title,
+          context.member.id,context.turn-candidate.age,traitKey]
+      )).rows[0]!;
+      await client.query(
+        "UPDATE dynasty_members SET spouse_id=$1,roman_spouse_id=NULL,updated_at=NOW() WHERE id=$2",
+        [spouse.id,context.member.id]
+      );
+      await addEvent(client,context.dynasty.id,context.turn,"MARRIAGE",context.member.id,{
+        memberName:context.member.name,spouseName:candidate.name,spouseAge:candidate.age,
+        spouseGender:candidate.gender,cultureGroup:candidate.cultureGroup,actorId:input.actorId,
+        source:"PLAYER_LOCAL_NOBLE"
+      });
+      return{
+        dynastyId:context.dynasty.id,memberId:context.member.id,memberName:context.member.name,
+        spouseId:spouse.id,spouseName:candidate.name,spouseAge:candidate.age,
+        spouseGender:candidate.gender,cultureLabel:candidate.cultureLabel,traitKey
+      };
+    });
   },
 
   async create(input:{guildId:string;countryId:string;actorId:string;name:string}):Promise<string>{
