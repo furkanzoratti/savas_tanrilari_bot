@@ -57,6 +57,9 @@ export const commandBuilders = [
   new SlashCommandBuilder()
     .setName("karakterlerim").setDescription("Ülkenizin bütün karakterlerini, konumlarını ve etkin görevlerini gösterir"),
   new SlashCommandBuilder()
+    .setName("ordularim").setDescription("Ordularınızı, askerî kapasitenizi ve boş asker havuzunuzu yönetir")
+    .addStringOption((o)=>o.setName("ulke").setDescription("Yalnızca yönetici: görüntülenecek devlet").setRequired(false).setAutocomplete(true)),
+  new SlashCommandBuilder()
     .setName("komutan").setDescription("Komutanın kalıcı doktrin ve uzmanlığını yönetir")
     .addSubcommand((sub) => sub.setName("doktrin-sec").setDescription("Komutan için bir kez seçilebilen kalıcı doktrini belirler")
       .addStringOption((o) => o.setName("komutan").setDescription("Doktrin verilecek Komutan").setRequired(true).setAutocomplete(true))
@@ -881,8 +884,6 @@ export const commandBuilders = [
       .addStringOption((o) => o.setName("komutan").setDescription("Atanacak komutan").setRequired(true).setAutocomplete(true)))
     .addSubcommand((sub) => sub.setName("komutan-kaldir").setDescription("Ordunun komutanını görevden alır")
       .addStringOption((o) => o.setName("ordu").setDescription("Komutanı kaldırılacak ordu").setRequired(true).setAutocomplete(true)))
-    .addSubcommand((sub) => sub.setName("bilgi").setDescription("Bir ordunun veya bütün orduların güncel durumunu gösterir")
-      .addStringOption((o) => o.setName("ordu").setDescription("Boş bırakılırsa bütün ordular").setAutocomplete(true)))
     .addSubcommand((sub) => sub.setName("dagit").setDescription("Ordu kaydını dağıtır; askerler yerleşke stoklarında kalır")
       .addStringOption((o) => o.setName("ordu").setDescription("Dağıtılacak ordu").setRequired(true).setAutocomplete(true))
       .addStringOption((o) => o.setName("onay").setDescription("Onaylamak için DAGIT yazın").setRequired(true))),

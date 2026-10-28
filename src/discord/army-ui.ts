@@ -17,11 +17,17 @@ async function logCommanderAssignment(interaction: ChatInputCommandInteraction,c
 
 export async function handleArmyCommand(interaction: ChatInputCommandInteraction): Promise<void> {
   if (!interaction.guildId) throw new GameError("Ordu komutları yalnızca bir sunucuda kullanılabilir.");
+  if(interaction.commandName==="ordularim"){
+    await interaction.deferReply({flags:MessageFlags.Ephemeral});
+    const country=await resolveCountry(interaction,interaction.options.getString("ulke"));
+    await sendArmyDashboard(interaction,country.id);
+    return;
+  }
   const sub = interaction.options.getSubcommand();
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const country = await resolveCountry(interaction);
 
-  if(sub!=="bilgi")await assertCountryExecutiveAccess(interaction,country.id);
+  await assertCountryExecutiveAccess(interaction,country.id);
 
   if (sub === "olustur") {
     const army = await armyService.create({
@@ -30,11 +36,6 @@ export async function handleArmyCommand(interaction: ChatInputCommandInteraction
     });
     await interaction.editReply({ content: "✅ Ordu oluşturuldu.", embeds: [renderArmyEmbed(army)] });
     if (army.commander_name) await logCommanderAssignment(interaction,country.name,"**"+army.commander_name+"**, **"+army.name+"** ordusunun başına atandı.");
-    return;
-  }
-  if (sub === "bilgi") {
-    const selected = interaction.options.getString("ordu");
-    await sendArmyDashboard(interaction,country.id,selected);
     return;
   }
   if (sub === "havuzu-ekle") {

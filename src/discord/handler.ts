@@ -1471,7 +1471,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
       : `**${index + 1}.** <@${row.discord_user_id}> — ${number(row.words)} kelime / ${row.messages} rol`).join("\n") : "Bu takvim döneminde kayıt bulunmuyor.";
     const titles: Record<RoleReportPeriod, string> = { daily: "📊 Günlük Rol Sıralaması", weekly: "📚 Haftalık Rol Sıralaması", monthly: "🏛️ Aylık Rol Sıralaması" };
     await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle(titles[period]).setDescription(text)] });
-  } else if (interaction.commandName === "ordu") {
+  } else if (interaction.commandName === "ordu" || interaction.commandName === "ordularim") {
     await handleArmyCommand(interaction);
   } else if (interaction.commandName === "filo") {
     await handleFleetCommand(interaction);
@@ -1742,6 +1742,16 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
   if (await handleCityAutocomplete(interaction)) return;
   if (await handleGovernorshipAutocomplete(interaction)) return;
   const focused = interaction.options.getFocused(true);
+  if(interaction.commandName==="ordularim"&&focused.name==="ulke"){
+    if(!interaction.guildId||!isGameMaster(interaction)){await interaction.respond([]);return;}
+    const query=String(focused.value).toLocaleLowerCase("tr-TR").trim();
+    const countries=await gameService.listCountries(interaction.guildId);
+    await interaction.respond(countries
+      .filter((country)=>!query||country.name.toLocaleLowerCase("tr-TR").includes(query))
+      .slice(0,25)
+      .map((country)=>({name:country.name.slice(0,100),value:country.name})));
+    return;
+  }
   if (interaction.commandName === "gozcu-alimi") {
     if (!interaction.guildId) { await interaction.respond([]); return; }
     const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();

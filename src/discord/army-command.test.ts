@@ -6,7 +6,7 @@ describe("kalıcı ordu komutları", () => {
     const army = commandBuilders.find((command) => command.name === "ordu");
     expect(army?.options?.map((option) => option.name)).toEqual([
       "olustur", "asker-ekle", "asker-cikar", "havuzu-ekle", "birlestir", "kusatma-aleti-ekle", "kusatma-aleti-cikar",
-      "komutan-ata", "komutan-kaldir", "bilgi", "dagit"
+      "komutan-ata", "komutan-kaldir", "dagit"
     ]);
     const add = army?.options?.find((option) => option.name === "asker-ekle");
     const create = army?.options?.find((option) => option.name === "olustur");
@@ -21,6 +21,14 @@ describe("kalıcı ordu komutları", () => {
       .toEqual(["hedef-ordu","kaynak-ordu","onay"]);
     expect(army?.options?.find((option)=>option.name==="birlestir")?.options?.find((option)=>option.name==="onay"))
       .toMatchObject({required:true});
+  });
+
+  it("ordu bilgi yerine bağımsız ordularım kontrol merkezini kaydeder",()=>{
+    const dashboard=commandBuilders.find((command)=>command.name==="ordularim");
+    expect(dashboard).toBeDefined();
+    expect(dashboard?.options?.map((option)=>option.name)).toEqual(["ulke"]);
+    expect(dashboard?.options?.find((option)=>option.name==="ulke")).toMatchObject({required:false,autocomplete:true});
+    expect(commandBuilders.find((command)=>command.name==="ordu")?.options?.some((option)=>option.name==="bilgi")).toBe(false);
   });
 
   it("mevcut kadro komutunu korur ve yöneticiye ordu ekleme komutu verir", () => {
