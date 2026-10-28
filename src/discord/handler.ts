@@ -70,6 +70,7 @@ import { handleBattleButton, handleBattleCommand, handleBattleModal, handleBattl
 import { handleNavalOperationsAutocomplete,handleNavalOperationsButton,handleNavalOperationsCommand } from "./naval-operations-ui.js";
 import { handleLandRaidsAutocomplete,handleLandRaidsButton,handleLandRaidsCommand } from "./land-raids-ui.js";
 import { handleArmyCommand } from "./army-ui.js";
+import {handleArmyControlButton,handleArmyControlModal,handleArmyControlSelect} from "./army-control-ui.js";
 import { handleFleetCommand } from "./fleet-ui.js";
 import { handleCityAutocomplete, handleCityButton, handleCityCommand, handleCityModal } from "./city-ui.js";
 import { addCountryRoleToMember, deleteCountryRole, ensureCountryRole, removeCountryRoleFromMember } from "./country-roles.js";
@@ -1538,6 +1539,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
 }
 
 async function handleSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+  if(await handleArmyControlSelect(interaction))return;
   if(await handleDocumentSelect(interaction))return;
   if (await handleGovernorshipSelect(interaction)) return;
   if (await handleWarDeclarationSelect(interaction)) return;
@@ -1648,6 +1650,7 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
 }
 
 async function handleButton(interaction: ButtonInteraction): Promise<void> {
+  if(await handleArmyControlButton(interaction))return;
   if(await handleDocumentButton(interaction))return;
   if (await handleGovernorshipButton(interaction)) return;
   if (await handleRomanRepublicButton(interaction)) return;
@@ -1703,6 +1706,7 @@ async function handleButton(interaction: ButtonInteraction): Promise<void> {
 }
 
 async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
+  if(await handleArmyControlModal(interaction))return;
   if(await handleDocumentModal(interaction))return;
   if (await handleRomanRepublicModal(interaction)) return;
   if (await handleDynastyModal(interaction)) return;

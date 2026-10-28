@@ -7,7 +7,7 @@ import { GameError } from "../services/game-service.js";
 import { assertCountryExecutiveAccess,resolveCountry } from "./auth.js";
 import { renderArmyEmbed } from "./army-embed.js";
 import { queueCharacterLog } from "./character-ui.js";
-import { batchDocumentEmbeds } from "./document.js";
+import {sendArmyDashboard} from "./army-control-ui.js";
 
 async function logCommanderAssignment(interaction: ChatInputCommandInteraction,countryName:string,entry:string):Promise<void>{
   await queueCharacterLog({client:interaction.client,guildId:interaction.guildId!,interactionId:interaction.id,
@@ -34,13 +34,7 @@ export async function handleArmyCommand(interaction: ChatInputCommandInteraction
   }
   if (sub === "bilgi") {
     const selected = interaction.options.getString("ordu");
-    const armies = selected ? [await armyService.get(country.id, selected)] : await armyService.listCountry(country.id);
-    if (!armies.length) throw new GameError("Devletinizde kurulmuş bir ordu bulunmuyor.");
-    const pages = batchDocumentEmbeds(armies.map(renderArmyEmbed));
-    await interaction.editReply({ embeds: pages[0] ?? [] });
-    for (const page of pages.slice(1)) {
-      await interaction.followUp({ embeds: page, flags: MessageFlags.Ephemeral });
-    }
+    await sendArmyDashboard(interaction,country.id,selected);
     return;
   }
   if (sub === "havuzu-ekle") {
