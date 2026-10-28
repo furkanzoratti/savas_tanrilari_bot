@@ -72,6 +72,7 @@ import { handleLandRaidsAutocomplete,handleLandRaidsButton,handleLandRaidsComman
 import { handleArmyCommand } from "./army-ui.js";
 import {handleArmyControlButton,handleArmyControlModal,handleArmyControlSelect} from "./army-control-ui.js";
 import { handleFleetCommand } from "./fleet-ui.js";
+import {handleFleetControlButton,handleFleetControlModal,handleFleetControlSelect} from "./fleet-control-ui.js";
 import { handleCityAutocomplete, handleCityButton, handleCityCommand, handleCityModal } from "./city-ui.js";
 import { addCountryRoleToMember, deleteCountryRole, ensureCountryRole, removeCountryRoleFromMember } from "./country-roles.js";
 import { setEventManagerRole } from "./event-manager-role.js";
@@ -1473,7 +1474,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle(titles[period]).setDescription(text)] });
   } else if (interaction.commandName === "ordu" || interaction.commandName === "ordularim") {
     await handleArmyCommand(interaction);
-  } else if (interaction.commandName === "filo") {
+  } else if (interaction.commandName === "filo" || interaction.commandName === "filolarim") {
     await handleFleetCommand(interaction);
   } else if (interaction.commandName === "savas") {
     await handleBattleCommand(interaction);
@@ -1540,6 +1541,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
 
 async function handleSelect(interaction: StringSelectMenuInteraction): Promise<void> {
   if(await handleArmyControlSelect(interaction))return;
+  if(await handleFleetControlSelect(interaction))return;
   if(await handleDocumentSelect(interaction))return;
   if (await handleGovernorshipSelect(interaction)) return;
   if (await handleWarDeclarationSelect(interaction)) return;
@@ -1651,6 +1653,7 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
 
 async function handleButton(interaction: ButtonInteraction): Promise<void> {
   if(await handleArmyControlButton(interaction))return;
+  if(await handleFleetControlButton(interaction))return;
   if(await handleDocumentButton(interaction))return;
   if (await handleGovernorshipButton(interaction)) return;
   if (await handleRomanRepublicButton(interaction)) return;
@@ -1707,6 +1710,7 @@ async function handleButton(interaction: ButtonInteraction): Promise<void> {
 
 async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
   if(await handleArmyControlModal(interaction))return;
+  if(await handleFleetControlModal(interaction))return;
   if(await handleDocumentModal(interaction))return;
   if (await handleRomanRepublicModal(interaction)) return;
   if (await handleDynastyModal(interaction)) return;
@@ -1742,7 +1746,7 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
   if (await handleCityAutocomplete(interaction)) return;
   if (await handleGovernorshipAutocomplete(interaction)) return;
   const focused = interaction.options.getFocused(true);
-  if(interaction.commandName==="ordularim"&&focused.name==="ulke"){
+  if(["ordularim","filolarim"].includes(interaction.commandName)&&focused.name==="ulke"){
     if(!interaction.guildId||!isGameMaster(interaction)){await interaction.respond([]);return;}
     const query=String(focused.value).toLocaleLowerCase("tr-TR").trim();
     const countries=await gameService.listCountries(interaction.guildId);

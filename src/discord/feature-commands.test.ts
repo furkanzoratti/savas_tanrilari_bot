@@ -43,9 +43,12 @@ describe("ticaret ve rol raporu komutları", () => {
   it("kalıcı filo yönetimini ve deniz savaşına filo eklemeyi kaydeder",() => {
     const fleet = commandBuilders.find((item) => item.name === "filo");
     expect(fleet?.options?.map((option) => option.name)).toEqual([
-      "olustur","gemi-ekle","gemi-cikar","komutan-ata","komutan-kaldir","bilgi",
+      "olustur","gemi-ekle","gemi-cikar","komutan-ata","komutan-kaldir",
       "tamir","tamirden-cikar","tamirden-ekle","tamir-bilgi","dagit"
     ]);
+    const dashboard=commandBuilders.find((item)=>item.name==="filolarim");
+    expect(dashboard?.options?.map((option)=>option.name)).toEqual(["ulke"]);
+    expect(dashboard?.options?.find((option)=>option.name==="ulke")).toMatchObject({required:false,autocomplete:true});
     const repair = fleet?.options?.find((option) => option.name === "tamir");
     expect(repair?.options?.map((option) => option.name)).toEqual(["filo","yerleske","kapsam"]);
     expect(repair?.options?.find((option) => option.name === "kapsam")?.choices?.map((choice) => choice.value))

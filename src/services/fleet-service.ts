@@ -12,6 +12,24 @@ export interface FleetShipAllocation {
   quantity: number;
 }
 
+export interface FleetPoolShip{
+  ship_type:NavalUnitType;
+  available:number;
+}
+
+export interface FleetPoolSettlement{
+  settlement_id:string;
+  settlement_name:string;
+  ships:FleetPoolShip[];
+  total:number;
+}
+
+export interface FleetPoolView{
+  settlements:FleetPoolSettlement[];
+  totals:FleetPoolShip[];
+  grandTotal:number;
+}
+
 export interface FleetView {
   id: string;
   guild_id: string;
@@ -163,6 +181,56 @@ export const fleetService = {
       .filter((row) => row.available > 0 && Boolean(SHIPS[row.ship_type]));
   },
 
+  async unallocatedPool(countryId:string):Promise<FleetPoolView>{
+    const rows=(await pool.query<{
+      settlement_id:string;settlement_name:string;ship_type:NavalUnitType|null;available:number|null;
+    }>(
+      `WITH stock AS (
+         SELECT unit.settlement_id,unit.ship_type,SUM(unit.quantity)::integer AS quantity
+           FROM naval_units unit JOIN settlements owned ON owned.id=unit.settlement_id
+          WHERE owned.country_id=$1
+          GROUP BY unit.settlement_id,unit.ship_type
+       ), allocated AS (
+         SELECT reserved.settlement_id,reserved.ship_type,SUM(reserved.quantity)::integer AS quantity
+           FROM (
+             SELECT ship.settlement_id,ship.ship_type,ship.quantity FROM fleet_ships ship
+             UNION ALL
+             SELECT damage.settlement_id,damage.ship_type,1 AS quantity FROM naval_ship_damage damage
+              WHERE damage.status IN ('REPAIRING','READY')
+           ) reserved JOIN settlements owned ON owned.id=reserved.settlement_id
+          WHERE owned.country_id=$1
+          GROUP BY reserved.settlement_id,reserved.ship_type
+       )
+       SELECT settlement.id AS settlement_id,settlement.name AS settlement_name,stock.ship_type,
+              GREATEST(0,stock.quantity-COALESCE(allocated.quantity,0))::integer AS available
+         FROM settlements settlement
+         LEFT JOIN stock ON stock.settlement_id=settlement.id
+         LEFT JOIN allocated ON allocated.settlement_id=stock.settlement_id AND allocated.ship_type=stock.ship_type
+        WHERE settlement.country_id=$1
+        ORDER BY lower(settlement.name),stock.ship_type`,[countryId]
+    )).rows;
+    const settlements=new Map<string,FleetPoolSettlement>();
+    const totals=new Map<NavalUnitType,number>();
+    for(const row of rows){
+      let settlement=settlements.get(row.settlement_id);
+      if(!settlement){
+        settlement={settlement_id:row.settlement_id,settlement_name:row.settlement_name,ships:[],total:0};
+        settlements.set(row.settlement_id,settlement);
+      }
+      if(!row.ship_type||!SHIPS[row.ship_type])continue;
+      const available=Math.max(0,Number(row.available??0));
+      if(!available)continue;
+      settlement.ships.push({ship_type:row.ship_type,available});
+      settlement.total+=available;
+      totals.set(row.ship_type,(totals.get(row.ship_type)??0)+available);
+    }
+    return{
+      settlements:[...settlements.values()],
+      totals:[...totals].map(([ship_type,available])=>({ship_type,available})),
+      grandTotal:[...totals.values()].reduce((sum,value)=>sum+value,0)
+    };
+  },
+
   async listBattleCountry(guildId:string,countryId:string,battleId:string):Promise<FleetView[]> {
     const client = await pool.connect();
     try {
@@ -237,6 +305,61 @@ export const fleetService = {
       await client.query("UPDATE fleets SET updated_at=NOW() WHERE id=$1", [fleet.id]);
       await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'fleet.ships.add','fleet',$3,$4::jsonb)", [input.guildId,input.actorId,fleet.id,JSON.stringify({ settlementId:settlement.id,shipType:input.shipType,quantity:input.quantity })]);
       return loadFleet(client,fleet.id,input.countryId);
+    });
+  },
+
+  async allocateEntirePool(input:{
+    guildId:string;countryId:string;actorId:string;fleet:string;
+  }):Promise<{fleet:FleetView;allocated:number;settlements:number;shipTypes:number}>{
+    return withTransaction(async(client)=>{
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))",[`fleet-pool:${input.countryId}`]);
+      const fleet=await resolveFleet(client,input.countryId,input.fleet,true);
+      await assertMutable(client,fleet.id);
+      await client.query("SELECT id FROM settlements WHERE country_id=$1 FOR UPDATE",[input.countryId]);
+      const available=(await client.query<{
+        settlement_id:string;settlement_name:string;ship_type:NavalUnitType;available:number;
+      }>(
+        `WITH stock AS (
+           SELECT unit.settlement_id,unit.ship_type,SUM(unit.quantity)::integer AS quantity
+             FROM naval_units unit JOIN settlements owned ON owned.id=unit.settlement_id
+            WHERE owned.country_id=$1
+            GROUP BY unit.settlement_id,unit.ship_type
+         ), allocated AS (
+           SELECT reserved.settlement_id,reserved.ship_type,SUM(reserved.quantity)::integer AS quantity
+             FROM (
+               SELECT ship.settlement_id,ship.ship_type,ship.quantity FROM fleet_ships ship
+               UNION ALL
+               SELECT damage.settlement_id,damage.ship_type,1 AS quantity FROM naval_ship_damage damage
+                WHERE damage.status IN ('REPAIRING','READY')
+             ) reserved JOIN settlements owned ON owned.id=reserved.settlement_id
+            WHERE owned.country_id=$1
+            GROUP BY reserved.settlement_id,reserved.ship_type
+         )
+         SELECT stock.settlement_id,settlement.name AS settlement_name,stock.ship_type,
+                GREATEST(0,stock.quantity-COALESCE(allocated.quantity,0))::integer AS available
+           FROM stock JOIN settlements settlement ON settlement.id=stock.settlement_id
+           LEFT JOIN allocated ON allocated.settlement_id=stock.settlement_id AND allocated.ship_type=stock.ship_type
+          WHERE stock.quantity>COALESCE(allocated.quantity,0)
+          ORDER BY lower(settlement.name),stock.ship_type`,[input.countryId]
+      )).rows.filter((row)=>Boolean(SHIPS[row.ship_type])&&Number(row.available)>0);
+      if(!available.length)throw new GameError("Boş gemi havuzunda bu filoya aktarılabilecek gemi bulunmuyor.");
+      for(const row of available){
+        await client.query(
+          `INSERT INTO fleet_ships(fleet_id,settlement_id,ship_type,quantity) VALUES($1,$2,$3,$4)
+           ON CONFLICT(fleet_id,settlement_id,ship_type) DO UPDATE
+             SET quantity=fleet_ships.quantity+EXCLUDED.quantity`,
+          [fleet.id,row.settlement_id,row.ship_type,Number(row.available)]
+        );
+      }
+      const allocated=available.reduce((sum,row)=>sum+Number(row.available),0);
+      const settlements=new Set(available.map((row)=>row.settlement_id)).size;
+      const shipTypes=new Set(available.map((row)=>row.ship_type)).size;
+      await client.query("UPDATE fleets SET updated_at=NOW() WHERE id=$1",[fleet.id]);
+      await client.query(
+        "INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'fleet.pool.allocate','fleet',$3,$4::jsonb)",
+        [input.guildId,input.actorId,fleet.id,JSON.stringify({allocated,settlements,shipTypes})]
+      );
+      return{fleet:await loadFleet(client,fleet.id,input.countryId),allocated,settlements,shipTypes};
     });
   },
 

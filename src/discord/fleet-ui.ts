@@ -8,6 +8,7 @@ import { queueCharacterLog } from "./character-ui.js";
 import { renderFleetEmbed } from "./fleet-embed.js";
 import { renderRepairFleetEmbed } from "./repair-fleet-embed.js";
 import { batchDocumentEmbeds } from "./document.js";
+import {sendFleetDashboard} from "./fleet-control-ui.js";
 
 async function logCommanderAssignment(interaction:ChatInputCommandInteraction,countryName:string,entry:string):Promise<void>{
   await queueCharacterLog({client:interaction.client,guildId:interaction.guildId!,interactionId:interaction.id,
@@ -17,10 +18,16 @@ async function logCommanderAssignment(interaction:ChatInputCommandInteraction,co
 
 export async function handleFleetCommand(interaction: ChatInputCommandInteraction): Promise<void> {
   if (!interaction.guildId) throw new GameError("Filo komutları yalnızca bir sunucuda kullanılabilir.");
+  if(interaction.commandName==="filolarim"){
+    await interaction.deferReply({flags:MessageFlags.Ephemeral});
+    const country=await resolveCountry(interaction,interaction.options.getString("ulke"));
+    await sendFleetDashboard(interaction,country.id);
+    return;
+  }
   const sub = interaction.options.getSubcommand();
   await interaction.deferReply({ ephemeral:true });
   const country = await resolveCountry(interaction);
-  if(!["bilgi","tamir-bilgi"].includes(sub))await assertCountryExecutiveAccess(interaction,country.id);
+  if(sub!=="tamir-bilgi")await assertCountryExecutiveAccess(interaction,country.id);
   if (sub === "olustur") {
     const fleet = await fleetService.create({
       guildId:interaction.guildId,countryId:country.id,actorId:interaction.user.id,
@@ -28,17 +35,6 @@ export async function handleFleetCommand(interaction: ChatInputCommandInteractio
     });
     await interaction.editReply({ content:"✅ Filo oluşturuldu.",embeds:[renderFleetEmbed(fleet)] });
     if (fleet.commander_name) await logCommanderAssignment(interaction,country.name,`**${fleet.commander_name}**, **${fleet.name}** filosunun başına atandı.`);
-    return;
-  }
-  if (sub === "bilgi") {
-    const selected = interaction.options.getString("filo");
-    const fleets = selected ? [await fleetService.get(country.id,selected)] : await fleetService.listCountry(country.id);
-    if (!fleets.length) throw new GameError("Devletinizde kurulmuş bir filo bulunmuyor.");
-    const pages=batchDocumentEmbeds(fleets.map(renderFleetEmbed));
-    await interaction.editReply({ embeds:pages[0]??[] });
-    for(const page of pages.slice(1)){
-      await interaction.followUp({embeds:page,flags:MessageFlags.Ephemeral});
-    }
     return;
   }
   if(sub==="tamir-bilgi"){
