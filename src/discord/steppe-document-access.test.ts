@@ -11,7 +11,7 @@ describe("bozkır devletlerinin normal belge erişimi",()=>{
 
   it("belge ve yerleşkelerim normal devlet belgesini doğrudan işler",()=>{
     const handler=readFileSync(new URL("./handler.ts",import.meta.url),"utf8");
-    expect(handler).toContain("const embeds=renderDocument(document)");
+    expect(handler).toContain("sendDocumentDashboard(interaction,countryId)");
     expect(handler).toContain("const embeds=renderSettlementsOverview(document)");
     expect(handler).not.toContain("visibleSettlementIds:steppeAccess.settlementIds");
   });

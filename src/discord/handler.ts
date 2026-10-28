@@ -47,6 +47,7 @@ import { treasuryLedgerService, type TreasuryMovement } from "../services/treasu
 import { assertCountryAccess,assertCountryExecutiveAccess,isGameMaster,requireGameMaster,resolveCountry } from "./auth.js";
 import { buildingChoices, shipChoices, unitChoices } from "./commands.js";
 import { batchDocumentEmbeds, renderDocument } from "./document.js";
+import {handleDocumentButton,handleDocumentModal,handleDocumentSelect,sendDocumentDashboard} from "./document-control-ui.js";
 import { renderSettlementsOverview } from "./settlements-overview.js";
 import { renderArmyPool } from "./army-pool-ui.js";
 import { playerMentionPayload } from "./player-mentions.js";
@@ -254,11 +255,7 @@ async function handleCharacterTurnRecovery(interaction: ChatInputCommandInteract
 }
 async function sendDocument(interaction: ChatInputCommandInteraction, countryId: string): Promise<void> {
   if (!interaction.deferred && !interaction.replied) await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const document=await gameService.document(countryId,{includeArmies:false});
-  const embeds=renderDocument(document);
-  const batches = batchDocumentEmbeds(embeds);
-  await interaction.editReply({ embeds: batches[0] ?? [], files: [new AttachmentBuilder(TEMPLE_BANNER_PATH, { name: TEMPLE_BANNER_NAME })] });
-  for (const batch of batches.slice(1)) await interaction.followUp({ embeds: batch, files: [new AttachmentBuilder(TEMPLE_BANNER_PATH, { name: TEMPLE_BANNER_NAME })], flags: MessageFlags.Ephemeral });
+  await sendDocumentDashboard(interaction,countryId);
 }
 
 async function resolveDocumentCountry(interaction:ChatInputCommandInteraction){
@@ -1541,6 +1538,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
 }
 
 async function handleSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+  if(await handleDocumentSelect(interaction))return;
   if (await handleGovernorshipSelect(interaction)) return;
   if (await handleWarDeclarationSelect(interaction)) return;
   if (await handleRomanRepublicSelect(interaction)) return;
@@ -1650,6 +1648,7 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
 }
 
 async function handleButton(interaction: ButtonInteraction): Promise<void> {
+  if(await handleDocumentButton(interaction))return;
   if (await handleGovernorshipButton(interaction)) return;
   if (await handleRomanRepublicButton(interaction)) return;
   if (await handleSteppeHegemonyButton(interaction)) return;
@@ -1704,6 +1703,7 @@ async function handleButton(interaction: ButtonInteraction): Promise<void> {
 }
 
 async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
+  if(await handleDocumentModal(interaction))return;
   if (await handleRomanRepublicModal(interaction)) return;
   if (await handleDynastyModal(interaction)) return;
   if (await handleBattleModal(interaction)) return;
