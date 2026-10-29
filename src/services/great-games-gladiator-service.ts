@@ -150,7 +150,7 @@ async function lockedSeason(client: DbClient, guildId: string): Promise<SeasonRo
     "SELECT id,status,current_game,current_round,current_run FROM great_games_seasons WHERE guild_id=$1 AND game_turn=$2 FOR UPDATE",
     [guildId, GREAT_GAMES_TURN]
   )).rows[0];
-  if (!season) throw new GameError("30. Tur Büyük Oyunları henüz yönetici tarafından açılmadı.");
+  if (!season) throw new GameError(`${GREAT_GAMES_TURN}. Tur etkinlikleri henüz yönetici tarafından açılmadı.`);
   return season;
 }
 
@@ -591,6 +591,11 @@ export const greatGamesGladiatorService = {
         [season.id]
       )).rows[0]?.count ?? 0);
       if (!registered) throw new GameError("Turnuvadan önce en az bir devlet `/oyunlar katil` ile etkinliğe katılmalıdır.");
+      const drawStatus=(await client.query<{status:string}>(
+        "SELECT status FROM great_games_gladiator_draws WHERE season_id=$1 FOR UPDATE",
+        [season.id]
+      )).rows[0]?.status;
+      if(drawStatus!=="COMPLETED")throw new GameError("Capua turnuvası başlamadan önce bütün ülkelerin dört kişilik gladyatör kurası tamamlanmalıdır.");
       await ensureQualifierResults(client,season.id);
       const finalTournament=(await client.query<{status:string}>(
         "SELECT status FROM great_games_gladiator_tournaments WHERE season_id=$1 AND tournament_type='FINAL' ORDER BY run_number DESC LIMIT 1",

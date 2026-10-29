@@ -10,6 +10,21 @@ function clientWith(query: (sql: string, values?: unknown[]) => unknown): DbClie
 }
 
 describe("Büyük Oyunlar cüzdanı", () => {
+  it("64 gladyatörlü Capua kurasında on yedinci yeni devlet katılımını reddeder",async()=>{
+    const client=clientWith((sql)=>{
+      if(sql.startsWith("SELECT id,status,current_game"))return{rows:[{id:"season-1",status:"OPEN",current_game:null,prize_pool:0}],rowCount:1};
+      if(sql.includes("FROM great_games_gladiator_draws"))return{rows:[],rowCount:0};
+      if(sql.includes("FROM great_games_wallets WHERE season_id=$1 AND country_id=$2"))return{rows:[],rowCount:0};
+      if(sql.includes("FROM great_games_gladiators WHERE active=TRUE"))return{rows:[{count:"64"}],rowCount:1};
+      if(sql.includes("COUNT(*)::text AS count FROM great_games_wallets"))return{rows:[{count:"16"}],rowCount:1};
+      throw new Error(`Beklenmeyen sorgu: ${sql}`);
+    });
+    vi.mocked(withTransaction).mockImplementationOnce(async(work)=>work(client));
+
+    await expect(greatGamesWalletService.join("guild-1","country-17","user-17"))
+      .rejects.toThrow("16 devletlik");
+  });
+
   it("aynı kaynak anahtarını ikinci kez uygulamaz", async () => {
     const client = clientWith((sql) => {
       if (sql.startsWith("SELECT id,balance")) return { rows: [{ id: "wallet-1", balance: 5_000, closed_at: null }], rowCount: 1 };

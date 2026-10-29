@@ -169,7 +169,7 @@ async function lockedSeason(client: DbClient, guildId: string): Promise<GreatGam
   const season = (await client.query<GreatGamesSeasonRow>(
     "SELECT * FROM great_games_seasons WHERE guild_id=$1 AND game_turn=$2 FOR UPDATE", [guildId, GREAT_GAMES_TURN]
   )).rows[0];
-  if (!season) throw new GameError("30. Tur Büyük Oyunları henüz yönetici tarafından açılmadı.");
+  if (!season) throw new GameError(`${GREAT_GAMES_TURN}. Tur etkinlikleri henüz yönetici tarafından açılmadı.`);
   return season;
 }
 
@@ -400,7 +400,7 @@ export const greatGamesService = {
              END
            FROM great_games_wallets w
            JOIN countries c ON c.id=w.country_id
-           CROSS JOIN (VALUES ('AUCTION'),('CHARIOT'),('KINGS_BET'),('GLADIATOR')) AS games(game_type)
+           CROSS JOIN (VALUES ('CHARIOT'),('GLADIATOR')) AS games(game_type)
            WHERE w.season_id=$1 AND w.closed_at IS NULL
            ON CONFLICT(season_id,game_type,country_id) DO NOTHING`,
           [season.id]
@@ -830,7 +830,7 @@ export const greatGamesService = {
         if (await recordMoney(client, {
           season, countryId: row.country_id, gameType: row.game_type, amount, kind: "REFUND",
           sourceKey: `season-cancel:${row.country_id}:${row.game_type}`,
-          description: "30. Tur Büyük Oyunları iptal iadesi"
+          description: `${GREAT_GAMES_TURN}. Tur etkinlikleri iptal iadesi`
         })) refunded += amount;
       }
       await client.query("UPDATE great_games_seasons SET status='CANCELLED',current_game=NULL,current_round=0,updated_at=NOW() WHERE id=$1", [season.id]);

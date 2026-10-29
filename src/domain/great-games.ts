@@ -1,4 +1,4 @@
-export const GREAT_GAMES_TURN = 30;
+export const GREAT_GAMES_TURN = 50;
 export const GREAT_GAMES_RACE_ROUNDS = 6;
 export const RACE_TRACK_STEPS = 50;
 export const CHARIOT_TRACK_TARGET = 100;
@@ -45,7 +45,7 @@ export const GREAT_GAME_TYPES = {
 } as const;
 
 export type GreatGameType = keyof typeof GREAT_GAME_TYPES;
-export const ACTIVE_GREAT_GAME_TYPES = ["AUCTION", "CHARIOT", "KINGS_BET", "GLADIATOR"] as const satisfies readonly GreatGameType[];
+export const ACTIVE_GREAT_GAME_TYPES = ["CHARIOT", "GLADIATOR"] as const satisfies readonly GreatGameType[];
 export type ChariotTactic = "AGGRESSIVE" | "BALANCED" | "CAUTIOUS" | "SQUEEZE";
 export type KingsDecision = "COOPERATE" | "BETRAY";
 

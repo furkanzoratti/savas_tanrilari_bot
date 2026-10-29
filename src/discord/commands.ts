@@ -28,7 +28,7 @@ const SETTLEMENT_EVENT_RESOLUTION_CHOICES = Object.entries(SETTLEMENT_EVENT_TYPE
 
 export const commandBuilders = [
   new SlashCommandBuilder()
-    .setName("oyunlar").setDescription("30. Tur Büyük Oyunlarını ve oyun cüzdanını yönetir")
+    .setName("oyunlar").setDescription("50. Tur etkinliklerini ve oyun cüzdanını yönetir")
     .addSubcommand((sub) => sub.setName("panel").setDescription("Yalnızca yönetici: Büyük Oyunlar yönetim panelini açar"))
     .addSubcommand((sub) => sub.setName("katil").setDescription("Etkinliğe katılır ve 5.000 Altınlık oyun cüzdanını açar"))
     .addSubcommand((sub) => sub.setName("gladyatorler").setDescription("Capua dövüşçülerinin güç sıralamasını ve güncel turnuva ağacını gösterir"))
@@ -41,14 +41,12 @@ export const commandBuilders = [
       .addIntegerOption((o) => o.setName("miktar").setDescription("Aktarılacak Altın").setRequired(true).setMinValue(1)))
     .addSubcommand((sub) => sub.setName("katilimci-ulkeler").setDescription("Yalnızca yönetici: katılan ülkeleri ve cüzdan bakiyelerini gösterir"))
     .addSubcommand((sub) => sub.setName("puan-durumu").setDescription("Yalnızca yönetici: toplam ve oyun bazlı Büyük Oyunlar puanlarını gösterir"))
-    .addSubcommand((sub) => sub.setName("cuzdan-bonusu").setDescription("Yalnızca yönetici: her kullanımda tüm açık oyun cüzdanlarına 5.000 Altın ekler"))
     .addSubcommand((sub) => sub.setName("cuzdan-duzenle").setDescription("Yalnızca yönetici: bir ülkenin oyun cüzdanına Altın ekler veya düşer")
       .addStringOption((o) => o.setName("ulke").setDescription("Cüzdanı düzenlenecek ülke").setRequired(true))
       .addIntegerOption((o) => o.setName("miktar").setDescription("Eklemek için pozitif, düşmek için negatif miktar").setRequired(true)
         .setMinValue(-999_999_999).setMaxValue(999_999_999))
       .addStringOption((o) => o.setName("aciklama").setDescription("Düzenleme gerekçesi").setMaxLength(300)))
     .addSubcommand((sub) => sub.setName("kurtar").setDescription("Yalnızca yönetici: aktif oyunun çalışır formunu yeniden yayımlar"))
-    .addSubcommand((sub) => sub.setName("cuzdan-onar").setDescription("Yalnızca yönetici: biten Kervan oyununun eksik cüzdan ödemelerini tamamlar"))
     .addSubcommand((sub) => sub.setName("yonetici-bitir").setDescription("Yalnızca yönetici: cüzdanların %30'unu devletlere aktarır, kalanını siler ve oyunları kapatır")),
   new SlashCommandBuilder()
     .setName("hazine-hareketleri").setDescription("Yalnızca yönetici: bir ülkenin tur içindeki bütün mali hareketlerini gösterir")

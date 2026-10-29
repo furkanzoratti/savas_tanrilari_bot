@@ -160,6 +160,7 @@ import { warScoreCostMigration } from "./war-score-cost-migration.js";
 import { governorshipFocusCleanupMigration } from "./governorship-focus-cleanup-migration.js";
 import { siegeWarScorePrivacyMigration } from "./siege-war-score-privacy-migration.js";
 import { navalBlockadeWarScoreMigration } from "./naval-blockade-war-score-migration.js";
+import { greatGamesGladiatorDrawMigration } from "./great-games-gladiator-draw-migration.js";
 
 export const migrations = [
   {
@@ -2537,5 +2538,6 @@ export const migrations = [
   warScoreCostMigration,
   governorshipFocusCleanupMigration,
   siegeWarScorePrivacyMigration,
-  navalBlockadeWarScoreMigration
+  navalBlockadeWarScoreMigration,
+  greatGamesGladiatorDrawMigration
 ] as const;

@@ -6,7 +6,7 @@ import {
 import {
   ACTIVE_GREAT_GAME_TYPES, AUCTION_BID_INCREMENT, AUCTION_OPENING_BID, CARAVAN_ROUTES, CARAVAN_TRACK_TARGET, CHARIOT_TACTICS, CHARIOT_TRACK_TARGET,
   GLADIATOR_COUPON_MAX_ODDS,GLADIATOR_COUPON_MAX_SELECTIONS,GLADIATOR_COUPON_MIN_SELECTIONS,
-  GREAT_GAMES_RACE_ROUNDS, GREAT_GAME_TYPES, auctionNextMinimum, diplomacyGoalKey, nextIstanbulAuctionDeadline,
+  GREAT_GAMES_RACE_ROUNDS, GREAT_GAMES_TURN, GREAT_GAME_TYPES, auctionNextMinimum, diplomacyGoalKey, nextIstanbulAuctionDeadline,
   gladiatorCouponOdds,parseCaravanRoute, parseChariotTactic, parseKingsDecision,
   type CaravanRoute, type ChariotTactic, type GreatGameType, type KingsDecision
 } from "../domain/great-games.js";
@@ -18,6 +18,7 @@ import { greatGamesBetService } from "../services/great-games-bet-service.js";
 import { greatGamesWalletService } from "../services/great-games-wallet-service.js";
 import { greatGamesGladiatorService, type GladiatorMatchRow, type GladiatorTournamentView } from "../services/great-games-gladiator-service.js";
 import { greatGamesGladiatorAuctionService } from "../services/great-games-gladiator-auction-service.js";
+import { greatGamesGladiatorDrawService, type GladiatorDrawView } from "../services/great-games-gladiator-draw-service.js";
 import { GameError, gameService } from "../services/game-service.js";
 import { logger } from "../logger.js";
 import { isGameMaster } from "./auth.js";
@@ -37,8 +38,9 @@ const CARAVAN_ROLE_LABELS: Record<string, string> = {
 const RACE_TRACK_DISPLAY_STEPS = 30;
 
 function gameId(value: string): GreatGameType {
-
   if (!(value in GREAT_GAME_TYPES)) throw new GameError("Büyük Oyun türü geçersiz.");
+  if (!(ACTIVE_GREAT_GAME_TYPES as readonly string[]).includes(value))
+    throw new GameError(`${GREAT_GAMES_TURN}. Tur etkinliklerinde bu oyun aktif değil.`);
   return value as GreatGameType;
 }
 
@@ -54,7 +56,7 @@ function gameRules(type: GreatGameType): string {
   if (type === "CHARIOT") return `Katılım 1.000 Altın. Form yayınlandıktan sonra bahisler açılır. Yarış ${GREAT_GAMES_RACE_ROUNDS} etap sürer; her etapta gizli taktik verilir ve 50 kademeli pistteki atlar sonuçlarla birlikte ilerler. Katılım havuzu %65/%35 paylaşılır.`;
   if (type === "CARAVAN") return `Seçilen devletler 2–3 kişilik kervanlara ayrılır. ${GREAT_GAMES_RACE_ROUNDS} aşamanın her birinde, her kervandan yalnız bir takım üyesi ortak rotayı gizlice seçer. Her devletten oyun başlarken 1.000 Altın alınır; kervanların 50 kademeli pistteki sırası canlı değişir.`;
   if (type === "KINGS_BET") return "Katılım 1.000 Altın. Üç ikilemde İşbirliği veya İhanet ve rakibin kararı için tahmin gizlice seçilir. Rakipler her turun ardından yeniden karıştırılır; mümkün olduğu sürece aynı rakiple üst üste eşleşilmez.";
-  if (type === "GLADIATOR") return "Capua sezonu dört adet 32 kişilik eleme ve 12 kişilik finalden oluşur. 64 gladyatörün her biri elemelere tam iki kez katılır; her turnuvada 1. sıra 32, son sıra 1 puan kazanır. Dört elemenin puan sıralamasındaki ilk 12 finale çıkar, ilk 4 doğrudan çeyrek finale geçer. Dövüşte taraflar sırayla saldırır: 1d20 + Güç/10 saldırı, 1d20 + Güç/12 savunma zarıdır. Saldırı savunmayı geçerse 1d10 + Güç/25 hasar verilir. Tekli bahsin yanında aynı turdan 2–5 eşleşmeli, en fazla 12.00x oranlı birleşik kupon hazırlanabilir.";
+  if (type === "GLADIATOR") return "Katılımcı her devlete canlı kurayla dört rastgele gladyatör verilir; müzayede ve satın alma yapılmaz. Capua sezonu dört adet 32 kişilik eleme ve 12 kişilik finalden oluşur. 64 gladyatörün her biri elemelere tam iki kez katılır; her turnuvada 1. sıra 32, son sıra 1 puan kazanır. Dört elemenin puan sıralamasındaki ilk 12 finale çıkar, ilk 4 doğrudan çeyrek finale geçer. Dövüşte taraflar sırayla saldırır: 1d20 + Güç/10 saldırı, 1d20 + Güç/12 savunma zarıdır. Saldırı savunmayı geçerse 1d10 + Güç/25 hasar verilir.";
   return "Her masa üç devletten oluşur. Anlaşma yalnız bir ana ve en fazla bir ikincil kazanan çıkarabilir. Katılım 500 Altındır.";
 }
 
@@ -355,11 +357,7 @@ function gladiatorRosterFields(view: GladiatorTournamentView,page:number) {
   const lines = view.roster.slice(start,start+GLADIATOR_ROSTER_PAGE_SIZE).map((fighter, index) => {
     const market = fighter.owner_country_name
       ? `Sahip **${fighter.owner_country_name}**`
-      : view.auctionStatus === "OPEN" && fighter.current_bid
-        ? `Lider **${fighter.leading_country_name}** • ${gold(Number(fighter.current_bid))}`
-        : view.auctionStatus === "OPEN"
-          ? "Sahipsiz • Açılış 50 Altın"
-          : "Sahipsiz";
+      : "Henüz kurada çıkmadı";
     return `**${start+index+1}. ${fighter.name}** [${fighter.code}] — G**${fighter.power}** C**${fighter.max_hp}** • Eleme **${fighter.qualifier_appearances}/2** • **${fighter.qualifier_points} P** • ${market}`;
   });
   const chunks: string[] = [];
@@ -427,28 +425,27 @@ function gladiatorStatus(view: GladiatorTournamentView): string {
 }
 
 async function gladiatorRosterPayload(guildId: string, content?: string,requestedPage=0) {
-  const view = await greatGamesGladiatorService.view(guildId);
+  const [view,draw]=await Promise.all([
+    greatGamesGladiatorService.view(guildId),greatGamesGladiatorDrawService.view(guildId)
+  ]);
   const pageCount=Math.max(1,Math.ceil(view.roster.length/GLADIATOR_ROSTER_PAGE_SIZE));
   const page=safePage(requestedPage,pageCount);
   const embed = new EmbedBuilder().setColor(0xb43b32).setTitle("⚔️ Capua • Gladyatör Listesi")
-    .setDescription(`**Müzayede:** ${view.auctionStatus === "OPEN" ? "Tekliflere açık" : view.auctionStatus === "FINISHED" ? "Tamamlandı" : "Henüz açılmadı"} • **Sayfa:** ${page+1}/${pageCount}\nTeklifler **50 Altından** başlar. Sonraki teklif güncel bedelin üzerindeki **herhangi bir tam sayı** olabilir. Her devlet en fazla **3 gladyatöre** sahip olabilir.`)
+    .setDescription(`**Kura:** ${draw.status==="COMPLETED"?"Tamamlandı":draw.status==="OPEN"?`${draw.assigned}/${draw.target} atama yapıldı`:"Henüz açılmadı"} • **Sayfa:** ${page+1}/${pageCount}\nKatılımcı her devlet kuradan **4 rastgele gladyatör** alır. Gladyatörler satın alınmaz ve müzayede yapılmaz.`)
     .addFields(...gladiatorStandingFields(view),...gladiatorRosterFields(view,page));
   const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(`gg2|gladiator-roster-page|${page-1}`).setLabel("Önceki").setEmoji("⬅️").setStyle(ButtonStyle.Secondary).setDisabled(page===0),
     new ButtonBuilder().setCustomId(`gg2|gladiator-roster-refresh|${page}`).setLabel("Yenile").setEmoji("🔄").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(`gg2|gladiator-roster-page|${page+1}`).setLabel("Sonraki").setEmoji("➡️").setStyle(ButtonStyle.Secondary).setDisabled(page===pageCount-1)
   );
-  if (view.auctionStatus === "OPEN") buttons.addComponents(
-    new ButtonBuilder().setCustomId("gg2|gladiator-auction-bid|GLADIATOR").setLabel("Teklif Ver").setEmoji("💰").setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId("gg2|gladiator-auction-close|GLADIATOR").setLabel("Müzayedeyi Bitir").setEmoji("🏁").setStyle(ButtonStyle.Danger)
-  );
   return { content: content ?? "", embeds: [embed], components: [buttons] };
 }
 
 async function gladiatorOwnershipPayload(guildId:string,requestedPage=0){
-  const [view,wallets]=await Promise.all([
+  const [view,wallets,draw]=await Promise.all([
     greatGamesGladiatorService.view(guildId),
-    greatGamesWalletService.listParticipants(guildId)
+    greatGamesWalletService.listParticipants(guildId),
+    greatGamesGladiatorDrawService.view(guildId)
   ]);
   const fightersByCountry=new Map<string,typeof view.roster>();
   for(const fighter of view.roster){
@@ -470,9 +467,9 @@ async function gladiatorOwnershipPayload(guildId:string,requestedPage=0){
         Number(right.power)-Number(left.power)||left.name.localeCompare(right.name,"tr")
       );
       return {
-        name:`🏛️ ${countryName} • ${fighters.length}/3`.slice(0,256),
+        name:`🏛️ ${countryName} • ${fighters.length}/${draw.targetPerCountry}`.slice(0,256),
         value:fighters.length
-          ? fighters.map((fighter)=>`• **${fighter.name}** [${fighter.code}] — G**${fighter.power}** • ${gold(Number(fighter.purchase_price??0))}`).join("\n")
+          ? fighters.map((fighter)=>`• **${fighter.name}** [${fighter.code}] — Güç **${fighter.power}**`).join("\n")
           : "Henüz gladyatörü bulunmuyor.",
         inline:false as const
       };
@@ -480,7 +477,7 @@ async function gladiatorOwnershipPayload(guildId:string,requestedPage=0){
   const embed=new EmbedBuilder()
     .setColor(0x9b6a35)
     .setTitle("🏛️ Capua • Ülke Gladyatör Sahiplikleri")
-    .setDescription(`**Katılımcı devlet:** ${countries.length} • **Sahipli gladyatör:** ${ownedCount}/${view.roster.length} • **Sayfa:** ${page+1}/${pageCount}\nHer devlet en fazla **3 gladyatöre** sahip olabilir. Listede kod, güç ve gladyatörün alış bedeli gösterilir.`)
+    .setDescription(`**Katılımcı devlet:** ${countries.length} • **Kurayla atanan:** ${ownedCount}/${draw.target} • **Sayfa:** ${page+1}/${pageCount}\nHer katılımcı devlet kura tamamlandığında **${draw.targetPerCountry} gladyatöre** sahip olur.`)
     .addFields(...(fields.length?fields:[{name:"Kayıt bulunamadı",value:"Henüz katılımcı devlet veya gladyatör sahipliği bulunmuyor.",inline:false}]))
     .setFooter({text:"Sahiplik değişikliklerini görmek için Yenile düğmesini kullanabilirsin."});
   const navigation=new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -489,6 +486,48 @@ async function gladiatorOwnershipPayload(guildId:string,requestedPage=0){
     new ButtonBuilder().setCustomId(`gg2|gladiator-owners-page|${page+1}`).setLabel("Sonraki").setEmoji("➡️").setStyle(ButtonStyle.Secondary).setDisabled(page===pageCount-1)
   );
   return {embeds:[embed],components:[navigation]};
+}
+
+function gladiatorDrawStatus(view:GladiatorDrawView):string{
+  if(view.status==="COMPLETED")return "✅ Kura tamamlandı";
+  if(view.status==="OPEN")return `🎲 Kura sürüyor • ${view.assigned}/${view.target}`;
+  return "⏳ Kura henüz açılmadı";
+}
+
+async function gladiatorDrawPayload(guildId:string,notice?:string){
+  const view=await greatGamesGladiatorDrawService.view(guildId);
+  if(view.status==="NOT_STARTED")throw new GameError("Gladyatör kurası henüz yönetici tarafından açılmadı.");
+  const embed=new EmbedBuilder()
+    .setColor(view.status==="COMPLETED"?0x3f8f5f:0xb43b32)
+    .setTitle(`🎟️ ${GREAT_GAMES_TURN}. Tur • Capua Gladyatör Kurası`)
+    .setDescription([
+      notice?.trim()||null,
+      `## ${gladiatorDrawStatus(view)}`,
+      `**Katılımcı devlet:** ${view.countries.length} • **Hedef:** Her devlete ${view.targetPerCountry} gladyatör`,
+      `**Atanan:** ${view.assigned} • **Kalan kura:** ${view.remaining}`,
+      "Yönetici her çekilişte bir gladyatörü, o turda en az gladyatöre sahip ülkelerden rastgele birine atar. Bütün sonuçlar bu kartta canlı güncellenir."
+    ].filter(Boolean).join("\n\n"));
+  if(view.lastAssignment){
+    const last=view.lastAssignment;
+    embed.addFields({
+      name:`🎉 ${last.fighter.acquisitionOrder}. Kura Sonucu`,
+      value:`**${last.fighter.name}** [${last.fighter.code}] → **${last.countryName}**\n${last.fighter.origin} • ${last.fighter.style} • Güç **${last.fighter.power}** • Can **${last.fighter.maxHp}**`,
+      inline:false
+    });
+  }
+  for(const country of view.countries){
+    const slots=Array.from({length:view.targetPerCountry},(_,index)=>{
+      const fighter=country.fighters[index];
+      return fighter?`**${index+1}.** ${fighter.name} [${fighter.code}]`:`**${index+1}.** —`;
+    }).join("\n");
+    embed.addFields({name:`🏛️ ${country.countryName} • ${country.fighters.length}/${view.targetPerCountry}`.slice(0,256),value:slots,inline:true});
+  }
+  embed.setFooter({text:view.status==="COMPLETED"?"Bütün ülkelerin dört kişilik kadrosu belirlendi.":"Sıradaki çekilişi yalnız oyun yöneticisi yapabilir."});
+  const controls=new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId("gg2|gladiator-draw-next|GLADIATOR").setLabel("Sıradaki Kurayı Çek").setEmoji("🎲").setStyle(ButtonStyle.Success).setDisabled(view.status==="COMPLETED"),
+    new ButtonBuilder().setCustomId("gg2|gladiator-draw-refresh|GLADIATOR").setLabel("Formu Yenile").setEmoji("🔄").setStyle(ButtonStyle.Secondary)
+  );
+  return{embeds:[embed],components:[controls]};
 }
 
 function gladiatorBetStatus(status:"LOCKED"|"WON"|"LOST"|"REFUNDED"){
@@ -646,8 +685,8 @@ async function adminDashboardPayload(guildId: string): Promise<AdminPanelPayload
   const status = data.season
     ? `${data.season.status}${data.season.current_game ? ` • ${GREAT_GAME_TYPES[data.season.current_game].label}` : ""}`
     : "Henüz açılmadı";
-  const embed = new EmbedBuilder().setColor(0xd6ad3c).setTitle("🏛️ 30. Tur Büyük Oyunları • Yönetici Paneli")
-    .setDescription(`**Oyun turu:** ${data.currentTurn} • **Ana oyun:** ${status}\n**Bağımsız müzayede:** ${statusLabel(data, "AUCTION", chosenEntries(data, "AUCTION"))}\nOyuncular bu paneli göremez. Capua ve Devletler Müzayedesi ana oyunlardan bağımsız ilerleyebilir.`);
+  const embed = new EmbedBuilder().setColor(0xd6ad3c).setTitle(`🏛️ ${GREAT_GAMES_TURN}. Tur Etkinlikleri • Yönetici Paneli`)
+    .setDescription(`**Mevcut tur:** ${data.currentTurn} • **Etkin oyun:** ${status}\nBu etkinlik döneminde yalnız **Savaş Arabaları Turnuvası** ve **Capua Gladyatör Dövüşleri** oynanır. Oyuncular bu yönetim panelini göremez.`);
   for (const type of ACTIVE_GREAT_GAME_TYPES) {
     const selected = chosenEntries(data, type);
     embed.addFields({
@@ -669,15 +708,18 @@ async function adminDashboardPayload(guildId: string): Promise<AdminPanelPayload
 async function adminGamePayload(guildId: string, type: GreatGameType): Promise<AdminPanelPayload> {
   const data = await greatGamesService.dashboard(guildId);
   if (type === "GLADIATOR") {
-    const view = await greatGamesGladiatorService.view(guildId);
+    const [view,draw] = await Promise.all([
+      greatGamesGladiatorService.view(guildId),greatGamesGladiatorDrawService.view(guildId)
+    ]);
+    const drawStatus=draw.status==="NOT_STARTED"?"Henüz açılmadı":draw.status==="COMPLETED"?"Tamamlandı":"Devam ediyor";
     const embed = new EmbedBuilder().setColor(0xb43b32).setTitle("⚔️ Capua Gladyatör Dövüşleri • Yönetim")
-      .setDescription(`${gameRules(type)}\n\n**Durum:** ${gladiatorStatus(view)}\n**Gladyatör müzayedesi:** ${view.auctionStatus === "OPEN" ? "Tekliflere açık" : view.auctionStatus === "FINISHED" ? "Tamamlandı" : "Henüz açılmadı"}\n**Etkinliğe kayıtlı devlet:** ${view.registeredCountries}\n**Tamamlanan eleme:** ${view.qualifiersCompleted}/4${view.finalCompleted ? " • Final tamamlandı" : ""}`)
+      .setDescription(`${gameRules(type)}\n\n**Turnuva:** ${gladiatorStatus(view)}\n**Kura:** ${drawStatus} • **${draw.assigned}/${draw.target} atama**\n**Kura ülkesi:** ${draw.countries.length}/${Math.floor(draw.activeFighters/draw.targetPerCountry)} • Her ülke **${draw.targetPerCountry} gladyatör**\n**Tamamlanan eleme:** ${view.qualifiersCompleted}/4${view.finalCompleted ? " • Final tamamlandı" : ""}`)
       .addFields(...gladiatorBracketFields(view));
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId("gg2|admin-home").setLabel("Ana Panel").setStyle(ButtonStyle.Secondary)
     );
     const running = view.tournament && ["BETTING", "FIGHTING"].includes(view.tournament.status);
-    if (data.season && !["FINISHED","CANCELLED"].includes(data.season.status) && !running && !view.finalCompleted) row.addComponents(
+    if (data.season && draw.status==="COMPLETED" && !["FINISHED","CANCELLED"].includes(data.season.status) && !running && !view.finalCompleted) row.addComponents(
       new ButtonBuilder().setCustomId("gg2|gladiator-start|GLADIATOR")
         .setLabel(view.qualifiersCompleted>=4?"12 Kişilik Finali Başlat":`${view.qualifiersCompleted+1}. Elemeyi Başlat`)
         .setEmoji("🎲").setStyle(ButtonStyle.Success)
@@ -691,14 +733,12 @@ async function adminGamePayload(guildId: string, type: GreatGameType): Promise<A
     if (running) row.addComponents(
       new ButtonBuilder().setCustomId("gg2|recover|GLADIATOR").setLabel("Formu Yeniden Yayınla").setEmoji("📣").setStyle(ButtonStyle.Secondary)
     );
-    const auctionRow = new ActionRowBuilder<ButtonBuilder>();
-    if (view.auctionStatus === "NOT_OPENED" || view.auctionStatus === "CANCELLED") auctionRow.addComponents(
-      new ButtonBuilder().setCustomId("gg2|gladiator-auction-open|GLADIATOR").setLabel("Gladyatör Müzayedesini Aç").setEmoji("🔨").setStyle(ButtonStyle.Success)
+    const drawRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("gg2|gladiator-draw-publish|GLADIATOR")
+        .setLabel(draw.status==="NOT_STARTED"?"Kura Formunu Yayınla":"Kura Formunu Yeniden Yayınla")
+        .setEmoji("🎟️").setStyle(ButtonStyle.Success)
     );
-    if (view.auctionStatus === "OPEN") auctionRow.addComponents(
-      new ButtonBuilder().setCustomId("gg2|gladiator-auction-close|GLADIATOR").setLabel("Gladyatör Müzayedesini Bitir").setEmoji("🏁").setStyle(ButtonStyle.Danger)
-    );
-    return { embeds: [embed], components: auctionRow.components.length ? [row, auctionRow] : [row] };
+    return { embeds: [embed], components: [row, drawRow] };
   }
   const entries = chosenEntries(data, type).filter((entry) => entry.status !== "FINISHED");
   const auctionState = auctionLifecycle(data);
@@ -746,16 +786,17 @@ async function publicGamePayload(guildId: string, type: GreatGameType, content?:
     ? auctionState === "ACTIVE"
     : data.season?.status === "ACTIVE" && activeForType;
   const gladiatorView = type === "GLADIATOR" ? await greatGamesGladiatorService.view(guildId) : null;
+  const gladiatorDraw = type === "GLADIATOR" ? await greatGamesGladiatorDrawService.view(guildId) : null;
 
   const embed = new EmbedBuilder().setColor(type === "GLADIATOR" ? 0xb43b32 : type === "CARAVAN" ? 0xc88a3d : 0xd6ad3c)
     .setTitle(`${GREAT_GAME_TYPES[type].emoji} ${GREAT_GAME_TYPES[type].label}`)
-    .setDescription(type === "GLADIATOR" && gladiatorView
-      ? `${gameRules(type)}\n\n**Durum:** ${gladiatorStatus(gladiatorView)} • **Gladyatör müzayedesi:** ${gladiatorView.auctionStatus === "OPEN" ? "Açık" : gladiatorView.auctionStatus === "FINISHED" ? "Tamamlandı" : "Kapalı"} • **Katılabilecek devlet:** ${gladiatorView.registeredCountries}`
+    .setDescription(type === "GLADIATOR" && gladiatorView && gladiatorDraw
+      ? `${gameRules(type)}\n\n**Durum:** ${gladiatorStatus(gladiatorView)} • **Kura:** ${gladiatorDraw.status==="COMPLETED"?"Tamamlandı":gladiatorDraw.status==="OPEN"?`${gladiatorDraw.assigned}/${gladiatorDraw.target}`:"Bekleniyor"} • **Katılımcı devlet:** ${gladiatorDraw.countries.length}`
       : `${gameRules(type)}\n\n**Durum:** ${statusLabel(data, type, entries)} • **Katılımcı:** ${entries.length}`);
 
   if (type === "GLADIATOR" && gladiatorView) {
     embed.addFields(...gladiatorBracketFields(gladiatorView));
-    embed.setFooter({ text: "Güç, can, sahiplik ve güncel müzayede teklifleri: /oyunlar gladyatorler" });
+    embed.setFooter({ text: "Güç, can ve kura sahiplikleri: /oyunlar gladyatorler" });
   } else if (type === "AUCTION") {
     const lots = await greatGamesAuctionService.lots(guildId);
     const status = statusLabel(data, type, entries);
@@ -851,12 +892,6 @@ async function publicGamePayload(guildId: string, type: GreatGameType, content?:
   if (type!=="GLADIATOR" && runningForType) {
     if (type !== "AUCTION") buttons.addComponents(new ButtonBuilder().setCustomId(`gg2|action|${type}`).setLabel("Gizli Hamle Ver").setStyle(ButtonStyle.Primary));
     buttons.addComponents(new ButtonBuilder().setCustomId(`gg2|resolve|${type}`).setLabel(type === "AUCTION" ? "Müzayedeyi Bitir" : "Aşamayı Çöz").setEmoji(type === "AUCTION" ? "🏁" : "🎲").setStyle(ButtonStyle.Danger));
-  }
-  if (type === "GLADIATOR" && gladiatorView?.auctionStatus === "OPEN") {
-    buttons.addComponents(
-      new ButtonBuilder().setCustomId("gg2|gladiator-auction-bid|GLADIATOR").setLabel("Gladyatöre Teklif Ver").setEmoji("💰").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId("gg2|gladiator-auction-close|GLADIATOR").setLabel("Müzayedeyi Bitir").setEmoji("🏁").setStyle(ButtonStyle.Danger)
-    );
   }
   const components: Array<ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>> = [];
   if (type === "AUCTION" && runningForType) {
@@ -999,33 +1034,20 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
   }
   if (subcommand === "puan-durumu") {
     if (!isGameMaster(interaction)) throw new GameError("Bu komut yalnızca oyun yöneticileri tarafından kullanılabilir.");
-    const [standings, dashboard] = await Promise.all([
-      greatGamesService.pointStandings(interaction.guildId), greatGamesService.dashboard(interaction.guildId)
-    ]);
+    const standings=await greatGamesService.pointStandings(interaction.guildId);
     if (!standings.length) throw new GameError("Büyük Oyunlara katılmış devlet veya kaydedilmiş puan bulunmuyor.");
     const lines = standings.map((standing, index) =>
       `**${index + 1}. ${standing.countryName} — ${standing.total} Puan**\n` +
-      `↳ 🏺 Müzayede ${standing.byGame.AUCTION} • 🏇 Arabalar ${standing.byGame.CHARIOT} • 👑 Krallar ${standing.byGame.KINGS_BET} • ⚔️ Capua ${standing.byGame.GLADIATOR}`
+      `↳ 🏇 Arabalar ${standing.byGame.CHARIOT} • ⚔️ Capua ${standing.byGame.GLADIATOR}`
     );
     await interaction.reply({
       embeds: [new EmbedBuilder()
         .setColor(0xd6ad3c)
         .setTitle("🏆 Büyük Oyunlar • Puan Durumu")
-        .setDescription(clip(`💰 **Müzayede Ödül Havuzu:** ${gold(Number(dashboard.season?.prize_pool ?? 0))}\nKapanışta genel sıralamanın ilk üçüne %50 / %30 / %20 dağıtılır.\n\n${lines.join("\n\n")}`, 3_900))
+        .setDescription(clip(`Bu dönemde yalnız Savaş Arabaları ve Capua puanları hesaba katılır.\n\n${lines.join("\n\n")}`, 3_900))
         .setFooter({ text: "Puanlar oyunlar sonuçlandırıldığında kalıcı olarak kaydedilir; ödül dağıtımı yalnızca yönetici kapanışında yapılır." })],
       flags: MessageFlags.Ephemeral
     });
-    return true;
-  }
-  if (subcommand === "cuzdan-bonusu") {
-    if (!isGameMaster(interaction)) throw new GameError("Bu komut yalnızca oyun yöneticileri tarafından kullanılabilir.");
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    const result = await greatGamesWalletService.grantAuctionBonus(interaction.guildId, `discord:${interaction.id}`);
-    await interaction.editReply(
-      `💰 **Müzayede cüzdan bonusu tamamlandı.**\n` +
-      `Ödeme yapılan açık cüzdan: **${result.credited}**\n` +
-      `Toplam eklenen bakiye: **${gold(result.total)}**`
-    );
     return true;
   }
   if (subcommand === "cuzdan-duzenle") {
@@ -1064,20 +1086,12 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
     await interaction.reply(await publicGamePayload(interaction.guildId, type, "🛠️ Aktif oyun formu kayıtlar korunarak yeniden oluşturuldu."));
     return true;
   }
-  if (subcommand === "cuzdan-onar") {
-    if (!isGameMaster(interaction)) throw new GameError("Bu komut yalnızca oyun yöneticileri tarafından kullanılabilir.");
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    const result = await greatGamesService.repairFinishedCaravanPayments(interaction.guildId);
-    const lines = result.countries.map((item) => `**${item.countryName}:** ${gold(item.before)} → ${gold(item.after)} • Katılım −${gold(item.stake)} • Ödül +${gold(item.payout)}`);
-    await interaction.editReply({ content: clip(`✅ Ticaret Kervanı cüzdan denetimi tamamlandı.\n**Toplam katılım havuzu:** ${gold(result.totalStake)} • **Dağıtılan:** ${gold(result.totalPayout)}\n\n${lines.join("\n")}`, 1_990) });
-    return true;
-  }
   if (subcommand === "yonetici-bitir") {
     if (!isGameMaster(interaction)) throw new GameError("Bu komut yalnızca oyun yöneticileri tarafından kullanılabilir.");
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const result = await greatGamesWalletService.closeAll(interaction.guildId);
     const awards = result.prizeAwards.length
-      ? `\n\n🏆 **Müzayede ödül havuzu dağıtımı**\n${result.prizeAwards.map((award) =>
+      ? `\n\n🏆 **Genel puan ödülleri**\n${result.prizeAwards.map((award) =>
         `${award.rank}. **${award.countryName}** — ${award.points} puan • +${gold(award.amount)}`
       ).join("\n")}`
       : "";
@@ -1085,8 +1099,7 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
       `• **${item.countryName}:** ${gold(item.originalBalance)} → devlete **${gold(item.amount)}** • sıfırlanan ${gold(item.discarded)}`
     ).join("\n");
     await interaction.editReply(clip(
-      `🏛️ Büyük Oyunlar kapatıldı. Ödül havuzu önce dereceye giren cüzdanlara dağıtıldı. ` +
-      `Ardından her cüzdanın **%30’u** devlete aktarıldı, kalan **%70** sıfırlandı.\n\n${countries}\n\n` +
+      `🏛️ ${GREAT_GAMES_TURN}. Tur etkinlikleri kapatıldı. Her cüzdanın **%30’u** devlete aktarıldı, kalan **%70** sıfırlandı.\n\n${countries}\n\n` +
       `**Toplam aktarılan:** ${gold(result.total)} • **Toplam sıfırlanan:** ${gold(result.discardedTotal)}${awards}`,
       1_990
     ));
@@ -1120,7 +1133,7 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
   if (subcommand === "katil") {
     const result = await greatGamesWalletService.join(interaction.guildId, country.id, interaction.user.id);
     await interaction.reply({ content: result.created
-      ? `✅ ${country.name}, 30. Tur Büyük Oyunlarına yeniden katıldı ve dört etkin oyuna aday kaydedildi. Oyun cüzdanına **${gold(5_000)}** yüklendi.`
+      ? `✅ ${country.name}, ${GREAT_GAMES_TURN}. Tur etkinliklerine katıldı; **Gladyatör Dövüşleri** ve **Savaş Arabaları Turnuvası** kayıtları açıldı. Oyun cüzdanına **${gold(5_000)}** yüklendi.`
       : `ℹ️ ${country.name} zaten kayıtlı. Eksik oyun adaylıkları tamamlandı; güncel bakiye **${gold(result.balance)}**.`, flags: MessageFlags.Ephemeral });
     return true;
   }
@@ -1202,6 +1215,37 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
   if(action==="gladiator-points-page"){
     await interaction.update(await gladiatorPointsPayload(interaction.guildId,Number(rawType)));
     return true;
+  }
+  if(action==="gladiator-draw-publish"){
+    if(!isGameMaster(interaction))throw new GameError("Gladyatör kura formunu yalnızca oyun yöneticisi yayımlayabilir.");
+    await interaction.deferUpdate();
+    const draw=await greatGamesGladiatorDrawService.open(interaction.guildId,interaction.user.id);
+    await interaction.editReply(await adminGamePayload(interaction.guildId,"GLADIATOR"));
+    await interaction.followUp({
+      ...(await gladiatorDrawPayload(interaction.guildId,draw.status==="COMPLETED"
+        ?"📜 **Tamamlanmış kura sonuçları yeniden yayımlandı.**"
+        :"📣 **Capua gladyatör kurası açıldı.** Çekilişler aşağıdaki formda tek tek yapılacak.")),
+      ephemeral:false
+    });
+    return true;
+  }
+  if(action==="gladiator-draw-next"){
+    if(!isGameMaster(interaction))throw new GameError("Gladyatör kurasını yalnızca oyun yöneticisi ilerletebilir.");
+    await interaction.deferUpdate();
+    const draw=await greatGamesGladiatorDrawService.drawNext(interaction.guildId,interaction.user.id);
+    const last=draw.lastAssignment;
+    const notice=last
+      ?`🎲 **${last.fighter.name}**, kurada **${last.countryName}** devletine çıktı.`
+      :undefined;
+    await interaction.editReply(await gladiatorDrawPayload(interaction.guildId,notice));
+    return true;
+  }
+  if(action==="gladiator-draw-refresh"){
+    await interaction.update(await gladiatorDrawPayload(interaction.guildId));
+    return true;
+  }
+  if(action?.startsWith("gladiator-auction")){
+    throw new GameError(`${GREAT_GAMES_TURN}. Tur etkinliklerinde gladyatör müzayedesi kullanılmıyor; sahiplikler canlı kurayla belirlenir.`);
   }
   if (action === "gladiator-auction-open") {
     if (!isGameMaster(interaction)) throw new GameError("Gladyatör müzayedesini yalnızca oyun yöneticisi açabilir.");
@@ -1507,23 +1551,7 @@ export async function handleGreatGamesSelect(interaction: StringSelectMenuIntera
     return true;
   }
   if (interaction.customId.startsWith("ggs2|gladiator-fighter|")) {
-    if (!interaction.guildId) throw new GameError("Bu işlem yalnızca sunucuda kullanılabilir.");
-    const fighterId = interaction.values[0];
-    if (!fighterId) throw new GameError("Gladyatör seçilmedi.");
-    const view = await greatGamesGladiatorService.view(interaction.guildId);
-    if (view.auctionStatus !== "OPEN") throw new GameError("Capua gladyatör müzayedesi tekliflere kapalı.");
-    const fighter = view.roster.find((item) => item.id === fighterId && !item.owner_country_name);
-    if (!fighter) throw new GameError("Seçilen gladyatör artık tekliflere açık değil.");
-    const minimum = fighter.current_bid ? Number(fighter.current_bid) + 1 : 50;
-    await interaction.showModal(new ModalBuilder()
-      .setCustomId(`ggm2|gladiator-auction-bid|${fighter.id}`)
-      .setTitle(`${fighter.name} • Teklif`.slice(0, 45))
-      .addComponents(
-        new ActionRowBuilder<TextInputBuilder>().addComponents(
-          new TextInputBuilder().setCustomId("amount").setLabel(`Yeni teklif • En az ${gold(minimum)}`.slice(0, 45)).setPlaceholder(String(minimum)).setMaxLength(15).setStyle(TextInputStyle.Short).setRequired(true)
-        )
-      ));
-    return true;
+    throw new GameError(`${GREAT_GAMES_TURN}. Tur etkinliklerinde gladyatör müzayedesi ve teklif verme kapalıdır.`);
   }
   if (interaction.customId !== "ggs2|auction-lot") return false;
   const lotId = interaction.values[0];
@@ -1570,19 +1598,7 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
     return true;
   }
   if (action === "gladiator-auction-bid") {
-    const amount = Number(interaction.fields.getTextInputValue("amount").replaceAll(".", "").trim());
-    const result = await greatGamesGladiatorAuctionService.bid({
-      guildId: interaction.guildId,
-      countryId: country.id,
-      userId: interaction.user.id,
-      gladiatorId: rawType!,
-      amount
-    });
-    await interaction.reply({
-      content: `✅ **${result.gladiatorName}** için teklifin **${gold(result.amount)}** olarak kaydedildi. Lider olduğun/sahip olduğun gladyatör: **${result.leadingLots}/3** • Kalan teklif kapasitesi: **${gold(result.availableAfter)}**`,
-      flags: MessageFlags.Ephemeral
-    });
-    return true;
+    throw new GameError(`${GREAT_GAMES_TURN}. Tur etkinliklerinde gladyatör müzayedesi ve teklif verme kapalıdır.`);
   }
   if (action === "gladiator-bet") {
     const matchNumber = Number(interaction.fields.getTextInputValue("match").trim());

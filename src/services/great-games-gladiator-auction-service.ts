@@ -12,7 +12,7 @@ async function lockedSeason(client: DbClient, guildId: string): Promise<SeasonRo
     "SELECT id,status FROM great_games_seasons WHERE guild_id=$1 AND game_turn=$2 FOR UPDATE",
     [guildId, GREAT_GAMES_TURN]
   )).rows[0];
-  if (!season) throw new GameError("30. Tur Büyük Oyunları henüz yönetici tarafından açılmadı.");
+  if (!season) throw new GameError(`${GREAT_GAMES_TURN}. Tur etkinlikleri henüz yönetici tarafından açılmadı.`);
   return season;
 }
 

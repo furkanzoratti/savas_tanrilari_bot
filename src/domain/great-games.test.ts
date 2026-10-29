@@ -13,10 +13,10 @@ function sequence(values: number[]): () => number {
   return () => values[index++] ?? 0;
 }
 
-describe("30. Tur Büyük Oyunları", () => {
+describe("50. Tur Büyük Oyunları", () => {
   it("yeni sezonu yalnız seçilen dört etkin oyunla açar", () => {
-    expect(GREAT_GAMES_TURN).toBe(30);
-    expect(ACTIVE_GREAT_GAME_TYPES).toEqual(["AUCTION", "CHARIOT", "KINGS_BET", "GLADIATOR"]);
+    expect(GREAT_GAMES_TURN).toBe(50);
+    expect(ACTIVE_GREAT_GAME_TYPES).toEqual(["CHARIOT", "GLADIATOR"]);
   });
 
   it("Capua oranlarını güce göre üretir ve dövüşü d20 + güç bonusuyla çözer", () => {

@@ -17,7 +17,7 @@ async function lockedSeason(client: DbClient, guildId: string) {
     "SELECT id,status,current_game,prize_pool FROM great_games_seasons WHERE guild_id=$1 AND game_turn=$2 FOR UPDATE",
     [guildId, GREAT_GAMES_TURN]
   )).rows[0];
-  if (!row) throw new GameError("30. Tur Büyük Oyunları henüz yönetici tarafından açılmadı.");
+  if (!row) throw new GameError(`${GREAT_GAMES_TURN}. Tur etkinlikleri henüz yönetici tarafından açılmadı.`);
   return row;
 }
 
@@ -58,6 +58,24 @@ export const greatGamesWalletService = {
     return withTransaction(async (client) => {
       const season = await lockedSeason(client, guildId);
       if (!["OPEN", "PUBLISHED", "ACTIVE"].includes(season.status)) throw new GameError("Büyük Oyunlara katılım kapalı.");
+      const drawStarted=Boolean((await client.query(
+        "SELECT 1 FROM great_games_gladiator_draws WHERE season_id=$1",
+        [season.id]
+      )).rowCount);
+      const existingWallet=Boolean((await client.query(
+        "SELECT 1 FROM great_games_wallets WHERE season_id=$1 AND country_id=$2 AND closed_at IS NULL",
+        [season.id,countryId]
+      )).rowCount);
+      if(drawStarted&&!existingWallet)throw new GameError("Gladyatör kurası başladığı için yeni devlet katılımı kapandı.");
+      if(!existingWallet){
+        const [fighterCount,participantCount]=await Promise.all([
+          client.query<{count:string}>("SELECT COUNT(*)::text AS count FROM great_games_gladiators WHERE active=TRUE"),
+          client.query<{count:string}>("SELECT COUNT(*)::text AS count FROM great_games_wallets WHERE season_id=$1 AND closed_at IS NULL",[season.id])
+        ]);
+        const capacity=Math.floor(Number(fighterCount.rows[0]?.count??0)/4);
+        if(Number(participantCount.rows[0]?.count??0)>=capacity)
+          throw new GameError(`Capua kurasının **${capacity} devletlik** katılım kapasitesi doldu.`);
+      }
       const inserted = (await client.query<{ id: string; balance: number }>(
         `INSERT INTO great_games_wallets(season_id,country_id,balance,initial_grant,joined_by)
          VALUES($1,$2,5000,5000,$3) ON CONFLICT(season_id,country_id) DO NOTHING RETURNING id,balance`,
@@ -67,8 +85,8 @@ export const greatGamesWalletService = {
       if (inserted) {
         await client.query(
           `INSERT INTO great_games_wallet_movements(wallet_id,amount,balance_after,kind,source_key,description)
-          VALUES($1,5000,5000,'INITIAL_GRANT','initial-grant','30. Tur Büyük Oyunları başlangıç bakiyesi')`,
-          [inserted.id]
+          VALUES($1,5000,5000,'INITIAL_GRANT','initial-grant',$2)`,
+          [inserted.id, `${GREAT_GAMES_TURN}. Tur etkinlikleri başlangıç bakiyesi`]
         );
         balance = 5_000;
       } else {
