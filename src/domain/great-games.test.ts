@@ -14,9 +14,9 @@ function sequence(values: number[]): () => number {
 }
 
 describe("50. Tur Büyük Oyunları", () => {
-  it("yeni sezonu yalnız seçilen dört etkin oyunla açar", () => {
+  it("yeni sezonu yalnız seçilen beş etkin oyunla açar", () => {
     expect(GREAT_GAMES_TURN).toBe(50);
-    expect(ACTIVE_GREAT_GAME_TYPES).toEqual(["CHARIOT", "GLADIATOR"]);
+    expect(ACTIVE_GREAT_GAME_TYPES).toEqual(["CHARIOT", "GLADIATOR", "COURT_INTRIGUE", "GREAT_CONSTRUCTION", "SEVEN_SEALS"]);
   });
 
   it("Capua oranlarını güce göre üretir ve dövüşü d20 + güç bonusuyla çözer", () => {

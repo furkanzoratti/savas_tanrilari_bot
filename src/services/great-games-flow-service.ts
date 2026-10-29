@@ -100,8 +100,10 @@ function manualSelection(entries: readonly GreatGamesEntryRow[], countryNames: r
 }
 
 function validateSelection(gameType: GreatGameType, count: number): void {
-  const minimum = gameType === "DIPLOMACY" ? 3 : gameType === "CARAVAN" ? 4 : 2;
+  const minimum = gameType === "DIPLOMACY" ? 3 : ["CARAVAN","COURT_INTRIGUE","GREAT_CONSTRUCTION","SEVEN_SEALS"].includes(gameType) ? 4 : 2;
   if (count < minimum) throw new GameError(`Bu oyun için en az ${minimum} devlet seçilmelidir.`);
+  if (gameType === "COURT_INTRIGUE" && count > 16) throw new GameError("Saray Entrikası 4–16 devletle oynanabilir.");
+  if (["GREAT_CONSTRUCTION","SEVEN_SEALS"].includes(gameType) && count > 16) throw new GameError("Bu oyun 4–16 devletle oynanabilir.");
   if (gameType === "KINGS_BET" && count % 2 !== 0) throw new GameError("Kralların Bahsi için devlet sayısı çift olmalıdır.");
   if (gameType === "DIPLOMACY" && count % 3 !== 0) throw new GameError("Diplomasi Masası için devlet sayısı üçün katı olmalıdır.");
 }

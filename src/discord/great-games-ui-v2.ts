@@ -19,6 +19,12 @@ import { greatGamesWalletService } from "../services/great-games-wallet-service.
 import { greatGamesGladiatorService, type GladiatorMatchRow, type GladiatorTournamentView } from "../services/great-games-gladiator-service.js";
 import { greatGamesGladiatorAuctionService } from "../services/great-games-gladiator-auction-service.js";
 import { greatGamesGladiatorDrawService, type GladiatorDrawView } from "../services/great-games-gladiator-draw-service.js";
+import { greatGamesCourtIntrigueService, type CourtGameView } from "../services/great-games-court-intrigue-service.js";
+import { COURT_ACTIONS,COURT_AREAS,COURT_EVENTS,COURT_OBJECTIVES,type CourtActionType,type CourtArea } from "../domain/court-intrigue.js";
+import { greatGamesConstructionService,type ConstructionView } from "../services/great-games-construction-service.js";
+import { CONSTRUCTION_EVENTS,CONSTRUCTION_METHODS,CONSTRUCTION_STAGES,type ConstructionMethod,type ConstructionStage } from "../domain/great-construction.js";
+import { greatGamesSevenSealsService,type SevenSealsView } from "../services/great-games-seven-seals-service.js";
+import { SEALS,SEAL_ACTIONS,type SealActionType,type SealKey } from "../domain/seven-seals.js";
 import { GameError, gameService } from "../services/game-service.js";
 import { logger } from "../logger.js";
 import { isGameMaster } from "./auth.js";
@@ -57,6 +63,9 @@ function gameRules(type: GreatGameType): string {
   if (type === "CARAVAN") return `Seçilen devletler 2–3 kişilik kervanlara ayrılır. ${GREAT_GAMES_RACE_ROUNDS} aşamanın her birinde, her kervandan yalnız bir takım üyesi ortak rotayı gizlice seçer. Her devletten oyun başlarken 1.000 Altın alınır; kervanların 50 kademeli pistteki sırası canlı değişir.`;
   if (type === "KINGS_BET") return "Katılım 1.000 Altın. Üç ikilemde İşbirliği veya İhanet ve rakibin kararı için tahmin gizlice seçilir. Rakipler her turun ardından yeniden karıştırılır; mümkün olduğu sürece aynı rakiple üst üste eşleşilmez.";
   if (type === "GLADIATOR") return "Katılımcı her devlete canlı kurayla dört rastgele gladyatör verilir; müzayede ve satın alma yapılmaz. Capua sezonu dört adet 32 kişilik eleme ve 12 kişilik finalden oluşur. 64 gladyatörün her biri elemelere tam iki kez katılır; her turnuvada 1. sıra 32, son sıra 1 puan kazanır. Dört elemenin puan sıralamasındaki ilk 12 finale çıkar, ilk 4 doğrudan çeyrek finale geçer. Dövüşte taraflar sırayla saldırır: 1d20 + Güç/10 saldırı, 1d20 + Güç/12 savunma zarıdır. Saldırı savunmayı geçerse 1d10 + Güç/25 hasar verilir.";
+  if(type==="COURT_INTRIGUE")return "Beş raund boyunca Taht, Saray Muhafızları, Ruhban Sınıfı ve Tüccarlar üzerinde nüfuz kurulur. Her delegasyon gizli amaç taşır; destek, entrika, koruma ve resmî anlaşmalarla prestij toplamaya çalışır. Gerçek devlet hazinesi veya ordusu kullanılmaz.";
+  if(type==="GREAT_CONSTRUCTION")return "Beş raund boyunca temel, ana yapı ve bezeme aşamalarını ilerleterek en görkemli anıtı tamamla. Düzenli inşa güvenlidir; hızlandırma malzeme ve zar riski, usta işçiliği ise ilham karşılığında kalite sağlar.";
+  if(type==="SEVEN_SEALS")return "Yedi raund boyunca farklı zorluk ve puanlardaki kadim mühürleri aç. Kehanetle odak biriktir, yozlaşmayı arındır veya sınırlı lanet haklarınla rakiplerin girişimini zorlaştır.";
   return "Her masa üç devletten oluşur. Anlaşma yalnız bir ana ve en fazla bir ikincil kazanan çıkarabilir. Katılım 500 Altındır.";
 }
 
@@ -530,6 +539,288 @@ async function gladiatorDrawPayload(guildId:string,notice?:string){
   return{embeds:[embed],components:[controls]};
 }
 
+function courtStateLines(view:CourtGameView):string[]{
+  const players=view.status==="COMPLETED"
+    ?[...view.players].sort((left,right)=>right.prestige-left.prestige||left.countryName.localeCompare(right.countryName,"tr"))
+    :view.players;
+  return players.map((player,index)=>{
+    const influence=(Object.keys(COURT_AREAS)as CourtArea[])
+      .map((area)=>`${COURT_AREAS[area].emoji}${player.influence[area]}`).join(" ");
+    const readiness=view.status==="ACTIVE"?(player.submitted?"✅":"⏳"):"";
+    const rank=view.status==="COMPLETED"?`**${index+1}.** `:"";
+    return `${readiness} ${rank}**${player.countryName}** — ⭐ **${player.prestige}** • ${influence}`.trim();
+  });
+}
+
+function courtAreaLines(view:CourtGameView):string[]{
+  if(!view.players.length)return[];
+  return(Object.keys(COURT_AREAS)as CourtArea[]).map((area)=>{
+    const maximum=Math.max(...view.players.map((player)=>player.influence[area]));
+    const leaders=view.players.filter((player)=>player.influence[area]===maximum).map((player)=>player.countryName).join(", ");
+    return `${COURT_AREAS[area].emoji} **${COURT_AREAS[area].label}:** ${leaders} — ${maximum} nüfuz`;
+  });
+}
+
+async function courtPublicPayload(guildId:string,notice?:string){
+  const view=await greatGamesCourtIntrigueService.view(guildId);
+  const event=view.status==="ACTIVE"&&view.eventKey?COURT_EVENTS[view.eventKey]:null;
+  const status=view.status==="PUBLISHED"?"Yayınlandı • Başlangıç bekleniyor"
+    :view.status==="ACTIVE"?`Raund ${view.round}/${view.maxRounds}`
+    :view.status==="COMPLETED"?"Tamamlandı":"Hazırlanıyor";
+  const embed=new EmbedBuilder().setColor(0x6d466b).setTitle("🎭 Saray Entrikası")
+    .setDescription([
+      notice?.trim()||null,`## ${status}`,
+      event?`### ${COURT_AREAS.THRONE.emoji} ${event.label}\n${event.description}`:null,
+      view.status==="PUBLISHED"?"Katılımcılar hazır. Yönetici oyunu başlattığında gizli amaçlar ve saray kaynakları dağıtılacak.":
+        "Aşağıdaki dengeler herkese açıktır; gizli amaçlar, entrika hakları ve özel bilgiler yalnız delegasyon sahibine gösterilir."
+    ].filter(Boolean).join("\n\n"));
+  if(view.status==="PUBLISHED"){
+    embed.addFields({name:`🏛️ Katılımcı Delegasyonlar • ${view.players.length}`,value:clip(view.players.map((player)=>`• ${player.countryName}`).join("\n")||"Katılımcı bulunmuyor.",1024),inline:false});
+  }else{
+    embed.addFields({name:"⚖️ Saray Dengesi",value:courtAreaLines(view).join("\n")||"Denge kaydı bulunmuyor.",inline:false});
+    const stateLines=courtStateLines(view);
+    for(let index=0;index<stateLines.length;index+=8)embed.addFields({
+      name:index===0?"🎖️ Delegasyonlar":"🎖️ Delegasyonlar • Devam",
+      value:stateLines.slice(index,index+8).join("\n"),inline:false
+    });
+    const activePacts=view.pacts.filter((pact)=>pact.status==="ACTIVE");
+    embed.addFields({
+      name:"🤝 Etkin Saray Anlaşmaları",
+      value:activePacts.length?activePacts.map((pact)=>`• **${pact.proposerCountryName}** ↔ **${pact.receiverCountryName}** • ${pact.activeUntilRound}. raund sonuna kadar`).join("\n"):"Etkin anlaşma bulunmuyor.",
+      inline:false
+    });
+    if(view.lastSummary.length)embed.addFields({name:"📜 Son Raundun Saray Kayıtları",value:clip(view.lastSummary.join("\n"),1024),inline:false});
+  }
+  embed.setFooter({text:view.status==="ACTIVE"?"Hamleni Hazırla düğmesi kişisel ve gizli kontrol kartını açar.":"Saray kayıtları Formu Yenile düğmesiyle güncellenir."});
+  const controls=new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId("gg2|public-refresh|COURT_INTRIGUE").setLabel("Formu Yenile").setEmoji("🔄").setStyle(ButtonStyle.Secondary)
+  );
+  if(view.status==="PUBLISHED")controls.addComponents(
+    new ButtonBuilder().setCustomId("gg2|start|COURT_INTRIGUE").setLabel("Oyunu Başlat").setEmoji("▶️").setStyle(ButtonStyle.Success)
+  );
+  if(view.status==="ACTIVE")controls.addComponents(
+    new ButtonBuilder().setCustomId("gg2|court-control|COURT_INTRIGUE").setLabel("Hamleni Hazırla").setEmoji("🎭").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId("gg2|court-pacts|COURT_INTRIGUE").setLabel("Anlaşmalarım").setEmoji("🤝").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("gg2|resolve|COURT_INTRIGUE").setLabel("Raundu Çöz").setEmoji("⚖️").setStyle(ButtonStyle.Danger)
+  );
+  return{content:"",embeds:[embed],components:[controls]};
+}
+
+async function courtControlPayload(guildId:string,countryId:string,notice?:string){
+  const view=await greatGamesCourtIntrigueService.view(guildId,countryId);
+  const own=view.ownState;
+  if(view.status!=="ACTIVE"||!own)throw new GameError("Devletinin etkin bir Saray Entrikası delegasyonu bulunmuyor.");
+  const objective=COURT_OBJECTIVES[own.objective];
+  const embed=new EmbedBuilder().setColor(0x75506f).setTitle(`🎭 ${own.countryName} • Gizli Saray Masası`)
+    .setDescription([
+      notice?.trim()||null,`## Raund ${view.round}/${view.maxRounds}`,
+      `🎯 **Gizli amaç — ${objective.label}**\n${objective.description}`,
+      own.submitted?"✅ Bu raund için hamlen kaydedildi. Raund çözülmeden önce aşağıdaki düğmelerle değiştirebilirsin.":"⏳ Bu raund için henüz hamle vermedin."
+    ].filter(Boolean).join("\n\n"))
+    .addFields(
+      {name:"🧰 Kalan Haklar",value:`🕵️ Entrika: **${own.intrigue}**\n🛡️ Koruma: **${own.protection}**\n⭐ Prestij: **${own.prestige}**`,inline:true},
+      {name:"🏛️ Nüfuzun",value:(Object.keys(COURT_AREAS)as CourtArea[]).map((area)=>`${COURT_AREAS[area].emoji} ${COURT_AREAS[area].label}: **${own.influence[area]}**`).join("\n"),inline:true},
+      {name:"📩 Son Özel Sonucun",value:clip(own.lastPrivateResult??"Henüz özel bir raund sonucu bulunmuyor.",1024),inline:false}
+    );
+  if(own.lastIntel)embed.addFields({name:"🕵️ Son İstihbarat",value:clip(own.lastIntel,1024),inline:false});
+  const mainActions=new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId("gg2|court-act|INFLUENCE").setLabel("Nüfuz Kur").setEmoji("🏛️").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId("gg2|court-act|BRIBE").setLabel("Rüşvet Dağıt").setEmoji("🪙").setStyle(ButtonStyle.Secondary).setDisabled(own.intrigue<=0),
+    new ButtonBuilder().setCustomId("gg2|court-act|SUPPORT").setLabel("Destekle").setEmoji("🤝").setStyle(ButtonStyle.Success)
+  );
+  const intrigueActions=new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId("gg2|court-act|UNDERMINE").setLabel("İtibar Sars").setEmoji("🗡️").setStyle(ButtonStyle.Danger).setDisabled(own.intrigue<=0),
+    new ButtonBuilder().setCustomId("gg2|court-act|SPY").setLabel("Casusluk Yap").setEmoji("🕵️").setStyle(ButtonStyle.Danger).setDisabled(own.intrigue<=0),
+    new ButtonBuilder().setCustomId("gg2|court-act|PROTECT").setLabel("Delegasyonu Koru").setEmoji("🛡️").setStyle(ButtonStyle.Secondary).setDisabled(own.protection<=0),
+    new ButtonBuilder().setCustomId("gg2|court-pacts|COURT_INTRIGUE").setLabel("Anlaşmalar").setEmoji("🤝").setStyle(ButtonStyle.Secondary)
+  );
+  return{embeds:[embed],components:[mainActions,intrigueActions]};
+}
+
+function courtActionModal(view:CourtGameView,countryId:string,action:CourtActionType):ModalBuilder{
+  const rule=COURT_ACTIONS[action];
+  const modal=new ModalBuilder().setCustomId(`ggm2|court-action|${action}`).setTitle(`${rule.emoji} ${rule.label}`.slice(0,45))
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(`**${rule.label}**\n${rule.description}\n\nSeçimin raund çözülene kadar gizli kalır ve tekrar girilerek değiştirilebilir.`));
+  if(["INFLUENCE","BRIBE","SUPPORT","UNDERMINE"].includes(action))modal.addLabelComponents(
+    new LabelBuilder().setLabel("Saray alanı").setDescription("Hamlenin uygulanacağı nüfuz alanını seç.")
+      .setStringSelectMenuComponent(new StringSelectMenuBuilder().setCustomId("area").setPlaceholder("Saray alanını seç").setRequired(true)
+        .addOptions((Object.keys(COURT_AREAS)as CourtArea[]).map((area)=>({label:COURT_AREAS[area].label,value:area,emoji:COURT_AREAS[area].emoji}))))
+  );
+  if(["SUPPORT","UNDERMINE","SPY"].includes(action))modal.addLabelComponents(
+    new LabelBuilder().setLabel("Hedef delegasyon").setDescription("Hamlenin yöneltileceği devleti seç.")
+      .setStringSelectMenuComponent(new StringSelectMenuBuilder().setCustomId("target").setPlaceholder("Hedef devleti seç").setRequired(true)
+        .addOptions(view.players.filter((player)=>player.countryId!==countryId).slice(0,25).map((player)=>({label:player.countryName,value:player.countryId}))))
+  );
+  return modal;
+}
+
+async function courtPactPayload(guildId:string,countryId:string,selectedPactId?:string,notice?:string){
+  const view=await greatGamesCourtIntrigueService.view(guildId,countryId);
+  if(view.status!=="ACTIVE"||!view.ownState)throw new GameError("Devletinin etkin Saray Entrikası delegasyonu bulunmuyor.");
+  const related=view.pacts.filter((pact)=>pact.proposerCountryId===countryId||pact.receiverCountryId===countryId);
+  const active=related.filter((pact)=>pact.status==="ACTIVE");
+  const incoming=related.filter((pact)=>pact.status==="PENDING"&&pact.receiverCountryId===countryId);
+  const outgoing=related.filter((pact)=>pact.status==="PENDING"&&pact.proposerCountryId===countryId);
+  const selected=incoming.find((pact)=>pact.id===selectedPactId);
+  const embed=new EmbedBuilder().setColor(0x8b6848).setTitle(`🤝 ${view.ownState.countryName} • Saray Anlaşmaları`)
+    .setDescription([notice?.trim()||null,"Anlaşmalar iki delegasyonu geçici olarak birbirine bağlar. Taraflardan biri diğerine casusluk veya itibar sarsma uygularsa anlaşma bozulur ve saldıran **2 prestij** kaybeder. Süresini tamamlayan iki taraf **2’şer prestij** kazanır."].filter(Boolean).join("\n\n"))
+    .addFields(
+      {name:"✅ Etkin Anlaşmalar",value:active.length?active.map((pact)=>`• ${pact.proposerCountryName} ↔ ${pact.receiverCountryName} • ${pact.activeUntilRound}. raund sonu`).join("\n"):"Etkin anlaşma yok.",inline:false},
+      {name:"📥 Gelen Teklifler",value:incoming.length?incoming.map((pact)=>`• **${pact.proposerCountryName}** • Raund ${pact.proposedRound}`).join("\n"):"Bekleyen teklif yok.",inline:true},
+      {name:"📤 Gönderilen Teklifler",value:outgoing.length?outgoing.map((pact)=>`• **${pact.receiverCountryName}** • Yanıt bekliyor`).join("\n"):"Yanıt bekleyen teklif yok.",inline:true}
+    );
+  const components:Array<ActionRowBuilder<ButtonBuilder>|ActionRowBuilder<StringSelectMenuBuilder>>=[];
+  if(incoming.length)components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+    new StringSelectMenuBuilder().setCustomId("ggs2|court-pact-select").setPlaceholder("Yanıtlanacak anlaşma teklifini seç")
+      .addOptions(incoming.slice(0,25).map((pact)=>({label:pact.proposerCountryName,value:pact.id,description:`${pact.proposedRound}. raundda önerildi`})))
+  ));
+  const controls=new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId("gg2|court-pact-offer|COURT_INTRIGUE").setLabel("Anlaşma Öner").setEmoji("✉️").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId("gg2|court-pacts|COURT_INTRIGUE").setLabel("Yenile").setEmoji("🔄").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("gg2|court-control|COURT_INTRIGUE").setLabel("Hamle Masasına Dön").setEmoji("↩️").setStyle(ButtonStyle.Secondary)
+  );
+  if(selected)controls.addComponents(
+    new ButtonBuilder().setCustomId(`gg2|court-pact-accept|${selected.id}`).setLabel(`${selected.proposerCountryName} • Kabul Et`.slice(0,80)).setEmoji("✅").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`gg2|court-pact-reject|${selected.id}`).setLabel("Reddet").setEmoji("❌").setStyle(ButtonStyle.Danger)
+  );
+  components.push(controls);
+  return{embeds:[embed],components};
+}
+
+function courtPactOfferModal(view:CourtGameView,countryId:string):ModalBuilder{
+  const livePacts=view.pacts.filter((pact)=>["PENDING","ACTIVE"].includes(pact.status));
+  const ownPactCount=livePacts.filter((pact)=>pact.proposerCountryId===countryId||pact.receiverCountryId===countryId).length;
+  if(ownPactCount>=2)throw new GameError("Aynı anda en fazla iki bekleyen veya etkin saray anlaşman olabilir.");
+  const unavailable=new Set(livePacts.filter((pact)=>pact.proposerCountryId===countryId||pact.receiverCountryId===countryId)
+    .map((pact)=>pact.proposerCountryId===countryId?pact.receiverCountryId:pact.proposerCountryId));
+  const targets=view.players.filter((player)=>player.countryId!==countryId&&!unavailable.has(player.countryId)&&
+    livePacts.filter((pact)=>pact.proposerCountryId===player.countryId||pact.receiverCountryId===player.countryId).length<2);
+  if(!targets.length)throw new GameError("Şu anda anlaşma önerilebilecek uygun bir delegasyon bulunmuyor.");
+  return new ModalBuilder().setCustomId("ggm2|court-pact-offer|COURT_INTRIGUE").setTitle("🤝 Saray Anlaşması Öner")
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent("Anlaşma kabul edilirse iki raund sürer. Bir taraf diğerine düşmanca hamle yaparsa anlaşmayı bozan taraf 2 prestij kaybeder."))
+    .addLabelComponents(new LabelBuilder().setLabel("Anlaşma yapılacak delegasyon")
+      .setStringSelectMenuComponent(new StringSelectMenuBuilder().setCustomId("target").setPlaceholder("Bir devlet seç").setRequired(true)
+        .addOptions(targets.slice(0,25).map((player)=>({label:player.countryName,value:player.countryId})))));
+}
+
+function miniProgress(value:number,max=8){const filled=Math.max(0,Math.min(max,Math.round(value)));return`${"▰".repeat(filled)}${"▱".repeat(max-filled)} ${value}/${max}`;}
+
+async function constructionPublicPayload(guildId:string,notice?:string){
+  const view=await greatGamesConstructionService.view(guildId);const event=view.eventKey?CONSTRUCTION_EVENTS[view.eventKey]:null;
+  const status=view.status==="PUBLISHED"?"Yayınlandı • Başlangıç bekleniyor":view.status==="ACTIVE"?`Raund ${view.round}/${view.maxRounds}`:view.status==="COMPLETED"?"Tamamlandı":"Hazırlanıyor";
+  const embed=new EmbedBuilder().setColor(0xb87832).setTitle("🏗️ Büyük İnşa Yarışı").setDescription([
+    notice?.trim()||null,`## ${status}`,event?`### 📜 ${event.label}\n${event.description}`:null,
+    view.status==="PUBLISHED"?"Katılımcılar hazır. Yarış başladığında bütün devletlere eşit malzeme ve ilham hakkı verilecek.":"Temel ve ana yapı en az 6 ilerlemeye ulaşınca sonraki aşama açılır. Her aşama en fazla 8 ilerleme taşır."
+  ].filter(Boolean).join("\n\n"));
+  const players=view.status==="COMPLETED"?[...view.players].sort((a,b)=>b.score-a.score||b.quality-a.quality):view.players;
+  if(view.status==="PUBLISHED")embed.addFields({name:`🏛️ Katılımcılar • ${players.length}`,value:clip(players.map((player)=>`• ${player.countryName}`).join("\n")||"Katılımcı yok.",1024)});
+  else{
+    const lines=players.map((player,index)=>`${view.status==="ACTIVE"?(player.submitted?"✅":"⏳"): `**${index+1}.**`} **${player.countryName}** • **${player.score} puan**\n🧱 ${player.foundation}/8 • 🏛️ ${player.structure}/8 • ✨ ${player.splendor}/8 • 🎖️ Kalite ${player.quality}`);
+    for(let index=0;index<lines.length;index+=6)embed.addFields({name:index===0?"🏆 Anıtlar":"🏆 Anıtlar • Devam",value:lines.slice(index,index+6).join("\n\n")});
+    if(view.lastSummary.length)embed.addFields({name:"📋 Son İnşa Kayıtları",value:clip(view.lastSummary.join("\n"),1024)});
+  }
+  embed.setFooter({text:"İnşa Emri düğmesi yalnız sana görünen kişisel çalışma masasını açar."});
+  const controls=new ActionRowBuilder<ButtonBuilder>().addComponents(new ButtonBuilder().setCustomId("gg2|public-refresh|GREAT_CONSTRUCTION").setLabel("Formu Yenile").setEmoji("🔄").setStyle(ButtonStyle.Secondary));
+  if(view.status==="PUBLISHED")controls.addComponents(new ButtonBuilder().setCustomId("gg2|start|GREAT_CONSTRUCTION").setLabel("Yarışı Başlat").setEmoji("▶️").setStyle(ButtonStyle.Success));
+  if(view.status==="ACTIVE")controls.addComponents(
+    new ButtonBuilder().setCustomId("gg2|construction-control|GREAT_CONSTRUCTION").setLabel("İnşa Emri").setEmoji("🏗️").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId("gg2|resolve|GREAT_CONSTRUCTION").setLabel("Raundu Çöz").setEmoji("⚖️").setStyle(ButtonStyle.Danger)
+  );
+  return{content:"",embeds:[embed],components:[controls]};
+}
+
+async function constructionControlPayload(guildId:string,countryId:string,notice?:string){
+  const view=await greatGamesConstructionService.view(guildId,countryId);const own=view.ownState;if(view.status!=="ACTIVE"||!own)throw new GameError("Devletinin etkin bir Büyük İnşa Yarışı kaydı bulunmuyor.");
+  const pending=own.pendingAction?`${CONSTRUCTION_STAGES[own.pendingAction.stage].emoji} **${CONSTRUCTION_STAGES[own.pendingAction.stage].label}** • ${CONSTRUCTION_METHODS[own.pendingAction.method].label}`:"Henüz emir verilmedi.";
+  const embed=new EmbedBuilder().setColor(0xc18a52).setTitle(`🏗️ ${own.countryName} • Şantiye Masası`).setDescription([
+    notice?.trim()||null,`## Raund ${view.round}/${view.maxRounds}`,own.submitted?"✅ İnşa emrin kaydedildi; raund çözülmeden önce değiştirebilirsin.":"⏳ Bu raund için henüz inşa emri vermedin."
+  ].filter(Boolean).join("\n\n")).addFields(
+    {name:"🧱 Temel",value:miniProgress(own.foundation),inline:false},{name:"🏛️ Ana Yapı",value:miniProgress(own.structure),inline:false},{name:"✨ Bezeme",value:miniProgress(own.splendor),inline:false},
+    {name:"🧰 Şantiye Kaynakları",value:`🪨 Malzeme: **${own.material}**\n💡 İlham: **${own.inspiration}**\n🎖️ Kalite: **${own.quality}**\n🏆 Güncel puan: **${own.score}**`,inline:true},
+    {name:"📌 Bu Raundki Emrin",value:pending,inline:true},
+    {name:"📩 Son Sonucun",value:clip(own.lastResult??"Henüz çözülen bir inşa emri bulunmuyor.",1024),inline:false}
+  );
+  return{embeds:[embed],components:[new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId("gg2|construction-order|GREAT_CONSTRUCTION").setLabel("İnşa Emri Ver").setEmoji("📐").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId("gg2|construction-control|GREAT_CONSTRUCTION").setLabel("Yenile").setEmoji("🔄").setStyle(ButtonStyle.Secondary)
+  )]};
+}
+
+function constructionOrderModal(view:ConstructionView,countryId:string){
+  const own=view.players.find((player)=>player.countryId===countryId);if(!own)throw new GameError("Şantiye kaydın bulunamadı.");
+  const stages=(Object.keys(CONSTRUCTION_STAGES)as ConstructionStage[]).filter((stage)=>stage==="FOUNDATION"?own.foundation<8:stage==="STRUCTURE"?own.foundation>=6&&own.structure<8:own.structure>=6&&own.splendor<8);
+  const methods=(Object.keys(CONSTRUCTION_METHODS)as ConstructionMethod[]).filter((method)=>method==="RUSH"?own.material>0:method==="MASTERWORK"?own.inspiration>0:true);
+  if(!stages.length)throw new GameError("Anıtının bütün inşa aşamaları tamamlandı.");
+  return new ModalBuilder().setCustomId("ggm2|construction-order|GREAT_CONSTRUCTION").setTitle("🏗️ İnşa Emri Ver")
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent("Aşama ve çalışma yöntemini seç. Emir raund çözülene kadar gizli kalır ve yeniden verilerek değiştirilebilir."))
+    .addLabelComponents(
+      new LabelBuilder().setLabel("İnşa aşaması").setStringSelectMenuComponent(new StringSelectMenuBuilder().setCustomId("stage").setPlaceholder("Çalışılacak aşamayı seç").setRequired(true).addOptions(stages.map((stage)=>({label:CONSTRUCTION_STAGES[stage].label,value:stage,emoji:CONSTRUCTION_STAGES[stage].emoji,description:CONSTRUCTION_STAGES[stage].description})))),
+      new LabelBuilder().setLabel("Çalışma yöntemi").setStringSelectMenuComponent(new StringSelectMenuBuilder().setCustomId("method").setPlaceholder("İnşa yöntemini seç").setRequired(true).addOptions(methods.map((method)=>({label:CONSTRUCTION_METHODS[method].label,value:method,emoji:CONSTRUCTION_METHODS[method].emoji,description:CONSTRUCTION_METHODS[method].description.slice(0,100)}))))
+    );
+}
+
+async function sealsPublicPayload(guildId:string,notice?:string){
+  const view=await greatGamesSevenSealsService.view(guildId);const status=view.status==="PUBLISHED"?"Yayınlandı • Başlangıç bekleniyor":view.status==="ACTIVE"?`Raund ${view.round}/${view.maxRounds}`:view.status==="COMPLETED"?"Tamamlandı":"Hazırlanıyor";
+  const embed=new EmbedBuilder().setColor(0x59417a).setTitle("🔏 Yedi Mühür").setDescription([
+    notice?.trim()||null,`## ${status}`,view.status==="PUBLISHED"?"Katılımcılar hazır. Her devlet oyuna iki lanet hakkı ve sıfır yozlaşmayla başlayacak.":"Açılan mühürler ve puanlar açıktır; odak, kalan lanetler, hedefler ve özel zar ayrıntıları yalnız oyuncuya gösterilir."
+  ].filter(Boolean).join("\n\n"));
+  const players=view.status==="COMPLETED"?[...view.players].sort((a,b)=>b.score-a.score||b.opened.length-a.opened.length||a.corruption-b.corruption):view.players;
+  if(view.status==="PUBLISHED")embed.addFields({name:`🕯️ Katılımcılar • ${players.length}`,value:clip(players.map((player)=>`• ${player.countryName}`).join("\n")||"Katılımcı yok.",1024)});
+  else{
+    const lines=players.map((player,index)=>{
+      const seals=player.opened.length?player.opened.map((key)=>SEALS[key].emoji).join(""):"—";
+      return`${view.status==="ACTIVE"?(player.submitted?"✅":"⏳"): `**${index+1}.**`} **${player.countryName}** • **${player.score} puan**\n🔓 ${player.opened.length}/7 ${seals} • 🕷️ Yozlaşma ${player.corruption}`;
+    });
+    for(let index=0;index<lines.length;index+=7)embed.addFields({name:index===0?"📜 Mühür Kayıtları":"📜 Mühür Kayıtları • Devam",value:lines.slice(index,index+7).join("\n\n")});
+    if(view.lastSummary.length)embed.addFields({name:"🕯️ Son Raundun Kehanetleri",value:clip(view.lastSummary.join("\n"),1024)});
+  }
+  embed.setFooter({text:"Mühür Masam düğmesi kişisel ve gizli hamle formunu açar."});
+  const controls=new ActionRowBuilder<ButtonBuilder>().addComponents(new ButtonBuilder().setCustomId("gg2|public-refresh|SEVEN_SEALS").setLabel("Formu Yenile").setEmoji("🔄").setStyle(ButtonStyle.Secondary));
+  if(view.status==="PUBLISHED")controls.addComponents(new ButtonBuilder().setCustomId("gg2|start|SEVEN_SEALS").setLabel("Oyunu Başlat").setEmoji("▶️").setStyle(ButtonStyle.Success));
+  if(view.status==="ACTIVE")controls.addComponents(
+    new ButtonBuilder().setCustomId("gg2|seals-control|SEVEN_SEALS").setLabel("Mühür Masam").setEmoji("🔏").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId("gg2|resolve|SEVEN_SEALS").setLabel("Raundu Çöz").setEmoji("⚖️").setStyle(ButtonStyle.Danger)
+  );
+  return{content:"",embeds:[embed],components:[controls]};
+}
+
+async function sealsControlPayload(guildId:string,countryId:string,notice?:string){
+  const view=await greatGamesSevenSealsService.view(guildId,countryId);const own=view.ownState;if(view.status!=="ACTIVE"||!own)throw new GameError("Devletinin etkin bir Yedi Mühür kaydı bulunmuyor.");
+  const opened=own.opened.length?own.opened.map((key)=>`${SEALS[key].emoji} **${SEALS[key].label}** • ${SEALS[key].points} puan`).join("\n"):"Henüz mühür açılmadı.";
+  const pending=own.pendingAction?own.pendingAction.action==="OPEN"&&own.pendingAction.seal?`${SEALS[own.pendingAction.seal].emoji} **${SEALS[own.pendingAction.seal].label}** açılacak`
+    :own.pendingAction.action==="CURSE"?`🕸️ **${own.pendingAction.targetCountryName??"Gizli hedef"}** lanetlenecek`
+    :`${SEAL_ACTIONS[own.pendingAction.action].emoji} **${SEAL_ACTIONS[own.pendingAction.action].label}**`:"Henüz hamle verilmedi.";
+  const embed=new EmbedBuilder().setColor(0x705792).setTitle(`🔏 ${own.countryName} • Gizli Mühür Masası`).setDescription([
+    notice?.trim()||null,`## Raund ${view.round}/${view.maxRounds}`,own.submitted?"✅ Hamlen kaydedildi; raund çözülmeden önce değiştirebilirsin.":"⏳ Bu raund için henüz hamle vermedin."
+  ].filter(Boolean).join("\n\n")).addFields(
+    {name:"🔓 Açtığın Mühürler",value:opened,inline:false},
+    {name:"🧿 Gizli Kaynakların",value:`🔮 Odak: **+${own.focus}**\n🕸️ Lanet hakkı: **${own.curses}**\n🕷️ Yozlaşma: **${own.corruption}**\n🏆 Güncel puan: **${own.score}**`,inline:true},
+    {name:"📌 Bu Raundki Hamlen",value:pending,inline:true},
+    {name:"📩 Son Özel Sonucun",value:clip(own.lastResult??"Henüz çözülen bir mühür hamlesi bulunmuyor.",1024),inline:false}
+  );
+  const row=new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId("gg2|seals-act|OPEN").setLabel("Mühür Aç").setEmoji("🔓").setStyle(ButtonStyle.Primary).setDisabled(own.opened.length>=7),
+    new ButtonBuilder().setCustomId("gg2|seals-act|STUDY").setLabel("Kehanet Oku").setEmoji("🔮").setStyle(ButtonStyle.Secondary).setDisabled(own.focus>=8),
+    new ButtonBuilder().setCustomId("gg2|seals-act|WARD").setLabel("Arınma Ayini").setEmoji("🕯️").setStyle(ButtonStyle.Success).setDisabled(own.corruption<=0),
+    new ButtonBuilder().setCustomId("gg2|seals-act|CURSE").setLabel("Lanet Gönder").setEmoji("🕸️").setStyle(ButtonStyle.Danger).setDisabled(own.curses<=0),
+    new ButtonBuilder().setCustomId("gg2|seals-control|SEVEN_SEALS").setLabel("Yenile").setEmoji("🔄").setStyle(ButtonStyle.Secondary)
+  );
+  return{embeds:[embed],components:[row]};
+}
+
+function sealActionModal(view:SevenSealsView,countryId:string,action:"OPEN"|"CURSE"){
+  const own=view.players.find((player)=>player.countryId===countryId);if(!own)throw new GameError("Mühür kaydın bulunamadı.");
+  const modal=new ModalBuilder().setCustomId(`ggm2|seals-action|${action}`).setTitle(action==="OPEN"?"🔓 Bir Mühür Aç":"🕸️ Bir Lanet Gönder")
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(action==="OPEN"?"Zorluk ve puan dengesine göre açılmamış mühürlerinden birini seç.":"Hedefin bu raund mühür açması hâlinde zorluğu +4 artar. Lanetin kaynağı açığa çıkabilir."));
+  if(action==="OPEN")modal.addLabelComponents(new LabelBuilder().setLabel("Açılacak mühür").setStringSelectMenuComponent(
+    new StringSelectMenuBuilder().setCustomId("seal").setPlaceholder("Bir mühür seç").setRequired(true).addOptions((Object.keys(SEALS)as SealKey[]).filter((key)=>!own.opened.includes(key)).map((key)=>({label:SEALS[key].label,value:key,emoji:SEALS[key].emoji,description:`Zorluk ${SEALS[key].difficulty} • ${SEALS[key].points} puan • ${SEALS[key].description}`.slice(0,100)})))
+  ));
+  else modal.addLabelComponents(new LabelBuilder().setLabel("Lanet hedefi").setStringSelectMenuComponent(
+    new StringSelectMenuBuilder().setCustomId("target").setPlaceholder("Bir rakip seç").setRequired(true).addOptions(view.players.filter((player)=>player.countryId!==countryId).map((player)=>({label:player.countryName,value:player.countryId})))
+  ));
+  return modal;
+}
+
 function gladiatorBetStatus(status:"LOCKED"|"WON"|"LOST"|"REFUNDED"){
   if(status==="WON")return "✅ Kazandı";
   if(status==="LOST")return "❌ Kaybetti";
@@ -686,7 +977,7 @@ async function adminDashboardPayload(guildId: string): Promise<AdminPanelPayload
     ? `${data.season.status}${data.season.current_game ? ` • ${GREAT_GAME_TYPES[data.season.current_game].label}` : ""}`
     : "Henüz açılmadı";
   const embed = new EmbedBuilder().setColor(0xd6ad3c).setTitle(`🏛️ ${GREAT_GAMES_TURN}. Tur Etkinlikleri • Yönetici Paneli`)
-    .setDescription(`**Mevcut tur:** ${data.currentTurn} • **Etkin oyun:** ${status}\nBu etkinlik döneminde yalnız **Savaş Arabaları Turnuvası** ve **Capua Gladyatör Dövüşleri** oynanır. Oyuncular bu yönetim panelini göremez.`);
+    .setDescription(`**Mevcut tur:** ${data.currentTurn} • **Etkin oyun:** ${status}\nBu dönemde **Savaş Arabaları**, **Capua**, **Saray Entrikası**, **Büyük İnşa Yarışı** ve **Yedi Mühür** aktiftir. Oyuncular bu yönetim panelini göremez.`);
   for (const type of ACTIVE_GREAT_GAME_TYPES) {
     const selected = chosenEntries(data, type);
     embed.addFields({
@@ -775,6 +1066,9 @@ async function adminGamePayload(guildId: string, type: GreatGameType): Promise<A
 }
 
 async function publicGamePayload(guildId: string, type: GreatGameType, content?: string) {
+  if(type==="COURT_INTRIGUE")return courtPublicPayload(guildId,content);
+  if(type==="GREAT_CONSTRUCTION")return constructionPublicPayload(guildId,content);
+  if(type==="SEVEN_SEALS")return sealsPublicPayload(guildId,content);
   const data = await greatGamesService.dashboard(guildId);
   const entries = chosenEntries(data, type);
   const auctionState = auctionLifecycle(data);
@@ -1038,13 +1332,13 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
     if (!standings.length) throw new GameError("Büyük Oyunlara katılmış devlet veya kaydedilmiş puan bulunmuyor.");
     const lines = standings.map((standing, index) =>
       `**${index + 1}. ${standing.countryName} — ${standing.total} Puan**\n` +
-      `↳ 🏇 Arabalar ${standing.byGame.CHARIOT} • ⚔️ Capua ${standing.byGame.GLADIATOR}`
+      `↳ 🏇 Arabalar ${standing.byGame.CHARIOT} • ⚔️ Capua ${standing.byGame.GLADIATOR} • 🎭 Saray ${standing.byGame.COURT_INTRIGUE} • 🏗️ İnşa ${standing.byGame.GREAT_CONSTRUCTION} • 🔏 Mühür ${standing.byGame.SEVEN_SEALS}`
     );
     await interaction.reply({
       embeds: [new EmbedBuilder()
         .setColor(0xd6ad3c)
         .setTitle("🏆 Büyük Oyunlar • Puan Durumu")
-        .setDescription(clip(`Bu dönemde yalnız Savaş Arabaları ve Capua puanları hesaba katılır.\n\n${lines.join("\n\n")}`, 3_900))
+        .setDescription(clip(`Bu dönemde beş etkin oyunun puanları birlikte hesaba katılır.\n\n${lines.join("\n\n")}`, 3_900))
         .setFooter({ text: "Puanlar oyunlar sonuçlandırıldığında kalıcı olarak kaydedilir; ödül dağıtımı yalnızca yönetici kapanışında yapılır." })],
       flags: MessageFlags.Ephemeral
     });
@@ -1133,7 +1427,7 @@ export async function handleGreatGamesCommand(interaction: ChatInputCommandInter
   if (subcommand === "katil") {
     const result = await greatGamesWalletService.join(interaction.guildId, country.id, interaction.user.id);
     await interaction.reply({ content: result.created
-      ? `✅ ${country.name}, ${GREAT_GAMES_TURN}. Tur etkinliklerine katıldı; **Gladyatör Dövüşleri** ve **Savaş Arabaları Turnuvası** kayıtları açıldı. Oyun cüzdanına **${gold(5_000)}** yüklendi.`
+      ? `✅ ${country.name}, ${GREAT_GAMES_TURN}. Tur etkinliklerine katıldı; beş etkin oyunun kaydı açıldı. Oyun cüzdanına **${gold(5_000)}** yüklendi.`
       : `ℹ️ ${country.name} zaten kayıtlı. Eksik oyun adaylıkları tamamlandı; güncel bakiye **${gold(result.balance)}**.`, flags: MessageFlags.Ephemeral });
     return true;
   }
@@ -1403,6 +1697,72 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
     ));
     return true;
   }
+  if(action==="court-control"){
+    const country=await ownCountry(interaction.guildId,interaction.user.id);
+    const payload=await courtControlPayload(interaction.guildId,country.id);
+    if(interaction.message.flags.has(MessageFlags.Ephemeral))await interaction.update(payload);
+    else await interaction.reply({...payload,flags:MessageFlags.Ephemeral});
+    return true;
+  }
+  if(action==="court-pacts"){
+    const country=await ownCountry(interaction.guildId,interaction.user.id);
+    const payload=await courtPactPayload(interaction.guildId,country.id);
+    if(interaction.message.flags.has(MessageFlags.Ephemeral))await interaction.update(payload);
+    else await interaction.reply({...payload,flags:MessageFlags.Ephemeral});
+    return true;
+  }
+  if(action==="court-act"){
+    const country=await ownCountry(interaction.guildId,interaction.user.id);
+    const courtAction=rawType as CourtActionType;
+    if(!(courtAction in COURT_ACTIONS))throw new GameError("Saray hamlesi geçersiz.");
+    if(courtAction==="PROTECT"){
+      await interaction.deferUpdate();
+      await greatGamesCourtIntrigueService.submitAction({guildId:interaction.guildId,countryId:country.id,action:courtAction});
+      await interaction.editReply(await courtControlPayload(interaction.guildId,country.id,"✅ **Delegasyonu Koru** hamlen bu raund için kaydedildi."));
+    }else{
+      const view=await greatGamesCourtIntrigueService.view(interaction.guildId,country.id);
+      await interaction.showModal(courtActionModal(view,country.id,courtAction));
+    }
+    return true;
+  }
+  if(action==="court-pact-offer"){
+    const country=await ownCountry(interaction.guildId,interaction.user.id);
+    const view=await greatGamesCourtIntrigueService.view(interaction.guildId,country.id);
+    await interaction.showModal(courtPactOfferModal(view,country.id));
+    return true;
+  }
+  if(action==="court-pact-accept"||action==="court-pact-reject"){
+    const country=await ownCountry(interaction.guildId,interaction.user.id);
+    if(!rawType)throw new GameError("Yanıtlanacak saray anlaşması bulunamadı.");
+    await interaction.deferUpdate();
+    const accepted=action==="court-pact-accept";
+    await greatGamesCourtIntrigueService.respondPact(interaction.guildId,rawType,country.id,accepted);
+    await interaction.editReply(await courtPactPayload(interaction.guildId,country.id,undefined,accepted?"✅ Anlaşma kabul edildi ve saray kayıtlarına işlendi.":"❌ Anlaşma teklifi reddedildi."));
+    return true;
+  }
+  if(action==="construction-control"){
+    const country=await ownCountry(interaction.guildId,interaction.user.id);const payload=await constructionControlPayload(interaction.guildId,country.id);
+    if(interaction.message.flags.has(MessageFlags.Ephemeral))await interaction.update(payload);else await interaction.reply({...payload,flags:MessageFlags.Ephemeral});return true;
+  }
+  if(action==="construction-order"){
+    const country=await ownCountry(interaction.guildId,interaction.user.id);const view=await greatGamesConstructionService.view(interaction.guildId,country.id);
+    await interaction.showModal(constructionOrderModal(view,country.id));return true;
+  }
+  if(action==="seals-control"){
+    const country=await ownCountry(interaction.guildId,interaction.user.id);const payload=await sealsControlPayload(interaction.guildId,country.id);
+    if(interaction.message.flags.has(MessageFlags.Ephemeral))await interaction.update(payload);else await interaction.reply({...payload,flags:MessageFlags.Ephemeral});return true;
+  }
+  if(action==="seals-act"){
+    const country=await ownCountry(interaction.guildId,interaction.user.id);const sealAction=rawType as SealActionType;
+    if(!(sealAction in SEAL_ACTIONS))throw new GameError("Mühür hamlesi geçersiz.");
+    if(sealAction==="OPEN"||sealAction==="CURSE"){
+      const view=await greatGamesSevenSealsService.view(interaction.guildId,country.id);await interaction.showModal(sealActionModal(view,country.id,sealAction));
+    }else{
+      await interaction.deferUpdate();await greatGamesSevenSealsService.submitAction({guildId:interaction.guildId,countryId:country.id,action:sealAction});
+      await interaction.editReply(await sealsControlPayload(interaction.guildId,country.id,`✅ **${SEAL_ACTIONS[sealAction].label}** hamlen bu raund için kaydedildi.`));
+    }
+    return true;
+  }
   if (action === "cancel") {
     throw new GameError("Büyük Oyunlar sabit olarak açık tutulur; sezon bütünüyle iptal edilemez.");
   }
@@ -1454,6 +1814,19 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
     if (!isGameMaster(interaction)) throw new GameError("Oyunu yalnızca oyun yöneticisi başlatabilir.");
     const type = gameId(rawType!);
     await interaction.deferUpdate();
+    if(type==="COURT_INTRIGUE"){
+      const result=await greatGamesCourtIntrigueService.start(interaction.guildId,interaction.user.id);
+      await interaction.editReply(await courtPublicPayload(interaction.guildId,`▶️ Saray Entrikası **${result.players.length} delegasyonla** başladı. Gizli amaçlar dağıtıldı; ilk raund hamleleri açıldı.`));
+      return true;
+    }
+    if(type==="GREAT_CONSTRUCTION"){
+      const result=await greatGamesConstructionService.start(interaction.guildId);
+      await interaction.editReply(await constructionPublicPayload(interaction.guildId,`▶️ Büyük İnşa Yarışı **${result.players.length} devletle** başladı. İlk dönem olayı ve şantiye emirleri açıldı.`));return true;
+    }
+    if(type==="SEVEN_SEALS"){
+      const result=await greatGamesSevenSealsService.start(interaction.guildId);
+      await interaction.editReply(await sealsPublicPayload(interaction.guildId,`▶️ Yedi Mühür **${result.players.length} devletle** başladı. İlk raundun gizli hamleleri açıldı.`));return true;
+    }
     const deadline = type === "AUCTION" ? nextIstanbulAuctionDeadline() : null;
     const result = await greatGamesFlowService.startPublishedGame(interaction.guildId, type, deadline ? {
       endsAt: deadline,
@@ -1489,7 +1862,16 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
     if (!isGameMaster(interaction)) throw new GameError("Aşamayı yalnızca oyun yöneticisi çözebilir.");
     const type = gameId(rawType!);
     await interaction.deferUpdate();
-    if (type === "AUCTION") {
+    if(type==="COURT_INTRIGUE"){
+      const result=await greatGamesCourtIntrigueService.resolveRound(interaction.guildId);
+      await interaction.editReply(await courtPublicPayload(interaction.guildId,`⚖️ **${result.round}. raund çözüldü.**${result.finished?" Saray Entrikası tamamlandı.":" Yeni saray olayı ve hamleler açıldı."}`));
+    }else if(type==="GREAT_CONSTRUCTION"){
+      const result=await greatGamesConstructionService.resolveRound(interaction.guildId);
+      await interaction.editReply(await constructionPublicPayload(interaction.guildId,`⚖️ **${result.round}. inşa raundu çözüldü.**${result.finished?" Büyük İnşa Yarışı tamamlandı.":" Yeni dönem olayı ve emirler açıldı."}`));
+    }else if(type==="SEVEN_SEALS"){
+      const result=await greatGamesSevenSealsService.resolveRound(interaction.guildId);
+      await interaction.editReply(await sealsPublicPayload(interaction.guildId,`⚖️ **${result.round}. mühür raundu çözüldü.**${result.finished?" Yedi Mühür tamamlandı.":" Yeni gizli hamleler açıldı."}`));
+    }else if (type === "AUCTION") {
       const result = await greatGamesAuctionService.advance(interaction.guildId);
       await interaction.editReply(await publicGamePayload(interaction.guildId, type, `🏺 **Müzayede Sonuçları**\n${result.summary.join("\n")}`.slice(0, 2_000)));
       await greatGamesAuctionService.markResultPublished(interaction.guildId, interaction.message.id);
@@ -1506,6 +1888,13 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
 }
 
 export async function handleGreatGamesSelect(interaction: StringSelectMenuInteraction): Promise<boolean> {
+  if(interaction.customId==="ggs2|court-pact-select"){
+    if(!interaction.guildId)throw new GameError("Bu işlem yalnızca sunucuda kullanılabilir.");
+    const country=await ownCountry(interaction.guildId,interaction.user.id);
+    const pactId=interaction.values[0];
+    await interaction.update(await courtPactPayload(interaction.guildId,country.id,pactId));
+    return true;
+  }
   if(interaction.customId.startsWith("ggs2|gladiator-bets-round|")){
     if(!interaction.guildId)throw new GameError("Bu işlem yalnızca sunucuda kullanılabilir.");
     const scope=interaction.customId.split("|")[2];
@@ -1584,6 +1973,51 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
     return true;
   }
   const country = await ownCountry(interaction.guildId, interaction.user.id);
+  if(action==="court-action"){
+    const courtAction=rawType as CourtActionType;
+    if(!(courtAction in COURT_ACTIONS)||courtAction==="PROTECT")throw new GameError("Saray hamlesi geçersiz.");
+    const areaRaw=["INFLUENCE","BRIBE","SUPPORT","UNDERMINE"].includes(courtAction)
+      ? interaction.fields.getStringSelectValues("area")[0]:undefined;
+    const area=areaRaw as CourtArea|undefined;
+    if(areaRaw&&!(areaRaw in COURT_AREAS))throw new GameError("Saray alanı geçersiz.");
+    const targetCountryId=["SUPPORT","UNDERMINE","SPY"].includes(courtAction)
+      ? interaction.fields.getStringSelectValues("target")[0]:undefined;
+    await greatGamesCourtIntrigueService.submitAction({
+      guildId:interaction.guildId,countryId:country.id,action:courtAction,
+      ...(area?{area}:{}),...(targetCountryId?{targetCountryId}:{})
+    });
+    const notice=`✅ **${COURT_ACTIONS[courtAction].label}** hamlen bu raund için gizlice kaydedildi.`;
+    const payload=await courtControlPayload(interaction.guildId,country.id,notice);
+    if(interaction.isFromMessage())await interaction.update(payload);
+    else await interaction.reply({...payload,flags:MessageFlags.Ephemeral});
+    return true;
+  }
+  if(action==="court-pact-offer"){
+    const targetCountryId=interaction.fields.getStringSelectValues("target")[0];
+    if(!targetCountryId)throw new GameError("Anlaşma yapılacak delegasyon seçilmelidir.");
+    await greatGamesCourtIntrigueService.offerPact(interaction.guildId,country.id,targetCountryId);
+    const payload=await courtPactPayload(interaction.guildId,country.id,undefined,"✉️ Saray anlaşması teklifin hedef delegasyona iletildi.");
+    if(interaction.isFromMessage())await interaction.update(payload);
+    else await interaction.reply({...payload,flags:MessageFlags.Ephemeral});
+    return true;
+  }
+  if(action==="construction-order"){
+    const stage=interaction.fields.getStringSelectValues("stage")[0] as ConstructionStage|undefined;
+    const method=interaction.fields.getStringSelectValues("method")[0] as ConstructionMethod|undefined;
+    if(!stage||!(stage in CONSTRUCTION_STAGES)||!method||!(method in CONSTRUCTION_METHODS))throw new GameError("İnşa aşaması veya yöntemi geçersiz.");
+    await greatGamesConstructionService.submitAction({guildId:interaction.guildId,countryId:country.id,stage,method});
+    const payload=await constructionControlPayload(interaction.guildId,country.id,`✅ **${CONSTRUCTION_STAGES[stage].label} • ${CONSTRUCTION_METHODS[method].label}** emrin kaydedildi.`);
+    if(interaction.isFromMessage())await interaction.update(payload);else await interaction.reply({...payload,flags:MessageFlags.Ephemeral});return true;
+  }
+  if(action==="seals-action"){
+    const sealAction=rawType as "OPEN"|"CURSE";if(sealAction!=="OPEN"&&sealAction!=="CURSE")throw new GameError("Mühür hamlesi geçersiz.");
+    const seal=sealAction==="OPEN"?interaction.fields.getStringSelectValues("seal")[0] as SealKey|undefined:undefined;
+    const targetCountryId=sealAction==="CURSE"?interaction.fields.getStringSelectValues("target")[0]:undefined;
+    await greatGamesSevenSealsService.submitAction({guildId:interaction.guildId,countryId:country.id,action:sealAction,...(seal?{seal}:{}),...(targetCountryId?{targetCountryId}:{})});
+    const notice=sealAction==="OPEN"?`✅ **${SEALS[seal!].label}** için açma girişimin kaydedildi.`:"✅ Lanet hedefin gizlice kaydedildi.";
+    const payload=await sealsControlPayload(interaction.guildId,country.id,notice);
+    if(interaction.isFromMessage())await interaction.update(payload);else await interaction.reply({...payload,flags:MessageFlags.Ephemeral});return true;
+  }
   if(action==="gladiator-coupon-amount"){
     const amount=Number(interaction.fields.getTextInputValue("amount").replaceAll(".","").trim());
     if(!Number.isSafeInteger(amount)||amount<100||amount>5_000)

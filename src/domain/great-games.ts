@@ -41,11 +41,14 @@ export const GREAT_GAME_TYPES = {
   CARAVAN: { label: "Ticaret Kervanı", emoji: "🐫", stake: 0 },
   KINGS_BET: { label: "Kralların Bahsi", emoji: "👑", stake: 1_000 },
   DIPLOMACY: { label: "Diplomasi Masası", emoji: "🤝", stake: 500 },
-  GLADIATOR: { label: "Capua Gladyatör Dövüşleri", emoji: "⚔️", stake: 0 }
+  GLADIATOR: { label: "Capua Gladyatör Dövüşleri", emoji: "⚔️", stake: 0 },
+  COURT_INTRIGUE: { label: "Saray Entrikası", emoji: "🎭", stake: 0 },
+  GREAT_CONSTRUCTION: { label: "Büyük İnşa Yarışı", emoji: "🏗️", stake: 0 },
+  SEVEN_SEALS: { label: "Yedi Mühür", emoji: "🔏", stake: 0 }
 } as const;
 
 export type GreatGameType = keyof typeof GREAT_GAME_TYPES;
-export const ACTIVE_GREAT_GAME_TYPES = ["CHARIOT", "GLADIATOR"] as const satisfies readonly GreatGameType[];
+export const ACTIVE_GREAT_GAME_TYPES = ["CHARIOT", "GLADIATOR", "COURT_INTRIGUE", "GREAT_CONSTRUCTION", "SEVEN_SEALS"] as const satisfies readonly GreatGameType[];
 export type ChariotTactic = "AGGRESSIVE" | "BALANCED" | "CAUTIOUS" | "SQUEEZE";
 export type KingsDecision = "COOPERATE" | "BETRAY";
 

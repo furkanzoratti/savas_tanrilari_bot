@@ -400,7 +400,7 @@ export const greatGamesService = {
              END
            FROM great_games_wallets w
            JOIN countries c ON c.id=w.country_id
-           CROSS JOIN (VALUES ('CHARIOT'),('GLADIATOR')) AS games(game_type)
+           CROSS JOIN (VALUES ('CHARIOT'),('GLADIATOR'),('COURT_INTRIGUE'),('GREAT_CONSTRUCTION'),('SEVEN_SEALS')) AS games(game_type)
            WHERE w.season_id=$1 AND w.closed_at IS NULL
            ON CONFLICT(season_id,game_type,country_id) DO NOTHING`,
           [season.id]
