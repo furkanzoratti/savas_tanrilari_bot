@@ -50,6 +50,7 @@ import { batchDocumentEmbeds, renderDocument } from "./document.js";
 import {handleDocumentButton,handleDocumentModal,handleDocumentSelect,sendDocumentDashboard} from "./document-control-ui.js";
 import { renderSettlementsOverview } from "./settlements-overview.js";
 import { renderArmyPool } from "./army-pool-ui.js";
+import { renderFleetPool } from "./fleet-pool-ui.js";
 import { playerMentionPayload } from "./player-mentions.js";
 import { publishGreatPowerRanking } from "./great-power-ui.js";
 import {
@@ -639,7 +640,7 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
   requireGameMaster(interaction);
   if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
   const sub = interaction.options.getSubcommand();
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  await interaction.deferReply(sub === "tur-ilerlet" ? {} : { flags: MessageFlags.Ephemeral });
 
   if (sub === "ulke-olustur") {
     const country = await gameService.createCountry(interaction.guildId, interaction.user.id, interaction.options.getString("ad", true), interaction.options.getInteger("hazine", true));
@@ -875,7 +876,7 @@ async function handleAdmin(interaction: ChatInputCommandInteraction): Promise<vo
     });
     await interaction.editReply({ embeds: [announcementCards[0]!], files: [new AttachmentBuilder(TURN_BANNER_PATH, { name: TURN_BANNER_NAME })] });
     for (const extraEmbed of announcementCards.slice(1)) {
-      await interaction.followUp({ embeds: [extraEmbed], flags: MessageFlags.Ephemeral });
+      await interaction.followUp({ embeds: [extraEmbed] });
     }
   } else if (sub === "tur-durumu") {
     const phase = interaction.options.getString("durum", true) as "OPEN" | "CLOSED" | "RESOLVING";
@@ -981,7 +982,13 @@ function npcPlanLine(plan: { countryName: string; doctrine: NpcAutoPurchaseDoctr
   return `• **${plan.countryName}** — ${NPC_AUTO_PURCHASE_DOCTRINES[plan.doctrine].label}${attempt}\n  🏗️ ${buildings} • 🚢 ${ships} • ⚔️ ${number(personnel)} asker • 💰 ${gold(plan.plannedCost)}`;
 }
 
-async function sendNpcPages(interaction: ChatInputCommandInteraction, title: string, lines: string[], footer: string): Promise<void> {
+async function sendNpcPages(
+  interaction: ChatInputCommandInteraction,
+  title: string,
+  lines: string[],
+  footer: string,
+  publicPages = false
+): Promise<void> {
   const pages: string[] = [];
   let current = "";
   for (const line of lines.length ? lines : ["Uygun oyuncusuz devlet bulunamadı."]) {
@@ -994,7 +1001,10 @@ async function sendNpcPages(interaction: ChatInputCommandInteraction, title: str
   if (current) pages.push(current);
   await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0xc59b45).setTitle(title).setDescription(pages[0]!).setFooter({ text: footer })] });
   for (let index = 1; index < pages.length; index += 1) {
-    await interaction.followUp({ embeds: [new EmbedBuilder().setColor(0xc59b45).setTitle(`${title} • ${index + 1}/${pages.length}`).setDescription(pages[index]!)], flags: MessageFlags.Ephemeral });
+    await interaction.followUp({
+      embeds: [new EmbedBuilder().setColor(0xc59b45).setTitle(`${title} • ${index + 1}/${pages.length}`).setDescription(pages[index]!)],
+      ...(publicPages ? {} : { flags: MessageFlags.Ephemeral })
+    });
   }
 }
 
@@ -1073,7 +1083,7 @@ async function handleGreatPowerCommand(interaction: ChatInputCommandInteraction)
   requireGameMaster(interaction);
   if (!interaction.guildId) throw new GameError("Sunucu bulunamadı.");
   const subcommand = interaction.options.getSubcommand();
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  await interaction.deferReply(subcommand === "puanlar" ? {} : { flags: MessageFlags.Ephemeral });
 
   if (subcommand === "kanal") {
     const operation = interaction.options.getString("islem", true);
@@ -1095,9 +1105,10 @@ async function handleGreatPowerCommand(interaction: ChatInputCommandInteraction)
     );
     await sendNpcPages(
       interaction,
-      "🔒 Kesin Devlet Güç Puanları",
+      "🌍 Kesin Devlet Güç Puanları",
       lines.length ? lines : ["Aktif devlet bulunmuyor."],
-      `${ranking.length} aktif devlet • Yalnızca oyun yöneticisine görünür`
+      `${ranking.length} aktif devlet • Bu kanaldaki herkes tarafından görülebilir`,
+      true
     );
     return;
   }
@@ -1316,6 +1327,14 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     const country=await resolveCountry(interaction,interaction.options.getString("ulke"));
     const pool=await armyService.unallocatedPool(country.id);
     const embeds=renderArmyPool(country.name,pool);
+    await interaction.editReply({embeds:[embeds[0]!]});
+    for(const embed of embeds.slice(1))await interaction.followUp({embeds:[embed],flags:MessageFlags.Ephemeral});
+  } else if(interaction.commandName==="gemi-havuzu"){
+    if(!interaction.guildId)throw new GameError("Sunucu bulunamadı.");
+    await interaction.deferReply({flags:MessageFlags.Ephemeral});
+    const country=await resolveCountry(interaction,interaction.options.getString("ulke"));
+    const pool=await fleetService.unallocatedPool(country.id);
+    const embeds=renderFleetPool(country.name,pool);
     await interaction.editReply({embeds:[embeds[0]!]});
     for(const embed of embeds.slice(1))await interaction.followUp({embeds:[embed],flags:MessageFlags.Ephemeral});
   } else if (interaction.commandName === "belge") {

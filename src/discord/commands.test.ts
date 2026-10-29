@@ -96,6 +96,12 @@ describe("yönetim komutları", () => {
     expect(command?.options?.find((option)=>option.name==="ulke")).toMatchObject({required:false});
   });
 
+  it("filolara tahsis edilmemiş gemileri gösteren gemi havuzu komutunu kaydeder",()=>{
+    const command=commandBuilders.find((item)=>item.name==="gemi-havuzu");
+    expect(command?.description).toContain("tahsis edilmemiş");
+    expect(command?.options?.find((option)=>option.name==="ulke")).toMatchObject({required:false});
+  });
+
   it("Olay Yöneticisi rolünü üyeye verip kaldıran ayrı komutu kaydeder", () => {
     const command = commandBuilders.find((item) => item.name === "olay-yoneticisi");
     expect(command?.description).toContain("Yalnızca yönetici");

@@ -41,18 +41,6 @@ function fleetSummary(input:{
     ).setFooter({text:"Aşağıdan filo seç; liman rezervi aktarımını aynı ekrandan yönet."});
 }
 
-function poolDetail(countryName:string,pool:FleetPoolView):EmbedBuilder{
-  const populated=pool.settlements.filter((settlement)=>settlement.total>0);
-  const sections=populated.map((settlement)=>[
-    `**⚓ ${settlement.settlement_name} — ${number(settlement.total)} gemi**`,
-    settlement.ships.map((ship)=>`• ${shipLabel(ship.ship_type)}: **${number(ship.available)}**`).join("\n")
-  ].join("\n"));
-  return new EmbedBuilder().setColor(pool.grandTotal?0x2f6f8f:0x6b6b6b)
-    .setTitle(`🚢 ${countryName} • Boş Gemi Havuzu`)
-    .setDescription(trim(sections.length?sections.join("\n\n"):"Filolara tahsis edilmemiş gemi bulunmuyor.",1_200))
-    .setFooter({text:`Toplam müsait: ${number(pool.grandTotal)} gemi • Tamirdeki gemiler havuza dahil değildir`});
-}
-
 function controls(countryId:string,fleets:FleetView[],selected:FleetView|null,pool:FleetPoolView):ComponentRow[]{
   const country=compactUuid(countryId);
   const fleet=selected?compactUuid(selected.id):null;
@@ -88,7 +76,7 @@ export async function fleetDashboardPayload(countryId:string,fleetValue?:string|
       fleetSummary({
         countryName:document.country.name,fleets,pool,selectedFleetId:selected?.id??null,
         repairCount:repairs.length,repairShips:repairs.reduce((sum,repair)=>sum+repair.totalShips,0)
-      }),...(selected?[renderFleetEmbed(selected)]:[]),poolDetail(document.country.name,pool)
+      }),...(selected?[renderFleetEmbed(selected)]:[])
     ],components:controls(countryId,fleets,selected,pool)
   };
 }

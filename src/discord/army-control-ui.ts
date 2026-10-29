@@ -75,20 +75,6 @@ function armyDetail(army:ArmyView):EmbedBuilder{
     );
 }
 
-function poolDetail(countryName:string,pool:ArmyPoolView):EmbedBuilder{
-  const populated=pool.settlements.filter((settlement)=>settlement.total>0);
-  const sections=populated.map((settlement)=>[
-    `**🏘️ ${settlement.settlement_name} — ${number(settlement.total)} asker**`,
-    settlement.units.map((unit)=>`• ${unitLabel(unit.unit_type)}: **${number(unit.available)}**`).join("\n")
-  ].join("\n"));
-  const description=sections.length?sections.join("\n\n"):"Ordulara tahsis edilmemiş saha birliği bulunmuyor.";
-  return new EmbedBuilder()
-    .setColor(pool.grandTotal?0x8f6b35:0x6b6b6b)
-    .setTitle(`🪖 ${countryName} • Boş Asker Havuzu`)
-    .setDescription(trim(description,1_200))
-    .setFooter({text:`Toplam müsait: ${number(pool.grandTotal)} asker • Garnizon ve milisler dahil değildir`});
-}
-
 function controls(countryId:string,armies:ArmyView[],selected:ArmyView|null,pool:ArmyPoolView):ComponentRow[]{
   const country=compactUuid(countryId);
   const selectedArmy=selected?compactUuid(selected.id):null;
@@ -116,7 +102,7 @@ export async function armyDashboardPayload(countryId:string,armyValue?:string|nu
     :armies[0]??null;
   return{
     content,
-    embeds:[armySummary(document,armies,pool,selected?.id??null),...(selected?[armyDetail(selected)]:[]),poolDetail(document.country.name,pool)],
+    embeds:[armySummary(document,armies,pool,selected?.id??null),...(selected?[armyDetail(selected)]:[])],
     components:controls(countryId,armies,selected,pool)
   };
 }

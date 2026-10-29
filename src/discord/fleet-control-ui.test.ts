@@ -10,10 +10,10 @@ describe("filolarım kontrol merkezi",()=>{
     expect(commandBuilders.find((command)=>command.name==="filo")?.options?.some((option)=>option.name==="bilgi")).toBe(false);
   });
 
-  it("özet, filo gezintisi ve liman havuzu aktarım akışlarını bağlar",()=>{
+  it("özet ve filo gezintisini gösterirken uzun havuz dökümünü ayrı komuta bırakır",()=>{
     const source=readFileSync(new URL("./fleet-control-ui.ts",import.meta.url),"utf8");
     expect(source).toContain("Filo Komuta Merkezi");
-    expect(source).toContain("Boş Gemi Havuzu");
+    expect(source).not.toContain("function poolDetail");
     expect(source).toContain("allocateEntirePool");
     expect(source).toContain("availableSettlementShips");
     expect(source).toContain("Gemi Seçerek Aktar");

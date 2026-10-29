@@ -10,6 +10,7 @@ describe("ordu komuta merkezi",()=>{
 
   it("havuzun tamamını ve seçili birimi aktarma kontrollerini sunar",()=>{
     const source=readFileSync(new URL("./army-control-ui.ts",import.meta.url),"utf8");
+    expect(source).not.toContain("function poolDetail");
     expect(source).toContain("Tüm Havuzu Aktar");
     expect(source).toContain("Birim Seçerek Aktar");
     expect(source).toContain("allocateEntirePool");
