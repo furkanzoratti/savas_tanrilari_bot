@@ -101,7 +101,49 @@ export interface BattleRollRow {
     __commander?: { clash?: number };
     __dismounted?: BattleComposition;
     egyptian_war_chariot?: { engaged?: number; clash?: number; damage?: number };
+    __participants?: Record<string,BattleParticipantRollContribution>;
   } | null;
+}
+
+export interface BattleParticipantRollUnit {
+  unitType:string;
+  engaged:number;
+  clash:number;
+  damage:number;
+}
+
+export interface BattleParticipantRollContribution {
+  countryId:string;
+  countryName:string;
+  committed:number;
+  engaged:number;
+  reserve:number;
+  clash:number;
+  damage:number;
+  sharedClash:number;
+  sharedDamage:number;
+  units:BattleParticipantRollUnit[];
+}
+
+export interface BattlePublicHistoryRound {
+  roundNumber:number;tier:string;winner:BattleSideKey|null;
+  lossA:number;lossB:number;pressureA:number;pressureB:number;
+  orderA:string;orderB:string;wallDamage:number;gateDamage:number;
+  clashA:number;damageA:number;clashB:number;damageB:number;
+}
+
+export interface BattlePublicHistory {
+  battleId:string;terrain:BattleTerrain;status:BattleStatus;
+  countryAName:string;countryBName:string;initialA:number;initialB:number;
+  currentA:number;currentB:number;lossesA:number;lossesB:number;
+  winner:BattleSideKey|null;finishReason:string|null;
+  rounds:BattlePublicHistoryRound[];
+}
+
+export interface PlayerBattleContributionView {
+  battleId:string;terrain:BattleTerrain;roundNumber:number;side:BattleSideKey;
+  countryName:string;sideName:string;sideClash:number;sideDamage:number;
+  frontage:number;contribution:BattleParticipantRollContribution;legacy:boolean;
 }
 
 export interface CasualtyApplication {
@@ -176,6 +218,62 @@ export interface BattleRoundResult {
   navalOrderA?:NavalBattleOrder;navalOrderB?:NavalBattleOrder;
   maneuverPointsA?:number;maneuverPointsB?:number;
   navalConditionA?:NavalFleetCondition;navalConditionB?:NavalFleetCondition;
+}
+
+function proportionalIntegers(total:number,weights:number[]):number[]{
+  const safeTotal=Math.max(0,Math.round(total));
+  const normalized=weights.map((value)=>Math.max(0,Number(value)||0));
+  const weightTotal=normalized.reduce((sum,value)=>sum+value,0);
+  if(!safeTotal||!weightTotal)return normalized.map(()=>0);
+  const exact=normalized.map((weight)=>safeTotal*weight/weightTotal);
+  const result=exact.map(Math.floor);
+  let remainder=safeTotal-result.reduce((sum,value)=>sum+value,0);
+  const order=exact.map((value,index)=>({index,fraction:value-Math.floor(value)}))
+    .sort((left,right)=>right.fraction-left.fraction||left.index-right.index);
+  for(let index=0;index<remainder;index+=1)result[order[index%order.length]!.index]!+=1;
+  return result;
+}
+
+export function buildParticipantRollContributions(
+  participants:Array<Pick<BattleParticipantRow,"country_id"|"country_name"|"composition">>,
+  rawDetail:Record<string,unknown>,finalClash:number,finalDamage:number
+):Record<string,BattleParticipantRollContribution>{
+  const contributions=participants.map((participant)=>({
+    countryId:participant.country_id,countryName:participant.country_name,
+    committed:compositionTotal(participant.composition),engaged:0,reserve:0,clash:0,damage:0,
+    sharedClash:0,sharedDamage:0,units:[] as BattleParticipantRollUnit[]
+  }));
+  for(const [unitType,raw] of Object.entries(rawDetail)){
+    if(unitType.startsWith("__")||!raw||typeof raw!=="object")continue;
+    const detail=raw as {engaged?:unknown;clash?:unknown;damage?:unknown};
+    const engaged=Math.max(0,Number(detail.engaged)||0);
+    const clash=Math.max(0,Number(detail.clash)||0);
+    const damage=Math.max(0,Number(detail.damage)||0);
+    if(!engaged&&!clash&&!damage)continue;
+    let weights=participants.map((participant)=>Math.max(0,Number(participant.composition[unitType as BattleForceType]??0)));
+    if(!weights.some(Boolean))weights=participants.map((participant)=>compositionTotal(participant.composition));
+    const engagedShares=proportionalIntegers(engaged,weights);
+    const clashShares=proportionalIntegers(clash,engagedShares.some(Boolean)?engagedShares:weights);
+    const damageShares=proportionalIntegers(damage,engagedShares.some(Boolean)?engagedShares:weights);
+    contributions.forEach((contribution,index)=>{
+      const unitEngaged=engagedShares[index]??0,unitClash=clashShares[index]??0,unitDamage=damageShares[index]??0;
+      if(!unitEngaged&&!unitClash&&!unitDamage)return;
+      contribution.engaged+=unitEngaged;
+      contribution.units.push({unitType,engaged:unitEngaged,clash:unitClash,damage:unitDamage});
+    });
+  }
+  const baseClash=contributions.map((item)=>item.units.reduce((sum,unit)=>sum+unit.clash,0));
+  const baseDamage=contributions.map((item)=>item.units.reduce((sum,unit)=>sum+unit.damage,0));
+  const clashShares=proportionalIntegers(finalClash,baseClash.some(Boolean)?baseClash:contributions.map((item)=>item.engaged||item.committed));
+  const damageShares=proportionalIntegers(finalDamage,baseDamage.some(Boolean)?baseDamage:contributions.map((item)=>item.engaged||item.committed));
+  contributions.forEach((contribution,index)=>{
+    contribution.reserve=Math.max(0,contribution.committed-contribution.engaged);
+    contribution.clash=clashShares[index]??0;
+    contribution.damage=damageShares[index]??0;
+    contribution.sharedClash=contribution.clash-baseClash[index]!;
+    contribution.sharedDamage=contribution.damage-baseDamage[index]!;
+  });
+  return Object.fromEntries(contributions.map((item)=>[item.countryId,item]));
 }
 
 export interface BattleSourceSettlement {
@@ -1581,9 +1679,10 @@ export const battleService = {
       let starvationCapacity: number | null = null;
       let starvationRemaining: number | null = null;
       let activeBlockadeId: string | null = null;
-      let currentTurn: number | null = null;
+      const currentTurn = (await client.query<{ current_turn: number }>(
+        "SELECT current_turn FROM guilds WHERE discord_id=$1",[input.guildId]
+      )).rows[0]?.current_turn ?? 0;
       if (defenderSettlementId) {
-        currentTurn = (await client.query<{ current_turn: number }>("SELECT current_turn FROM guilds WHERE discord_id=$1", [input.guildId])).rows[0]?.current_turn ?? 0;
         const structures = (await client.query<{ building_type: string; level: number }>(
           "SELECT building_type,level FROM buildings WHERE settlement_id=$1 AND status IN ('ACTIVE','BUILDING') AND level>0 AND building_type IN ('farm','aqueduct')", [defenderSettlementId]
         )).rows;
@@ -1615,8 +1714,8 @@ export const battleService = {
           starvationRemaining=Math.max(0,starvationCapacity-1);
         }
       }
-      await client.query(`INSERT INTO battles(id,guild_id,channel_id,terrain,narrative,status,round_number,first_side,created_by,wall_max_hp,wall_current_hp,gate_max_hp,gate_current_hp,siege_phase,defender_settlement_id,starvation_capacity,starvation_remaining,last_starvation_turn)
-        VALUES($1,$2,$3,$4,$5,'DRAFT',1,$6,$7,$8,$8,$9,$9,$10,$11,$12,$13,$14)`, [id, input.guildId, input.channelId, input.terrain, input.narrative, firstSide, input.actorId, wallHp, gateHp, siegePhase, defenderSettlementId, starvationCapacity, starvationRemaining, currentTurn]);
+      await client.query(`INSERT INTO battles(id,guild_id,channel_id,terrain,narrative,status,round_number,first_side,created_by,wall_max_hp,wall_current_hp,gate_max_hp,gate_current_hp,siege_phase,defender_settlement_id,starvation_capacity,starvation_remaining,last_starvation_turn,started_turn)
+        VALUES($1,$2,$3,$4,$5,'DRAFT',1,$6,$7,$8,$8,$9,$9,$10,$11,$12,$13,$14,$15)`, [id, input.guildId, input.channelId, input.terrain, input.narrative, firstSide, input.actorId, wallHp, gateHp, siegePhase, defenderSettlementId, starvationCapacity, starvationRemaining, currentTurn,currentTurn]);
       if(activeBlockadeId){
         await client.query("UPDATE naval_blockades SET siege_battle_id=$1,starvation_adjusted=TRUE WHERE id=$2",[id,activeBlockadeId]);
       }
@@ -2573,6 +2672,87 @@ export const battleService = {
     return battle ? loadView(pool as unknown as DbClient,battle.id) : null;
   },
 
+  async publicHistory(guildId:string,battleId:string):Promise<BattlePublicHistory>{
+    const battle=(await pool.query<{
+      id:string;terrain:BattleTerrain;status:BattleStatus;winner_side:BattleSideKey|null;finish_reason:string|null;
+      country_a_name:string;country_b_name:string;initial_a:number;initial_b:number;current_a:number;current_b:number;
+      losses_a:number;losses_b:number;
+    }>(`SELECT battle.id,battle.terrain,battle.status,battle.winner_side,battle.finish_reason,
+              COALESCE(rebel_a.display_name,country_a.name) AS country_a_name,
+              COALESCE(rebel_b.display_name,country_b.name) AS country_b_name,
+              side_a.initial_total AS initial_a,side_a.current_total AS current_a,side_a.total_losses AS losses_a,
+              side_b.initial_total AS initial_b,side_b.current_total AS current_b,side_b.total_losses AS losses_b
+         FROM battles battle
+         JOIN battle_sides side_a ON side_a.battle_id=battle.id AND side_a.side_key='A'
+         JOIN countries country_a ON country_a.id=side_a.country_id
+         LEFT JOIN rebel_factions rebel_a ON rebel_a.id=side_a.rebel_faction_id
+         JOIN battle_sides side_b ON side_b.battle_id=battle.id AND side_b.side_key='B'
+         JOIN countries country_b ON country_b.id=side_b.country_id
+         LEFT JOIN rebel_factions rebel_b ON rebel_b.id=side_b.rebel_faction_id
+        WHERE battle.id=$1 AND battle.guild_id=$2`,[battleId,guildId])).rows[0];
+    if(!battle)throw new GameError("Muharebe bulunamadı.");
+    const rows=(await pool.query<{
+      round_number:number;tier:string;winner_side:BattleSideKey|null;loss_a:number;loss_b:number;
+      pressure_a:number;pressure_b:number;order_a:string;order_b:string;wall_damage:number;gate_damage:number;
+      clash_a:number|null;damage_a:number|null;clash_b:number|null;damage_b:number|null;
+    }>(`SELECT round.round_number,round.tier,round.winner_side,round.loss_a,round.loss_b,
+              round.pressure_a,round.pressure_b,round.order_a,round.order_b,round.wall_damage,round.gate_damage,
+              roll_a.clash_total AS clash_a,roll_a.damage_total AS damage_a,
+              roll_b.clash_total AS clash_b,roll_b.damage_total AS damage_b
+         FROM battle_rounds round
+         LEFT JOIN battle_rolls roll_a ON roll_a.battle_id=round.battle_id AND roll_a.round_number=round.round_number AND roll_a.side_key='A'
+         LEFT JOIN battle_rolls roll_b ON roll_b.battle_id=round.battle_id AND roll_b.round_number=round.round_number AND roll_b.side_key='B'
+        WHERE round.battle_id=$1 ORDER BY round.round_number`,[battle.id])).rows;
+    return{
+      battleId:battle.id,terrain:battle.terrain,status:battle.status,countryAName:battle.country_a_name,countryBName:battle.country_b_name,
+      initialA:Number(battle.initial_a),initialB:Number(battle.initial_b),currentA:Number(battle.current_a),currentB:Number(battle.current_b),
+      lossesA:Number(battle.losses_a),lossesB:Number(battle.losses_b),winner:battle.winner_side,finishReason:battle.finish_reason,
+      rounds:rows.map((row)=>({roundNumber:Number(row.round_number),tier:row.tier,winner:row.winner_side,
+        lossA:Number(row.loss_a),lossB:Number(row.loss_b),pressureA:Number(row.pressure_a),pressureB:Number(row.pressure_b),
+        orderA:row.order_a,orderB:row.order_b,wallDamage:Number(row.wall_damage),gateDamage:Number(row.gate_damage),
+        clashA:Number(row.clash_a??0),damageA:Number(row.damage_a??0),clashB:Number(row.clash_b??0),damageB:Number(row.damage_b??0)}))
+    };
+  },
+
+  async playerRoundContribution(input:{guildId:string;battleId:string;actorId:string}):Promise<PlayerBattleContributionView>{
+    const battle=(await pool.query<{id:string;terrain:BattleTerrain;status:BattleStatus}>(
+      "SELECT id,terrain,status FROM battles WHERE id=$1 AND guild_id=$2",[input.battleId,input.guildId]
+    )).rows[0];
+    if(!battle)throw new GameError("Muharebe bulunamadı.");
+    const participant=(await pool.query<BattleParticipantRow>(`
+      SELECT participant.*,country.name AS country_name,NULL::text AS source_settlement_name,
+             NULL::text AS embarked_army_name,'{}'::jsonb AS embarked_army_composition,0 AS embarked_army_loss
+        FROM battle_side_participants participant
+        JOIN countries country ON country.id=participant.country_id
+        JOIN battle_sides side_record ON side_record.battle_id=participant.battle_id AND side_record.side_key=participant.side_key
+        LEFT JOIN country_members member ON member.country_id=participant.country_id AND member.discord_user_id=$2
+        LEFT JOIN steppe_internal_titles title ON title.id=side_record.steppe_title_id AND title.holder_user_id=$2
+       WHERE participant.battle_id=$1 AND (member.discord_user_id IS NOT NULL OR title.holder_user_id IS NOT NULL)
+       ORDER BY participant.is_primary DESC,country.name LIMIT 1`,[battle.id,input.actorId])).rows[0];
+    if(!participant)throw new GameError("Bu muharebenin tarafı değilsiniz.");
+    const roll=(await pool.query<{round_number:number;clash_total:number;damage_total:number;detail:BattleRollRow["detail"]}>(`
+      SELECT round_number,clash_total,damage_total,detail FROM battle_rolls
+       WHERE battle_id=$1 AND side_key=$2 ORDER BY round_number DESC LIMIT 1`,[battle.id,participant.side_key])).rows[0];
+    if(!roll)throw new GameError("Tarafınız henüz bu muharebede zar üretmedi.");
+    const allParticipants=(await pool.query<BattleParticipantRow>(`
+      SELECT participant.*,country.name AS country_name,NULL::text AS source_settlement_name,
+             NULL::text AS embarked_army_name,'{}'::jsonb AS embarked_army_composition,0 AS embarked_army_loss
+        FROM battle_side_participants participant JOIN countries country ON country.id=participant.country_id
+       WHERE participant.battle_id=$1 AND participant.side_key=$2 ORDER BY participant.is_primary DESC,country.name`,
+      [battle.id,participant.side_key])).rows;
+    const stored=roll.detail?.__participants?.[participant.country_id];
+    const calculated=buildParticipantRollContributions(
+      allParticipants,(roll.detail??{}) as Record<string,unknown>,Number(roll.clash_total),Number(roll.damage_total)
+    )[participant.country_id];
+    const contribution=stored??calculated;
+    if(!contribution)throw new GameError("Bu tur için ülkenizin katkı kaydı bulunamadı.");
+    const sideName=allParticipants.map((item)=>item.country_name).join(" + ");
+    const terrain=BATTLE_TERRAINS[battle.terrain];
+    return{battleId:battle.id,terrain:battle.terrain,roundNumber:Number(roll.round_number),side:participant.side_key,
+      countryName:participant.country_name,sideName,sideClash:Number(roll.clash_total),sideDamage:Number(roll.damage_total),
+      frontage:participant.side_key==="A"?terrain.frontageA:terrain.frontageB,contribution,legacy:!stored};
+  },
+
   async lockNavalOrder(input:{
     guildId:string;channelId:string;battleId:string;actorId:string;isGameMaster:boolean;side:BattleSideKey;
   }):Promise<BattleView>{
@@ -2842,6 +3022,9 @@ export const battleService = {
         gateDamage = Math.floor(gateDamage*siegeMultiplier);
       }
       if (commanderBonus > 0) roll.clash += commanderBonus;
+      const participantContributions=buildParticipantRollContributions(
+        target.participants,roll.detail as Record<string,unknown>,roll.clash,roll.damage
+      );
       const proxy = input.isGameMaster && target.controller === "PLAYERS" && !member;
       const rollDetail = {
         ...roll.detail,
@@ -2850,7 +3033,8 @@ export const battleService = {
         ...(Object.keys(rolledDismounted).length ? { __dismounted: rolledDismounted } : {}),
         ...(commanderBonus > 0 ? { __commander: { engaged: 0, clash: commanderBonus, damage: 0 } } : {}),
         ...(navalClashBonus > 0 && view.battle.terrain === "NAVAL" ? { __royal_navy: { engaged: 0, clash: navalClashBonus, damage: 0 } } : {})
-        ,...((temporaryClash < 1 || temporaryDamage < 1) ? { __supply_sabotage: { engaged:0,clash:temporaryClash,damage:temporaryDamage,doctrineDisabled } } : {})
+        ,...((temporaryClash < 1 || temporaryDamage < 1) ? { __supply_sabotage: { engaged:0,clash:temporaryClash,damage:temporaryDamage,doctrineDisabled } } : {}),
+        __participants:participantContributions
       };
       await client.query(`INSERT INTO battle_rolls(battle_id,round_number,side_key,roller_user_id,clash_total,damage_total,wall_damage,gate_damage,detail,is_proxy,manual)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,false)`, [active.id, active.round_number, side, input.actorId, roll.clash, roll.damage, wallDamage, gateDamage, JSON.stringify(rollDetail), proxy]);

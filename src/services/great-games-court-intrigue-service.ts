@@ -8,9 +8,9 @@ import{
 import{GREAT_GAMES_TURN}from"../domain/great-games.js";
 import{GameError}from"./game-service.js";
 
-interface SeasonRow{id:string;status:string;current_game:string|null;current_round:number}
+interface SeasonRow{id:string;status:string;current_game:string|null;current_round:number;current_run:number}
 interface EntryRow{id:string;country_id:string;country_name:string;status:string;score:number;metadata:Record<string,unknown>}
-interface GameRow{id:string;season_id:string;status:"ACTIVE"|"COMPLETED";current_event_key:CourtEventKey;max_rounds:number}
+interface GameRow{id:string;season_id:string;run_number:number;status:"ACTIVE"|"COMPLETED";current_event_key:CourtEventKey;max_rounds:number}
 export interface CourtPactView{
   id:string;proposerCountryId:string;proposerCountryName:string;receiverCountryId:string;receiverCountryName:string;
   status:"PENDING"|"ACTIVE"|"REJECTED"|"BROKEN"|"COMPLETED";proposedRound:number;activeUntilRound:number|null;
@@ -28,7 +28,7 @@ const events=Object.keys(COURT_EVENTS)as CourtEventKey[];
 
 async function lockedSeason(client:DbClient,guildId:string):Promise<SeasonRow>{
   const row=(await client.query<SeasonRow>(
-    "SELECT id,status,current_game,current_round FROM great_games_seasons WHERE guild_id=$1 AND game_turn=$2 FOR UPDATE",
+    "SELECT id,status,current_game,current_round,current_run FROM great_games_seasons WHERE guild_id=$1 AND game_turn=$2 FOR UPDATE",
     [guildId,GREAT_GAMES_TURN]
   )).rows[0];
   if(!row)throw new GameError(`${GREAT_GAMES_TURN}. Tur etkinlikleri henüz açılmadı.`);
@@ -104,12 +104,12 @@ async function pacts(client:DbClient,gameId:string):Promise<CourtPactView[]>{
 
 async function loadView(client:DbClient,guildId:string,ownCountryId?:string):Promise<CourtGameView>{
   const season=(await client.query<SeasonRow>(
-    "SELECT id,status,current_game,current_round FROM great_games_seasons WHERE guild_id=$1 AND game_turn=$2",
+    "SELECT id,status,current_game,current_round,current_run FROM great_games_seasons WHERE guild_id=$1 AND game_turn=$2",
     [guildId,GREAT_GAMES_TURN]
   )).rows[0];
   if(!season)return{status:"NOT_STARTED",round:0,maxRounds:COURT_MAX_ROUNDS,eventKey:null,players:[],pacts:[],lastSummary:[],ownState:null};
   const list=await entries(client,season.id);
-  const game=(await client.query<GameRow>("SELECT * FROM great_games_court_games WHERE season_id=$1",[season.id])).rows[0];
+  const game=(await client.query<GameRow>("SELECT * FROM great_games_court_games WHERE season_id=$1 AND run_number=$2",[season.id,season.current_run])).rows[0];
   const actionRows=game&&season.current_round>0?(await client.query<{country_id:string;private_result:string|null}>(
     `SELECT country_id,payload->>'privateResult' AS private_result FROM great_games_actions
       WHERE season_id=$1 AND game_type='COURT_INTRIGUE' AND round=$2 AND action_type='ROUND'`,
@@ -146,8 +146,6 @@ export const greatGamesCourtIntrigueService={
       const selected=(await entries(client,season.id)).filter((entry)=>entry.status==="SELECTED");
       if(selected.length<4)throw new GameError("Saray Entrikası için en az 4 devlet gerekir.");
       if(selected.length>16)throw new GameError("Saray Entrikası en fazla 16 devletle oynanabilir.");
-      const existing=await client.query("SELECT 1 FROM great_games_court_games WHERE season_id=$1",[season.id]);
-      if(existing.rowCount)throw new GameError("Bu etkinlik döneminin Saray Entrikası daha önce başlatılmış.");
       const objectiveDeck=shuffle(Array.from({length:selected.length},(_,index)=>objectives[index%objectives.length]!),random);
       for(let index=0;index<selected.length;index+=1){
         const entry=selected[index]!;
@@ -157,13 +155,13 @@ export const greatGamesCourtIntrigueService={
         };
         await client.query(
           "UPDATE great_games_entries SET status='ACTIVE',score=0,metadata=metadata||$1::jsonb,updated_at=NOW() WHERE id=$2",
-          [JSON.stringify(stateMetadata(state)),entry.id]
+          [JSON.stringify({...stateMetadata(state),courtLastResult:null}),entry.id]
         );
       }
       const event=events[Math.floor(Math.min(Math.max(random(),0),0.999999)*events.length)]!;
       await client.query(
-        `INSERT INTO great_games_court_games(season_id,current_event_key,max_rounds,created_by)
-         VALUES($1,$2,$3,$4)`,[season.id,event,COURT_MAX_ROUNDS,actorId]
+        `INSERT INTO great_games_court_games(season_id,run_number,current_event_key,max_rounds,created_by)
+         VALUES($1,$2,$3,$4,$5)`,[season.id,season.current_run,event,COURT_MAX_ROUNDS,actorId]
       );
       await client.query(
         "UPDATE great_games_seasons SET status='ACTIVE',current_round=1,updated_at=NOW() WHERE id=$1",[season.id]
@@ -216,7 +214,7 @@ export const greatGamesCourtIntrigueService={
       const season=await lockedSeason(client,guildId);
       if(season.status!=="ACTIVE"||season.current_game!=="COURT_INTRIGUE")throw new GameError("Anlaşma önerilebilecek etkin bir Saray Entrikası bulunmuyor.");
       if(proposerCountryId===receiverCountryId)throw new GameError("Kendi delegasyonuna anlaşma öneremezsin.");
-      const game=(await client.query<GameRow>("SELECT * FROM great_games_court_games WHERE season_id=$1 FOR UPDATE",[season.id])).rows[0]!;
+      const game=(await client.query<GameRow>("SELECT * FROM great_games_court_games WHERE season_id=$1 AND run_number=$2 FOR UPDATE",[season.id,season.current_run])).rows[0]!;
       const participant=await client.query(
         "SELECT 1 FROM great_games_entries WHERE season_id=$1 AND game_type='COURT_INTRIGUE' AND country_id=$2 AND status='ACTIVE'",
         [season.id,receiverCountryId]
@@ -245,7 +243,7 @@ export const greatGamesCourtIntrigueService={
     await withTransaction(async(client)=>{
       const season=await lockedSeason(client,guildId);
       if(season.status!=="ACTIVE"||season.current_game!=="COURT_INTRIGUE")throw new GameError("Yanıtlanabilecek etkin bir Saray Entrikası anlaşması bulunmuyor.");
-      const game=(await client.query<GameRow>("SELECT * FROM great_games_court_games WHERE season_id=$1 FOR UPDATE",[season.id])).rows[0]!;
+      const game=(await client.query<GameRow>("SELECT * FROM great_games_court_games WHERE season_id=$1 AND run_number=$2 FOR UPDATE",[season.id,season.current_run])).rows[0]!;
       const pact=(await client.query<{receiver_country_id:string;status:string}>(
         "SELECT receiver_country_id,status FROM great_games_court_pacts WHERE id=$1 AND game_id=$2 FOR UPDATE",[pactId,game.id]
       )).rows[0];
@@ -268,7 +266,7 @@ export const greatGamesCourtIntrigueService={
     return withTransaction(async(client)=>{
       const season=await lockedSeason(client,guildId);
       if(season.status!=="ACTIVE"||season.current_game!=="COURT_INTRIGUE")throw new GameError("Çözülecek etkin bir Saray Entrikası raundu bulunmuyor.");
-      const game=(await client.query<GameRow>("SELECT * FROM great_games_court_games WHERE season_id=$1 FOR UPDATE",[season.id])).rows[0];
+      const game=(await client.query<GameRow>("SELECT * FROM great_games_court_games WHERE season_id=$1 AND run_number=$2 FOR UPDATE",[season.id,season.current_run])).rows[0];
       if(!game||game.status!=="ACTIVE")throw new GameError("Saray Entrikası oyunu etkin değil.");
       const list=(await entries(client,season.id)).filter((entry)=>entry.status==="ACTIVE");
       const actionRows=(await client.query<{country_id:string;payload:{action:CourtActionType;area:CourtArea|null;targetCountryId:string|null}}>(
@@ -338,7 +336,7 @@ export const greatGamesCourtIntrigueService={
           await client.query(
             `INSERT INTO great_games_points(season_id,country_id,game_type,points,reason,dedupe_key)
              VALUES($1,$2,'COURT_INTRIGUE',$3,$4,$5) ON CONFLICT(season_id,dedupe_key) DO NOTHING`,
-            [season.id,ranked[index]!.countryId,points,`${index+1}. Saray Entrikası sırası`,`COURT_INTRIGUE:placement:${index+1}`]
+            [season.id,ranked[index]!.countryId,points,`${index+1}. Saray Entrikası sırası`,`COURT_INTRIGUE:run:${season.current_run}:placement:${index+1}`]
           );
         }
         await client.query("UPDATE great_games_entries SET status='FINISHED' WHERE season_id=$1 AND game_type='COURT_INTRIGUE' AND status='ACTIVE'",[season.id]);

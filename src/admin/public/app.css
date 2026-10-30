@@ -420,9 +420,18 @@ tr[data-open-settlement] { cursor: pointer; }
 .battle-hero-stats strong { margin-top: 4px; color: var(--navy); font: 700 20px Georgia,serif; }
 .active-battle-card { border-left: 4px solid var(--brown); box-shadow: 0 10px 28px rgba(42,34,25,.07); }
 .battle-history-groups,.state-war-list { display: grid; gap: 18px; }
-.battle-turn-group { padding: 15px; border: 1px solid var(--line); border-radius: 14px; background: color-mix(in srgb,var(--surface) 78%,transparent); }
-.battle-turn-heading { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 12px; color: var(--brown); font-size: 10px; font-weight: 800; letter-spacing: .12em; }
-.battle-turn-heading strong { color: var(--muted); letter-spacing: normal; }
+.battle-turn-group { border: 1px solid var(--line); border-radius: 14px; background: color-mix(in srgb,var(--surface) 78%,transparent); overflow: hidden; transition: border-color .18s ease,box-shadow .18s ease; }
+.battle-turn-group[open] { border-color: color-mix(in srgb,var(--brown) 40%,var(--line)); box-shadow: 0 12px 28px rgba(42,34,25,.07); }
+.battle-turn-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 15px 17px; color: var(--brown); font-size: 10px; font-weight: 800; letter-spacing: .12em; cursor: pointer; list-style: none; user-select: none; }
+.battle-turn-heading::-webkit-details-marker { display: none; }
+.battle-turn-heading > span { display: grid; gap: 4px; }
+.battle-turn-heading b { font: 700 16px Georgia,serif; letter-spacing: normal; color: var(--navy); }
+.battle-turn-heading small { color: var(--muted); font-size: 10px; font-weight: 500; letter-spacing: normal; }
+.battle-turn-heading strong { display: flex; align-items: center; gap: 9px; color: var(--muted); letter-spacing: normal; }
+.battle-turn-heading i { display: inline-grid; place-items: center; width: 25px; height: 25px; border-radius: 50%; background: var(--surface-2); color: var(--brown); font-size: 16px; font-style: normal; transition: transform .18s ease; }
+.battle-turn-group[open] .battle-turn-heading i { transform: rotate(180deg); }
+.battle-turn-group > .battle-grid { padding: 0 15px 15px; border-top: 1px solid color-mix(in srgb,var(--line) 75%,transparent); }
+.battle-turn-group > .battle-grid > .battle-record { margin-top: 15px; }
 .battle-record { position: relative; overflow: hidden; }
 .battle-record::before { position: absolute; inset: 0 0 auto; height: 3px; background: linear-gradient(90deg,var(--brown) 0 50%,var(--navy) 50%); content: ""; }
 .battle-strength-flow { display: grid; grid-template-columns: minmax(0,1fr) 28px minmax(0,1fr); gap: 8px; align-items: center; margin-top: 12px; }

@@ -26,4 +26,14 @@ describe("GM war and battle command panels",()=>{
     expect(warService).toContain("removeWarParticipant");
     expect(warService).toContain("changeWarLeader");
   });
+
+  it("groups the complete battle archive into collapsible game turns",()=>{
+    const app=read("./public/app.js"),styles=read("./public/app.css"),service=read("./service.ts");
+    expect(app).toContain('<details class="battle-turn-group"');
+    expect(app).toContain('AMBUSH: "Pusu"');
+    expect(app).toContain("Tur ${number(battle.startedTurn)}'da başladı");
+    expect(styles).toContain(".battle-turn-group[open]");
+    expect(service).toContain("COALESCE(battle.ended_turn,battle.started_turn) AS game_turn");
+    expect(service).not.toContain("LIMIT 250`");
+  });
 });

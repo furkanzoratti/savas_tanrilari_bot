@@ -2760,13 +2760,14 @@ export const adminPanelService = {
     const rows = (await adminPool.query(
       `SELECT battle.id,battle.terrain,battle.status,battle.round_number,battle.siege_phase,battle.state_war_id,
               battle.narrative,battle.winner_side,battle.finish_reason,battle.created_at,battle.updated_at,
+              battle.started_turn,battle.ended_turn,COALESCE(battle.ended_turn,battle.started_turn) AS game_turn,
               battle.wall_current_hp,battle.wall_max_hp,battle.gate_current_hp,battle.gate_max_hp,
               settlement.name AS defender_settlement_name,
               COALESCE(rebel_a.display_name,country_a.name) AS country_a_name,side_a.current_total AS current_a,
               side_a.initial_total AS initial_a,side_a.total_losses AS losses_a,side_a.pressure AS pressure_a,
               COALESCE(rebel_b.display_name,country_b.name) AS country_b_name,side_b.current_total AS current_b,
               side_b.initial_total AS initial_b,side_b.total_losses AS losses_b,side_b.pressure AS pressure_b,
-              score_event.game_turn,score_event.side AS score_side,score_event.points AS score_points,
+              score_event.side AS score_side,score_event.points AS score_points,
               COALESCE((
                 SELECT jsonb_agg(jsonb_build_object(
                   'contractId',assignment.contract_id,
@@ -2801,8 +2802,7 @@ export const adminPanelService = {
          ) score_event ON TRUE
         WHERE battle.guild_id=$1
         ORDER BY CASE WHEN battle.status IN ('FINISHED','CANCELLED') THEN 1 ELSE 0 END,
-                 battle.updated_at DESC
-        LIMIT 250`,
+                 COALESCE(battle.ended_turn,battle.started_turn) DESC,battle.updated_at DESC`,
       [adminConfig.guildId]
     )).rows as Array<Record<string, unknown>>;
     return rows.map((row) => ({ ...row, mercenaries: mercenaryAssignmentViews(row.mercenaries) }));
@@ -2814,17 +2814,19 @@ export const adminPanelService = {
       id:string;terrain:string;status:string;round_number:number;winner_side:"A"|"B"|null;finish_reason:string|null;
       narrative:string;created_at:Date;updated_at:Date;defender_settlement_name:string|null;
       country_a_name:string|null;country_b_name:string|null;initial_a:number;initial_b:number;current_a:number;current_b:number;
-      losses_a:number;losses_b:number;game_turn:number|null;score_side:"ATTACKER"|"DEFENDER"|null;score_points:number;
+      losses_a:number;losses_b:number;started_turn:number;ended_turn:number|null;game_turn:number;
+      score_side:"ATTACKER"|"DEFENDER"|null;score_points:number;
     }>(
       `SELECT battle.id,battle.terrain,battle.status,battle.round_number,battle.winner_side,battle.finish_reason,
-              battle.narrative,battle.created_at,battle.updated_at,settlement.name AS defender_settlement_name,
+              battle.narrative,battle.created_at,battle.updated_at,battle.started_turn,battle.ended_turn,
+              COALESCE(battle.ended_turn,battle.started_turn) AS game_turn,settlement.name AS defender_settlement_name,
               COALESCE(rebel_a.display_name,country_a.name) AS country_a_name,
               COALESCE(rebel_b.display_name,country_b.name) AS country_b_name,
               COALESCE(side_a.initial_total,0)::integer AS initial_a,COALESCE(side_a.current_total,0)::integer AS current_a,
               COALESCE(side_a.total_losses,0)::integer AS losses_a,
               COALESCE(side_b.initial_total,0)::integer AS initial_b,COALESCE(side_b.current_total,0)::integer AS current_b,
               COALESCE(side_b.total_losses,0)::integer AS losses_b,
-              score_event.game_turn,score_event.side AS score_side,COALESCE(score_event.points,0)::integer AS score_points
+              score_event.side AS score_side,COALESCE(score_event.points,0)::integer AS score_points
          FROM battles battle
          LEFT JOIN battle_sides side_a ON side_a.battle_id=battle.id AND side_a.side_key='A'
          LEFT JOIN countries country_a ON country_a.id=side_a.country_id
@@ -3368,6 +3370,7 @@ export const adminPanelService = {
     const [battleRows, participantRows, armyRows, fleetRows] = await Promise.all([
       adminPool.query(
         `SELECT battle.id,battle.terrain,battle.status,battle.round_number,battle.siege_phase,battle.updated_at,
+                battle.started_turn,battle.ended_turn,
                 settlement.name AS settlement_name,
                 side_a.country_id AS country_a_id,COALESCE(rebel_a.display_name,country_a.name) AS country_a_name,
                 side_b.country_id AS country_b_id,COALESCE(rebel_b.display_name,country_b.name) AS country_b_name
@@ -3467,6 +3470,7 @@ export const adminPanelService = {
       const battleId = String(battle.id);
       return {
         id:battleId,terrain:battle.terrain,status:battle.status,roundNumber:battle.round_number,siegePhase:battle.siege_phase,
+        startedTurn:Number(battle.started_turn),endedTurn:battle.ended_turn===null?null:Number(battle.ended_turn),
         settlementName:battle.settlement_name,countryAId:battle.country_a_id,countryAName:battle.country_a_name,
         countryBId:battle.country_b_id,countryBName:battle.country_b_name,
         participants:participantsByBattle.get(battleId) ?? [],

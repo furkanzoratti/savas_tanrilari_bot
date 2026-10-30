@@ -45,7 +45,7 @@ describe("kuşatma bilgi gizliliği", () => {
     expect(json).not.toContain("12.345");
     expect(json).not.toContain("8.765");
     expect(json).toContain("3.580");
-    expect(json).toContain("Toplam Asker:** Gizli");
+    expect(json).toContain("Toplam asker:** Gizli");
     expect(json).toContain("Baskı Altında");
     expect(json).toContain("Oyun Turu 12");
     expect(json).toContain("2/4 kullanıldı");
@@ -83,7 +83,7 @@ describe("kuşatma bilgi gizliliği", () => {
     const view = siegeView();
     view.sides.B.pressure = 6;
     const json = JSON.stringify(battleEmbed(view).toJSON());
-    expect(json).toContain("Baskı:** 6 puan");
+    expect(json).toContain("6/12");
     expect(json).toContain("Baskı Altında");
     expect(json).toContain("Oyun Turu 12");
     expect(json).toContain("2/4 kullanıldı");
@@ -129,10 +129,16 @@ describe("kuşatma bilgi gizliliği", () => {
 
     const json = JSON.stringify(battleEmbed(view).toJSON());
 
-    expect(json).toContain("Son Çözümlenen Tur • Tur 5");
+    expect(json).toContain("Önceki Tur · Belirgin Üstünlük");
     expect(json).toContain("1.820");
     expect(json).toContain("740");
-    expect(json).toContain("sonraki savaş turu çözümlenene kadar");
+    expect(json).toContain("Üstün taraf");
+  });
+
+  it("savaş alanı görselini ana akışı uzatmadan thumbnail olarak korur",()=>{
+    const json=battleEmbed(siegeView()).toJSON();
+    expect(json.thumbnail?.url).toContain("attachment://");
+    expect(json.image).toBeUndefined();
   });
 });
 

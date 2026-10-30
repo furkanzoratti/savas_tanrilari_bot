@@ -118,6 +118,7 @@ import { steppeVassalKurultayVotesMigration } from "./steppe-vassal-kurultay-vot
 import { steppeTributeLedgerMigration } from "./steppe-tribute-ledger-migration.js";
 import { espionageNobleTargetsMigration } from "./espionage-noble-targets-migration.js";
 import { diplomatTaskRemovalMigration } from "./diplomat-task-removal-migration.js";
+import { battleTurnArchiveMigration } from "./battle-turn-archive-migration.js";
 import { countryMarshalsMigration } from "./country-marshals-migration.js";
 import { formableCountryCatalogSyncMigration } from "./formable-country-catalog-sync-migration.js";
 import { mountedArcherSeparationMigration } from "./mounted-archer-separation-migration.js";
@@ -163,6 +164,7 @@ import { navalBlockadeWarScoreMigration } from "./naval-blockade-war-score-migra
 import { greatGamesGladiatorDrawMigration } from "./great-games-gladiator-draw-migration.js";
 import { greatGamesCourtIntrigueMigration } from "./great-games-court-intrigue-migration.js";
 import { greatGamesConstructionSealsMigration } from "./great-games-construction-seals-migration.js";
+import { greatGamesRepeatableSpecialGamesMigration } from "./great-games-repeatable-special-games-migration.js";
 
 export const migrations = [
   {
@@ -2543,5 +2545,7 @@ export const migrations = [
   navalBlockadeWarScoreMigration,
   greatGamesGladiatorDrawMigration,
   greatGamesCourtIntrigueMigration,
-  greatGamesConstructionSealsMigration
+  greatGamesConstructionSealsMigration,
+  greatGamesRepeatableSpecialGamesMigration,
+  battleTurnArchiveMigration
 ] as const;

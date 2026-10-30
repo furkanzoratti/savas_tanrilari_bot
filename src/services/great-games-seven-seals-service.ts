@@ -7,12 +7,12 @@ import{
 import{GREAT_GAMES_TURN}from"../domain/great-games.js";
 import{GameError}from"./game-service.js";
 
-interface Season{id:string;status:string;current_game:string|null;current_round:number}
+interface Season{id:string;status:string;current_game:string|null;current_round:number;current_run:number}
 interface Entry{id:string;country_id:string;country_name:string;status:string;score:number;metadata:Record<string,unknown>}
 export interface SealPlayerView extends SevenSealsState{submitted:boolean;pendingAction:{action:SealActionType;seal:SealKey|null;targetCountryId:string|null;targetCountryName:string|null}|null;lastResult:string|null;score:number}
 export interface SevenSealsView{status:"NOT_STARTED"|"PUBLISHED"|"ACTIVE"|"COMPLETED";round:number;maxRounds:number;players:SealPlayerView[];ownState:SealPlayerView|null;lastSummary:string[]}
 async function season(client:DbClient,guildId:string,lock=false):Promise<Season>{
-  const row=(await client.query<Season>(`SELECT id,status,current_game,current_round FROM great_games_seasons WHERE guild_id=$1 AND game_turn=$2${lock?" FOR UPDATE":""}`,[guildId,GREAT_GAMES_TURN])).rows[0];
+  const row=(await client.query<Season>(`SELECT id,status,current_game,current_round,current_run FROM great_games_seasons WHERE guild_id=$1 AND game_turn=$2${lock?" FOR UPDATE":""}`,[guildId,GREAT_GAMES_TURN])).rows[0];
   if(!row)throw new GameError(`${GREAT_GAMES_TURN}. Tur etkinlikleri henüz açılmadı.`);return row;
 }
 async function entries(client:DbClient,seasonId:string):Promise<Entry[]>{return(await client.query<Entry>(
@@ -30,15 +30,15 @@ async function view(client:DbClient,guildId:string,ownCountryId?:string):Promise
     "SELECT country_id,payload FROM great_games_actions WHERE season_id=$1 AND game_type='SEVEN_SEALS' AND round=$2 AND action_type='ROUND' AND resolved=FALSE",[current.id,current.current_round])).rows:[];
   const actionByCountry=new Map(actionRows.map((row)=>[row.country_id,row.payload]));const names=new Map(relevant.map((entry)=>[entry.country_id,entry.country_name]));
   const players=relevant.map((entry)=>{const data=state(entry);const pending=actionByCountry.get(entry.country_id);return{...data,submitted:Boolean(pending),pendingAction:pending?{...pending,targetCountryName:pending.targetCountryId?names.get(pending.targetCountryId)??null:null}:null,lastResult:typeof entry.metadata.sealsLastResult==="string"?entry.metadata.sealsLastResult:null,score:sevenSealsScore(data)};});
-  const lastSummary=(await client.query<{public_summary:string[]}>("SELECT public_summary FROM great_games_special_rounds WHERE season_id=$1 AND game_type='SEVEN_SEALS' ORDER BY round DESC LIMIT 1",[current.id])).rows[0]?.public_summary??[];
+  const lastSummary=(await client.query<{public_summary:string[]}>("SELECT public_summary FROM great_games_special_rounds WHERE season_id=$1 AND game_type='SEVEN_SEALS' AND run_number=$2 ORDER BY round DESC LIMIT 1",[current.id,current.current_run])).rows[0]?.public_summary??[];
   const status:SevenSealsView["status"]=relevant.some((entry)=>entry.status==="FINISHED")?"COMPLETED":current.status==="ACTIVE"&&current.current_game==="SEVEN_SEALS"?"ACTIVE":current.status==="PUBLISHED"&&current.current_game==="SEVEN_SEALS"?"PUBLISHED":"NOT_STARTED";
   return{status,round:status==="COMPLETED"?SEVEN_SEALS_MAX_ROUNDS:current.current_round,maxRounds:SEVEN_SEALS_MAX_ROUNDS,players,lastSummary,ownState:players.find((player)=>player.countryId===ownCountryId)??null};
 }
-async function award(client:DbClient,seasonId:string,players:readonly SevenSealsState[]){
+async function award(client:DbClient,seasonId:string,runNumber:number,players:readonly SevenSealsState[]){
   const ranked=[...players].sort((a,b)=>sevenSealsScore(b)-sevenSealsScore(a)||b.opened.length-a.opened.length||a.corruption-b.corruption||a.countryName.localeCompare(b.countryName,"tr"));
   for(let index=0;index<Math.min(3,ranked.length);index+=1)await client.query(
     `INSERT INTO great_games_points(season_id,country_id,game_type,points,reason,dedupe_key) VALUES($1,$2,'SEVEN_SEALS',$3,$4,$5) ON CONFLICT(season_id,dedupe_key) DO NOTHING`,
-    [seasonId,ranked[index]!.countryId,[5,3,2][index],`${index+1}. Yedi Mühür sırası`,`SEVEN_SEALS:placement:${index+1}`]
+    [seasonId,ranked[index]!.countryId,[5,3,2][index],`${index+1}. Yedi Mühür sırası`,`SEVEN_SEALS:run:${runNumber}:placement:${index+1}`]
   );
 }
 export const greatGamesSevenSealsService={
@@ -46,7 +46,7 @@ export const greatGamesSevenSealsService={
   async start(guildId:string){return withTransaction(async(client)=>{
     const current=await season(client,guildId,true);if(current.status!=="PUBLISHED"||current.current_game!=="SEVEN_SEALS")throw new GameError("Yedi Mühür önce hazırlanıp yayımlanmalıdır.");
     const selected=(await entries(client,current.id)).filter((entry)=>entry.status==="SELECTED");if(selected.length<4||selected.length>16)throw new GameError("Yedi Mühür 4–16 devletle oynanabilir.");
-    for(const entry of selected){const initial=initialSevenSealsState(entry.country_id,entry.country_name);await client.query("UPDATE great_games_entries SET status='ACTIVE',score=0,metadata=metadata||$1::jsonb,updated_at=NOW() WHERE id=$2",[JSON.stringify(metadata(initial)),entry.id]);}
+    for(const entry of selected){const initial=initialSevenSealsState(entry.country_id,entry.country_name);await client.query("UPDATE great_games_entries SET status='ACTIVE',score=0,metadata=metadata||$1::jsonb,updated_at=NOW() WHERE id=$2",[JSON.stringify({...metadata(initial),sealsLastResult:null}),entry.id]);}
     await client.query("UPDATE great_games_seasons SET status='ACTIVE',current_round=1,updated_at=NOW() WHERE id=$1",[current.id]);return view(client,guildId);
   });},
   async submitAction(input:{guildId:string;countryId:string;action:SealActionType;seal?:SealKey;targetCountryId?:string}){await withTransaction(async(client)=>{
@@ -73,8 +73,8 @@ export const greatGamesSevenSealsService={
     const result=resolveSealRound(list.map(state),rows.map((row)=>({countryId:row.country_id,...row.payload})),random);const finished=current.current_round>=SEVEN_SEALS_MAX_ROUNDS;
     for(const player of result.players){const entry=list.find((item)=>item.country_id===player.countryId)!;await client.query("UPDATE great_games_entries SET score=$1,metadata=metadata||$2::jsonb,updated_at=NOW() WHERE id=$3",[sevenSealsScore(player),JSON.stringify(metadata(player,result.privateResults[player.countryId])),entry.id]);}
     await client.query("UPDATE great_games_actions SET resolved=TRUE WHERE season_id=$1 AND game_type='SEVEN_SEALS' AND round=$2",[current.id,current.current_round]);
-    await client.query("INSERT INTO great_games_special_rounds(season_id,game_type,round,public_summary) VALUES($1,'SEVEN_SEALS',$2,$3::jsonb) ON CONFLICT DO NOTHING",[current.id,current.current_round,JSON.stringify(result.publicLines)]);
-    if(finished){await award(client,current.id,result.players);await client.query("UPDATE great_games_entries SET status='FINISHED' WHERE season_id=$1 AND game_type='SEVEN_SEALS' AND status='ACTIVE'",[current.id]);await client.query("UPDATE great_games_seasons SET status='OPEN',current_game=NULL,current_round=0,updated_at=NOW() WHERE id=$1",[current.id]);}
+    await client.query("INSERT INTO great_games_special_rounds(season_id,game_type,run_number,round,public_summary) VALUES($1,'SEVEN_SEALS',$2,$3,$4::jsonb) ON CONFLICT DO NOTHING",[current.id,current.current_run,current.current_round,JSON.stringify(result.publicLines)]);
+    if(finished){await award(client,current.id,current.current_run,result.players);await client.query("UPDATE great_games_entries SET status='FINISHED' WHERE season_id=$1 AND game_type='SEVEN_SEALS' AND status='ACTIVE'",[current.id]);await client.query("UPDATE great_games_seasons SET status='OPEN',current_game=NULL,current_round=0,updated_at=NOW() WHERE id=$1",[current.id]);}
     else await client.query("UPDATE great_games_seasons SET current_round=current_round+1,updated_at=NOW() WHERE id=$1",[current.id]);
     return{round:current.current_round,finished,summary:result.publicLines};
   });}
