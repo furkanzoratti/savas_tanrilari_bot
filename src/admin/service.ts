@@ -2786,11 +2786,11 @@ export const adminPanelService = {
                 WHERE assignment.battle_id=battle.id
               ),'[]'::jsonb) AS mercenaries
          FROM battles battle
-         LEFT JOIN battle_sides side_a ON side_a.battle_id=battle.id AND side_a.side_key='A'
-         LEFT JOIN countries country_a ON country_a.id=side_a.country_id
+         JOIN battle_sides side_a ON side_a.battle_id=battle.id AND side_a.side_key='A'
+         JOIN countries country_a ON country_a.id=side_a.country_id
          LEFT JOIN rebel_factions rebel_a ON rebel_a.id=side_a.rebel_faction_id
-         LEFT JOIN battle_sides side_b ON side_b.battle_id=battle.id AND side_b.side_key='B'
-         LEFT JOIN countries country_b ON country_b.id=side_b.country_id
+         JOIN battle_sides side_b ON side_b.battle_id=battle.id AND side_b.side_key='B'
+         JOIN countries country_b ON country_b.id=side_b.country_id
          LEFT JOIN rebel_factions rebel_b ON rebel_b.id=side_b.rebel_faction_id
          LEFT JOIN settlements settlement ON settlement.id=battle.defender_settlement_id
          LEFT JOIN LATERAL (
