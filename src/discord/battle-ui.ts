@@ -65,7 +65,7 @@ function expectedSide(view: BattleView): BattleSideKey | null {
 
 function pressureBar(value:number,limit:number):string{
   const filled=Math.max(0,Math.min(10,Math.round(value/Math.max(1,limit)*10)));
-  return `${"█".repeat(filled)}${"░".repeat(10-filled)} ${number(value)}/${number(limit)}`;
+  return `${"●".repeat(filled)}${"○".repeat(10-filled)} ${number(value)}/${number(limit)}`;
 }
 
 export function battleEmbed(view: BattleView, roundResult?: BattleRoundResult): EmbedBuilder {
@@ -77,9 +77,9 @@ export function battleEmbed(view: BattleView, roundResult?: BattleRoundResult): 
       : orderState(side.pressure, side.initial_total, side.current_total);
     const pressureLimit=view.battle.terrain==="SIEGE"?SIEGE_PRESSURE_LIMIT:FIELD_BATTLE_PRESSURE_LIMIT;
     const rebelHeader=side.rebel_faction_id
-      ? `**İsyancı Ordu:** ${side.rebel_army_name}\n**İsyan Lideri:** ${side.rebel_leader_name} (+${number(side.rebel_leader_skill_bonus??1)})\n`
+      ? `*${side.rebel_army_name ?? "İsyancı Ordu"} · Lider ${side.rebel_leader_name ?? "Bilinmiyor"} (+${number(side.rebel_leader_skill_bonus??1)})*\n`
       : "";
-    if (view.battle.terrain === "SIEGE" && key === "B") return `${rebelHeader}**Toplam asker:** Gizli\n${side.rebel_faction_id?"Yalnızca isyancı ordu":"Otomatik garnizon dahil"}\n**Kayıp:** ${number(side.total_losses)}\n**${orderLabels[order]}** · ${pressureBar(side.pressure,pressureLimit)}`;
+    if (view.battle.terrain === "SIEGE" && key === "B") return `${rebelHeader}**Toplam asker gizli** · ${side.rebel_faction_id?"Yalnızca isyancı ordu":"Otomatik garnizon dahil"}\n${orderLabels[order]} · Baskı ${pressureBar(side.pressure,pressureLimit)}`;
     if(view.battle.terrain==="NAVAL"){
       const condition=navalFleetCondition({
         initialHullHp:side.initial_hull_hp??0,operationalHullHp:side.operational_hull_hp??0,
@@ -92,8 +92,9 @@ export function battleEmbed(view: BattleView, roundResult?: BattleRoundResult): 
         : side.naval_order?"Seçildi • Kilit bekliyor":"Henüz seçilmedi";
       return `${rebelHeader}**${number(side.active_ship_total??0)} / ${number(side.initial_total)}** savaşabilir gemi\n**İş göremez:** ${number(side.disabled_ship_total??0)} · **Batık:** ${number(side.sunk_ship_total??0)}\n**HP:** ${number(side.operational_hull_hp??0)} / ${number(side.initial_hull_hp??0)}\n**${navalConditionLabels[condition]}** · Manevra ${number(side.naval_maneuver_points??0)}/5\n**Filo emri:** ${orderStateLabel}`;
     }
-    return `${rebelHeader}**${number(side.current_total)} / ${number(side.initial_total)}** asker · Kayıp **${number(side.total_losses)}**\n**${orderLabels[order]}** · ${pressureBar(side.pressure,pressureLimit)}`;
+    return `${rebelHeader}**${number(side.current_total)} / ${number(side.initial_total)} asker**\n${orderLabels[order]} · Baskı ${pressureBar(side.pressure,pressureLimit)}`;
   };
+  const sideBlock=(key:BattleSideKey)=>`${key==="A"?"🟥":"🟦"} **${view.sides[key].country_name}**\n${sideField(key)}`;
   const siegeProfile = view.battle.terrain === "SIEGE"
     ? siegeFrontageProfile(view.battle.wall_current_hp ?? 0, view.battle.gate_current_hp ?? 0)
     : null;
@@ -120,17 +121,14 @@ export function battleEmbed(view: BattleView, roundResult?: BattleRoundResult): 
     : null;
   const nextSide=expectedSide(view);
   const nextAction=nextSide
-    ? `${view.sides[nextSide].country_name} savaş zarını bekliyor${view.sides[nextSide].controller==="GM"?" · Yönetici kontrolü":""}`
+    ? `**Zar bekleniyor:** ${view.sides[nextSide].country_name}${view.sides[nextSide].controller==="GM"?" · Yönetici":" · Ülke oyuncusu"}`
     : view.battle.status==="READY_TO_RESOLVE"
-      ? "İki tarafın zarı tamamlandı · Yönetici turu çözümleyecek"
+      ? "**Çözüm bekleniyor:** İki tarafın zarı tamamlandı · Yönetici"
       : navalStage??statusLabels[view.battle.status]??view.battle.status;
   const embed = new EmbedBuilder().setColor(view.battle.status === "FINISHED" ? 0x8b1a1a : 0xb68b36)
     .setTitle(`⚔️ ${view.sides.A.country_name} — ${view.sides.B.country_name}`)
-    .setDescription(`**${number(view.battle.round_number)}. Muharebe Turu · ${statusLabels[view.battle.status]??view.battle.status}**\n${view.battle.narrative || "İki ordu savaş alanında karşı karşıya geldi."}\n\n🗺️ **${terrain.label}:** ${frontage}\n🎲 **Sıradaki işlem:** ${nextAction}`)
-    .addFields(
-      { name: `🟥 ${view.sides.A.country_name}`, value: sideField("A"), inline: true },
-      { name: `🟦 ${view.sides.B.country_name}`, value: sideField("B"), inline: true }
-    );
+    .setDescription(`**${number(view.battle.round_number)}. Muharebe Turu**\n${view.battle.narrative || "İki ordu savaş alanında karşı karşıya geldi."}\n\n🗺️ **${terrain.label}** · ${frontage}\n🎲 ${nextAction}`)
+    .addFields({name:"⚔️ Cephe Durumu",value:`${sideBlock("A")}\n\n${sideBlock("B")}`,inline:false});
   if(siegeStage)embed.addFields({name:"📜 Kuşatma Aşaması",value:siegeStage.trim(),inline:false});
   if (view.battle.terrain === "AMBUSH") embed.addFields({ name: "🌲 Pusu Düzeni", value: "A tarafı pusuyu kuran taraftır. İlk turda çarpışma +%25 ve hasar +%10 uygulanır." });
   if (view.battle.terrain === "SIEGE") {
@@ -192,10 +190,10 @@ ${accessNote}` }
       lastRound.gateDamage ? `Kapıya verilen hasar: **${number(lastRound.gateDamage)}**` : null
     ].filter(Boolean).join("\n");
     const resultValue = view.battle.terrain === "NAVAL"
-      ? `Değerlendirme üstünlüğü: **${winner}**\n${view.sides.A.country_name}: **-${number(lastRound.lossA)} gemi**\n${view.sides.B.country_name}: **-${number(lastRound.lossB)} gemi**`
-      : `Üstün taraf: **${winner}**\n${view.sides.A.country_name}: **-${number(lastRound.lossA)}** · ${orderLabels[lastRound.orderA] ?? lastRound.orderA} · Baskı ${number(lastRound.pressureA)}/${pressureLimit}\n${view.sides.B.country_name}: **-${number(lastRound.lossB)}** · ${orderLabels[lastRound.orderB] ?? lastRound.orderB} · Baskı ${number(lastRound.pressureB)}/${pressureLimit}${structureDamage ? `\n${structureDamage}` : ""}`;
+      ? `**${winner} üstünlüğü**\n🟥 ${view.sides.A.country_name} · **-${number(lastRound.lossA)} gemi**\n🟦 ${view.sides.B.country_name} · **-${number(lastRound.lossB)} gemi**`
+      : `**${winner} üstünlüğü**\n🟥 ${view.sides.A.country_name} · **-${number(lastRound.lossA)}** · ${orderLabels[lastRound.orderA] ?? lastRound.orderA} · Baskı ${number(lastRound.pressureA)}/${pressureLimit}\n🟦 ${view.sides.B.country_name} · **-${number(lastRound.lossB)}** · ${orderLabels[lastRound.orderB] ?? lastRound.orderB} · Baskı ${number(lastRound.pressureB)}/${pressureLimit}${structureDamage ? `\n${structureDamage}` : ""}`;
     embed.addFields({
-      name: `📜 Önceki Tur · ${tierLabels[lastRound.tier] ?? lastRound.tier}`,
+      name: `📜 ${number(lastRound.roundNumber)}. Tur Sonucu · ${tierLabels[lastRound.tier] ?? lastRound.tier}`,
       value: resultValue
     });
   }
