@@ -26,6 +26,7 @@ import { ESPIONAGE_PUBLICATION_IMAGE_KEYS } from "../domain/espionage-publicatio
 import {adminGreatProjectService} from "./great-project-admin-service.js";
 import { adminGovernorshipService } from "./governorship-admin-service.js";
 import { adminStateWarService } from "./state-war-admin-service.js";
+import { adminGreatGamesService } from "./great-games-admin-service.js";
 
 const logger = pino({ level: adminConfig.logLevel });
 const responseStartedAt = new WeakMap<ServerResponse, number>();
@@ -196,6 +197,14 @@ const server = createServer(async (request, response) => {
     if(request.method==="GET"&&url.pathname==="/api/great-projects"){
       if(!requireSession(request,response))return;
       return json(response,200,await adminGreatProjectService.dashboard());
+    }
+    if(request.method==="GET"&&url.pathname==="/api/great-games"){
+      if(!requireSession(request,response))return;
+      return json(response,200,await adminGreatGamesService.dashboard());
+    }
+    if(request.method==="POST"&&url.pathname==="/api/great-games/participants"){
+      const session=requireMutation(request,response);if(!session)return;
+      return json(response,200,await adminGreatGamesService.addParticipant(session.sub,await body(request)));
     }
     if(request.method==="POST"&&url.pathname==="/api/great-projects/action"){
       const session=requireMutation(request,response);if(!session)return;

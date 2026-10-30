@@ -17,7 +17,9 @@ import { parsePeaceIndemnity, renderActiveWarDetail, renderActiveWarPages, rende
 
 describe("resmî savaş ilanları ve barış duyuruları", () => {
   it("devlet adlarını sunucudaki bayrak emoji adlarına eşler", () => {
-    expect(countryFlagEmojiName("Bosporos Krallığı")).toBe("bosporoc");
+    expect(countryFlagEmojiName("Bosporos Krallığı")).toBe("bosporos");
+    expect(countryFlagEmojiName("Akdeniz Ligi")).toBe("akdenizligi");
+    expect(countryFlagEmojiName("Saketler")).toBe("saketler");
     expect(countryFlagEmojiName("Büyük Britanya")).toBe("britanya");
     expect(countryFlagEmojiName("Nil İmparatorluğu")).toBe("nilimp");
     expect(countryFlagEmojiName("Satraplar")).toBe("satraplar");

@@ -2,6 +2,7 @@ import type { Guild } from "discord.js";
 
 const COUNTRY_FLAG_EMOJI_NAMES: Record<string, string> = {
   "gaut kralligi": "gaut",
+  "akdeniz ligi": "akdenizligi",
   "xianbei konfederasyonu": "xianbei",
   "iberya": "iberya2",
   "trakya": "trakya",
@@ -10,9 +11,9 @@ const COUNTRY_FLAG_EMOJI_NAMES: Record<string, string> = {
   "fenike aram": "fenikearam",
   "fenike-aram": "fenikearam",
   "roma": "roma",
-  "saketler": "sakatlar",
+  "saketler": "saketler",
   "greko-baktriya": "grekobaktriya",
-  "bosporos kralligi": "bosporoc",
+  "bosporos kralligi": "bosporos",
   "karnutlar": "karnut",
   "persis": "pers",
   "boylar": "boylar",

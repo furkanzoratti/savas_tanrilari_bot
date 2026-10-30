@@ -1,5 +1,5 @@
-import { ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, ModalBuilder, StringSelectMenuBuilder, TextInputBuilder, TextInputStyle, type ButtonInteraction, type ChatInputCommandInteraction, type Client, type ModalSubmitInteraction, type StringSelectMenuInteraction } from "discord.js";
-import { BATTLE_TERRAINS, BATTLE_UNIT_STATS, FIELD_BATTLE_PRESSURE_LIMIT, LADDER_GROUP_ASSAULT_CAPACITY, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, SIEGE_ASSET_BATTLE_STATS, SIEGE_ASSAULT_FRONTAGE, SIEGE_ATTACKER_DISMOUNT_MAP, SIEGE_PRESSURE_LIMIT, SIEGE_TOWER_ASSAULT_CAPACITY, assessArmyComposition, automaticSiegeDismountments, orderState, remainingBombardments, siegeAssaultAccess, siegeAttackerDismountedComposition, siegeDefenderComposition, siegeDefenderReserveBonus, siegeDefenseModifiers, siegeFrontageProfile, siegeOrderState, type ArmyCompositionContext, type BattleComposition, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain, type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeDismountUnitType, type SiegeTarget } from "../domain/battle.js";
+import { ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, ModalBuilder, StringSelectMenuBuilder, TextInputBuilder, TextInputStyle, type ButtonInteraction, type ChatInputCommandInteraction, type Client, type Guild, type ModalSubmitInteraction, type StringSelectMenuInteraction } from "discord.js";
+import { BATTLE_TERRAINS, BATTLE_UNIT_STATS, FIELD_BATTLE_PRESSURE_LIMIT, LADDER_GROUP_ASSAULT_CAPACITY, MAX_BOMBARDMENTS_PER_GAME_TURN, NAVAL_UNIT_STATS, SIEGE_ASSET_BATTLE_STATS, SIEGE_ASSAULT_FRONTAGE, SIEGE_ATTACKER_DISMOUNT_MAP, SIEGE_PRESSURE_LIMIT, SIEGE_TOWER_ASSAULT_CAPACITY, assessArmyComposition, automaticSiegeDismountments, orderState, siegeAssaultAccess, siegeAttackerDismountedComposition, siegeDefenderComposition, siegeDefenderReserveBonus, siegeDefenseModifiers, siegeFrontageProfile, siegeOrderState, type ArmyCompositionContext, type BattleComposition, type BattleController, type BattleForceType, type BattleSideKey, type BattleTerrain, type BattleUnitType, type NavalUnitType, type SiegeAssetType, type SiegeDismountUnitType, type SiegeTarget } from "../domain/battle.js";
 import { NAVAL_BATTLE_ORDERS, isNavalRetreatOrder, navalFleetCondition, type NavalBattleOrder } from "../domain/naval-tactics.js";
 import { SPECIAL_UNITS } from "../domain/special-units.js";
 import { number } from "../domain/format.js";
@@ -13,6 +13,7 @@ import { renderArmyEmbed } from "./army-embed.js";
 import { renderFleetEmbed } from "./fleet-embed.js";
 import { publishCharacterTurnLogs } from "./character-ui.js";
 import { batchDocumentEmbeds } from "./document.js";
+import { countryFlagEmoji } from "./country-flag-emojis.js";
 
 const statusLabels: Record<string, string> = {
   DRAFT: "Taslak", WAITING_FIRST_ROLL: "İlk tarafın zarı bekleniyor", WAITING_SECOND_ROLL: "İkinci tarafın zarı bekleniyor",
@@ -63,12 +64,44 @@ function expectedSide(view: BattleView): BattleSideKey | null {
   return view.rolls.length ? view.battle.first_side === "A" ? "B" : "A" : view.battle.first_side;
 }
 
-function pressureBar(value:number,limit:number):string{
-  const filled=Math.max(0,Math.min(10,Math.round(value/Math.max(1,limit)*10)));
-  return `${"●".repeat(filled)}${"○".repeat(10-filled)} ${number(value)}/${number(limit)}`;
+type CountryFlagResolver=(countryName:string,fallback:string)=>string;
+const fallbackCountryFlag:CountryFlagResolver=(_countryName,fallback)=>fallback;
+
+function siegeUiData(view:BattleView){
+  const wallCurrent=view.battle.wall_current_hp??0,wallMax=view.battle.wall_max_hp??0;
+  const gateCurrent=view.battle.gate_current_hp??0,gateMax=view.battle.gate_max_hp??0;
+  const wallOpen=wallCurrent===0,gateOpen=gateCurrent===0;
+  const access=siegeAssaultAccess(view.sides.A.support_assets,SIEGE_ASSAULT_FRONTAGE);
+  const ladders=Math.max(0,Math.floor(view.sides.A.support_assets.ladder_group??0));
+  const towers=Math.max(0,Math.floor(view.sides.A.support_assets.siege_tower??0));
+  const profile=siegeFrontageProfile(wallCurrent,gateCurrent);
+  const effectiveInfantryAccess=profile.state==="INTACT"?access.capacity:profile.attackerInfantry;
+  const wallPercent=wallMax>0?Math.max(0,Math.min(100,Math.floor(wallCurrent/wallMax*100))):0;
+  const gatePercent=gateMax>0?Math.max(0,Math.min(100,Math.floor(gateCurrent/gateMax*100))):0;
+  const accessNote=profile.state==="FULLY_BREACHED"
+    ? "Kapı kırıldı ve surda gedik açıldı; kuşatma aracı erişimi aranmaz."
+    :profile.state==="GATE_BREACHED"
+      ? "Kapı kırıldı; kuşatma aracı erişimi aranmaz."
+      :profile.state==="WALL_BREACHED"
+        ? "Surda gedik açıldı; kuşatma aracı erişimi aranmaz."
+        :`Doğrudan sur hücumuna katılabilecek azami piyade: ${number(access.capacity)}`;
+  const phase=view.battle.siege_phase==="BOMBARDMENT"
+    ?`Bombardıman · Bu tur ${number(view.battle.bombardments_this_turn??0)}/${MAX_BOMBARDMENTS_PER_GAME_TURN}`
+    :"Hücum";
+  const phaseDetail=view.battle.siege_phase==="BOMBARDMENT"
+    ?`**Bombardıman:** Ordular temas etmiyor\n**Toplam Bombardıman:** ${number(view.battle.bombardment_round)}\n**Oyun Turu ${number(view.battle.game_turn??0)}:** ${number(view.battle.bombardments_this_turn??0)}/${MAX_BOMBARDMENTS_PER_GAME_TURN} kullanıldı · ${number(Math.max(0,MAX_BOMBARDMENTS_PER_GAME_TURN-(view.battle.bombardments_this_turn??0)))} hak kaldı`
+    :"**Hücum:** Ordular temas hâlinde; savaş zarları etkin.";
+  const assaultCurrent=effectiveInfantryAccess+profile.attackerRanged;
+  const assaultMaximum=profile.attackerInfantry+profile.attackerRanged;
+  return{
+    summary:`**${phase}** · Sur **%${wallPercent}** · Kapı **%${gatePercent}** · Erzak **${number(view.battle.starvation_remaining??0)} tur**\nHücum erişimi **${number(assaultCurrent)} / ${number(assaultMaximum)}** · ${number(access.activeLadderGroups)} merdiven${access.activeSiegeTowers?` · ${number(access.activeSiegeTowers)} kule`:""}`,
+    phaseDetail,
+    fortifications:`**Sur:** ${number(wallCurrent)} / ${number(wallMax)} HP${wallOpen?" — Yıkıldı":""}\n**Kapı:** ${number(gateCurrent)} / ${number(gateMax)} HP${gateOpen?" — Kırıldı":""}\n**Erzak Dayanıklılığı:** ${number(view.battle.starvation_remaining??0)} / ${number(view.battle.starvation_capacity??0)} oyun turu${view.battle.starvation_capacity!==null&&view.battle.starvation_remaining===0?" — Erzak tükendi; yönetici sonucu belirler.":""}`,
+    access:`**Merdiven Grupları:** ${number(access.activeLadderGroups)} / ${number(ladders)} aktif → ${number(access.activeLadderGroups*LADDER_GROUP_ASSAULT_CAPACITY)}\n**Kuşatma Kuleleri:** ${number(access.activeSiegeTowers)} / ${number(towers)} aktif → ${number(access.activeSiegeTowers*SIEGE_TOWER_ASSAULT_CAPACITY)}\n**Piyade Hücum Kapasitesi:** ${number(effectiveInfantryAccess)} / ${number(profile.attackerInfantry)}\n**Menzilli Destek Kapasitesi:** ${number(profile.attackerRanged)}\n**Toplam Hücum Kapasitesi:** ${number(assaultCurrent)} / ${number(assaultMaximum)}\n${accessNote}`
+  };
 }
 
-export function battleEmbed(view: BattleView, roundResult?: BattleRoundResult): EmbedBuilder {
+export function battleEmbed(view: BattleView, roundResult?: BattleRoundResult,flagResolver:CountryFlagResolver=fallbackCountryFlag): EmbedBuilder {
   const terrain = BATTLE_TERRAINS[view.battle.terrain];
   const sideField = (key: BattleSideKey) => {
     const side = view.sides[key];
@@ -79,7 +112,7 @@ export function battleEmbed(view: BattleView, roundResult?: BattleRoundResult): 
     const rebelHeader=side.rebel_faction_id
       ? `*${side.rebel_army_name ?? "İsyancı Ordu"} · Lider ${side.rebel_leader_name ?? "Bilinmiyor"} (+${number(side.rebel_leader_skill_bonus??1)})*\n`
       : "";
-    if (view.battle.terrain === "SIEGE" && key === "B") return `${rebelHeader}**Toplam asker gizli** · ${side.rebel_faction_id?"Yalnızca isyancı ordu":"Otomatik garnizon dahil"}\n${orderLabels[order]} · Baskı ${pressureBar(side.pressure,pressureLimit)}`;
+    if (view.battle.terrain === "SIEGE" && key === "B") return `${rebelHeader}**Toplam asker gizli** · ${side.rebel_faction_id?"Yalnızca isyancı ordu":"Otomatik garnizon dahil"}\n${orderLabels[order]} · Baskı **${number(side.pressure)}/${number(pressureLimit)}**`;
     if(view.battle.terrain==="NAVAL"){
       const condition=navalFleetCondition({
         initialHullHp:side.initial_hull_hp??0,operationalHullHp:side.operational_hull_hp??0,
@@ -92,24 +125,15 @@ export function battleEmbed(view: BattleView, roundResult?: BattleRoundResult): 
         : side.naval_order?"Seçildi • Kilit bekliyor":"Henüz seçilmedi";
       return `${rebelHeader}**${number(side.active_ship_total??0)} / ${number(side.initial_total)}** savaşabilir gemi\n**İş göremez:** ${number(side.disabled_ship_total??0)} · **Batık:** ${number(side.sunk_ship_total??0)}\n**HP:** ${number(side.operational_hull_hp??0)} / ${number(side.initial_hull_hp??0)}\n**${navalConditionLabels[condition]}** · Manevra ${number(side.naval_maneuver_points??0)}/5\n**Filo emri:** ${orderStateLabel}`;
     }
-    return `${rebelHeader}**${number(side.current_total)} / ${number(side.initial_total)} asker**\n${orderLabels[order]} · Baskı ${pressureBar(side.pressure,pressureLimit)}`;
+    return `${rebelHeader}**${number(side.current_total)} / ${number(side.initial_total)} asker**\n${orderLabels[order]} · Baskı **${number(side.pressure)}/${number(pressureLimit)}**`;
   };
-  const sideBlock=(key:BattleSideKey)=>`${key==="A"?"🟥":"🟦"} **${view.sides[key].country_name}**\n${sideField(key)}`;
-  const siegeProfile = view.battle.terrain === "SIEGE"
-    ? siegeFrontageProfile(view.battle.wall_current_hp ?? 0, view.battle.gate_current_hp ?? 0)
-    : null;
+  const sideIcon=(key:BattleSideKey)=>flagResolver(view.sides[key].country_name,key==="A"?"🟥":"🟦");
+  const sideBlock=(key:BattleSideKey)=>`${sideIcon(key)} **${view.sides[key].country_name}**\n${sideField(key)}`;
   const frontage = view.battle.terrain === "NAVAL"
     ? "Cephe sınırı yok: iki tarafın bütün savaşabilir gemileri çatışmaya katılır."
-    : siegeProfile
-      ? `Saldıran: ${number(siegeProfile.attackerInfantry)} piyade + ${number(siegeProfile.attackerRanged)} menzilli • Savunan: ${number(siegeProfile.defenderInfantry)} piyade + ${number(siegeProfile.defenderRanged)} menzilli`
     : terrain.frontageA === terrain.frontageB
       ? `Cephe kapasitesi: ${number(terrain.frontageA)} asker`
       : `Cephe kapasitesi: ${view.sides.A.country_name} ${number(terrain.frontageA)} • ${view.sides.B.country_name} ${number(terrain.frontageB)} asker`;
-  const siegeStage = view.battle.terrain === "SIEGE"
-    ? view.battle.siege_phase === "BOMBARDMENT"
-      ? `\n**Kuşatma Durumu:** Bombardıman — ordular temas etmiyor\n**Toplam Bombardıman:** ${view.battle.bombardment_round}\n**Oyun Turu ${view.battle.game_turn ?? 0}:** ${view.battle.bombardments_this_turn ?? 0}/${MAX_BOMBARDMENTS_PER_GAME_TURN} kullanıldı • ${remainingBombardments(view.battle.bombardments_this_turn ?? 0)} hak kaldı`
-      : "\n**Kuşatma Durumu:** Hücum — ordular temas hâlinde"
-    : "";
   const navalStage=view.battle.terrain==="NAVAL"&&!["FINISHED","CANCELLED"].includes(view.battle.status)
     ? !view.sides.A.naval_order_locked||!view.sides.B.naval_order_locked
       ? "Gizli filo emirleri bekleniyor"
@@ -121,37 +145,22 @@ export function battleEmbed(view: BattleView, roundResult?: BattleRoundResult): 
     : null;
   const nextSide=expectedSide(view);
   const nextAction=nextSide
-    ? `**Zar bekleniyor:** ${view.sides[nextSide].country_name}${view.sides[nextSide].controller==="GM"?" · Yönetici":" · Ülke oyuncusu"}`
+    ? `**Zar bekleniyor:** ${sideIcon(nextSide)} ${view.sides[nextSide].country_name}${view.sides[nextSide].controller==="GM"?" · Yönetici":" · Ülke oyuncusu"}`
     : view.battle.status==="READY_TO_RESOLVE"
       ? "**Çözüm bekleniyor:** İki tarafın zarı tamamlandı · Yönetici"
       : navalStage??statusLabels[view.battle.status]??view.battle.status;
+  const titleAFlag=flagResolver(view.sides.A.country_name,"");
+  const titleBFlag=flagResolver(view.sides.B.country_name,"");
+  const terrainSummary=view.battle.terrain==="SIEGE"
+    ?`**Kuşatma · ${view.battle.siege_phase==="BOMBARDMENT"?"Bombardıman":"Hücum"}**`
+    :`**${terrain.label}** · ${frontage}`;
   const embed = new EmbedBuilder().setColor(view.battle.status === "FINISHED" ? 0x8b1a1a : 0xb68b36)
-    .setTitle(`⚔️ ${view.sides.A.country_name} — ${view.sides.B.country_name}`)
-    .setDescription(`**${number(view.battle.round_number)}. Muharebe Turu**\n${view.battle.narrative || "İki ordu savaş alanında karşı karşıya geldi."}\n\n🗺️ **${terrain.label}** · ${frontage}\n🎲 ${nextAction}`)
+    .setTitle(`⚔️ ${titleAFlag?`${titleAFlag} `:""}${view.sides.A.country_name} — ${titleBFlag?`${titleBFlag} `:""}${view.sides.B.country_name}`)
+    .setDescription(`**${number(view.battle.round_number)}. Muharebe Turu**\n> ${view.battle.narrative || "İki ordu savaş alanında karşı karşıya geldi."}\n\n🗺️ ${terrainSummary}\n🎲 ${nextAction}`)
     .addFields({name:"⚔️ Cephe Durumu",value:`${sideBlock("A")}\n\n${sideBlock("B")}`,inline:false});
-  if(siegeStage)embed.addFields({name:"📜 Kuşatma Aşaması",value:siegeStage.trim(),inline:false});
   if (view.battle.terrain === "AMBUSH") embed.addFields({ name: "🌲 Pusu Düzeni", value: "A tarafı pusuyu kuran taraftır. İlk turda çarpışma +%25 ve hasar +%10 uygulanır." });
   if (view.battle.terrain === "SIEGE") {
-    const wallOpen = (view.battle.wall_current_hp ?? 0) === 0, gateOpen = (view.battle.gate_current_hp ?? 0) === 0;
-    const access = siegeAssaultAccess(view.sides.A.support_assets, SIEGE_ASSAULT_FRONTAGE);
-    const ladders = Math.max(0, Math.floor(view.sides.A.support_assets.ladder_group ?? 0));
-    const towers = Math.max(0, Math.floor(view.sides.A.support_assets.siege_tower ?? 0));
-    const profile = siegeFrontageProfile(view.battle.wall_current_hp ?? 0, view.battle.gate_current_hp ?? 0);
-    const effectiveInfantryAccess = profile.state === "INTACT" ? access.capacity : profile.attackerInfantry;
-    const accessNote = profile.state === "FULLY_BREACHED"
-      ? "**Kapı kırıldı ve surda gedik açıldı:** Merdiven/kule erişimi aranmaz; 30.000 piyade cephesi açılır."
-      : profile.state === "GATE_BREACHED"
-        ? "**Kapı kırıldı:** Merdiven/kule erişimi aranmaz; 20.000 piyade cephesi açılır."
-        : profile.state === "WALL_BREACHED"
-          ? "**Surda gedik açıldı:** Merdiven/kule erişimi aranmaz; 25.000 piyade cephesi açılır."
-      : view.battle.siege_phase === "BOMBARDMENT"
-        ? `**Hücum başlatılırsa doğrudan sur hücumuna katılabilecek azami piyade:** ${number(access.capacity)}`
-        : `**Bu tur doğrudan sur hücumuna katılabilecek azami piyade:** ${number(access.capacity)}`;
-    embed.addFields(
-      { name: "🏰 Tahkimatlar", value: `**Sur:** ${number(view.battle.wall_current_hp ?? 0)} / ${number(view.battle.wall_max_hp ?? 0)} HP${wallOpen ? " — Yıkıldı" : ""}\n**Kapı:** ${number(view.battle.gate_current_hp ?? 0)} / ${number(view.battle.gate_max_hp ?? 0)} HP${gateOpen ? " — Kırıldı" : ""}\n**Erzak Dayanıklılığı:** ${number(view.battle.starvation_remaining ?? 0)} / ${number(view.battle.starvation_capacity ?? 0)} oyun turu${view.battle.starvation_capacity !== null && view.battle.starvation_remaining === 0 ? " — Erzak tükendi; yönetici sonucu belirler." : ""}` },
-      { name: "🪜 Hücum Erişimi", value: `**Merdiven Grupları:** ${number(access.activeLadderGroups)} / ${number(ladders)} aktif → ${number(access.activeLadderGroups * LADDER_GROUP_ASSAULT_CAPACITY)}\n**Kuşatma Kuleleri:** ${number(access.activeSiegeTowers)} / ${number(towers)} aktif → ${number(access.activeSiegeTowers * SIEGE_TOWER_ASSAULT_CAPACITY)}\n**Piyade Hücum Kapasitesi:** ${number(effectiveInfantryAccess)} / ${number(profile.attackerInfantry)}\n**Menzilli Destek Kapasitesi:** ${number(profile.attackerRanged)}\n**Toplam Hücum Kapasitesi:** ${number(effectiveInfantryAccess + profile.attackerRanged)} / ${number(profile.attackerInfantry + profile.attackerRanged)}
-${accessNote}` }
-    );
+    embed.addFields({name:"🏰 Kuşatma Özeti",value:siegeUiData(view).summary});
   }
   embed.setThumbnail(`attachment://${terrain.preset}`).setFooter({ text: "Rakip birlik dağılımı ve birim bazlı zarlar gizlidir." }).setTimestamp();
   const factor = (value: number) => value.toFixed(2).replace(".", ",");
@@ -190,8 +199,8 @@ ${accessNote}` }
       lastRound.gateDamage ? `Kapıya verilen hasar: **${number(lastRound.gateDamage)}**` : null
     ].filter(Boolean).join("\n");
     const resultValue = view.battle.terrain === "NAVAL"
-      ? `**${winner} üstünlüğü**\n🟥 ${view.sides.A.country_name} · **-${number(lastRound.lossA)} gemi**\n🟦 ${view.sides.B.country_name} · **-${number(lastRound.lossB)} gemi**`
-      : `**${winner} üstünlüğü**\n🟥 ${view.sides.A.country_name} · **-${number(lastRound.lossA)}** · ${orderLabels[lastRound.orderA] ?? lastRound.orderA} · Baskı ${number(lastRound.pressureA)}/${pressureLimit}\n🟦 ${view.sides.B.country_name} · **-${number(lastRound.lossB)}** · ${orderLabels[lastRound.orderB] ?? lastRound.orderB} · Baskı ${number(lastRound.pressureB)}/${pressureLimit}${structureDamage ? `\n${structureDamage}` : ""}`;
+      ? `**${winner} üstünlüğü**\n${sideIcon("A")} ${view.sides.A.country_name} · **-${number(lastRound.lossA)} gemi**\n${sideIcon("B")} ${view.sides.B.country_name} · **-${number(lastRound.lossB)} gemi**`
+      : `**${winner} üstünlüğü**\n${sideIcon("A")} ${view.sides.A.country_name} · **-${number(lastRound.lossA)}**\n${sideIcon("B")} ${view.sides.B.country_name} · **-${number(lastRound.lossB)}**${structureDamage ? `\n${structureDamage}` : ""}`;
     embed.addFields({
       name: `📜 ${number(lastRound.roundNumber)}. Tur Sonucu · ${tierLabels[lastRound.tier] ?? lastRound.tier}`,
       value: resultValue
@@ -199,6 +208,21 @@ ${accessNote}` }
   }
   if (view.battle.status === "FINISHED") embed.addFields({ name: "🏁 Savaş Sonu", value: `${view.battle.winner_side ? `Galip: **${view.sides[view.battle.winner_side].country_name}**` : "Sonuç: **Berabere / kararsız**"}\n${view.battle.finish_reason ?? ""}` });
   return embed;
+}
+
+export function siegeDetailEmbed(view:BattleView,flagResolver:CountryFlagResolver=fallbackCountryFlag):EmbedBuilder{
+  if(view.battle.terrain!=="SIEGE")throw new GameError("Bu muharebe bir kuşatma değil.");
+  const data=siegeUiData(view);
+  const attackerFlag=flagResolver(view.sides.A.country_name,"🟥");
+  const defenderFlag=flagResolver(view.sides.B.country_name,"🟦");
+  return new EmbedBuilder().setColor(0x8a623f)
+    .setTitle(`🏰 Kuşatma Detayı · ${view.sides.A.country_name} — ${view.sides.B.country_name}`)
+    .setDescription(`${attackerFlag} **${view.sides.A.country_name}** → ${defenderFlag} **${view.sides.B.country_name}**\n${data.summary}`)
+    .addFields(
+      {name:"📜 Kuşatma Aşaması",value:data.phaseDetail},
+      {name:"🧱 Tahkimatlar",value:data.fortifications},
+      {name:"🪜 Hücum Erişimi",value:data.access}
+    ).setFooter({text:"Bu ayrıntı ana muharebe kartını kalabalıklaştırmamak için ayrı gösterilir."});
 }
 
 function components(view: BattleView) {
@@ -352,7 +376,7 @@ export async function refreshActiveBattleCards(client: Client, guildId: string):
         const channel = await client.channels.fetch(view.battle.channel_id);
         if (!channel?.isTextBased() || channel.isDMBased() || !("messages" in channel)) { failed += 1; continue; }
         const message = await channel.messages.fetch(view.battle.public_message_id);
-        await message.edit(publicPayload(view));
+        await message.edit(publicPayload(view,undefined,client.guilds?.cache.get(guildId)??null));
         updated += 1;
       } catch (error) {
         failed += 1;
@@ -369,11 +393,16 @@ export async function refreshActiveBattleCards(client: Client, guildId: string):
 function reportComponents(view:BattleView):ActionRowBuilder<ButtonBuilder>{
   const hasResolved=Boolean(view.lastRound);
   const hasContribution=hasResolved||view.rolls.length>0;
-  return new ActionRowBuilder<ButtonBuilder>().addComponents(
+  const buttons:ButtonBuilder[]=[];
+  if(view.battle.terrain==="SIEGE")buttons.push(
+    new ButtonBuilder().setCustomId(`battle_siege_detail|${view.battle.id}`).setLabel("Kuşatma Detayı").setEmoji("🏰").setStyle(ButtonStyle.Secondary)
+  );
+  buttons.push(
     new ButtonBuilder().setCustomId(`battle_last_report|${view.battle.id}`).setLabel("Son Tur Raporu").setEmoji("📜").setStyle(ButtonStyle.Secondary).setDisabled(!hasResolved),
     new ButtonBuilder().setCustomId(`battle_history|${view.battle.id}`).setLabel("Muharebe Geçmişi").setEmoji("🗂️").setStyle(ButtonStyle.Secondary).setDisabled(!hasResolved),
     new ButtonBuilder().setCustomId(`battle_contribution|${view.battle.id}`).setLabel("Birlik Katkılarım").setEmoji("🔐").setStyle(ButtonStyle.Primary).setDisabled(!hasContribution)
   );
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(buttons);
 }
 
 function historyRoundText(history:BattlePublicHistory,round:BattlePublicHistory["rounds"][number]):string{
@@ -429,7 +458,7 @@ export function playerContributionEmbed(view:PlayerBattleContributionView):Embed
     ).setFooter({text:"Özel katkı raporu · Yalnızca tıklayan oyuncuya görünür"});
 }
 
-function publicPayload(view: BattleView, result?: Parameters<typeof battleEmbed>[1]) {
+function publicPayload(view: BattleView, result?: Parameters<typeof battleEmbed>[1],guild:Guild|null=null) {
   const asset = battlefieldAsset(view.battle.terrain);
   const visibleComponents = view.battle.status === "FINISHED"
     ? components(view)
@@ -441,7 +470,8 @@ function publicPayload(view: BattleView, result?: Parameters<typeof battleEmbed>
           )]
         : []
       : components(view);
-  return { embeds: [battleEmbed(view, result)], components: [...visibleComponents,reportComponents(view)], files: [new AttachmentBuilder(asset.path, { name: asset.name })] };
+  const flagResolver:CountryFlagResolver=(countryName,fallback)=>countryFlagEmoji(guild,countryName,fallback);
+  return { embeds: [battleEmbed(view, result,flagResolver)], components: [...visibleComponents,reportComponents(view)], files: [new AttachmentBuilder(asset.path, { name: asset.name })] };
 }
 
 export function battleRollEmbed(view: BattleView, side: BattleSideKey): EmbedBuilder {
@@ -494,7 +524,7 @@ export async function refreshBattleCard(client: Client, view: BattleView): Promi
     const channel = await client.channels.fetch(view.battle.channel_id);
     if (!channel?.isTextBased() || channel.isDMBased() || !("messages" in channel)) return false;
     const message = await channel.messages.fetch(view.battle.public_message_id);
-    await message.edit(publicPayload(view));
+    await message.edit(publicPayload(view,undefined,client.guilds?.cache.get(view.battle.guild_id)??null));
     return true;
   } catch (error) {
     console.error("Savaş kartı güncellenemedi", { battleId: view.battle.id, error });
@@ -760,7 +790,7 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
     const label = result.view.battle.siege_phase === "BOMBARDMENT" ? "Bombardıman — ordular temas etmiyor" : "Hücum — savaş zarları açıldı";
     if (result.shouldReveal) {
       await interaction.editReply({ content: `✅ Kuşatma durumu **${label}** olarak değiştirildi ve yeni savaş kartı yayımlandı.` });
-      const reply = await interaction.followUp({ content: `🏰 Kuşatma durumu **${label}** olarak değiştirildi.`, ...publicPayload(result.view), fetchReply: true });
+      const reply = await interaction.followUp({ content: `🏰 Kuşatma durumu **${label}** olarak değiştirildi.`, ...publicPayload(result.view,undefined,interaction.guild), fetchReply: true });
       await retireBattleCard(interaction.client, result.view, reply.id);
       await battleService.setPublicMessage(result.view.battle.id, reply.id);
     } else {
@@ -775,12 +805,12 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
   } else if (sub === "yayinla") {
     requireGameMaster(interaction);
     const view = await battleService.publish({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id });
-    const reply = await interaction.editReply(publicPayload(view));
+    const reply = await interaction.editReply(publicPayload(view,undefined,interaction.guild));
     await battleService.setPublicMessage(view.battle.id, reply.id);
   } else if (sub === "tur-oynat") {
     requireGameMaster(interaction);
     const result = await battleService.resolve({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id });
-    const reply = await interaction.editReply(publicPayload(result.view, result.round));
+    const reply = await interaction.editReply(publicPayload(result.view,result.round,interaction.guild));
     await retireBattleCard(interaction.client, result.view, reply.id);
     await battleService.setPublicMessage(result.view.battle.id, reply.id);
     if (result.round.ended) {
@@ -821,13 +851,13 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
     requireGameMaster(interaction);
     const winnerRaw = interaction.options.getString("galip", true);
     const result = await battleService.finish({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id, winner: winnerRaw === "NONE" ? null : winnerRaw as BattleSideKey, reason: interaction.options.getString("neden", true) });
-    await interaction.editReply(publicPayload(result.view));
+    await interaction.editReply(publicPayload(result.view,undefined,interaction.guild));
     await interaction.followUp({ embeds: [casualtyReportEmbed(result.view, result.report)], flags: MessageFlags.Ephemeral });
     await publishCharacterTurnLogs(interaction.client,interaction.guildId,[]).catch(() => undefined);
   } else if (sub === "iptal") {
     requireGameMaster(interaction);
     const view = await battleService.cancel({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id });
-    await interaction.editReply({ embeds: [battleEmbed(view)] });
+    await interaction.editReply({ embeds: [battleEmbed(view,undefined,(countryName,fallback)=>countryFlagEmoji(interaction.guild,countryName,fallback))] });
   }
 }
 
@@ -836,7 +866,12 @@ export async function handleBattleButton(interaction: ButtonInteraction): Promis
   if (!interaction.guildId || !interaction.channelId) throw new GameError("Sunucu veya kanal bulunamadı.");
   const battleId = interaction.customId.split("|")[1];
   if (!battleId) throw new GameError("Savaş düğmesi bozuk.");
-  if(interaction.customId.startsWith("battle_last_report|")){
+  if(interaction.customId.startsWith("battle_siege_detail|")){
+    await interaction.deferReply({flags:MessageFlags.Ephemeral});
+    const view=await battleService.byId(interaction.guildId,battleId);
+    if(!view)throw new GameError("Muharebe bulunamadı.");
+    await interaction.editReply({embeds:[siegeDetailEmbed(view,(countryName,fallback)=>countryFlagEmoji(interaction.guild,countryName,fallback))]});
+  } else if(interaction.customId.startsWith("battle_last_report|")){
     await interaction.deferReply({flags:MessageFlags.Ephemeral});
     const history=await battleService.publicHistory(interaction.guildId,battleId);
     await interaction.editReply({embeds:[lastRoundReportEmbed(history)]});
@@ -868,7 +903,7 @@ export async function handleBattleButton(interaction: ButtonInteraction): Promis
     const result=await battleService.resolveNavalRetreatOrders({
       guildId:interaction.guildId,channelId:interaction.channelId,battleId,actorId:interaction.user.id
     });
-    const reply=await interaction.editReply(publicPayload(result.view));
+    const reply=await interaction.editReply(publicPayload(result.view,undefined,interaction.guild));
     await retireBattleCard(interaction.client,result.view,reply.id);
     await battleService.setPublicMessage(result.view.battle.id,reply.id);
     await interaction.followUp({embeds:[casualtyReportEmbed(result.view,result.report)],ephemeral:true});
@@ -877,7 +912,7 @@ export async function handleBattleButton(interaction: ButtonInteraction): Promis
     await interaction.deferReply();
     if(!isGameMaster(interaction))throw new GameError("Değerlendirmeyi yalnızca oyun yöneticisi sonuçlandırabilir.");
     const result=await battleService.resolve({guildId:interaction.guildId,channelId:interaction.channelId,actorId:interaction.user.id});
-    const reply=await interaction.editReply(publicPayload(result.view,result.round));
+    const reply=await interaction.editReply(publicPayload(result.view,result.round,interaction.guild));
     await retireBattleCard(interaction.client,result.view,reply.id);
     await battleService.setPublicMessage(result.view.battle.id,reply.id);
     if(result.round.ended){
@@ -929,12 +964,12 @@ export async function handleBattleButton(interaction: ButtonInteraction): Promis
   } else if (interaction.customId.startsWith("battle_bombard|")) {
     await interaction.deferReply();
     const result = await battleService.bombard({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id, isGameMaster: isGameMaster(interaction) });
-    await interaction.editReply({ content: `💥 <@${interaction.user.id}> **${result.view.sides.A.country_name}** adına ${result.catapultCount} Katapult ile açık bombardıman zarı attı${result.isProxy ? " **(DM vekili)**" : ""}. Sur hasarı: **${number(result.wallDamage)}**. Ordular temas etmedi; asker kaybı ve baskı oluşmadı.`, ...publicPayload(result.view) });
+    await interaction.editReply({ content: `💥 <@${interaction.user.id}> **${result.view.sides.A.country_name}** adına ${result.catapultCount} Katapult ile açık bombardıman zarı attı${result.isProxy ? " **(DM vekili)**" : ""}. Sur hasarı: **${number(result.wallDamage)}**. Ordular temas etmedi; asker kaybı ve baskı oluşmadı.`, ...publicPayload(result.view,undefined,interaction.guild) });
   } else if (interaction.customId.startsWith("battle_retreat|")) {
     await interaction.deferReply();
     const result = await battleService.retreat({ guildId: interaction.guildId, channelId: interaction.channelId, battleId, actorId: interaction.user.id, isGameMaster: isGameMaster(interaction) });
     const retreatText = result.retreatLoss ? ` Takip sırasında **${number(result.retreatLoss)}** ek kayıp verdi.` : " İlk savaş turunda çekildiği için ek kayıp yaşamadı.";
-    await interaction.editReply({ content: `🏳️ **${result.view.sides[result.side].country_name}** geri çekildi.${retreatText}`, ...publicPayload(result.view) });
+    await interaction.editReply({ content: `🏳️ **${result.view.sides[result.side].country_name}** geri çekildi.${retreatText}`, ...publicPayload(result.view,undefined,interaction.guild) });
   }
   return true;
 }

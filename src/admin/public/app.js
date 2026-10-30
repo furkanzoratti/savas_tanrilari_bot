@@ -183,7 +183,7 @@ function toast(message, kind = "success") {
 const routeTitles = {
   overview: "Genel Bakış", workspace: "Çalışma Alanım", countries: "Devletler", settlements: "Yerleşkeler", armies: "Ordular & Filolar",
   characters: "Karakterler", dynasties: "Hanedanlar", "noble-traits": "Soylu Traitleri", "roman-politics": "Roma Siyaseti",
-  "steppe-politics": "Bozkır Kurultayı", "diplomacy-control": "Diplomasi & Ticaret", assignments: "Görevler", governorships: "Valilikler", "espionage-publications": "Olay Yayınları", "gm-operations": "Rehberli İşlemler", "bulk-operations": "Toplu İşlemler", "economy-control": "Ekonomi & Üretim", "great-projects": "Büyük Projeler", "npc-purchases": "NPC Alımları", "state-wars": "Savaşlar", battles: "Muharebeler", "battle-simulator": "Savaş Simülasyonu",
+  "steppe-politics": "Bozkır Kurultayı", "diplomacy-control": "Diplomasi & Ticaret", assignments: "Görevler", governorships: "Valilikler", "espionage-publications": "Olay Yayınları", "gm-operations": "Rehberli İşlemler", "bulk-operations": "Toplu İşlemler", "economy-control": "Ekonomi & Üretim", "great-games": "Oyunlar", "great-projects": "Büyük Projeler", "npc-purchases": "NPC Alımları", "state-wars": "Savaşlar", battles: "Muharebeler", "battle-simulator": "Savaş Simülasyonu",
   rebellions: "İsyanlar", reports: "Raporlar", health: "Oyun Sağlığı", "data-control": "Tam Yetki", audit: "İşlem Geçmişi"
 };
 function loading() { page.innerHTML = '<div class="loading-shell"><div class="skeleton skeleton-title"></div><div class="loading-grid"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div><div class="skeleton skeleton-content"></div></div>'; }
@@ -366,6 +366,42 @@ async function greatProjectsPage(signal) {
       window.scrollTo({ top: scroll });
     } catch (error) { button.disabled = false; toast(error.message, "error"); }
   }));
+}
+
+async function greatGamesPage(signal) {
+  setActiveRoute("great-games"); loading();
+  const data = await api("/api/great-games", { signal });
+  if (!data.season) {
+    page.innerHTML = `<div class="page-head great-games-hero"><div><span class="overview-kicker">50. TUR ETKİNLİK MERKEZİ</span><h1>Oyunlar</h1><p>Katılımcıları, oyun cüzdanlarını, bahisleri ve sonuç geçmişini tek merkezden yönet.</p></div><span class="pill warning">Etkinlik açılmadı</span></div><section class="card great-games-empty"><strong>Henüz bir Büyük Oyun sezonu bulunmuyor.</strong><p>Discord yönetici komutuyla etkinlik sezonu açıldığında bütün yönetim araçları burada görünecek.</p></section>`;
+    return;
+  }
+  const seasonStatus = { OPEN: "Katılıma açık", PUBLISHED: "Yayınlandı", ACTIVE: "Oyun sürüyor", FINISHED: "Tamamlandı", CANCELLED: "İptal edildi" }[data.season.status] || data.season.status;
+  const entryStatus = { REGISTERED: "Kayıtlı", SELECTED: "Seçildi", ACTIVE: "Oyunda", FINISHED: "Tamamladı", CANCELLED: "İptal" };
+  const betStatus = { LOCKED: "Bekliyor", WON: "Kazandı", LOST: "Kaybetti", REFUNDED: "İade" };
+  const gameCards = data.games.map((game) => {
+    const active = game.state === "ACTIVE";
+    const participantRows = game.entries.slice(0, 10).map((entry) => `<div class="great-game-country"><span><strong>${escapeHtml(entry.countryName)}</strong><small>${escapeHtml(entryStatus[entry.status] || entry.status)}</small></span><b>${number(entry.score)} puan</b></div>`).join("");
+    return `<article class="card great-game-card ${active ? "active" : ""}"><header><span class="great-game-icon">${game.emoji}</span><div><span>${active ? `${number(game.run)}. oynatım · ${number(game.round)}. tur` : "Oyuna hazır"}</span><h2>${escapeHtml(game.label)}</h2></div><span class="pill ${active ? "success" : "neutral"}">${active ? "Aktif" : `${number(game.entries.length)} ülke`}</span></header><div class="great-game-card-body">${participantRows || '<div class="compact-empty muted">Henüz katılımcı kaydı yok.</div>'}${game.entries.length > 10 ? `<small class="great-game-more">+${number(game.entries.length - 10)} ülke daha</small>` : ""}</div></article>`;
+  }).join("");
+  const participantRows = data.participants.map((wallet) => `<tr><td><strong>${escapeHtml(wallet.country_name)}</strong><small>${wallet.closed_at ? "Cüzdan kapalı" : "Etkin katılımcı"}</small></td><td><strong>${money(wallet.balance)}</strong><small>Başlangıç ${money(wallet.initial_grant)}</small></td><td>${number(wallet.entry_count)} oyun</td><td>${date(wallet.joined_at)}</td><td><span class="pill ${wallet.closed_at ? "neutral" : "success"}">${wallet.closed_at ? "Kapalı" : "Açık"}</span></td></tr>`).join("");
+  const betRows = data.bets.map((bet) => `<tr><td><strong>${escapeHtml(bet.gameLabel)}</strong><small>${date(bet.created_at)}</small></td><td>${escapeHtml(bet.bettor_country_name)}</td><td><strong>${escapeHtml(bet.target_label)}</strong></td><td>${money(bet.amount)}</td><td>${bet.payout ? money(bet.payout) : "—"}</td><td><span class="pill ${bet.status === "WON" ? "success" : bet.status === "LOST" ? "danger" : bet.status === "LOCKED" ? "warning" : "neutral"}">${escapeHtml(betStatus[bet.status] || bet.status)}</span></td></tr>`).join("");
+  const historyRows = data.history.map((game) => `<details class="great-game-history"><summary><span><small>Tur ${number(game.turn)} · ${number(game.run)}. oynatım</small><strong>${escapeHtml(game.gameLabel)}</strong></span><span><b>${escapeHtml(game.standings[0]?.countryName || "Sonuç kaydı")}</b><small>${date(game.completedAt)}</small></span></summary><div>${game.standings.length ? game.standings.map((standing, index) => `<div class="great-game-standing"><b>${index + 1}</b><span><strong>${escapeHtml(standing.countryName)}</strong><small>${escapeHtml(standing.reason)}</small></span><em>${number(standing.points)} puan</em></div>`).join("") : '<div class="compact-empty muted">Derece kaydı bulunmuyor.</div>'}</div></details>`).join("");
+  const countryOptions = data.eligibleCountries.map((country) => `<option value="${country.id}">${escapeHtml(country.name)}</option>`).join("");
+  page.innerHTML = `<div class="page-head great-games-hero"><div><span class="overview-kicker">50. TUR ETKİNLİK MERKEZİ</span><h1>Oyunlar</h1><p>Katılımcı ülkeleri, bağımsız oyun cüzdanlarını, bahis akışını ve geçmiş sonuçları tek ekrandan izle.</p></div><div class="great-games-hero-status"><span class="pill ${data.season.status === "ACTIVE" ? "success" : "neutral"}">${escapeHtml(seasonStatus)}</span><small>Oyun turu ${number(data.season.game_turn)} · Sunucu turu ${number(data.currentTurn)}</small></div></div><section class="kpi-grid great-games-kpis"><div class="card kpi"><span>Katılımcı ülke</span><strong>${number(data.summary.participants)}</strong><small>Açık oyun cüzdanı</small></div><div class="card kpi"><span>Toplam oyun bakiyesi</span><strong>${money(data.summary.walletTotal)}</strong><small>Devlet hazinesinden bağımsız</small></div><div class="card kpi"><span>Açık bahis</span><strong>${number(data.summary.openBets)}</strong><small>Henüz sonuçlanmamış kupon</small></div><div class="card kpi"><span>Tamamlanan oyun</span><strong>${number(data.summary.completedGames)}</strong><small>Kayıtlı oynatım sonucu</small></div></section><section class="card great-games-enrollment"><div><span class="overview-kicker">KATILIM YÖNETİMİ</span><h2>Ülkeyi oyunlara ekle</h2><p>Seçilen ülkenin oyun cüzdanı açılır; başlangıç bakiyesi verilir ve etkin oyunların tamamına güvenli biçimde kaydedilir.</p></div><div><select id="great-games-country" ${countryOptions ? "" : "disabled"}>${countryOptions || '<option>Eklenebilecek ülke kalmadı</option>'}</select><button class="button primary" data-add-great-games-country ${countryOptions ? "" : "disabled"}>＋ Ülke ekle</button></div></section><div class="section-title"><h2>Etkin oyunlar</h2><span>${number(data.games.length)} oyun düzeni</span></div><section class="great-games-grid">${gameCards}</section><section class="great-games-ledger-grid"><article class="card great-games-ledger"><div class="card-head"><div><h2>Cüzdan durumları</h2><p>Katılımcıların yalnızca oyunlarda kullandığı bakiye</p></div><span class="pill neutral">${number(data.participants.length)} kayıt</span></div><div class="table-wrap"><table><thead><tr><th>Devlet</th><th>Bakiye</th><th>Kayıt</th><th>Katılım</th><th>Durum</th></tr></thead><tbody>${participantRows || '<tr><td colspan="5">Katılımcı bulunmuyor.</td></tr>'}</tbody></table></div></article><article class="card great-games-bets"><div class="card-head"><div><h2>Bahisler</h2><p>Savaş arabası ve gladyatör bahisleri</p></div><span class="pill neutral">${number(data.bets.length)} kupon</span></div><div class="table-wrap"><table><thead><tr><th>Oyun</th><th>Bahisçi</th><th>Tercih</th><th>Miktar</th><th>Ödeme</th><th>Durum</th></tr></thead><tbody>${betRows || '<tr><td colspan="6">Henüz bahis kaydı bulunmuyor.</td></tr>'}</tbody></table></div></article></section><div class="section-title"><h2>Geçmiş oyunlar ve sonuçlar</h2><span>Oynatım bazında kalıcı arşiv</span></div><section class="card great-games-history-list">${historyRows || '<div class="empty">Henüz tamamlanmış oyun sonucu bulunmuyor.</div>'}</section>`;
+  document.querySelector("[data-add-great-games-country]")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    const select = document.getElementById("great-games-country");
+    const countryName = select?.selectedOptions?.[0]?.textContent || "Seçilen ülke";
+    if (!select?.value || !confirm(`${countryName} bütün etkin oyunlara eklensin mi?`)) return;
+    button.disabled = true;
+    try {
+      const scroll = window.scrollY;
+      const result = await api("/api/great-games/participants", { method: "POST", body: JSON.stringify({ countryId: select.value }) });
+      toast(`${result.countryName} oyunlara eklendi · ${money(result.balance)} bakiye.`);
+      await greatGamesPage();
+      window.scrollTo({ top: scroll });
+    } catch (error) { button.disabled = false; toast(error.message, "error"); }
+  });
 }
 
 function simulationUnitOptions(units, selected) {
@@ -2852,6 +2888,7 @@ async function navigate(route) {
     if (route === "gm-operations") return await guidedOperationsPage();
     if (route === "bulk-operations") return await bulkOperationsPage();
     if (route === "economy-control") return await economyControlPage(controller.signal);
+    if (route === "great-games") return await greatGamesPage(controller.signal);
     if (route === "great-projects") return await greatProjectsPage(controller.signal);
     if (route === "npc-purchases") return await npcPurchasesPage();
     if (route === "state-wars") return await stateWarsPage();

@@ -5,7 +5,7 @@ vi.hoisted(() => {
   process.env.DISCORD_CLIENT_ID = "test-client";
   process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
 });
-import { battleEmbed, battleRollEmbed, fleetStatusEmbedPages, playerFleetStatusEmbeds, refreshChangedBattleCards } from "./battle-ui.js";
+import { battleEmbed, battleRollEmbed, fleetStatusEmbedPages, playerFleetStatusEmbeds, refreshChangedBattleCards, siegeDetailEmbed } from "./battle-ui.js";
 import { battleService, type BattleView, type PlayerBattleFleetStatus } from "../services/battle-service.js";
 
 function siegeView(): BattleView {
@@ -42,19 +42,25 @@ function siegeView(): BattleView {
 describe("kuşatma bilgi gizliliği", () => {
   it("açık kartta yalnız savunucunun toplam asker sayısını gizler", () => {
     const json = JSON.stringify(battleEmbed(siegeView()).toJSON());
+    const detailJson=JSON.stringify(siegeDetailEmbed(siegeView()).toJSON());
     expect(json).not.toContain("12.345");
     expect(json).not.toContain("8.765");
     expect(json).not.toContain("3.580");
     expect(json).toContain("Toplam asker gizli");
     expect(json).toContain("Baskı Altında");
-    expect(json).toContain("Oyun Turu 12");
-    expect(json).toContain("2/4 kullanıldı");
-    expect(json).toContain("2 hak kaldı");
-    expect(json).toContain("Hücum Erişimi");
-    expect(json).toContain("5.000 / 15.000");
-    expect(json).toContain("Erzak Dayanıklılığı");
-    expect(json).toContain("4 / 6 oyun turu");
-    expect(json).toContain("azami piyade");
+    expect(json).toContain("Kuşatma Özeti");
+    expect(json).toContain("Sur **%83**");
+    expect(json).toContain("Kapı **%80**");
+    expect(json).toContain("Erzak **4 tur**");
+    expect(json).toContain("10.000 / 20.000");
+    expect(json).not.toContain("Merdiven Grupları");
+    expect(detailJson).toContain("Hücum Erişimi");
+    expect(detailJson).toContain("5.000 / 15.000");
+    expect(detailJson).toContain("Erzak Dayanıklılığı");
+    expect(detailJson).toContain("4 / 6 oyun turu");
+    expect(detailJson).toContain("azami piyade");
+    expect(detailJson).toContain("Oyun Turu 12");
+    expect(detailJson).toContain("2 hak kaldı");
     expect(json).not.toContain("ATTACKER");
     expect(json).not.toContain("DEFENDER");
     expect(json).not.toContain("Savunma Kademesi");
@@ -85,9 +91,7 @@ describe("kuşatma bilgi gizliliği", () => {
     const json = JSON.stringify(battleEmbed(view).toJSON());
     expect(json).toContain("6/12");
     expect(json).toContain("Baskı Altında");
-    expect(json).toContain("Oyun Turu 12");
-    expect(json).toContain("2/4 kullanıldı");
-    expect(json).toContain("2 hak kaldı");
+    expect(json).toContain("Bombardıman · Bu tur 2/4");
     expect(json).not.toContain("Dağılmış");
   });
   it("açık tur sonucunda savunucunun kaybını gösterir", () => {
@@ -140,6 +144,12 @@ describe("kuşatma bilgi gizliliği", () => {
     const json=battleEmbed(siegeView()).toJSON();
     expect(json.thumbnail?.url).toContain("attachment://");
     expect(json.image).toBeUndefined();
+  });
+
+  it("sunucuda bayrağı bulunan devletin emojisini taraf işaretinin yerine koyar",()=>{
+    const json=JSON.stringify(battleEmbed(siegeView(),undefined,(countryName,fallback)=>countryName==="Roma"?"<:roma:123>":fallback).toJSON());
+    expect(json).toContain("<:roma:123> Roma");
+    expect(json).toContain("🟦 **Savunucu**");
   });
 });
 

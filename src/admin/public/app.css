@@ -19,6 +19,69 @@
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
+/* Büyük Oyunlar yönetim merkezi */
+.great-games-hero { position: relative; overflow: hidden; align-items: center; padding: 22px 24px; border: 1px solid rgba(128,82,56,.22); border-radius: 16px; background: radial-gradient(circle at 92% 10%,rgba(184,132,84,.24),transparent 27%),linear-gradient(120deg,#f8f1e6 0%,#eadcca 64%,#d8c1a7 100%); box-shadow: 0 14px 34px rgba(35,38,49,.09); }
+.great-games-hero::after { content: "♞"; position: absolute; right: 28px; bottom: -35px; color: rgba(128,82,56,.08); font-family: Georgia,"Times New Roman",serif; font-size: 150px; pointer-events: none; }
+.great-games-hero > * { position: relative; z-index: 1; }
+.great-games-hero h1 { color: var(--navy); font-size: 31px; }
+.great-games-hero-status { display: grid; justify-items: end; gap: 7px; text-align: right; }
+.great-games-hero-status small { color: var(--muted); font-weight: 700; }
+.great-games-kpis .kpi { min-height: 112px; }
+.great-games-enrollment { display: grid; grid-template-columns: minmax(0,1fr) minmax(360px,.7fr); align-items: center; gap: 24px; margin: 12px 0 18px; padding: 18px 20px; border-color: rgba(128,82,56,.28); background: linear-gradient(110deg,#f8f2e9,#e7d9c8); }
+.great-games-enrollment h2 { margin: 3px 0 5px; }
+.great-games-enrollment p { margin: 0; color: var(--muted); line-height: 1.45; }
+.great-games-enrollment > div:last-child { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; }
+.great-games-enrollment select { min-width: 0; min-height: 42px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; background: #fffaf2; color: var(--text); }
+.great-games-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
+.great-game-card { min-width: 0; overflow: hidden; padding: 0; }
+.great-game-card.active { border-color: rgba(128,82,56,.55); box-shadow: 0 10px 30px rgba(128,82,56,.13); }
+.great-game-card > header { display: grid; grid-template-columns: 42px minmax(0,1fr) auto; align-items: center; gap: 10px; padding: 14px 15px; border-bottom: 1px solid rgba(128,82,56,.14); background: rgba(226,213,197,.38); }
+.great-game-card.active > header { background: linear-gradient(110deg,rgba(128,82,56,.15),rgba(23,36,61,.07)); }
+.great-game-icon { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 11px; background: var(--navy); color: #fff7eb; box-shadow: 0 6px 14px rgba(23,36,61,.18); font-size: 20px; }
+.great-game-card header h2 { margin: 2px 0 0; font-size: 17px; }
+.great-game-card header div > span { color: var(--brown); font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.great-game-card-body { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; padding: 11px; }
+.great-game-country { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 9px; padding: 8px 9px; border: 1px solid rgba(128,82,56,.12); border-radius: 8px; background: #faf5ed; }
+.great-game-country span,.great-game-country strong,.great-game-country small { min-width: 0; display: block; }
+.great-game-country strong { overflow: hidden; color: var(--navy); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.great-game-country small { margin-top: 2px; color: var(--muted); font-size: 10px; }
+.great-game-country b { flex: 0 0 auto; color: var(--brown); font-size: 11px; }
+.great-game-more { grid-column: 1 / -1; padding: 3px 7px; color: var(--muted); text-align: right; }
+.great-games-ledger-grid { display: grid; gap: 14px; margin-top: 18px; }
+.great-games-ledger,.great-games-bets { min-width: 0; overflow: hidden; }
+.great-games-ledger .table-wrap,.great-games-bets .table-wrap { max-height: 440px; overflow: auto; }
+.great-games-ledger table,.great-games-bets table { min-width: 780px; }
+.great-games-history-list { display: grid; gap: 8px; padding: 10px; }
+.great-game-history { overflow: hidden; border: 1px solid rgba(128,82,56,.17); border-radius: 10px; background: #faf5ed; }
+.great-game-history > summary { display: grid; grid-template-columns: minmax(0,1fr) minmax(170px,.45fr) 20px; align-items: center; gap: 16px; padding: 12px 14px; cursor: pointer; list-style: none; }
+.great-game-history > summary::-webkit-details-marker { display: none; }
+.great-game-history > summary::after { content: "+"; color: var(--brown); font-size: 20px; font-weight: 800; }
+.great-game-history[open] > summary::after { content: "−"; }
+.great-game-history > summary span:last-child { text-align: right; }
+.great-game-history > summary strong,.great-game-history > summary small,.great-game-history > summary b { display: block; }
+.great-game-history > summary small { color: var(--muted); }
+.great-game-history > div { display: grid; gap: 5px; padding: 0 12px 12px; border-top: 1px solid rgba(128,82,56,.12); }
+.great-game-standing { display: grid; grid-template-columns: 28px minmax(0,1fr) auto; align-items: center; gap: 10px; padding: 8px; border-radius: 8px; background: rgba(226,213,197,.42); }
+.great-game-standing > b { width: 27px; height: 27px; display: grid; place-items: center; border-radius: 50%; background: var(--navy); color: #fff8ed; font-size: 11px; }
+.great-game-standing span strong,.great-game-standing span small { display: block; }
+.great-game-standing span small { margin-top: 2px; color: var(--muted); }
+.great-game-standing em { color: var(--brown); font-size: 12px; font-style: normal; font-weight: 800; }
+.great-games-empty { margin-top: 14px; padding: 30px; text-align: center; }
+.great-games-empty p { color: var(--muted); }
+
+@media (max-width: 1050px) {
+  .great-games-grid { grid-template-columns: 1fr; }
+  .great-games-enrollment { grid-template-columns: 1fr; }
+}
+@media (max-width: 680px) {
+  .great-games-hero-status { justify-items: start; text-align: left; }
+  .great-games-enrollment > div:last-child,.great-game-card-body { grid-template-columns: 1fr; }
+  .great-game-more { grid-column: auto; }
+  .great-game-history > summary { grid-template-columns: minmax(0,1fr) 20px; }
+  .great-game-history > summary span:last-child { grid-column: 1; text-align: left; }
+  .great-game-history > summary::after { grid-column: 2; grid-row: 1 / span 2; }
+}
+
 /* Casusluk yayın merkezi */
 .publication-hero { align-items: center; padding: 22px 24px; border: 1px solid rgba(128,82,56,.24); border-radius: 16px; background: linear-gradient(120deg,#f8f1e6 0%,#eadcca 68%,#dbc5ad 100%); box-shadow: 0 14px 34px rgba(35,38,49,.09); }
 .publication-hero h1 { color: var(--navy); font-size: 30px; }
