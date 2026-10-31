@@ -2276,6 +2276,7 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
 
 async function reportError(interaction: Interaction, error: unknown): Promise<void> {
   const reference = interaction.id.slice(-8);
+  const discordErrorCode=Number((error as {code?:number|string}|null)?.code??0);
   if (interaction.isAutocomplete()) {
     if (!interaction.responded) await interaction.respond([]).catch(() => undefined);
     return;
@@ -2316,6 +2317,10 @@ async function reportError(interaction: Interaction, error: unknown): Promise<vo
     : `Beklenmeyen bir hata oluştu. İşlem daha önce uygulanmış olabilir; belgeyi kontrol edin. Hata kodu: ${reference}`;
   const payload: InteractionReplyOptions = { content: `❌ ${message}`, components: [], flags: MessageFlags.Ephemeral };
   if (!interaction.isRepliable()) return;
+  // 10062, Discord'un etkileşim belirtecini süresi dolduğu için artık kabul
+  // etmediği anlamına gelir. Aynı belirteçle hata mesajı göndermek de kesin
+  // olarak başarısız olur ve yalnızca ikinci, yanıltıcı bir log üretir.
+  if(discordErrorCode===10_062)return;
   try {
     if (interaction.deferred && interaction.isMessageComponent()) await interaction.followUp(payload);
     else if (interaction.deferred) await interaction.editReply({ content: `❌ ${message}`, components: [] });

@@ -15,4 +15,16 @@ describe("gecikmeye duyarlı Discord komutları",()=>{
     expect(city).toContain("if(!interaction.deferred&&!interaction.replied)");
     expect(autoPurchase).toContain("if(!interaction.deferred&&!interaction.replied)");
   });
+
+  it("Büyük Oyunlar yenileme ve form gönderimlerini ağır işlemlerden önce onaylar",()=>{
+    const source=readFileSync(new URL("./great-games-ui-v2.ts",import.meta.url),"utf8");
+    const refresh=source.slice(source.indexOf('if (action === "public-refresh")'),source.indexOf('if (action === "start")'));
+    expect(refresh.indexOf("await interaction.deferUpdate()"))
+      .toBeLessThan(refresh.indexOf("await publicGamePayload"));
+
+    const modal=source.slice(source.indexOf("export async function handleGreatGamesModal"));
+    expect(modal.indexOf("await interaction.deferUpdate()"))
+      .toBeLessThan(modal.indexOf("await ownCountry"));
+    expect(modal).toContain("else await interaction.deferReply({flags:MessageFlags.Ephemeral})");
+  });
 });

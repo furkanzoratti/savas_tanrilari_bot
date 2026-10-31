@@ -1453,13 +1453,15 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
   const fromAdminCard = interaction.message.embeds[0]?.title?.includes("Yönetim") ?? false;
   if (action === "admin-home") {
     if (!isGameMaster(interaction)) throw new GameError("Bu panel yalnızca oyun yöneticisine açıktır.");
+    await interaction.deferUpdate();
     await greatGamesService.openSeason(interaction.guildId, interaction.user.id);
-    await interaction.update(await adminDashboardPayload(interaction.guildId)); return true;
+    await interaction.editReply(await adminDashboardPayload(interaction.guildId)); return true;
   }
   if (action === "admin-view") {
     if (!isGameMaster(interaction)) throw new GameError("Bu panel yalnızca oyun yöneticisine açıktır.");
+    await interaction.deferUpdate();
     await greatGamesService.openSeason(interaction.guildId, interaction.user.id);
-    await interaction.update(await adminGamePayload(interaction.guildId, gameId(rawType!))); return true;
+    await interaction.editReply(await adminGamePayload(interaction.guildId, gameId(rawType!))); return true;
   }
   if (action === "recover") {
     if (!isGameMaster(interaction)) throw new GameError("Oyunu yalnızca oyun yöneticisi kurtarabilir.");
@@ -1481,33 +1483,40 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
   }
   if (action === "open") {
     if (!isGameMaster(interaction)) throw new GameError("Yalnızca oyun yöneticisi kayıtları açabilir.");
+    await interaction.deferUpdate();
     await greatGamesService.openSeason(interaction.guildId, interaction.user.id);
-    await interaction.update(await adminDashboardPayload(interaction.guildId)); return true;
+    await interaction.editReply(await adminDashboardPayload(interaction.guildId)); return true;
   }
   if (action === "gladiator-roster-refresh") {
-    await interaction.update(await gladiatorRosterPayload(interaction.guildId,undefined,Number(rawType)));
+    await interaction.deferUpdate();
+    await interaction.editReply(await gladiatorRosterPayload(interaction.guildId,undefined,Number(rawType)));
     return true;
   }
   if(action==="gladiator-roster-page"){
-    await interaction.update(await gladiatorRosterPayload(interaction.guildId,undefined,Number(rawType)));
+    await interaction.deferUpdate();
+    await interaction.editReply(await gladiatorRosterPayload(interaction.guildId,undefined,Number(rawType)));
     return true;
   }
   if(action==="gladiator-owners-page"){
-    await interaction.update(await gladiatorOwnershipPayload(interaction.guildId,Number(rawType)));
+    await interaction.deferUpdate();
+    await interaction.editReply(await gladiatorOwnershipPayload(interaction.guildId,Number(rawType)));
     return true;
   }
   if(action==="gladiator-bets-page"){
     if(!isGameMaster(interaction))throw new GameError("Gladyatör bahis dökümünü yalnızca oyun yöneticileri görebilir.");
-    await interaction.update(await gladiatorBetsPayload(interaction.guildId,Number(rawType),undefined,Number(rawRunNumber),Number(rawRound)));
+    await interaction.deferUpdate();
+    await interaction.editReply(await gladiatorBetsPayload(interaction.guildId,Number(rawType),undefined,Number(rawRunNumber),Number(rawRound)));
     return true;
   }
   if(action==="gladiator-my-bets-page"){
+    await interaction.deferUpdate();
     const country=await ownCountry(interaction.guildId,interaction.user.id);
-    await interaction.update(await gladiatorBetsPayload(interaction.guildId,Number(rawType),country.id,Number(rawRunNumber),Number(rawRound)));
+    await interaction.editReply(await gladiatorBetsPayload(interaction.guildId,Number(rawType),country.id,Number(rawRunNumber),Number(rawRound)));
     return true;
   }
   if(action==="gladiator-points-page"){
-    await interaction.update(await gladiatorPointsPayload(interaction.guildId,Number(rawType)));
+    await interaction.deferUpdate();
+    await interaction.editReply(await gladiatorPointsPayload(interaction.guildId,Number(rawType)));
     return true;
   }
   if(action==="gladiator-draw-publish"){
@@ -1535,7 +1544,8 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
     return true;
   }
   if(action==="gladiator-draw-refresh"){
-    await interaction.update(await gladiatorDrawPayload(interaction.guildId));
+    await interaction.deferUpdate();
+    await interaction.editReply(await gladiatorDrawPayload(interaction.guildId));
     return true;
   }
   if(action?.startsWith("gladiator-auction")){
@@ -1628,16 +1638,15 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
     return true;
   }
   if(action==="gladiator-coupon-open"){
+    await interaction.deferReply({flags:MessageFlags.Ephemeral});
     const country=await ownCountry(interaction.guildId,interaction.user.id);
-    await interaction.reply({
-      ...(await gladiatorCouponPayload(interaction.guildId,interaction.user.id,country.id,0)),
-      flags:MessageFlags.Ephemeral
-    });
+    await interaction.editReply(await gladiatorCouponPayload(interaction.guildId,interaction.user.id,country.id,0));
     return true;
   }
   if(action==="gladiator-coupon-page"){
+    await interaction.deferUpdate();
     const country=await ownCountry(interaction.guildId,interaction.user.id);
-    await interaction.update(await gladiatorCouponPayload(
+    await interaction.editReply(await gladiatorCouponPayload(
       interaction.guildId,interaction.user.id,country.id,Number(rawType)
     ));
     return true;
@@ -1657,6 +1666,7 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
     return true;
   }
   if(action==="gladiator-coupon-confirm"){
+    await interaction.deferUpdate();
     const country=await ownCountry(interaction.guildId,interaction.user.id);
     const key=gladiatorCouponDraftKey(interaction.guildId,interaction.user.id);
     const draft=gladiatorCouponDrafts.get(key);
@@ -1666,7 +1676,6 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
       throw new GameError("Kuponun hazırlandığı bahis aşaması artık açık değil.");
     const selections=selectedCouponFighters(view,draft);
     if(!draft.amount)throw new GameError("Kuponu onaylamadan önce bahis tutarını girmelisin.");
-    await interaction.deferUpdate();
     const result=await greatGamesGladiatorService.placeCoupon({
       guildId:interaction.guildId,countryId:country.id,amount:draft.amount,sourceKey:`discord:${interaction.id}`,
       selections:selections.map((selection)=>({matchId:selection.matchId,fighterId:selection.fighterId}))
@@ -1685,8 +1694,9 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
     return true;
   }
   if(action==="gladiator-coupon-cancel"){
+    await interaction.deferUpdate();
     gladiatorCouponDrafts.delete(gladiatorCouponDraftKey(interaction.guildId,interaction.user.id));
-    await interaction.update({content:"🗑️ Capua kupon taslağı iptal edildi; cüzdandan para kesilmedi.",embeds:[],components:[]});
+    await interaction.editReply({content:"🗑️ Capua kupon taslağı iptal edildi; cüzdandan para kesilmedi.",embeds:[],components:[]});
     return true;
   }
   if (action === "gladiator-bet") {
@@ -1698,28 +1708,33 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
     return true;
   }
   if(action==="court-control"){
+    const updateExisting=interaction.message.flags.has(MessageFlags.Ephemeral);
+    if(updateExisting)await interaction.deferUpdate();
+    else await interaction.deferReply({flags:MessageFlags.Ephemeral});
     const country=await ownCountry(interaction.guildId,interaction.user.id);
     const payload=await courtControlPayload(interaction.guildId,country.id);
-    if(interaction.message.flags.has(MessageFlags.Ephemeral))await interaction.update(payload);
-    else await interaction.reply({...payload,flags:MessageFlags.Ephemeral});
+    await interaction.editReply(payload);
     return true;
   }
   if(action==="court-pacts"){
+    const updateExisting=interaction.message.flags.has(MessageFlags.Ephemeral);
+    if(updateExisting)await interaction.deferUpdate();
+    else await interaction.deferReply({flags:MessageFlags.Ephemeral});
     const country=await ownCountry(interaction.guildId,interaction.user.id);
     const payload=await courtPactPayload(interaction.guildId,country.id);
-    if(interaction.message.flags.has(MessageFlags.Ephemeral))await interaction.update(payload);
-    else await interaction.reply({...payload,flags:MessageFlags.Ephemeral});
+    await interaction.editReply(payload);
     return true;
   }
   if(action==="court-act"){
-    const country=await ownCountry(interaction.guildId,interaction.user.id);
     const courtAction=rawType as CourtActionType;
     if(!(courtAction in COURT_ACTIONS))throw new GameError("Saray hamlesi geçersiz.");
     if(courtAction==="PROTECT"){
       await interaction.deferUpdate();
+      const country=await ownCountry(interaction.guildId,interaction.user.id);
       await greatGamesCourtIntrigueService.submitAction({guildId:interaction.guildId,countryId:country.id,action:courtAction});
       await interaction.editReply(await courtControlPayload(interaction.guildId,country.id,"✅ **Delegasyonu Koru** hamlen bu raund için kaydedildi."));
     }else{
+      const country=await ownCountry(interaction.guildId,interaction.user.id);
       const view=await greatGamesCourtIntrigueService.view(interaction.guildId,country.id);
       await interaction.showModal(courtActionModal(view,country.id,courtAction));
     }
@@ -1732,33 +1747,40 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
     return true;
   }
   if(action==="court-pact-accept"||action==="court-pact-reject"){
-    const country=await ownCountry(interaction.guildId,interaction.user.id);
     if(!rawType)throw new GameError("Yanıtlanacak saray anlaşması bulunamadı.");
     await interaction.deferUpdate();
+    const country=await ownCountry(interaction.guildId,interaction.user.id);
     const accepted=action==="court-pact-accept";
     await greatGamesCourtIntrigueService.respondPact(interaction.guildId,rawType,country.id,accepted);
     await interaction.editReply(await courtPactPayload(interaction.guildId,country.id,undefined,accepted?"✅ Anlaşma kabul edildi ve saray kayıtlarına işlendi.":"❌ Anlaşma teklifi reddedildi."));
     return true;
   }
   if(action==="construction-control"){
+    const updateExisting=interaction.message.flags.has(MessageFlags.Ephemeral);
+    if(updateExisting)await interaction.deferUpdate();else await interaction.deferReply({flags:MessageFlags.Ephemeral});
     const country=await ownCountry(interaction.guildId,interaction.user.id);const payload=await constructionControlPayload(interaction.guildId,country.id);
-    if(interaction.message.flags.has(MessageFlags.Ephemeral))await interaction.update(payload);else await interaction.reply({...payload,flags:MessageFlags.Ephemeral});return true;
+    await interaction.editReply(payload);return true;
   }
   if(action==="construction-order"){
     const country=await ownCountry(interaction.guildId,interaction.user.id);const view=await greatGamesConstructionService.view(interaction.guildId,country.id);
     await interaction.showModal(constructionOrderModal(view,country.id));return true;
   }
   if(action==="seals-control"){
+    const updateExisting=interaction.message.flags.has(MessageFlags.Ephemeral);
+    if(updateExisting)await interaction.deferUpdate();else await interaction.deferReply({flags:MessageFlags.Ephemeral});
     const country=await ownCountry(interaction.guildId,interaction.user.id);const payload=await sealsControlPayload(interaction.guildId,country.id);
-    if(interaction.message.flags.has(MessageFlags.Ephemeral))await interaction.update(payload);else await interaction.reply({...payload,flags:MessageFlags.Ephemeral});return true;
+    await interaction.editReply(payload);return true;
   }
   if(action==="seals-act"){
-    const country=await ownCountry(interaction.guildId,interaction.user.id);const sealAction=rawType as SealActionType;
+    const sealAction=rawType as SealActionType;
     if(!(sealAction in SEAL_ACTIONS))throw new GameError("Mühür hamlesi geçersiz.");
     if(sealAction==="OPEN"||sealAction==="CURSE"){
+      const country=await ownCountry(interaction.guildId,interaction.user.id);
       const view=await greatGamesSevenSealsService.view(interaction.guildId,country.id);await interaction.showModal(sealActionModal(view,country.id,sealAction));
     }else{
-      await interaction.deferUpdate();await greatGamesSevenSealsService.submitAction({guildId:interaction.guildId,countryId:country.id,action:sealAction});
+      await interaction.deferUpdate();
+      const country=await ownCountry(interaction.guildId,interaction.user.id);
+      await greatGamesSevenSealsService.submitAction({guildId:interaction.guildId,countryId:country.id,action:sealAction});
       await interaction.editReply(await sealsControlPayload(interaction.guildId,country.id,`✅ **${SEAL_ACTIONS[sealAction].label}** hamlen bu raund için kaydedildi.`));
     }
     return true;
@@ -1808,7 +1830,8 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
     return true;
   }
   if (action === "public-refresh") {
-    await interaction.update(await publicGamePayload(interaction.guildId, gameId(rawType!))); return true;
+    await interaction.deferUpdate();
+    await interaction.editReply(await publicGamePayload(interaction.guildId, gameId(rawType!))); return true;
   }
   if (action === "start") {
     if (!isGameMaster(interaction)) throw new GameError("Oyunu yalnızca oyun yöneticisi başlatabilir.");
@@ -1890,13 +1913,15 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
 export async function handleGreatGamesSelect(interaction: StringSelectMenuInteraction): Promise<boolean> {
   if(interaction.customId==="ggs2|court-pact-select"){
     if(!interaction.guildId)throw new GameError("Bu işlem yalnızca sunucuda kullanılabilir.");
+    await interaction.deferUpdate();
     const country=await ownCountry(interaction.guildId,interaction.user.id);
     const pactId=interaction.values[0];
-    await interaction.update(await courtPactPayload(interaction.guildId,country.id,pactId));
+    await interaction.editReply(await courtPactPayload(interaction.guildId,country.id,pactId));
     return true;
   }
   if(interaction.customId.startsWith("ggs2|gladiator-bets-round|")){
     if(!interaction.guildId)throw new GameError("Bu işlem yalnızca sunucuda kullanılabilir.");
+    await interaction.deferUpdate();
     const scope=interaction.customId.split("|")[2];
     const [rawRun,rawRound]=interaction.values[0]?.split(":")??[];
     const runNumber=Number(rawRun);
@@ -1904,15 +1929,16 @@ export async function handleGreatGamesSelect(interaction: StringSelectMenuIntera
     if(!Number.isSafeInteger(runNumber)||!Number.isSafeInteger(round))throw new GameError("Capua bahis turu seçimi geçersiz.");
     if(scope==="admin"){
       if(!isGameMaster(interaction))throw new GameError("Gladyatör bahis dökümünü yalnızca oyun yöneticileri görebilir.");
-      await interaction.update(await gladiatorBetsPayload(interaction.guildId,0,undefined,runNumber,round));
+      await interaction.editReply(await gladiatorBetsPayload(interaction.guildId,0,undefined,runNumber,round));
       return true;
     }
     const country=await ownCountry(interaction.guildId,interaction.user.id);
-    await interaction.update(await gladiatorBetsPayload(interaction.guildId,0,country.id,runNumber,round));
+    await interaction.editReply(await gladiatorBetsPayload(interaction.guildId,0,country.id,runNumber,round));
     return true;
   }
   if(interaction.customId.startsWith("ggs2|gladiator-coupon|")){
     if(!interaction.guildId)throw new GameError("Bu işlem yalnızca sunucuda kullanılabilir.");
+    await interaction.deferUpdate();
     const page=Number(interaction.customId.split("|")[2]??0);
     const country=await ownCountry(interaction.guildId,interaction.user.id);
     const view=await greatGamesGladiatorService.view(interaction.guildId);
@@ -1936,7 +1962,7 @@ export async function handleGreatGamesSelect(interaction: StringSelectMenuIntera
       throw new GameError(`Bir kuponda en fazla ${GLADIATOR_COUPON_MAX_SELECTIONS} eşleşme seçebilirsin.`);
     draft.selections=nextSelections;
     draft.updatedAt=Date.now();
-    await interaction.update(await gladiatorCouponPayload(interaction.guildId,interaction.user.id,country.id,safe));
+    await interaction.editReply(await gladiatorCouponPayload(interaction.guildId,interaction.user.id,country.id,safe));
     return true;
   }
   if (interaction.customId.startsWith("ggs2|gladiator-fighter|")) {
@@ -1960,6 +1986,11 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
   if (!interaction.customId.startsWith("ggm2|")) return false;
   if (!interaction.guildId) throw new GameError("Bu işlem yalnızca sunucuda kullanılabilir.");
   const [, action, rawType] = interaction.customId.split("|");
+  // Modal gönderimleri özellikle mobil istemcilerde ağ gecikmesine daha açık.
+  // Discord'un üç saniyelik etkileşim süresini kaçırmamak için bütün Büyük
+  // Oyunlar formlarını önce onayla, veritabanı işlemlerini ardından yap.
+  if(interaction.isFromMessage())await interaction.deferUpdate();
+  else await interaction.deferReply({flags:MessageFlags.Ephemeral});
   if (action === "select-random" || action === "select-manual") {
     if (!isGameMaster(interaction)) throw new GameError("Katılımcıları yalnızca oyun yöneticisi seçebilir.");
     const type = gameId(rawType!);
@@ -1968,8 +1999,7 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
       : await greatGamesFlowService.selectParticipants({ guildId: interaction.guildId, gameType: type, mode: "MANUAL", countryNames: interaction.fields.getTextInputValue("countries").split(/[\n,;]+/).map((name) => name.trim()).filter(Boolean) });
     const payload = await adminGamePayload(interaction.guildId, type);
     const content = `${result.count} devlet seçildi${result.rooms.length > 1 ? `:\n${result.rooms.map((room, index) => `${index + 1}. ${room}`).join("\n")}` : "."}`.slice(0, 2_000);
-    if (interaction.isFromMessage()) await interaction.update({ ...payload, content });
-    else await interaction.reply({ ...payload, content });
+    await interaction.editReply({ ...payload, content });
     return true;
   }
   const country = await ownCountry(interaction.guildId, interaction.user.id);
@@ -1988,8 +2018,7 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
     });
     const notice=`✅ **${COURT_ACTIONS[courtAction].label}** hamlen bu raund için gizlice kaydedildi.`;
     const payload=await courtControlPayload(interaction.guildId,country.id,notice);
-    if(interaction.isFromMessage())await interaction.update(payload);
-    else await interaction.reply({...payload,flags:MessageFlags.Ephemeral});
+    await interaction.editReply(payload);
     return true;
   }
   if(action==="court-pact-offer"){
@@ -1997,8 +2026,7 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
     if(!targetCountryId)throw new GameError("Anlaşma yapılacak delegasyon seçilmelidir.");
     await greatGamesCourtIntrigueService.offerPact(interaction.guildId,country.id,targetCountryId);
     const payload=await courtPactPayload(interaction.guildId,country.id,undefined,"✉️ Saray anlaşması teklifin hedef delegasyona iletildi.");
-    if(interaction.isFromMessage())await interaction.update(payload);
-    else await interaction.reply({...payload,flags:MessageFlags.Ephemeral});
+    await interaction.editReply(payload);
     return true;
   }
   if(action==="construction-order"){
@@ -2007,7 +2035,7 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
     if(!stage||!(stage in CONSTRUCTION_STAGES)||!method||!(method in CONSTRUCTION_METHODS))throw new GameError("İnşa aşaması veya yöntemi geçersiz.");
     await greatGamesConstructionService.submitAction({guildId:interaction.guildId,countryId:country.id,stage,method});
     const payload=await constructionControlPayload(interaction.guildId,country.id,`✅ **${CONSTRUCTION_STAGES[stage].label} • ${CONSTRUCTION_METHODS[method].label}** emrin kaydedildi.`);
-    if(interaction.isFromMessage())await interaction.update(payload);else await interaction.reply({...payload,flags:MessageFlags.Ephemeral});return true;
+    await interaction.editReply(payload);return true;
   }
   if(action==="seals-action"){
     const sealAction=rawType as "OPEN"|"CURSE";if(sealAction!=="OPEN"&&sealAction!=="CURSE")throw new GameError("Mühür hamlesi geçersiz.");
@@ -2016,7 +2044,7 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
     await greatGamesSevenSealsService.submitAction({guildId:interaction.guildId,countryId:country.id,action:sealAction,...(seal?{seal}:{}),...(targetCountryId?{targetCountryId}:{})});
     const notice=sealAction==="OPEN"?`✅ **${SEALS[seal!].label}** için açma girişimin kaydedildi.`:"✅ Lanet hedefin gizlice kaydedildi.";
     const payload=await sealsControlPayload(interaction.guildId,country.id,notice);
-    if(interaction.isFromMessage())await interaction.update(payload);else await interaction.reply({...payload,flags:MessageFlags.Ephemeral});return true;
+    await interaction.editReply(payload);return true;
   }
   if(action==="gladiator-coupon-amount"){
     const amount=Number(interaction.fields.getTextInputValue("amount").replaceAll(".","").trim());
@@ -2027,8 +2055,7 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
     draft.amount=amount;
     draft.updatedAt=Date.now();
     const payload=await gladiatorCouponPayload(interaction.guildId,interaction.user.id,country.id,0);
-    if(interaction.isFromMessage())await interaction.update(payload);
-    else await interaction.reply({...payload,flags:MessageFlags.Ephemeral});
+    await interaction.editReply(payload);
     return true;
   }
   if (action === "gladiator-auction-bid") {
@@ -2046,9 +2073,8 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
       side: sideRaw,
       amount
     });
-    await interaction.reply({
+    await interaction.editReply({
       content: `✅ **${result.fighterName}** için **${gold(amount)}** bahis kilitlendi. Oran: **${result.odds.toFixed(2)}x** • Olası ödeme: **${gold(result.possiblePayout)}** • Cüzdan: **${gold(result.balance)}**`,
-      flags: MessageFlags.Ephemeral
     });
     return true;
   }
@@ -2056,12 +2082,12 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
     const amount = Number(interaction.fields.getTextInputValue("amount").replaceAll(".", ""));
     const targetCountryName = interaction.fields.getTextInputValue("target").trim();
     await greatGamesBetService.place({ guildId: interaction.guildId, bettorCountryId: country.id, targetCountryName, amount });
-    await interaction.reply({ content: `✅ ${targetCountryName} sürücüsüne ${gold(amount)} bahis kilitlendi.`, flags: MessageFlags.Ephemeral }); return true;
+    await interaction.editReply({ content: `✅ ${targetCountryName} sürücüsüne ${gold(amount)} bahis kilitlendi.` }); return true;
   }
   if (action === "bid") {
     const amount = Number(interaction.fields.getTextInputValue("amount").replaceAll(".", ""));
     const result = await greatGamesAuctionService.bid({ guildId: interaction.guildId, countryId: country.id, userId: interaction.user.id, lotId: rawType!, amount });
-    await interaction.reply({ content: `✅ Açık artırma teklifin **${gold(result.amount)}** olarak kaydedildi; cüzdandan para kesilmedi. Diğer lider tekliflerin hesaba katıldığında kalan teklif kapasiten: **${gold(result.availableAfter)}**.`, flags: MessageFlags.Ephemeral }); return true;
+    await interaction.editReply({ content: `✅ Açık artırma teklifin **${gold(result.amount)}** olarak kaydedildi; cüzdandan para kesilmedi. Diğer lider tekliflerin hesaba katıldığında kalan teklif kapasiten: **${gold(result.availableAfter)}**.` }); return true;
   }
   if (action !== "action") return false;
   const type = gameId(rawType!);
@@ -2113,10 +2139,10 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
       ? `✅ Diplomasi Masası oyun gizlice kaydedildi. Seçtiğin ana ve ikincil hedef yalnızca sonuç çözülünce açıklanacak.`
     : "✅ Büyük Oyun hamlen gizlice kaydedildi.";
   if (interaction.isFromMessage()) {
-    await interaction.update(await publicGamePayload(interaction.guildId, type));
+    await interaction.editReply(await publicGamePayload(interaction.guildId, type));
     await interaction.followUp({ content: confirmation, flags: MessageFlags.Ephemeral });
   } else {
-    await interaction.reply({ content: confirmation, flags: MessageFlags.Ephemeral });
+    await interaction.editReply({ content: confirmation });
   }
   return true;
 }
