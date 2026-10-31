@@ -65,7 +65,7 @@ export const religionSectMissionaryReworkMigration={
     END
     $$;
 
-    WITH leading AS (
+    WITH dominant_share AS (
       SELECT DISTINCT ON (share.settlement_id)
              share.settlement_id,share.religion_key,
              share.primary_percent+share.secondary_percent AS family_percent
@@ -75,7 +75,7 @@ export const religionSectMissionaryReworkMigration={
                 (share.religion_key=settlement.religion_key) DESC,share.religion_key
     )
     UPDATE settlements settlement
-       SET religion_key=leading.religion_key,religion_adherence_percent=leading.family_percent
-      FROM leading WHERE leading.settlement_id=settlement.id;
+       SET religion_key=dominant_share.religion_key,religion_adherence_percent=dominant_share.family_percent
+      FROM dominant_share WHERE dominant_share.settlement_id=settlement.id;
   `
 } as const;
