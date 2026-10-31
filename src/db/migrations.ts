@@ -120,6 +120,7 @@ import { espionageNobleTargetsMigration } from "./espionage-noble-targets-migrat
 import { diplomatTaskRemovalMigration } from "./diplomat-task-removal-migration.js";
 import { battleTurnArchiveMigration } from "./battle-turn-archive-migration.js";
 import { religionSectMissionaryReworkMigration } from "./religion-sect-missionary-rework-migration.js";
+import { religionSectLiveDataRepairMigration } from "./religion-sect-live-data-repair-migration.js";
 import { countryMarshalsMigration } from "./country-marshals-migration.js";
 import { formableCountryCatalogSyncMigration } from "./formable-country-catalog-sync-migration.js";
 import { mountedArcherSeparationMigration } from "./mounted-archer-separation-migration.js";
@@ -2549,5 +2550,6 @@ export const migrations = [
   greatGamesConstructionSealsMigration,
   greatGamesRepeatableSpecialGamesMigration,
   battleTurnArchiveMigration,
-  religionSectMissionaryReworkMigration
+  religionSectMissionaryReworkMigration,
+  religionSectLiveDataRepairMigration
 ] as const;

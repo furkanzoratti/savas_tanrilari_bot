@@ -10,7 +10,7 @@ import { BATTLE_UNIT_STATS, type BattleSideKey, type BattleUnitType, type NavalU
 import { BUILDING_CATEGORIES, BUILDINGS, CITY_POLICIES, MOBILIZATION_RULES, SHIPS, SIEGE_ASSETS, UNITS } from "../domain/catalog.js";
 import { gold, number } from "../domain/format.js";
 import { CULTURE_GROUPS, type CultureGroup } from "../domain/cultures.js";
-import { RELIGIONS, isReligionKey } from "../domain/religions.js";
+import { RELIGIONS, isReligionKey, primaryReligionTradition } from "../domain/religions.js";
 import { garrisonComposition } from "../domain/garrison.js";
 import { currentLocalDate } from "../domain/great-power.js";
 import type { SettlementTransferType } from "../domain/settlement-transfer.js";
@@ -292,6 +292,16 @@ function renderCountryDetail(detail:CountryDetailView,document:CountryDocument):
   const dynasty=detail.dynasty
     ?[`**${detail.dynasty.name}**`,`**Hükümdar:** ${detail.dynasty.monarch??"Belirlenmedi"}`,`**Veliaht:** ${detail.dynasty.heir??"Belirlenmedi"}`,`**Yaşayan Üye:** ${detail.dynasty.livingMembers}${detail.dynasty.sickMembers?` • **Hasta:** ${detail.dynasty.sickMembers}`:""}`].join("\n")
     :"Bu devlet için hanedan kaydı bulunmuyor.";
+  const religionLines=detail.religions.flatMap((entry)=>{
+    const secondary=detail.sects.find((sect)=>sect.parentReligionKey===entry.key);
+    const primaryWithinReligion=entry.population>0?entry.primaryPopulation/entry.population*100:0;
+    const secondaryWithinReligion=entry.population>0?(secondary?.population??0)/entry.population*100:0;
+    return [
+      `**${entry.label}:** %${detailPercent(entry.percent)} • ${number(Math.round(entry.population))} kişi`,
+      `↳ ${primaryReligionTradition(entry.key).label}: **%${detailPercent(primaryWithinReligion)}**`,
+      ...(secondary?[`↳ ${secondary.label}: **%${detailPercent(secondaryWithinReligion)}** • ${number(Math.round(secondary.population))} kişi`]:[])
+    ];
+  });
   const main=new EmbedBuilder()
     .setColor(0xc59b45)
     .setTitle(`👑 ${detail.country.name} • Devlet Detayı`)
@@ -306,7 +316,7 @@ function renderCountryDetail(detail:CountryDetailView,document:CountryDocument):
       {name:"🏰 Yönetici Hanedan",value:dynasty},
       {name:"🏦 Devlet Ekonomisi",value:[`**Hazine:** ${gold(detail.totalTreasury)}`,`**Dönem Geliri:** ${gold(document.totalPayableIncome)}`,`**Toplam Bakım:** −${gold(document.totalUpkeep)}`,`**Net Gelir:** ${document.netIncome>=0?"+":""}${gold(document.netIncome)}`].join("\n"),inline:true},
       {name:"⚔️ Askerî Durum",value:[`**Seferberlik:** ${MOBILIZATION_RULES[detail.country.mobilization].label}`,`**Askerî Kapasite:** ${number(document.militaryUsed)} / ${number(document.militaryLimit)}`,`**Savaş Yorgunluğu:** ${detail.country.warExhaustion}/100`,`**İsyan Riski Etkisi:** +${Math.min(15,Math.floor(detail.country.warExhaustion/10))} puan`,`_Savaş süresi, yeni kayıplar, yağmalar, işgaller ve toprak kayıpları artırır • Barışta her tur −10_${document.manpowerPenaltyActive?"\n⚠️ **Askerî Sınır Cezası Aktif**":""}`].join("\n"),inline:true},
-      {name:"⛩️ İnanç Dağılımı",value:list(detail.religions.map((entry)=>`**${entry.label}:** %${detailPercent(entry.percent)}${entry.primaryPercent?` • Ana İnanç %${detailPercent(entry.primaryPercent)}`:""}`),"Din kaydı bulunmuyor.")},
+      {name:"⛩️ Din ve Mezhep Dağılımı",value:list(religionLines,"Din kaydı bulunmuyor.")},
       {name:"🏺 Kültür Dağılımı",value:list(detail.cultures.map((entry)=>`**${CULTURE_GROUPS[entry.key]?.label??entry.key}:** %${detailPercent(entry.percent)}`),"Kültür kaydı bulunmuyor.")}
     )
     .setFooter({text:"Yerleşke bazlı ekonomi ve istikrar ayrıntıları için /yerleskelerim komutunu kullanın."});

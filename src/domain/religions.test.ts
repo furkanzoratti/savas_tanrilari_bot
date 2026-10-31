@@ -133,4 +133,15 @@ describe("din sistemi",()=>{
       {religionKey:"CHRISTIANITY",primaryPercent:65,secondaryPercent:35}
     ]);
   });
+  it("yeni nüfusu mevcut din ve mezhep yüzdelerine oransal dağıtır",()=>{
+    const shares=[
+      {religionKey:"HELLENIC_FAITH" as const,primaryPercent:60,secondaryPercent:20},
+      {religionKey:"CHRISTIANITY" as const,primaryPercent:15,secondaryPercent:5}
+    ];
+    const before=religionBeliefShares(shares,"HELLENIC_FAITH",100_000);
+    const after=religionBeliefShares(shares,"HELLENIC_FAITH",110_000);
+    expect(before.map((share)=>share.believerCount)).toEqual([80_000,20_000]);
+    expect(after.map((share)=>share.believerCount)).toEqual([88_000,22_000]);
+    expect(after[0]?.sects.map((sect)=>sect.believerCount)).toEqual([66_000,22_000]);
+  });
 });
