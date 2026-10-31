@@ -205,10 +205,20 @@ export function renderDocument(document: CountryDocument,scope?:DocumentSettleme
     const cultureText = foreignCulture
       ? `**${culture}** • ⚠️ Yabancı kültür\nToplam gelir: **×0,80**\nAskerî limit: **${document.guild.culture_military_penalty_enabled ? "×0,80" : "hazırlık sürecinde • etkisiz"}**`
       : `**${culture}** • ✅ Ana kültürle uyumlu`;
-    const religionLines=(settlement.religionDistribution??[]).flatMap((share)=>[
-      `${share.active?"Ana din":"Din"}: **${share.religionLabel} • %${number(share.primaryPercent)}**`,
-      `${share.active?"İkinci mezhep":"Mezhep"}: **${share.secondaryLabel} • %${number(share.secondaryPercent)}**`
-    ]);
+    const religionLines=(settlement.religionDistribution??[]).flatMap((share)=>{
+      const familyPercent=Number(share.familyPercent??(share.primaryPercent+share.secondaryPercent));
+      const believerCount=share.believerCount??Math.round(settlement.population*familyPercent/100);
+      const sects=share.sects??[
+        {label:`${share.religionLabel} Ana Geleneği`,percent:familyPercent>0?share.primaryPercent/familyPercent*100:0,believerCount:Math.round(settlement.population*share.primaryPercent/100)},
+        {label:share.secondaryLabel,percent:familyPercent>0?share.secondaryPercent/familyPercent*100:0,believerCount:Math.round(settlement.population*share.secondaryPercent/100)}
+      ];
+      return [
+        `${share.active?"👑 ":""}**${share.religionLabel} • %${number(familyPercent)}** (${number(believerCount)} kişi)`,
+        ...sects.filter((sect)=>sect.percent>0).map((sect)=>`↳ ${sect.label}: **%${number(sect.percent)}** (${number(sect.believerCount)} kişi)`)
+      ];
+    });
+    const religionPopulationLines=(settlement.religionDistribution??[])
+      .map((share)=>`• ${share.religionLabel}: **${number(share.believerCount??Math.round(settlement.population*Number(share.familyPercent??(share.primaryPercent+share.secondaryPercent))/100))}**`);
     const producedResource = RESOURCES[settlement.resource_type].label;
     const fixedGarrison = renderLandForces(settlement, "GARRISON", document.country.mobilization, document.manpowerPenaltyActive, document.greatProjectModifiers);
     const army = renderLandForces(settlement, "ARMY", document.country.mobilization, document.manpowerPenaltyActive, document.greatProjectModifiers);
@@ -284,6 +294,9 @@ export function renderDocument(document: CountryDocument,scope?:DocumentSettleme
           value: spacedSection([
             `Özgür: **${number(settlement.population)}**`,
             `Köle: ${number(settlement.slave_population)}`,
+            "",
+            "⛩️ **İnanç Dağılımı**",
+            ...(religionPopulationLines.length?religionPopulationLines:["Kayıt bulunmuyor."]),
             "",
             "🎖️ **Ordu Limiti**",
             `Mevcut: **${number(settlement.militaryUsed)}**`,

@@ -6,12 +6,12 @@ import {
 } from "../domain/characters.js";
 import { ESPIONAGE_TARGETS, type EspionageTarget } from "../domain/espionage.js";
 import { CULTURE_GROUPS, type CultureGroup } from "../domain/cultures.js";
-import { characterService, type CharacterView } from "../services/character-service.js";
+import { characterService, type CharacterView, type MissionaryTaskType } from "../services/character-service.js";
 import { cityService } from "../services/city-service.js";
 import { gameService, GameError } from "../services/game-service.js";
 import { logger } from "../logger.js";
 import { assertCountryExecutiveAccess,requireGameMaster, resolveCountry } from "./auth.js";
-import { RELIGIONS, type ReligionKey } from "../domain/religions.js";
+import { primaryReligionTradition,RELIGIONS,SECONDARY_RELIGIONS,type ReligionKey } from "../domain/religions.js";
 
 const assignmentLabels: Record<string,string> = {
   NONE: "Görev bekliyor", CURIA: "Curia", AGORA: "Agora / Forum", ARMY: "Ordu komutanı", FLEET: "Filo komutanı",
@@ -549,15 +549,18 @@ export async function handleCharacterCommand(interaction: ChatInputCommandIntera
     const result=await characterService.startMissionary({
       guildId:interaction.guildId,countryId:country.id,actorId:interaction.user.id,characterId,
       targetSettlementId:interaction.options.getString("hedef-yerleske",true),
-      religionKey:interaction.options.getString("din",true) as ReligionKey
+      religionKey:interaction.options.getString("din",true) as ReligionKey,
+      taskType:interaction.options.getString("gorev-turu",true) as MissionaryTaskType,
+      sectKey:interaction.options.getString("mezhep")
     });
+    const targetBelief=result.sectLabel??RELIGIONS[result.religionKey].label;
     await interaction.editReply(
       "🕯️ **"+result.missionaryName+"**, **"+result.targetName+"** yerleşkesine gönderildi. "+
-      "**Tur "+result.arrivalTurn+"** başında **"+RELIGIONS[result.religionKey].label+"** için ilk din değiştirme zarı işlenecek."
+      "**Tur "+result.arrivalTurn+"** başında **"+targetBelief+"** için ilk sabit ilerleme işlenecek."
     );
     await logCharacterCommand(interaction,country.name,
       "🕯️ Misyoner: **"+result.missionaryName+"** (+1) • Hedef: **"+result.targetName+"**\n"+
-      "↳ İnanç: **"+RELIGIONS[result.religionKey].label+"** • Varış ve ilk çözümleme: **Tur "+result.arrivalTurn+"**"
+      "↳ Görev: **"+(result.taskType==="SECT"?"Mezhep Değiştirme":"Din Değiştirme")+"** • Hedef inanç: **"+targetBelief+"** • Varış ve ilk çözümleme: **Tur "+result.arrivalTurn+"**"
     );
     return true;
   }
@@ -808,13 +811,20 @@ export async function handleCharacterAutocomplete(interaction: AutocompleteInter
     return true;
   }
   if(focused.name==="din"&&interaction.commandName==="misyoner"&&sub==="gorev-baslat"){
-    const targetId=interaction.options.getString("hedef-yerleske");
-    const target=targetId?(await gameService.listSettlements(country.id)).find((item)=>item.id===targetId):null;
-    const religions=(await characterService.missionaryReligionOptions(country.id))
-      .filter((item)=>item.key!==target?.religion_key);
+    const religions=await characterService.missionaryReligionOptions(country.id);
     await interaction.respond(religions
       .filter((item)=>!query||item.label.toLocaleLowerCase("tr-TR").includes(query))
       .slice(0,25)
+      .map((item)=>({name:item.label,value:item.key})));
+    return true;
+  }
+  if(focused.name==="mezhep"&&interaction.commandName==="misyoner"&&sub==="gorev-baslat"){
+    const religionKey=interaction.options.getString("din") as ReligionKey|null;
+    if(!religionKey||!(religionKey in RELIGIONS)){await interaction.respond([]);return true;}
+    const primary=primaryReligionTradition(religionKey);
+    const secondary=SECONDARY_RELIGIONS[religionKey];
+    await interaction.respond([primary,secondary]
+      .filter((item)=>!query||item.label.toLocaleLowerCase("tr-TR").includes(query))
       .map((item)=>({name:item.label,value:item.key})));
     return true;
   }

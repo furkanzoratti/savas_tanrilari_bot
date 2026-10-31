@@ -1,5 +1,5 @@
 import {describe,expect,it} from "vitest";
-import {convertReligionDistribution,convertReligionDistributionByPercent,dominantReligion,dominantReligionFromDistributions,leadingReligionFamily,RELIGIONS,SECONDARY_RELIGIONS,religionBeliefShares,religionConversionPercent,religionDistributionModifiers,religionEffectScale,religionModifiers,religionUnitDiscount,secondaryReligionEffectScale} from "./religions.js";
+import {convertReligionDistribution,convertReligionDistributionByPercent,convertReligionSectByPercent,dominantReligion,dominantReligionFromDistributions,leadingReligionFamily,RELIGIONS,SECONDARY_RELIGIONS,religionBeliefShares,religionConversionPercent,religionDistributionModifiers,religionEffectScale,religionModifiers,religionUnitDiscount,secondaryReligionEffectScale} from "./religions.js";
 import {calculatePopulationGain,calculateShipUpkeep,calculateUnitUpkeep} from "./economy.js";
 import {calculateCategorizedIncome} from "./income.js";
 
@@ -69,10 +69,12 @@ describe("din sistemi",()=>{
       {religionKey:"ROMAN_FAITH" as const,primaryPercent:6,secondaryPercent:2}
     ];
     const modifiers=religionDistributionModifiers(shares,null,"HELLENIC_FAITH");
-    expect(modifiers.landTradeIncomePercent).toBeCloseTo(.04);
-    expect(modifiers.unrestReduction).toBe(1);
+    expect(modifiers.landTradeIncomePercent).toBeCloseTo(.08);
+    expect(modifiers.unrestReduction).toBe(2);
     expect(modifiers.buildingCostDiscount).toBe(0);
-    expect(religionBeliefShares(shares,"HELLENIC_FAITH").map((share)=>share.familyPercent)).toEqual([92,8]);
+    const beliefs=religionBeliefShares(shares,"HELLENIC_FAITH",100_000);
+    expect(beliefs.map((share)=>share.familyPercent)).toEqual([92,8]);
+    expect(beliefs[0]).toMatchObject({believerCount:92_000,sects:[{percent:75,believerCount:69_000},{percent:25,believerCount:23_000}]});
   });
   it("eşit din ailelerinde mevcut baskın dini korur",()=>{
     const shares=[
@@ -81,14 +83,14 @@ describe("din sistemi",()=>{
     ];
     expect(leadingReligionFamily(shares,"ROMAN_FAITH")?.religionKey).toBe("ROMAN_FAITH");
   });
-  it("ülke baskınlığını nüfus ağırlıklı ana inanç yüzdelerinden hesaplar",()=>{
+  it("ülke baskınlığını mezhepler dahil din ailesinin nüfusundan hesaplar",()=>{
     expect(dominantReligionFromDistributions([{population:100_000,shares:[
       {religionKey:"HELLENIC_FAITH",primaryPercent:75,secondaryPercent:25}
-    ]}])).toMatchObject({key:"HELLENIC_FAITH",sharePercent:75});
+    ]}])).toMatchObject({key:"HELLENIC_FAITH",sharePercent:100});
     expect(dominantReligionFromDistributions([{population:100_000,shares:[
       {religionKey:"HELLENIC_FAITH",primaryPercent:69,secondaryPercent:23},
       {religionKey:"ROMAN_FAITH",primaryPercent:6,secondaryPercent:2}
-    ]}])).toBeNull();
+    ]}])).toMatchObject({key:"HELLENIC_FAITH",sharePercent:92});
   });
   it("başarı farkını yüzde puanına çevirip ana inanç ve mezhebe 75/25 dağıtır",()=>{
     expect([0,1,3,4,7,8].map(religionConversionPercent)).toEqual([0,5,5,10,10,15]);
@@ -122,6 +124,13 @@ describe("din sistemi",()=>{
     ],"CHRISTIANITY",10)).toEqual([
       {religionKey:"HELLENIC_FAITH",primaryPercent:67.5,secondaryPercent:22.5},
       {religionKey:"CHRISTIANITY",primaryPercent:7.5,secondaryPercent:2.5}
+    ]);
+  });
+  it("mezhep değişiminde din ailesini sabit tutup mezhebi kendi içinde ilerletir",()=>{
+    expect(convertReligionSectByPercent([
+      {religionKey:"CHRISTIANITY",primaryPercent:75,secondaryPercent:25}
+    ],"CHRISTIANITY","SECONDARY",10)).toEqual([
+      {religionKey:"CHRISTIANITY",primaryPercent:65,secondaryPercent:35}
     ]);
   });
 });

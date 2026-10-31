@@ -22,7 +22,7 @@ import {fallbackDynastyCandidateSql,lineageAwareDynastyCandidateSql,recomputeLin
 import { settlementTransferPolicy, type SettlementTransferType } from "../domain/settlement-transfer.js";
 import { MERCENARY_COMPANIES, type MercenaryCompanyKey } from "../domain/mercenaries.js";
 import { RESOURCES, type ResourceType } from "../domain/resources.js";
-import { RELIGIONS, isReligionKey, secondaryReligionFor, type ReligionKey } from "../domain/religions.js";
+import { RELIGIONS, isReligionKey, religionBeliefShares, secondaryReligionFor, type ReligionKey } from "../domain/religions.js";
 import { adminConfig } from "./config.js";
 import { adminPool, withAdminTransaction, type AdminDbClient } from "./db.js";
 import { signValue, verifySignedValue } from "../security/signed-value.js";
@@ -92,7 +92,7 @@ const settlementUpdateSchema = z.object({
   isCoastal: z.boolean(),
   isConquered: z.boolean(),
   religionKey: z.string().refine(isReligionKey, "Geçersiz din."),
-  religionAdherencePercent: z.coerce.number().min(0).max(100)
+  secondarySectPercent: z.coerce.number().min(0).max(100)
 });
 
 const characterUpdateSchema = z.object({
@@ -1987,11 +1987,12 @@ export const adminPanelService = {
       minority_religion_label: secondaryReligionFor(row.religion_key).label,
       minority_religion_effect: secondaryReligionFor(row.religion_key).effect,
       minority_religion_percent: 100 - Number(row.religion_adherence_percent),
-      religion_distribution:((row.religion_distribution as Array<Record<string,unknown>>|undefined)??[]).map((share)=>({
-        ...share,
-        religionLabel:RELIGIONS[String(share.religionKey) as ReligionKey]?.label??String(share.religionKey),
-        secondaryLabel:secondaryReligionFor(String(share.religionKey) as ReligionKey).label
-      }))
+      religion_distribution:religionBeliefShares(
+        ((row.religion_distribution as Array<Record<string,unknown>>|undefined)??[]).map((share)=>({
+          religionKey:String(share.religionKey) as ReligionKey,
+          primaryPercent:Number(share.primaryPercent),secondaryPercent:Number(share.secondaryPercent)
+        })),row.religion_key,Number(row.population)
+      )
     }));
   },
 
@@ -3085,11 +3086,12 @@ export const adminPanelService = {
       minority_religion_label: secondaryReligionFor(row.religion_key).label,
       minority_religion_effect: secondaryReligionFor(row.religion_key).effect,
       minority_religion_percent: 100 - Number(row.religion_adherence_percent),
-      religion_distribution:((row.religion_distribution as Array<Record<string,unknown>>|undefined)??[]).map((share)=>({
-        ...share,
-        religionLabel:RELIGIONS[String(share.religionKey) as ReligionKey]?.label??String(share.religionKey),
-        secondaryLabel:secondaryReligionFor(String(share.religionKey) as ReligionKey).label
-      }))
+      religion_distribution:religionBeliefShares(
+        ((row.religion_distribution as Array<Record<string,unknown>>|undefined)??[]).map((share)=>({
+          religionKey:String(share.religionKey) as ReligionKey,
+          primaryPercent:Number(share.primaryPercent),secondaryPercent:Number(share.secondaryPercent)
+        })),row.religion_key,Number(row.population)
+      )
     }));
     const armies = (await adminPool.query(
       `SELECT army.id,army.name,army.created_turn,character.name AS commander_name,
@@ -3250,11 +3252,12 @@ export const adminPanelService = {
         resource_label: RESOURCES[settlement.resource_type]?.label ?? settlement.resource_type,
         culture_label: CULTURE_GROUPS[settlement.culture_group]?.label ?? settlement.culture_group,
         religion_label: RELIGIONS[settlement.religion_key]?.label ?? settlement.religion_key,
-        religion_distribution: ((settlement.religion_distribution as Array<Record<string, unknown>> | undefined) ?? []).map((share) => ({
-          ...share,
-          religionLabel: RELIGIONS[String(share.religionKey) as ReligionKey]?.label ?? String(share.religionKey),
-          secondaryLabel: secondaryReligionFor(String(share.religionKey) as ReligionKey).label
-        }))
+        religion_distribution: religionBeliefShares(
+          ((settlement.religion_distribution as Array<Record<string, unknown>> | undefined) ?? []).map((share) => ({
+            religionKey:String(share.religionKey) as ReligionKey,
+            primaryPercent:Number(share.primaryPercent),secondaryPercent:Number(share.secondaryPercent)
+          })),settlement.religion_key,Number(settlement.population)
+        )
       },
       buildings: buildings.rows, units: units.rows, armyAllocations: armyAllocations.rows,
       ships: ships.rows, fleetAllocations: fleetAllocations.rows, policies: policies.rows,
@@ -4442,28 +4445,41 @@ export const adminPanelService = {
         [settlementId, adminConfig.guildId]
       )).rows[0];
       if (!previous) throw new Error("Aktif yerleşke bulunamadı.");
+      const previousDistribution=(await client.query<{religion_key:ReligionKey;primary_percent:number;secondary_percent:number}>(
+        "SELECT religion_key,primary_percent,secondary_percent FROM settlement_religion_shares WHERE settlement_id=$1 FOR UPDATE",
+        [settlementId]
+      )).rows;
       const updated = (await client.query(
         `UPDATE settlements SET name=$1,population=$2,slave_population=$3,local_treasury=$4,
-                tax_rate_percent=$5,base_land_trade_income=$6,ruin_stage=$7,is_coastal=$8,is_conquered=$9,
-                religion_key=$10,religion_adherence_percent=$11
-          WHERE id=$12
+                tax_rate_percent=$5,base_land_trade_income=$6,ruin_stage=$7,is_coastal=$8,is_conquered=$9
+          WHERE id=$10
           RETURNING id,country_id,name,population,slave_population,local_treasury,tax_rate_percent,
                     base_land_trade_income,ruin_stage,is_coastal,is_conquered,religion_key,religion_adherence_percent`,
         [input.name, input.population, input.slavePopulation, input.localTreasury, input.taxRatePercent,
-          input.baseLandTradeIncome, input.ruinStage, input.isCoastal, input.isConquered,
-          input.religionKey, input.religionAdherencePercent, settlementId]
+          input.baseLandTradeIncome, input.ruinStage, input.isCoastal, input.isConquered,settlementId]
       )).rows[0];
-      const religionChanged=previous.religion_key!==input.religionKey
-        || Number(previous.religion_adherence_percent)!==Number(input.religionAdherencePercent);
-      if (religionChanged) {
+      const currentFamily=previousDistribution.find((share)=>share.religion_key===input.religionKey);
+      const currentFamilyTotal=Number(currentFamily?.primary_percent??0)+Number(currentFamily?.secondary_percent??0);
+      const currentSecondaryPercent=currentFamilyTotal>0?Number(currentFamily?.secondary_percent??0)/currentFamilyTotal*100:0;
+      const religionChanged=previous.religion_key!==input.religionKey;
+      const sectChanged=Math.abs(currentSecondaryPercent-input.secondarySectPercent)>.005;
+      if(religionChanged||!currentFamily){
         await client.query("DELETE FROM settlement_religion_shares WHERE settlement_id=$1",[settlementId]);
         await client.query(
           `INSERT INTO settlement_religion_shares(settlement_id,religion_key,primary_percent,secondary_percent)
            VALUES ($1,$2,$3,$4)`,
-          [settlementId,input.religionKey,input.religionAdherencePercent,100-input.religionAdherencePercent]
+          [settlementId,input.religionKey,100-input.secondarySectPercent,input.secondarySectPercent]
+        );
+      }else if(sectChanged){
+        const secondary=Math.round(currentFamilyTotal*input.secondarySectPercent)/100;
+        await client.query(
+          `UPDATE settlement_religion_shares
+              SET primary_percent=$1,secondary_percent=$2,updated_at=NOW()
+            WHERE settlement_id=$3 AND religion_key=$4`,
+          [Math.round((currentFamilyTotal-secondary)*100)/100,Math.round(secondary*100)/100,settlementId,input.religionKey]
         );
       }
-      await writeAdminAudit(client, actorId, "admin.panel.settlement.update", "settlement", settlementId, { previous, updated });
+      await writeAdminAudit(client, actorId, "admin.panel.settlement.update", "settlement", settlementId, { previous, updated,religionKey:input.religionKey,secondarySectPercent:input.secondarySectPercent });
       return updated;
     });
   },

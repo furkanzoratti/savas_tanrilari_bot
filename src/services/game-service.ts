@@ -982,7 +982,7 @@ export const gameService = {
               guild.culture_military_penalty_enabled
             ),country.mobilization,marshalPartial
           ),
-          religionDistribution:religionBeliefShares(distribution,settlement.religion_key)
+          religionDistribution:religionBeliefShares(distribution,settlement.religion_key,population)
         };
       });
       const percent=(population:number)=>totalPopulation>0?population/totalPopulation*100:0;
@@ -2273,7 +2273,7 @@ export const gameService = {
           unrestRisk: settlementUnrestChance(activeBuildings, effectiveResources, activePolicies, country.active_formable_key, religion.unrestReduction),
           starvationBonus: settlementStarvationBonus(activeBuildings, activePolicies, country.active_formable_key, religion.starvationBonus),
           religionModifiers: religion,
-          religionDistribution:religionBeliefShares(religionDistribution,settlement.religion_key),
+          religionDistribution:religionBeliefShares(religionDistribution,settlement.religion_key,Number(settlement.population)),
           temporaryMilitia: activePolicies.includes("WAR_PREPARATION") ? (formableModifiers(country.active_formable_key).warPreparationMilitia ?? Math.floor(500 * (formableModifiers(country.active_formable_key).policyMilitiaMultiplier ?? 1))) : 0,
           assignedMerchant: Boolean(assignedMerchant),
           merchantSkillBonus: assignedMerchant?.skill_bonus ?? 0,

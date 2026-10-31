@@ -12,18 +12,23 @@ import { greatPowerService } from "./great-power-service.js";
 import { GameError } from "./game-service.js";
 import { assertSettlementNotOccupied } from "./war-occupation-service.js";
 import { awardCharacterSpecializationProgress, chooseCharacterSpecialization } from "./character-specialization-progress.js";
-import { convertReligionDistribution, religionConversionPercent, RELIGIONS, type ReligionKey } from "../domain/religions.js";
+import {
+  convertReligionDistributionByPercent,convertReligionSectByPercent,primaryReligionTradition,
+  religionSectPercent,RELIGIONS,SECONDARY_RELIGIONS,type ReligionKey
+} from "../domain/religions.js";
 import { fallbackReligionDistribution, loadCountryReligionProfile, loadReligionDistributions } from "./religion-service.js";
 import { isAcquisitionTurn } from "../domain/mobilization.js";
 import { syncCountryPrimaryCulture } from "./culture-service.js";
 import {activeCountryModifiers} from "./country-modifier-service.js";
 import {dynastyDeathFailureMaximum,dynastyDeathSaveFailed} from "../domain/dynasty.js";
 import {markCharacterDead} from "./character-death-service.js";
+import {MISSIONARY_BASE_PROGRESS,missionaryBeliefPenalty,missionaryPopulationPenalty} from "../domain/missionary.js";
 
 export const MISSIONARY_PURCHASE_COST = 2_000;
 export const MISSIONARY_LIMIT_PER_COUNTRY = 5;
 export const MERCHANT_TASK_INCOME_MULTIPLIER = 1.10;
 export const MISSIONARY_TASK_BONUS = 1;
+export type MissionaryTaskType="RELIGION"|"SECT";
 
 export interface CharacterView {
   id: string;
@@ -372,7 +377,8 @@ export const characterService = {
 
   async startMissionary(input:{
     guildId:string;countryId:string;actorId:string;characterId:string;targetSettlementId:string;religionKey:ReligionKey;
-  }):Promise<{arrivalTurn:number;missionaryName:string;targetName:string;religionKey:ReligionKey}>{
+    taskType:MissionaryTaskType;sectKey?:string|null;
+  }):Promise<{arrivalTurn:number;missionaryName:string;targetName:string;religionKey:ReligionKey;taskType:MissionaryTaskType;sectLabel:string|null}>{
     return withTransaction(async(client)=>{
       const state=await guildState(client,input.guildId);
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1))",["missionary-target:"+input.targetSettlementId]);
@@ -401,7 +407,31 @@ export const characterService = {
         [input.targetSettlementId,input.countryId,input.guildId]
       )).rows[0];
       if(!target)throw new GameError("Din değiştirme hedefi kendi devletinize ait etkin bir yerleşke olmalıdır.");
-      if(target.religion_key===input.religionKey)throw new GameError("Hedef yerleşkenin ana dini zaten seçilen dinle aynı.");
+      const distributionMap=await loadReligionDistributions(client,[target.id]);
+      const targetState=(await client.query<{religion_adherence_percent:number}>(
+        "SELECT religion_adherence_percent FROM settlements WHERE id=$1",[target.id]
+      )).rows[0];
+      const distribution=distributionMap.get(target.id)??fallbackReligionDistribution({
+        religion_key:target.religion_key,religion_adherence_percent:Number(targetState?.religion_adherence_percent??100)
+      });
+      const family=distribution.find((share)=>share.religionKey===input.religionKey);
+      const familyPercent=religionFamilyPercent(distribution,input.religionKey);
+      let sectLabel:string|null=null;
+      let normalizedSectKey:string|null=null;
+      if(input.taskType==="RELIGION"){
+        if(familyPercent>=100)throw new GameError("Seçilen din bu yerleşkede zaten %100 düzeyinde.");
+      }else{
+        if(!family||familyPercent<=0)throw new GameError("Mezhep değişimi için seçilen din hedef yerleşkede mevcut olmalıdır.");
+        const primary=primaryReligionTradition(input.religionKey);
+        const secondary=SECONDARY_RELIGIONS[input.religionKey];
+        if(input.sectKey!==primary.key&&input.sectKey!==secondary.key)throw new GameError("Seçilen mezhep bu dine bağlı değil.");
+        normalizedSectKey=input.sectKey;
+        sectLabel=input.sectKey===primary.key?primary.label:secondary.label;
+        const current=input.sectKey===primary.key
+          ?religionSectPercent(family.primaryPercent,familyPercent)
+          :religionSectPercent(family.secondaryPercent,familyPercent);
+        if(current>=100)throw new GameError("Seçilen mezhep bu dinin mensupları arasında zaten %100 düzeyinde.");
+      }
       const live=await client.query(
         "SELECT 1 FROM missionary_operations WHERE target_settlement_id=$1 AND status IN ('TRAVELING','ACTIVE')",
         [target.id]
@@ -410,10 +440,10 @@ export const characterService = {
       const arrivalTurn=state.current_turn+1;
       await client.query(
         `INSERT INTO missionary_operations(
-           guild_id,country_id,missionary_character_id,target_settlement_id,religion_key,status,
+           guild_id,country_id,missionary_character_id,target_settlement_id,religion_key,task_type,sect_key,status,
            started_turn,arrival_turn,created_by
-         ) VALUES($1,$2,$3,$4,$5,'TRAVELING',$6,$7,$8)`,
-        [input.guildId,input.countryId,character.id,target.id,input.religionKey,state.current_turn,arrivalTurn,input.actorId]
+         ) VALUES($1,$2,$3,$4,$5,$6,$7,'TRAVELING',$8,$9,$10)`,
+        [input.guildId,input.countryId,character.id,target.id,input.religionKey,input.taskType,normalizedSectKey,state.current_turn,arrivalTurn,input.actorId]
       );
       await client.query(
         "UPDATE country_characters SET assignment='MISSIONARY_TRAVELING',assigned_settlement_id=$1,assignment_ready_turn=$2 WHERE id=$3",
@@ -422,9 +452,9 @@ export const characterService = {
       await client.query(
         `INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details)
          VALUES($1,$2,'MISSIONARY_TASK_START','character',$3,$4::jsonb)`,
-        [input.guildId,input.actorId,character.id,JSON.stringify({targetSettlementId:target.id,religionKey:input.religionKey,arrivalTurn})]
+        [input.guildId,input.actorId,character.id,JSON.stringify({targetSettlementId:target.id,religionKey:input.religionKey,taskType:input.taskType,sectKey:normalizedSectKey,arrivalTurn})]
       );
-      return{arrivalTurn,missionaryName:character.name,targetName:target.name,religionKey:input.religionKey};
+      return{arrivalTurn,missionaryName:character.name,targetName:target.name,religionKey:input.religionKey,taskType:input.taskType,sectLabel};
     });
   },
 
@@ -1564,9 +1594,11 @@ export async function processCharacterTurn(
       id:string;country_id:string;missionary_character_id:string;target_settlement_id:string;
       religion_key:ReligionKey;converted_percent:number;missionary_name:string;country_name:string;
       target_name:string;population:number;target_religion_key:ReligionKey;religion_adherence_percent:number;
+      task_type:MissionaryTaskType;sect_key:string|null;
     }>(
       `SELECT operation.id,operation.country_id,operation.missionary_character_id,
               operation.target_settlement_id,operation.religion_key,operation.converted_percent,
+              operation.task_type,operation.sect_key,
               character.name AS missionary_name,country.name AS country_name,
               target.name AS target_name,target.population,target.religion_key AS target_religion_key,
               target.religion_adherence_percent
@@ -1587,7 +1619,18 @@ export async function processCharacterTurn(
         religion_adherence_percent:Number(operation.religion_adherence_percent)
       });
       const beforeFamily=religionFamilyPercent(beforeDistribution,operation.religion_key);
-      if(beforeFamily>=100){
+      const familyShare=beforeDistribution.find((share)=>share.religionKey===operation.religion_key);
+      const primarySect=primaryReligionTradition(operation.religion_key);
+      const secondarySect=SECONDARY_RELIGIONS[operation.religion_key];
+      const targetBranch: "PRIMARY"|"SECONDARY"=operation.sect_key===secondarySect.key?"SECONDARY":"PRIMARY";
+      const beforeProgress=operation.task_type==="SECT"
+        ?religionSectPercent(targetBranch==="PRIMARY"?(familyShare?.primaryPercent??0):(familyShare?.secondaryPercent??0),beforeFamily)
+        :beforeFamily;
+      const taskLabel=operation.task_type==="SECT"?"Mezhep Değiştirme":"Din Değiştirme";
+      const targetLabel=operation.task_type==="SECT"
+        ?(targetBranch==="PRIMARY"?primarySect.label:secondarySect.label)
+        :RELIGIONS[operation.religion_key].label;
+      if(beforeProgress>=100){
         await client.query(
           "UPDATE missionary_operations SET status='COMPLETED',last_resolved_turn=$1,updated_at=NOW() WHERE id=$2",
           [turn,operation.id]
@@ -1597,32 +1640,37 @@ export async function processCharacterTurn(
           [operation.missionary_character_id]
         );
         logs.push(
-          "🕯️ **"+operation.missionary_name+"** • **Din değiştirme tamamlandı**\n"+
+          "🕯️ **"+operation.missionary_name+"** • **"+taskLabel+" tamamlandı**\n"+
           "↳ Ülke: **"+operation.country_name+"** • Hedef: **"+operation.target_name+"**\n"+
-          "↳ **"+RELIGIONS[operation.religion_key].label+"** ailesi yerleşkede **%100** düzeyine ulaştı; Misyoner serbest kaldı."
+          "↳ **"+targetLabel+"** hedefi **%100** düzeyine ulaştı; Misyoner serbest kaldı."
         );
         continue;
       }
-      const attackRoll=randomInt(1,21);
-      const defenseRoll=randomInt(1,21);
       const projectModifiers=await activeCountryModifiers(client,operation.country_id);
-      const attackBonus=MISSIONARY_TASK_BONUS+(await countryReligionBonuses(operation.country_id)).missionary+Number(projectModifiers.taskRollBonus?.MISSIONARY??0)+Number(projectModifiers.religionTaskRollBonus??0);
-      const populationBonus=culturePopulationResistance(Number(operation.population));
-      const templeBonus=await pantheonBonus(client,operation.target_settlement_id);
-      const defenseBonus=populationBonus+templeBonus;
-      const margin=attackRoll+attackBonus-defenseRoll-defenseBonus;
-      const nextDistribution=convertReligionDistribution(beforeDistribution,operation.religion_key,margin);
+      const taskBonus=Math.round(MISSIONARY_TASK_BONUS+(await countryReligionBonuses(operation.country_id)).missionary+
+        Number(projectModifiers.taskRollBonus?.MISSIONARY??0)+Number(projectModifiers.religionTaskRollBonus??0));
+      const populationPenalty=missionaryPopulationPenalty(Number(operation.population));
+      const beliefPenalty=missionaryBeliefPenalty(100-beforeProgress);
+      const buildingPenalty=await pantheonBonus(client,operation.target_settlement_id);
+      const fixedProgress=Math.max(1,MISSIONARY_BASE_PROGRESS+taskBonus-populationPenalty-beliefPenalty-buildingPenalty);
+      const nextDistribution=operation.task_type==="SECT"
+        ?convertReligionSectByPercent(beforeDistribution,operation.religion_key,targetBranch,fixedProgress)
+        :convertReligionDistributionByPercent(beforeDistribution,operation.religion_key,fixedProgress);
       const afterFamily=religionFamilyPercent(nextDistribution,operation.religion_key);
-      const actualConverted=Math.max(0,Math.round((afterFamily-beforeFamily)*100)/100);
+      const afterShare=nextDistribution.find((share)=>share.religionKey===operation.religion_key);
+      const afterProgress=operation.task_type==="SECT"
+        ?religionSectPercent(targetBranch==="PRIMARY"?(afterShare?.primaryPercent??0):(afterShare?.secondaryPercent??0),afterFamily)
+        :afterFamily;
+      const actualConverted=Math.max(0,Math.round((afterProgress-beforeProgress)*100)/100);
       if(actualConverted>0)await replaceReligionDistribution(client,operation.target_settlement_id,nextDistribution);
-      const complete=afterFamily>=100;
+      const complete=afterProgress>=100;
       await client.query(
-        `INSERT INTO missionary_rolls(
-           operation_id,game_turn,attack_roll,attack_bonus,attack_total,defense_roll,
-           defense_bonus,defense_total,converted_percent
-         ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT DO NOTHING`,
-        [operation.id,turn,attackRoll,attackBonus,attackRoll+attackBonus,defenseRoll,defenseBonus,
-          defenseRoll+defenseBonus,actualConverted]
+        `INSERT INTO missionary_progress_logs(
+           operation_id,game_turn,base_progress,task_bonus,population_penalty,belief_penalty,
+           building_penalty,actual_progress,before_percent,after_percent
+         ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT DO NOTHING`,
+        [operation.id,turn,MISSIONARY_BASE_PROGRESS,taskBonus,populationPenalty,beliefPenalty,
+          buildingPenalty,actualConverted,beforeProgress,afterProgress]
       );
       await client.query(
         `UPDATE missionary_operations
@@ -1638,12 +1686,11 @@ export async function processCharacterTurn(
         );
       }
       logs.push(
-        "🕯️ **"+operation.missionary_name+"** • **Din Değiştirme**\n"+
-        "↳ Ülke: **"+operation.country_name+"** • Hedef: **"+operation.target_name+"** • İnanç: **"+RELIGIONS[operation.religion_key].label+"**\n"+
-        "↳ Başarı: 1d20 **"+attackRoll+"** + görev bonusu **"+attackBonus+"** = **"+(attackRoll+attackBonus)+"** • "+
-        "Savunma: 1d20 **"+defenseRoll+"** + nüfus **"+populationBonus+"** + Panteon **"+templeBonus+"** = **"+(defenseRoll+defenseBonus)+"**\n"+
-        "↳ Sonuç: **%"+religionConversionPercent(margin)+"** potansiyel • Bu tur çevrilen: **%"+actualConverted+"** • "+
-        "Yerleşkedeki inanç ailesi: **%"+beforeFamily+" → %"+afterFamily+"**"+(complete?" • **TAMAMLANDI**":"")
+        "🕯️ **"+operation.missionary_name+"** • **"+taskLabel+"**\n"+
+        "↳ Ülke: **"+operation.country_name+"** • Hedef: **"+operation.target_name+"** • Hedef inanç: **"+targetLabel+"**\n"+
+        "↳ Sabit ilerleme: **"+MISSIONARY_BASE_PROGRESS+"** + görev etkileri **"+taskBonus+"** − nüfus **"+populationPenalty+
+        "** − inanç direnci **"+beliefPenalty+"** − dinî yapılar **"+buildingPenalty+"**\n"+
+        "↳ Bu tur: **+%"+actualConverted+"** • Güncel: **%"+beforeProgress+" → %"+afterProgress+"**"+(complete?" • **TAMAMLANDI**":"")
       );
     }
     if (logs.length) {

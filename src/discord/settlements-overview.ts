@@ -15,9 +15,14 @@ export interface SettlementsOverviewScope{
 function dominantBelief(settlement:CountryDocument["settlements"][number]):string{
   const shares=settlement.religionDistribution??[];
   if(!shares.length)return "Kayıt yok";
-  const strongest=[...shares].sort((left,right)=>(right.primaryPercent+right.secondaryPercent)-(left.primaryPercent+left.secondaryPercent))[0]!;
-  const total=strongest.primaryPercent+strongest.secondaryPercent;
-  return `${strongest.religionLabel} %${number(total)}${strongest.secondaryPercent>0?` • ${strongest.secondaryLabel} %${number(strongest.secondaryPercent)}`:""}`;
+  const familyPercent=(share:typeof shares[number])=>Number(share.familyPercent??(share.primaryPercent+share.secondaryPercent));
+  const strongest=[...shares].sort((left,right)=>familyPercent(right)-familyPercent(left))[0]!;
+  const total=familyPercent(strongest);
+  const fallbackSect=strongest.secondaryPercent>0
+    ?[{label:strongest.secondaryLabel,percent:total>0?strongest.secondaryPercent/total*100:0}]:[];
+  const leadingSect=[...(strongest.sects??fallbackSect)].sort((left,right)=>right.percent-left.percent)[0];
+  const believers=strongest.believerCount??Math.round(settlement.population*total/100);
+  return `${strongest.religionLabel} %${number(total)} • ${number(believers)} kişi${leadingSect?`\n↳ ${leadingSect.label} %${number(leadingSect.percent)}`:""}`;
 }
 
 function settlementStatus(settlement:CountryDocument["settlements"][number]):string{
