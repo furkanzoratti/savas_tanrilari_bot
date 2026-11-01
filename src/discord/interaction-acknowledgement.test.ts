@@ -26,5 +26,13 @@ describe("gecikmeye duyarlı Discord komutları",()=>{
     expect(modal.indexOf("await interaction.deferUpdate()"))
       .toBeLessThan(modal.indexOf("await ownCountry"));
     expect(modal).toContain("else await interaction.deferReply({flags:MessageFlags.Ephemeral})");
+    expect(modal).toContain('new Set(["gladiator-bet","chariot-bet","bid","action"])');
+
+    const couponSelect=source.slice(
+      source.indexOf('if(interaction.customId.startsWith("ggs2|gladiator-coupon|"))'),
+      source.indexOf('if (interaction.customId.startsWith("ggs2|gladiator-fighter|"))')
+    );
+    expect(couponSelect.indexOf("await interaction.deferUpdate()"))
+      .toBeLessThan(couponSelect.indexOf("await ownCountry"));
   });
 });

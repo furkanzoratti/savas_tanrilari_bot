@@ -698,7 +698,7 @@ export const greatGamesGladiatorService = {
     matchNumber: number;
     side: "A" | "B";
     amount: number;
-  }): Promise<{ fighterName: string; odds: number; possiblePayout: number; balance: number }> {
+  }): Promise<{ fighterName: string; odds: number; possiblePayout: number; balance: number; created:boolean }> {
     return withTransaction(async (client) => {
       if (!Number.isSafeInteger(input.amount) || input.amount < 100 || input.amount > 5_000) {
         throw new GameError("Capua bahsi 100–5.000 Altın arasında olmalıdır.");
@@ -721,14 +721,28 @@ export const greatGamesGladiatorService = {
         [tournament.id, tournament.current_round, input.matchNumber]
       )).rows[0];
       if (!match) throw new GameError("Bu turda bu numarayla bahis alınabilir bir eşleşme yok.");
-      const existing = await client.query(
-        "SELECT 1 FROM great_games_gladiator_bets WHERE match_id=$1 AND bettor_country_id=$2",
-        [match.id, input.countryId]
-      );
-      if (existing.rowCount) throw new GameError("Bu devlet bu eşleşme için bahis hakkını zaten kullandı.");
       const fighterId = input.side === "A" ? match.fighter_a_id : match.fighter_b_id;
       const fighterName = input.side === "A" ? match.fighter_a_name : match.fighter_b_name;
       const odds = Number(input.side === "A" ? match.odds_a : match.odds_b);
+      const existing = (await client.query<{
+        fighter_id:string;amount:number;locked_odds:number;balance:number;
+      }>(
+        `SELECT bet.fighter_id,bet.amount,bet.locked_odds,wallet.balance
+           FROM great_games_gladiator_bets bet
+           JOIN great_games_wallets wallet
+             ON wallet.season_id=$3 AND wallet.country_id=bet.bettor_country_id AND wallet.closed_at IS NULL
+          WHERE bet.match_id=$1 AND bet.bettor_country_id=$2`,
+        [match.id,input.countryId,season.id]
+      )).rows[0];
+      if(existing){
+        if(existing.fighter_id!==fighterId||Number(existing.amount)!==input.amount)
+          throw new GameError("Bu devlet bu eşleşme için bahis hakkını zaten kullandı.");
+        const lockedOdds=Number(existing.locked_odds);
+        return{
+          fighterName,odds:lockedOdds,possiblePayout:Math.floor(input.amount*lockedOdds),
+          balance:Number(existing.balance),created:false
+        };
+      }
       const sourceKey = `GLADIATOR:run:${tournament.run_number}:round:${tournament.current_round}:match:${match.id}:bet:${input.countryId}`;
       const balance = await recordWalletMoney(client, {
         seasonId: season.id,
@@ -743,7 +757,7 @@ export const greatGamesGladiatorService = {
          VALUES($1,$2,$3,$4,$5)`,
         [match.id, input.countryId, fighterId, input.amount, odds]
       );
-      return { fighterName, odds, possiblePayout: Math.floor(input.amount * odds), balance };
+      return { fighterName, odds, possiblePayout: Math.floor(input.amount * odds), balance,created:true };
     });
   },
 

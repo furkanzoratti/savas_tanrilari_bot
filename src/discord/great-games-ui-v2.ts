@@ -1994,7 +1994,10 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
   // Modal gönderimleri özellikle mobil istemcilerde ağ gecikmesine daha açık.
   // Discord'un üç saniyelik etkileşim süresini kaçırmamak için bütün Büyük
   // Oyunlar formlarını önce onayla, veritabanı işlemlerini ardından yap.
-  if(interaction.isFromMessage())await interaction.deferUpdate();
+  const privateReplyActions=new Set(["gladiator-bet","chariot-bet","bid","action"]);
+  const usesPrivateReply=privateReplyActions.has(action??"");
+  if(usesPrivateReply)await interaction.deferReply({flags:MessageFlags.Ephemeral});
+  else if(interaction.isFromMessage())await interaction.deferUpdate();
   else await interaction.deferReply({flags:MessageFlags.Ephemeral});
   if (action === "select-random" || action === "select-manual") {
     if (!isGameMaster(interaction)) throw new GameError("Katılımcıları yalnızca oyun yöneticisi seçebilir.");
@@ -2079,7 +2082,7 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
       amount
     });
     await interaction.editReply({
-      content: `✅ **${result.fighterName}** için **${gold(amount)}** bahis kilitlendi. Oran: **${result.odds.toFixed(2)}x** • Olası ödeme: **${gold(result.possiblePayout)}** • Cüzdan: **${gold(result.balance)}**`
+      content: `${result.created?"✅":"ℹ️"} **${result.fighterName}** için **${gold(amount)}** bahis ${result.created?"kilitlendi":"zaten kayıtlıydı; ikinci kez para kesilmedi"}. Oran: **${result.odds.toFixed(2)}x** • Olası ödeme: **${gold(result.possiblePayout)}** • Cüzdan: **${gold(result.balance)}**`
     });
     return true;
   }
@@ -2143,7 +2146,10 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
     : type === "DIPLOMACY"
       ? `✅ Diplomasi Masası oyun gizlice kaydedildi. Seçtiğin ana ve ikincil hedef yalnızca sonuç çözülünce açıklanacak.`
     : "✅ Büyük Oyun hamlen gizlice kaydedildi.";
-  if (interaction.isFromMessage()) {
+  if (usesPrivateReply) {
+    if(interaction.isFromMessage())await interaction.message.edit(await publicGamePayload(interaction.guildId,type));
+    await interaction.editReply({content:confirmation});
+  } else if (interaction.isFromMessage()) {
     await interaction.editReply(await publicGamePayload(interaction.guildId, type));
     await interaction.followUp({ content: confirmation, flags: MessageFlags.Ephemeral });
   } else {
