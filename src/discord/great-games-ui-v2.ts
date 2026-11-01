@@ -1663,7 +1663,7 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
     const draft=gladiatorCouponDrafts.get(key);
     if(!draft)throw new GameError("Önce kupon seçimlerini açmalısın.");
     const amountInput=new TextInputBuilder()
-      .setCustomId("amount").setLabel("Kupon Bahsi: 100–5.000 Altın")
+      .setCustomId("amount").setLabel("Kupon Bahsi: 100–10.000 Altın")
       .setPlaceholder("1000").setMaxLength(10).setStyle(TextInputStyle.Short).setRequired(true);
     if(draft.amount)amountInput.setValue(String(draft.amount));
     await interaction.showModal(
@@ -1710,7 +1710,7 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
     await interaction.showModal(new ModalBuilder().setCustomId("ggm2|gladiator-bet|GLADIATOR").setTitle("Capua Tekli Maç Bahsi").addComponents(
       new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("match").setLabel("Eşleşme numarası").setPlaceholder("Örnek: 3").setStyle(TextInputStyle.Short).setRequired(true)),
       new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("side").setLabel("Dövüşçü tarafı: A veya B").setPlaceholder("A").setMaxLength(1).setStyle(TextInputStyle.Short).setRequired(true)),
-      new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("amount").setLabel("Bahis: 100–5.000 Altın").setPlaceholder("1000").setMaxLength(10).setStyle(TextInputStyle.Short).setRequired(true))
+      new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("amount").setLabel("Bahis: 100–10.000 Altın").setPlaceholder("1000").setMaxLength(10).setStyle(TextInputStyle.Short).setRequired(true))
     ));
     return true;
   }
@@ -2056,8 +2056,8 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
   }
   if(action==="gladiator-coupon-amount"){
     const amount=Number(interaction.fields.getTextInputValue("amount").replaceAll(".","").trim());
-    if(!Number.isSafeInteger(amount)||amount<100||amount>5_000)
-      throw new GameError("Capua kupon bahsi 100–5.000 Altın arasında olmalıdır.");
+    if(!Number.isSafeInteger(amount)||amount<100||amount>10_000)
+      throw new GameError("Capua kupon bahsi 100–10.000 Altın arasında olmalıdır.");
     const draft=gladiatorCouponDrafts.get(gladiatorCouponDraftKey(interaction.guildId,interaction.user.id));
     if(!draft||draft.countryId!==country.id)throw new GameError("Güncellenecek kupon taslağı bulunamadı.");
     draft.amount=amount;

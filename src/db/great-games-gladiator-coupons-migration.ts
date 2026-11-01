@@ -7,7 +7,7 @@ export const greatGamesGladiatorCouponsMigration={
       tournament_id UUID NOT NULL REFERENCES great_games_gladiator_tournaments(id) ON DELETE CASCADE,
       round INTEGER NOT NULL CHECK (round BETWEEN 1 AND 5),
       bettor_country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
-      amount BIGINT NOT NULL CHECK (amount BETWEEN 100 AND 5000),
+      amount BIGINT NOT NULL CHECK (amount BETWEEN 100 AND 10000),
       combined_odds NUMERIC(8,2) NOT NULL CHECK (combined_odds>=1 AND combined_odds<=12),
       payout BIGINT NOT NULL DEFAULT 0 CHECK (payout>=0),
       status TEXT NOT NULL DEFAULT 'LOCKED' CHECK (status IN ('LOCKED','WON','LOST','REFUNDED')),

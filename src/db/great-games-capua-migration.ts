@@ -64,7 +64,7 @@ export const greatGamesCapuaMigration = {
       match_id UUID NOT NULL REFERENCES great_games_gladiator_matches(id) ON DELETE CASCADE,
       bettor_country_id UUID NOT NULL REFERENCES countries(id) ON DELETE CASCADE,
       fighter_id UUID NOT NULL REFERENCES great_games_gladiators(id) ON DELETE RESTRICT,
-      amount BIGINT NOT NULL CHECK (amount BETWEEN 100 AND 5000),
+      amount BIGINT NOT NULL CHECK (amount BETWEEN 100 AND 10000),
       locked_odds NUMERIC(6,2) NOT NULL CHECK (locked_odds>=1),
       payout BIGINT NOT NULL DEFAULT 0 CHECK (payout>=0),
       status TEXT NOT NULL DEFAULT 'LOCKED' CHECK (status IN ('LOCKED','WON','LOST','REFUNDED')),

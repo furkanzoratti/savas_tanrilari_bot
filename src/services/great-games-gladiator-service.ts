@@ -700,8 +700,8 @@ export const greatGamesGladiatorService = {
     amount: number;
   }): Promise<{ fighterName: string; odds: number; possiblePayout: number; balance: number; created:boolean }> {
     return withTransaction(async (client) => {
-      if (!Number.isSafeInteger(input.amount) || input.amount < 100 || input.amount > 5_000) {
-        throw new GameError("Capua bahsi 100–5.000 Altın arasında olmalıdır.");
+      if (!Number.isSafeInteger(input.amount) || input.amount < 100 || input.amount > 10_000) {
+        throw new GameError("Capua bahsi 100–10.000 Altın arasında olmalıdır.");
       }
       if (!Number.isSafeInteger(input.matchNumber) || input.matchNumber < 1) throw new GameError("Eşleşme numarası geçersiz.");
       const season = await lockedSeason(client, input.guildId);
@@ -769,8 +769,8 @@ export const greatGamesGladiatorService = {
     selections:Array<{matchNumber:number;fighterName:string;fighterCode:string;odds:number}>;
   }>{
     return withTransaction(async(client)=>{
-      if(!Number.isSafeInteger(input.amount)||input.amount<100||input.amount>5_000)
-        throw new GameError("Capua kupon bahsi 100–5.000 Altın arasında olmalıdır.");
+      if(!Number.isSafeInteger(input.amount)||input.amount<100||input.amount>10_000)
+        throw new GameError("Capua kupon bahsi 100–10.000 Altın arasında olmalıdır.");
       if(input.selections.length<GLADIATOR_COUPON_MIN_SELECTIONS)
         throw new GameError(`Kupon en az ${GLADIATOR_COUPON_MIN_SELECTIONS} seçim içermelidir.`);
       const matchIds=input.selections.map((selection)=>selection.matchId);
