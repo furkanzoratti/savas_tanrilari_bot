@@ -33,4 +33,16 @@ describe("GM paneli lacivert, krem ve kahverengi arayüzü", () => {
     expect(css).toContain("position: sticky");
     expect(css).toContain("button:focus-visible");
   });
+
+  it("yerleşke tablosunu geniş çalışma alanına sığdırır", () => {
+    const app = read("./public/app.js");
+    const css = read("./public/app.css");
+
+    expect(app).toContain('page.classList.toggle("page-wide", route === "settlements")');
+    expect(app).toContain('class="card table-wrap settlements-table-wrap"');
+    expect(app).toContain('class="settlements-table"');
+    expect(css).toContain(".page.page-wide { max-width: none; }");
+    expect(css).toContain(".settlements-table { width: 100%; table-layout: fixed; }");
+    expect(css).toContain(".settlements-table-wrap { overflow-x: hidden; }");
+  });
 });
