@@ -2,7 +2,7 @@ import type { DbClient } from "../db/pool.js";
 import { pool, withTransaction } from "../db/pool.js";
 import {
   GLADIATOR_COUPON_MIN_SELECTIONS,GREAT_GAMES_TURN,
-  gladiatorCouponOdds,gladiatorOdds,resolveGladiatorFight
+  gladiatorCouponOdds,gladiatorOdds,gladiatorSingleBetAllowed,resolveGladiatorFight
 } from "../domain/great-games.js";
 import { GameError } from "./game-service.js";
 import { adjustGreatGamesWallet } from "./great-games-wallet-service.js";
@@ -708,6 +708,8 @@ export const greatGamesGladiatorService = {
       if(["FINISHED","CANCELLED"].includes(season.status))throw new GameError("Büyük Oyun sezonu kapalı.");
       const tournament = await latestTournament(client, season.id, true);
       if (!tournament || tournament.status !== "BETTING") throw new GameError("Bu turda bahis alımı kapalı.");
+      if(!gladiatorSingleBetAllowed(tournament.tournament_type,tournament.current_round))
+        throw new GameError("Tekli bahisler yalnızca Çeyrek Final, Yarı Final ve Final turlarında açılır.");
       const match = (await client.query<{
         id: string; fighter_a_id: string; fighter_b_id: string; fighter_a_name: string; fighter_b_name: string; odds_a: number; odds_b: number;
       }>(

@@ -176,6 +176,13 @@ export function gladiatorOdds(powerA: number, powerB: number, maxHpA = 35, maxHp
 export const GLADIATOR_COUPON_MIN_SELECTIONS=2;
 export const GLADIATOR_COUPON_MAX_ODDS=12;
 
+export function gladiatorSingleBetAllowed(
+  tournamentType:"QUALIFIER"|"FINAL",round:number
+):boolean{
+  if(!Number.isSafeInteger(round)||round<1)return false;
+  return tournamentType==="FINAL"?round>=2:round>=3;
+}
+
 export function gladiatorCouponOdds(odds:readonly number[]):number{
   if(odds.length<GLADIATOR_COUPON_MIN_SELECTIONS)
     throw new Error(`Kupon en az ${GLADIATOR_COUPON_MIN_SELECTIONS} seçim içermelidir.`);

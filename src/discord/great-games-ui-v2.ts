@@ -7,7 +7,7 @@ import {
   ACTIVE_GREAT_GAME_TYPES, AUCTION_BID_INCREMENT, AUCTION_OPENING_BID, CARAVAN_ROUTES, CARAVAN_TRACK_TARGET, CHARIOT_TACTICS, CHARIOT_TRACK_TARGET,
   GLADIATOR_COUPON_MAX_ODDS,GLADIATOR_COUPON_MIN_SELECTIONS,
   GREAT_GAMES_RACE_ROUNDS, GREAT_GAMES_TURN, GREAT_GAME_TYPES, auctionNextMinimum, diplomacyGoalKey, nextIstanbulAuctionDeadline,
-  gladiatorCouponOdds,parseCaravanRoute, parseChariotTactic, parseKingsDecision,
+  gladiatorCouponOdds,gladiatorSingleBetAllowed,parseCaravanRoute, parseChariotTactic, parseKingsDecision,
   type CaravanRoute, type ChariotTactic, type GreatGameType, type KingsDecision
 } from "../domain/great-games.js";
 import { gold } from "../domain/format.js";
@@ -1171,6 +1171,12 @@ async function publicGamePayload(guildId: string, type: GreatGameType, content?:
   );
   if(type==="GLADIATOR"&&gladiatorView?.tournament?.status==="BETTING"){
     const couponAvailable=activeCouponMatches(gladiatorView).length>=GLADIATOR_COUPON_MIN_SELECTIONS;
+    const singleBetAvailable=gladiatorSingleBetAllowed(
+      gladiatorView.tournament.tournament_type,gladiatorView.tournament.current_round
+    );
+    if(singleBetAvailable)buttons.addComponents(
+      new ButtonBuilder().setCustomId("gg2|gladiator-bet|GLADIATOR").setLabel("Tekli Bahis").setEmoji("💰").setStyle(ButtonStyle.Primary)
+    );
     buttons.addComponents(
       new ButtonBuilder().setCustomId("gg2|gladiator-coupon-open|GLADIATOR").setLabel(couponAvailable?"Kupon Yap":"En Az 2 Maç Gerekli").setEmoji("🎟️").setStyle(ButtonStyle.Success).setDisabled(!couponAvailable),
       new ButtonBuilder().setCustomId("gg2|gladiator-close|GLADIATOR").setLabel("Bahisleri Kapat").setEmoji("🔒").setStyle(ButtonStyle.Danger)
@@ -1701,7 +1707,12 @@ export async function handleGreatGamesButton(interaction: ButtonInteraction): Pr
     return true;
   }
   if (action === "gladiator-bet") {
-    throw new GameError("Capua'da tekli bahis kapalıdır. En az iki farklı eşleşmeden oluşan bir kupon hazırlamalısın.");
+    await interaction.showModal(new ModalBuilder().setCustomId("ggm2|gladiator-bet|GLADIATOR").setTitle("Capua Tekli Maç Bahsi").addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("match").setLabel("Eşleşme numarası").setPlaceholder("Örnek: 3").setStyle(TextInputStyle.Short).setRequired(true)),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("side").setLabel("Dövüşçü tarafı: A veya B").setPlaceholder("A").setMaxLength(1).setStyle(TextInputStyle.Short).setRequired(true)),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("amount").setLabel("Bahis: 100–5.000 Altın").setPlaceholder("1000").setMaxLength(10).setStyle(TextInputStyle.Short).setRequired(true))
+    ));
+    return true;
   }
   if(action==="court-control"){
     const updateExisting=interaction.message.flags.has(MessageFlags.Ephemeral);
@@ -2056,7 +2067,21 @@ export async function handleGreatGamesModal(interaction: ModalSubmitInteraction)
     throw new GameError(`${GREAT_GAMES_TURN}. Tur etkinliklerinde gladyatör müzayedesi ve teklif verme kapalıdır.`);
   }
   if (action === "gladiator-bet") {
-    throw new GameError("Capua'da tekli bahis kapalıdır. En az iki farklı eşleşmeden oluşan bir kupon hazırlamalısın.");
+    const matchNumber = Number(interaction.fields.getTextInputValue("match").trim());
+    const sideRaw = interaction.fields.getTextInputValue("side").trim().toLocaleUpperCase("tr-TR");
+    if (sideRaw !== "A" && sideRaw !== "B") throw new GameError("Dövüşçü tarafı `A` veya `B` olmalıdır.");
+    const amount = Number(interaction.fields.getTextInputValue("amount").replaceAll(".", "").trim());
+    const result = await greatGamesGladiatorService.placeBet({
+      guildId: interaction.guildId,
+      countryId: country.id,
+      matchNumber,
+      side: sideRaw,
+      amount
+    });
+    await interaction.editReply({
+      content: `✅ **${result.fighterName}** için **${gold(amount)}** bahis kilitlendi. Oran: **${result.odds.toFixed(2)}x** • Olası ödeme: **${gold(result.possiblePayout)}** • Cüzdan: **${gold(result.balance)}**`
+    });
+    return true;
   }
   if (action === "chariot-bet") {
     const amount = Number(interaction.fields.getTextInputValue("amount").replaceAll(".", ""));
