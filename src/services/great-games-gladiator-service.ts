@@ -1,7 +1,7 @@
 import type { DbClient } from "../db/pool.js";
 import { pool, withTransaction } from "../db/pool.js";
 import {
-  GLADIATOR_COUPON_MAX_SELECTIONS,GLADIATOR_COUPON_MIN_SELECTIONS,GREAT_GAMES_TURN,
+  GLADIATOR_COUPON_MIN_SELECTIONS,GREAT_GAMES_TURN,
   gladiatorCouponOdds,gladiatorOdds,resolveGladiatorFight
 } from "../domain/great-games.js";
 import { GameError } from "./game-service.js";
@@ -755,8 +755,8 @@ export const greatGamesGladiatorService = {
     return withTransaction(async(client)=>{
       if(!Number.isSafeInteger(input.amount)||input.amount<100||input.amount>5_000)
         throw new GameError("Capua kupon bahsi 100–5.000 Altın arasında olmalıdır.");
-      if(input.selections.length<GLADIATOR_COUPON_MIN_SELECTIONS||input.selections.length>GLADIATOR_COUPON_MAX_SELECTIONS)
-        throw new GameError(`Kupon ${GLADIATOR_COUPON_MIN_SELECTIONS}–${GLADIATOR_COUPON_MAX_SELECTIONS} seçim içermelidir.`);
+      if(input.selections.length<GLADIATOR_COUPON_MIN_SELECTIONS)
+        throw new GameError(`Kupon en az ${GLADIATOR_COUPON_MIN_SELECTIONS} seçim içermelidir.`);
       const matchIds=input.selections.map((selection)=>selection.matchId);
       if(new Set(matchIds).size!==matchIds.length)throw new GameError("Bir kuponda aynı eşleşmeden yalnızca bir gladyatör seçilebilir.");
       const season=await lockedSeason(client,input.guildId);

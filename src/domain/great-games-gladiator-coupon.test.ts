@@ -10,8 +10,8 @@ describe("Capua birleşik kupon oranı",()=>{
     expect(gladiatorCouponOdds([2.5,2.5,2.5])).toBe(12);
   });
 
-  it("iki ile beş dışındaki seçim sayılarını reddeder",()=>{
-    expect(()=>gladiatorCouponOdds([1.5])).toThrow("2–5");
-    expect(()=>gladiatorCouponOdds([1.1,1.1,1.1,1.1,1.1,1.1])).toThrow("2–5");
+  it("tekli bahsi reddeder, seçim sayısına üst sınır uygulamaz",()=>{
+    expect(()=>gladiatorCouponOdds([1.5])).toThrow("en az 2");
+    expect(gladiatorCouponOdds(Array.from({length:32},()=>1.01))).toBe(1.37);
   });
 });
