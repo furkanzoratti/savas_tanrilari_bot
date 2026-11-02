@@ -2535,7 +2535,11 @@ export const battleService = {
   async publish(input: { guildId: string; channelId: string; actorId: string }): Promise<BattleView> {
     return withTransaction(async (client) => {
       const battle = await activeInChannel(client, input.guildId, input.channelId);
-      if (!battle || battle.status !== "DRAFT") throw new GameError("Yayımlanabilir savaş taslağı bulunamadı.");
+      if (!battle) throw new GameError("Bu kanalda yayımlanabilecek etkin bir muharebe bulunamadı.");
+      // Panelden etkinleştirilen veya Discord kartı sonradan silinen muharebeler
+      // DRAFT durumunda değildir. Mevcut savaş durumunu değiştirmeden yeni bir
+      // açık kart üretilebilmesi için etkin kayıt doğrudan yeniden yayımlanır.
+      if (battle.status !== "DRAFT") return loadView(client,battle.id,true);
       let view = await loadView(client, battle.id, true);
       if (battle.terrain === "SIEGE" && battle.defender_settlement_id&&!view.sides.B.rebel_faction_id) {
         const prepared = Boolean((await client.query(

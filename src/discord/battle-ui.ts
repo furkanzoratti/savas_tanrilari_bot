@@ -807,6 +807,7 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
     requireGameMaster(interaction);
     const view = await battleService.publish({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id });
     const reply = await interaction.editReply(publicPayload(view,undefined,interaction.guild));
+    await retireBattleCard(interaction.client,view,reply.id);
     await battleService.setPublicMessage(view.battle.id, reply.id);
   } else if (sub === "tur-oynat") {
     requireGameMaster(interaction);

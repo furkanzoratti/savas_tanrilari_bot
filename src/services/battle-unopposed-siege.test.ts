@@ -98,4 +98,38 @@ describe("unopposed siege publication",()=>{
     await expect(battleService.publish({guildId:"guild-1",channelId:"channel-1",actorId:"gm-1"}))
       .rejects.toThrow("özel birlik seçimi henüz tamamlanmadı");
   });
+
+  it("re-publishes an active battle without resetting its round or status",async()=>{
+    const battle:any={
+      id:"battle-active",guild_id:"guild-1",channel_id:"channel-1",public_message_id:"deleted-message",
+      terrain:"AMBUSH",narrative:"Pusu başladı.",status:"WAITING_FIRST_ROLL",round_number:3,first_side:"A",
+      winner_side:null,finish_reason:null,wall_max_hp:null,wall_current_hp:null,gate_max_hp:null,gate_current_hp:null,
+      siege_phase:null,bombardment_round:0,defender_settlement_id:null,starvation_capacity:null,starvation_remaining:null,
+      last_starvation_turn:null,defender_pantheon_pressure_used:false,guardian_pressure_ignored_a:false,
+      guardian_pressure_ignored_b:false,bombardment_revealed:false,assault_revealed:false,losses_applied_at:null,
+      created_by:"gm-1",created_at:new Date(),updated_at:new Date()
+    };
+    const sides=[
+      {battle_id:battle.id,side_key:"A",country_id:"a",country_name:"Baykal Devleti",controller:"GM",composition:{light_cavalry:3900},initial_composition:{light_cavalry:3900},initial_total:3900,current_total:3900,total_losses:0,pressure:0,support_assets:{},support_enhanced:{},support_targets:{},temporary_militia:0,seal:"A"},
+      {battle_id:battle.id,side_key:"B",country_id:"b",country_name:"Sarmatya",controller:"PLAYERS",composition:{heavy_cavalry:29959},initial_composition:{heavy_cavalry:29959},initial_total:29959,current_total:29959,total_losses:0,pressure:0,support_assets:{},support_enhanced:{},support_targets:{},temporary_militia:0,seal:"B"}
+    ];
+    const participants=sides.map((side)=>({battle_id:battle.id,side_key:side.side_key,country_id:side.country_id,country_name:side.country_name,is_primary:true,source_settlement_id:null,source_settlement_name:null,composition:side.composition,initial_composition:side.initial_composition,dismounted_composition:{},is_steppe_confederation:false,is_scandinavian_state:false}));
+    const updates:string[]=[];
+    transaction.client={async query(sql:string){
+      if(sql.includes("SELECT * FROM battles WHERE guild_id=$1"))return {rows:[battle],rowCount:1};
+      if(sql.startsWith("SELECT * FROM battles WHERE id=$1"))return {rows:[battle],rowCount:1};
+      if(sql.includes("SELECT bs.*,COALESCE(rebel.display_name,steppe_title.title_name,c.name) AS country_name"))return {rows:sides,rowCount:2};
+      if(sql.includes("SELECT bsp.*,COALESCE(rebel.display_name,steppe_title.title_name,c.name) AS country_name"))return {rows:participants,rowCount:2};
+      if(sql.includes("FROM battle_rolls")||sql.includes("FROM battle_rounds"))return {rows:[],rowCount:0};
+      if(sql.includes("COUNT(bb.battle_id)::integer AS used"))return {rows:[{current_turn:51,army_composition_activation_turn:null,used:0}],rowCount:1};
+      if(sql.trimStart().startsWith("UPDATE")){updates.push(sql);return {rows:[],rowCount:1};}
+      throw new Error(`Unexpected query: ${sql}`);
+    }} as unknown as DbClient;
+
+    const view=await battleService.publish({guildId:"guild-1",channelId:"channel-1",actorId:"gm-1"});
+
+    expect(view.battle.status).toBe("WAITING_FIRST_ROLL");
+    expect(view.battle.round_number).toBe(3);
+    expect(updates).toHaveLength(0);
+  });
 });

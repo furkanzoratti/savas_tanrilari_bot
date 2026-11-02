@@ -1026,7 +1026,7 @@ export const commandBuilders = [
         { name: "Hücum — ordular temas eder ve savaş zarları açılır", value: "ASSAULT" }
       )))
     .addSubcommand((sub) => sub.setName("bombardiman").setDescription("Katapultlarla bir bombardıman turu oynatır; ordular temas etmez"))
-    .addSubcommand((sub) => sub.setName("yayinla").setDescription("Taslağı herkese açık savaş kartı olarak yayımlar"))
+    .addSubcommand((sub) => sub.setName("yayinla").setDescription("Taslağı veya etkin muharebeyi açık savaş kartı olarak yayımlar"))
     .addSubcommand((sub) => sub.setName("tur-oynat").setDescription("İki açık zar tamamlanınca savaş turunu çözer"))
     .addSubcommand((sub) => sub.setName("ordu-detay").setDescription("Tam birlik kompozisyonunu yalnızca yöneticiye gösterir"))
     .addSubcommand((sub) => sub.setName("kayip-raporu").setDescription("Son savaşın belgeye işlenen ayrıntılı kayıp raporunu yalnızca yöneticiye gösterir"))
