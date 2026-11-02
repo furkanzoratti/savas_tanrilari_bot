@@ -14,6 +14,7 @@ import { renderFleetEmbed } from "./fleet-embed.js";
 import { publishCharacterTurnLogs } from "./character-ui.js";
 import { batchDocumentEmbeds } from "./document.js";
 import { countryFlagEmoji } from "./country-flag-emojis.js";
+import { fitEmbedToDiscordLimit, truncateEmbedText } from "./embed-limits.js";
 
 const statusLabels: Record<string, string> = {
   DRAFT: "Taslak", WAITING_FIRST_ROLL: "İlk tarafın zarı bekleniyor", WAITING_SECOND_ROLL: "İkinci tarafın zarı bekleniyor",
@@ -156,7 +157,7 @@ export function battleEmbed(view: BattleView, roundResult?: BattleRoundResult,fl
     :`**${terrain.label}** · ${frontage}`;
   const embed = new EmbedBuilder().setColor(view.battle.status === "FINISHED" ? 0x8b1a1a : 0xb68b36)
     .setTitle(`⚔️ ${titleAFlag?`${titleAFlag} `:""}${view.sides.A.country_name} — ${titleBFlag?`${titleBFlag} `:""}${view.sides.B.country_name}`)
-    .setDescription(`**${number(view.battle.round_number)}. Muharebe Turu**\n> ${view.battle.narrative || "İki ordu savaş alanında karşı karşıya geldi."}\n\n🗺️ ${terrainSummary}\n🎲 ${nextAction}`)
+    .setDescription(`**${number(view.battle.round_number)}. Muharebe Turu**\n> ${truncateEmbedText(view.battle.narrative || "İki ordu savaş alanında karşı karşıya geldi.",3_500)}\n\n🗺️ ${terrainSummary}\n🎲 ${nextAction}`)
     .addFields({name:"⚔️ Cephe Durumu",value:`${sideBlock("A")}\n\n${sideBlock("B")}`,inline:false});
   if (view.battle.terrain === "AMBUSH") embed.addFields({ name: "🌲 Pusu Düzeni", value: "A tarafı pusuyu kuran taraftır. İlk turda çarpışma +%25 ve hasar +%10 uygulanır." });
   if (view.battle.terrain === "SIEGE") {
@@ -206,8 +207,8 @@ export function battleEmbed(view: BattleView, roundResult?: BattleRoundResult,fl
       value: resultValue
     });
   }
-  if (view.battle.status === "FINISHED") embed.addFields({ name: "🏁 Savaş Sonu", value: `${view.battle.winner_side ? `Galip: **${view.sides[view.battle.winner_side].country_name}**` : "Sonuç: **Berabere / kararsız**"}\n${view.battle.finish_reason ?? ""}` });
-  return embed;
+  if (view.battle.status === "FINISHED") embed.addFields({ name: "🏁 Savaş Sonu", value: truncateEmbedText(`${view.battle.winner_side ? `Galip: **${view.sides[view.battle.winner_side].country_name}**` : "Sonuç: **Berabere / kararsız**"}\n${view.battle.finish_reason ?? ""}`,1_024) });
+  return fitEmbedToDiscordLimit(embed);
 }
 
 export function siegeDetailEmbed(view:BattleView,flagResolver:CountryFlagResolver=fallbackCountryFlag):EmbedBuilder{

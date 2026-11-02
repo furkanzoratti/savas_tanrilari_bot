@@ -7,6 +7,7 @@ vi.hoisted(() => {
 });
 import { battleEmbed, battleRollEmbed, fleetStatusEmbedPages, playerFleetStatusEmbeds, refreshChangedBattleCards, siegeDetailEmbed } from "./battle-ui.js";
 import { battleService, type BattleView, type PlayerBattleFleetStatus } from "../services/battle-service.js";
+import { DISCORD_EMBED_TEXT_LIMIT, embedTextLength } from "./embed-limits.js";
 
 function siegeView(): BattleView {
   return {
@@ -150,6 +151,17 @@ describe("kuşatma bilgi gizliliği", () => {
     const json=JSON.stringify(battleEmbed(siegeView(),undefined,(countryName,fallback)=>countryName==="Roma"?"<:roma:123>":fallback).toJSON());
     expect(json).toContain("<:roma:123> Roma");
     expect(json).toContain("🟦 **Savunucu**");
+  });
+
+  it("uzun savaş anlatımlarında Discord toplam embed sınırını aşmaz",()=>{
+    const view=siegeView();
+    view.battle.narrative="Savaş alanındaki gelişmeler ayrıntılı olarak kayda geçirildi. ".repeat(180);
+    view.battle.status="FINISHED";
+    view.battle.winner_side="A";
+    view.battle.finish_reason="Muharebenin ardından taraflar savaş alanından çekildi. ".repeat(120);
+    const embed=battleEmbed(view);
+    expect(embedTextLength(embed)).toBeLessThanOrEqual(DISCORD_EMBED_TEXT_LIMIT);
+    expect(embed.toJSON().thumbnail?.url).toContain("attachment://");
   });
 });
 

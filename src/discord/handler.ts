@@ -2292,7 +2292,6 @@ async function reportError(interaction: Interaction, error: unknown): Promise<vo
       file: string; line: string; routine: string;
     }>;
     logger.error({
-      err: error,
       errorName: error instanceof Error ? error.name : undefined,
       errorMessage: error instanceof Error ? error.message : String(error),
       errorStack: error instanceof Error ? error.stack : undefined,
@@ -2331,7 +2330,13 @@ async function reportError(interaction: Interaction, error: unknown): Promise<vo
     else if (interaction.replied) await interaction.followUp(payload);
     else await interaction.reply(payload);
   } catch (responseError) {
-    logger.error({ responseError, reference, interactionId: interaction.id }, "Discord hata yanıtı kullanıcıya ulaştırılamadı");
+    logger.error({
+      errorName: responseError instanceof Error ? responseError.name : undefined,
+      errorMessage: responseError instanceof Error ? responseError.message : String(responseError),
+      errorCode: (responseError as {code?:number|string}|null)?.code,
+      reference,
+      interactionId: interaction.id
+    }, "Discord hata yanıtı kullanıcıya ulaştırılamadı");
   }
 }
 

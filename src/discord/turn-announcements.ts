@@ -1,5 +1,6 @@
 import { EmbedBuilder } from "discord.js";
 import { TURN_BANNER_URL } from "./assets.js";
+import { embedTextLength, fitEmbedToDiscordLimit } from "./embed-limits.js";
 
 export type TurnAnnouncement = "ADVANCE" | "OPEN" | "PAUSE" | "CLOSE";
 
@@ -81,12 +82,7 @@ const TURN_CARD_MAX_FIELDS=25;
 const fullAdvanceFields=new WeakMap<EmbedBuilder,TurnAnnouncementField[]>();
 
 export function turnAnnouncementTextLength(embed: EmbedBuilder): number {
-  const data = embed.toJSON();
-  return (data.title?.length ?? 0)
-    + (data.description?.length ?? 0)
-    + (data.footer?.text.length ?? 0)
-    + (data.author?.name.length ?? 0)
-    + (data.fields ?? []).reduce((sum, field) => sum + field.name.length + field.value.length, 0);
+  return embedTextLength(embed);
 }
 
 function splitField(field:TurnAnnouncementField):TurnAnnouncementField[]{
@@ -348,7 +344,7 @@ export function turnAnnouncement(input: TurnAnnouncementInput): EmbedBuilder {
 
 export function turnAnnouncementCards(input: TurnAnnouncementInput): EmbedBuilder[] {
   const announcement = turnAnnouncement(input);
-  if (input.kind !== "ADVANCE") return [announcement];
+  if (input.kind !== "ADVANCE") return [fitEmbedToDiscordLimit(announcement)];
 
   const source = announcement.toJSON();
   const sourceFields=fullAdvanceFields.get(announcement)??(source.fields??[]).map((field)=>({
@@ -376,5 +372,5 @@ export function turnAnnouncementCards(input: TurnAnnouncementInput): EmbedBuilde
     else card.setDescription("Bu tur ek ayrıntılı sistem sonucu oluşmadı.");
     return card;
   });
-  return[first,...details];
+  return[first,...details].map((card)=>fitEmbedToDiscordLimit(card));
 }

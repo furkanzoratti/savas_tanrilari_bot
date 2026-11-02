@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { turnAnnouncement, turnAnnouncementCards, turnAnnouncementTextLength } from "./turn-announcements.js";
+import { DISCORD_EMBED_TEXT_LIMIT } from "./embed-limits.js";
 
 describe("ayrıntılı tur ilerletme kartı", () => {
   it("tamamlanan işleri yerleşke ve tür bazında madde madde gösterir", () => {
@@ -126,6 +127,7 @@ describe("ayrıntılı tur ilerletme kartı", () => {
       settlementName:`Kesintisiz Yerleşke ${index+1}`,buildingName:`Yapı ${index+1}`,level:3
     }));
     const cards=turnAnnouncementCards({kind:"ADVANCE",turn:44,completedBuildings:buildings.length,completedBuildingDetails:buildings});
+    expect(cards.every((card)=>turnAnnouncementTextLength(card)<=DISCORD_EMBED_TEXT_LIMIT)).toBe(true);
     const fields=cards.flatMap((card)=>card.toJSON().fields??[]);
     const report=fields.map((field)=>field.value).join("\n");
     expect(report).toContain("Kesintisiz Yerleşke 1");
