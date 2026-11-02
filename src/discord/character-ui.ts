@@ -1,4 +1,7 @@
-import { EmbedBuilder, MessageFlags, type AutocompleteInteraction, type ChatInputCommandInteraction, type Client } from "discord.js";
+import {
+  ActionRowBuilder,ButtonBuilder,ButtonStyle,EmbedBuilder,MessageFlags,StringSelectMenuBuilder,
+  type AutocompleteInteraction,type ButtonInteraction,type ChatInputCommandInteraction,type Client,type StringSelectMenuInteraction
+} from "discord.js";
 import { CHARACTER_ROLES } from "../domain/catalog.js";
 import {
   ADMIRAL_DOCTRINES, ADMIRAL_SPECIALIZATIONS, CHARACTER_SPECIALIZATIONS, COMMANDER_DOCTRINES, DIPLOMAT_TASK_LABELS, MERCHANT_TASK_LABELS,
@@ -10,8 +13,10 @@ import { characterService, type CharacterView, type MissionaryTaskType } from ".
 import { cityService } from "../services/city-service.js";
 import { gameService, GameError } from "../services/game-service.js";
 import { logger } from "../logger.js";
-import { assertCountryExecutiveAccess,requireGameMaster, resolveCountry } from "./auth.js";
+import { assertCountryAccess,assertCountryExecutiveAccess,requireGameMaster, resolveCountry } from "./auth.js";
 import { primaryReligionTradition,RELIGIONS,SECONDARY_RELIGIONS,type ReligionKey } from "../domain/religions.js";
+import {compactUuid,expandUuid} from "./document-component-id.js";
+import {number} from "../domain/format.js";
 
 const assignmentLabels: Record<string,string> = {
   NONE: "Görev bekliyor", CURIA: "Curia", AGORA: "Agora / Forum", ARMY: "Ordu komutanı", FLEET: "Filo komutanı",
@@ -206,10 +211,14 @@ function deadCharacterLine(character: CharacterView): string {
 }
 
 export interface CharacterCapacitySummary {
+  countryName?: string;
   academies: number;
   characters: number;
+  dismissed?: number;
   pending: number;
   capacity: number;
+  modifierBonus?: number;
+  academySettlements?: Array<{ id: string; name: string; level: number; status: string; capacity: number }>;
 }
 
 export function charactersEmbed(
@@ -217,11 +226,12 @@ export function charactersEmbed(
   characters: CharacterView[],
   capacity?: CharacterCapacitySummary
 ): EmbedBuilder {
-  const livingCharacters = characters.filter((character) => character.character_status !== "DEAD");
-  const marshalRows=livingCharacters.filter((character)=>character.role==="COMMANDER"&&character.is_marshal).map(characterLine);
+  const activeCharacters = characters.filter((character) => character.character_status === "ACTIVE");
+  const dismissedCharacters = characters.filter((character) => character.character_status === "DISMISSED");
+  const marshalRows=activeCharacters.filter((character)=>character.role==="COMMANDER"&&character.is_marshal).map(characterLine);
   const sections = (Object.keys(CHARACTER_ROLES) as Array<keyof typeof CHARACTER_ROLES>)
     .map((role) => {
-      const rows = livingCharacters
+      const rows = activeCharacters
         .filter((character) => character.role === role && (role!=="COMMANDER"||!character.is_marshal))
         .map(characterLine);
       return rows.length ? "**" + CHARACTER_ROLES[role].emoji + " " + CHARACTER_ROLES[role].label + "ler**\n" + rows.join("\n\n") : null;
@@ -239,11 +249,15 @@ export function charactersEmbed(
       "**🏛️ Akademi Kapasitesi**\n"+
       "Akademi: **"+capacity.academies+"** • Barındırılabilir karakter: **"+capacity.capacity+"**\n"+
       "Mevcut karakter: **"+capacity.characters+"/"+capacity.capacity+"**"+
-      (capacity.pending>0 ? " • Eğitimde/bekleyen: **"+capacity.pending+"**" : "")
+      (capacity.pending>0 ? " • Eğitimde/bekleyen: **"+capacity.pending+"**" : "")+
+      (Number(capacity.dismissed??0)>0 ? "\nGörevden alınmış: **"+capacity.dismissed+"** • Kapasitede sayılmaz" : "")
     );
   }
   if (sections.length) description.push(...sections);
-  else description.push("Akademide etkin veya görevden alınmış karakteriniz bulunmuyor.");
+  else description.push("Akademide etkin karakteriniz bulunmuyor.");
+  if (dismissedCharacters.length) {
+    description.push("**🗃️ Görevden Alınmış Karakterler**\n"+dismissedCharacters.map(characterLine).join("\n\n"));
+  }
   if (deadCharacters.length) {
     description.push("**💀 Ölü Karakterler**\n"+deadCharacters.map(deadCharacterLine).join("\n\n"));
   }
@@ -306,35 +320,44 @@ export function characterEmbeds(
   characters: CharacterView[],
   capacity?: CharacterCapacitySummary
 ): EmbedBuilder[] {
-  const living = characters.filter((character) => character.character_status !== "DEAD");
+  const active = characters.filter((character) => character.character_status === "ACTIVE");
+  const dismissed = characters.filter((character) => character.character_status === "DISMISSED");
   const intro = capacity
     ? "**🏛️ Akademi Kapasitesi**\n"+
       "Akademi: **"+capacity.academies+"** • Barındırılabilir karakter: **"+capacity.capacity+"**\n"+
       "Mevcut karakter: **"+capacity.characters+"/"+capacity.capacity+"**"+
-      (capacity.pending>0 ? " • Eğitimde/bekleyen: **"+capacity.pending+"**" : "")
+      (capacity.pending>0 ? " • Eğitimde/bekleyen: **"+capacity.pending+"**" : "")+
+      (Number(capacity.dismissed??0)>0 ? "\nGörevden alınmış: **"+capacity.dismissed+"** • Kapasitede sayılmaz" : "")
     : undefined;
   const result = characterGroupEmbeds({
     countryName,
     title:"Komuta Kadrosu",
     ...(intro ? {intro} : {}),
     sections:[
-      {heading:"**🎖️ Mareşal**",rows:living.filter((character)=>character.role==="COMMANDER"&&character.is_marshal).map(characterLine)},
-      {heading:"**⚔️ Komutanlar**",rows:living.filter((character)=>character.role==="COMMANDER"&&!character.is_marshal&&!character.is_admiral).map(characterLine)}
+      {heading:"**🎖️ Mareşal**",rows:active.filter((character)=>character.role==="COMMANDER"&&character.is_marshal).map(characterLine)},
+      {heading:"**⚔️ Komutanlar**",rows:active.filter((character)=>character.role==="COMMANDER"&&!character.is_marshal&&!character.is_admiral).map(characterLine)}
     ]
   });
 
   const groups: Array<{title:string;heading:string;characters:CharacterView[]}> = [
-    {title:"Amiraller",heading:"**⚓ Amiraller**",characters:living.filter((character)=>character.role==="COMMANDER"&&character.is_admiral)},
-    {title:"Diplomatlar",heading:"**🤝 Diplomatlar**",characters:living.filter((character)=>character.role==="DIPLOMAT")},
-    {title:"Casuslar",heading:"**🕵️ Casuslar**",characters:living.filter((character)=>character.role==="SPY")},
-    {title:"Tüccarlar",heading:"**💰 Tüccarlar**",characters:living.filter((character)=>character.role==="MERCHANT")},
-    {title:"Misyonerler",heading:"**🕯️ Misyonerler**",characters:living.filter((character)=>character.role==="MISSIONARY")}
+    {title:"Amiraller",heading:"**⚓ Amiraller**",characters:active.filter((character)=>character.role==="COMMANDER"&&character.is_admiral)},
+    {title:"Diplomatlar",heading:"**🤝 Diplomatlar**",characters:active.filter((character)=>character.role==="DIPLOMAT")},
+    {title:"Casuslar",heading:"**🕵️ Casuslar**",characters:active.filter((character)=>character.role==="SPY")},
+    {title:"Tüccarlar",heading:"**💰 Tüccarlar**",characters:active.filter((character)=>character.role==="MERCHANT")},
+    {title:"Misyonerler",heading:"**🕯️ Misyonerler**",characters:active.filter((character)=>character.role==="MISSIONARY")}
   ];
   for(const group of groups){
     if(!group.characters.length)continue;
     result.push(...characterGroupEmbeds({
       countryName,title:group.title,
       sections:[{heading:group.heading,rows:group.characters.map(characterLine)}]
+    }));
+  }
+
+  if(dismissed.length){
+    result.push(...characterGroupEmbeds({
+      countryName,title:"Görevden Alınmış Karakterler",
+      sections:[{heading:"**🗃️ Görevden Alınmış Karakterler**",rows:dismissed.map(characterLine)}]
     }));
   }
 
@@ -348,6 +371,166 @@ export function characterEmbeds(
     }));
   }
   return result;
+}
+
+export type CharacterDashboardView = "overview" | "command" | "admiral" | "diplomat" | "spy" | "merchant" | "missionary" | "archive";
+
+const CHARACTER_DASHBOARD_VIEWS:Record<CharacterDashboardView,{label:string;description:string;emoji:string}>={
+  overview:{label:"Kadro Özeti",description:"Akademiler ve karakter dağılımı",emoji:"🎓"},
+  command:{label:"Komuta Kadrosu",description:"Mareşal ve kara komutanları",emoji:"⚔️"},
+  admiral:{label:"Amiraller",description:"Filo komutanları",emoji:"⚓"},
+  diplomat:{label:"Diplomatlar",description:"Diplomatik görevliler",emoji:"🤝"},
+  spy:{label:"Casuslar",description:"Casusluk görevlileri",emoji:"🕵️"},
+  merchant:{label:"Tüccarlar",description:"Ticari görevliler",emoji:"💰"},
+  missionary:{label:"Misyonerler",description:"Din görevlileri",emoji:"🕯️"},
+  archive:{label:"Karakter Arşivi",description:"Görevden alınmış ve ölü karakterler",emoji:"🗃️"}
+};
+
+function safeCharacterDashboardView(value:string|undefined):CharacterDashboardView{
+  return value&&value in CHARACTER_DASHBOARD_VIEWS?value as CharacterDashboardView:"overview";
+}
+
+function splitFieldLines(lines:string[],limit=1_000):string[]{
+  if(!lines.length)return["Akademi bulunan yerleşke yok."];
+  const chunks:string[]=[];
+  let current="";
+  for(const line of lines){
+    const next=current?`${current}\n${line}`:line;
+    if(current&&next.length>limit){chunks.push(current);current=line;}
+    else current=next;
+  }
+  if(current)chunks.push(current);
+  return chunks;
+}
+
+function characterDashboardSummary(countryName:string,characters:CharacterView[],capacity:CharacterCapacitySummary):EmbedBuilder{
+  const active=characters.filter((character)=>character.character_status==="ACTIVE");
+  const dead=characters.filter((character)=>character.character_status==="DEAD").length;
+  const dismissed=characters.filter((character)=>character.character_status==="DISMISSED").length;
+  const occupied=capacity.characters+capacity.pending;
+  const remaining=Math.max(0,capacity.capacity-occupied);
+  const academyLines=(capacity.academySettlements??[]).map((academy)=>
+    `• **${academy.name}** — Akademi Sv${academy.level} • **+${academy.capacity}** karakter${academy.status==="BUILDING"?" • 🏗️ İnşaatta":""}`
+  );
+  const academyFields=splitFieldLines(academyLines).map((value,index)=>({
+    name:index===0?`🏛️ Akademi Yerleşkeleri • ${capacity.academies}`:`🏛️ Akademi Yerleşkeleri • devam ${index+1}`,
+    value,
+    inline:false
+  }));
+  return new EmbedBuilder()
+    .setColor(0xc59b45)
+    .setTitle(`🎓 ${countryName} • Karakter Yönetimi`)
+    .setDescription([
+      `Toplam karakter sınırı **${number(capacity.capacity)}** • Doluluk **${number(occupied)}/${number(capacity.capacity)}**`,
+      `Etkin **${number(capacity.characters)}** • Eğitimde/bekleyen **${number(capacity.pending)}** • Boş yer **${number(remaining)}**`
+    ].join("\n"))
+    .addFields(
+      ...academyFields,
+      ...(Number(capacity.modifierBonus??0)>0?[{name:"✨ Ülke Çapı Kapasite Etkileri",value:`Akademiler dışında **+${number(Number(capacity.modifierBonus))}** toplam karakter kapasitesi.`,inline:false}]:[]),
+      {name:"👥 Kayıt Durumu",value:`Etkin kayıt: **${number(active.length)}**\nGörevden alınmış: **${number(dismissed)}** • Ölü: **${number(dead)}**`,inline:true}
+    )
+    .setFooter({text:"Aşağıdaki menüden karakter türünü seç; Yenile ile güncel verileri getir."});
+}
+
+function characterDashboardDetailEmbeds(countryName:string,characters:CharacterView[],view:CharacterDashboardView):EmbedBuilder[]{
+  const active=characters.filter((character)=>character.character_status==="ACTIVE");
+  if(view==="overview"){
+    const commanders=active.filter((character)=>character.role==="COMMANDER"&&!character.is_admiral).length;
+    const rows:[string,number][]=[
+      ["⚔️ Komuta Kadrosu",commanders],
+      ["⚓ Amiraller",active.filter((character)=>character.role==="COMMANDER"&&character.is_admiral).length],
+      ["🤝 Diplomatlar",active.filter((character)=>character.role==="DIPLOMAT").length],
+      ["🕵️ Casuslar",active.filter((character)=>character.role==="SPY").length],
+      ["💰 Tüccarlar",active.filter((character)=>character.role==="MERCHANT").length],
+      ["🕯️ Misyonerler",active.filter((character)=>character.role==="MISSIONARY").length]
+    ];
+    return[new EmbedBuilder()
+      .setColor(0x5865f2)
+      .setTitle(`👥 ${countryName} • Kadro Özeti`)
+      .setDescription(rows.map(([label,count])=>`${label}: **${number(count)}**`).join("\n"))
+      .setFooter({text:"Ayrıntılı liste için aşağıdan bir karakter türü seç."})];
+  }
+  if(view==="command"){
+    return characterGroupEmbeds({countryName,title:"Komuta Kadrosu",sections:[
+      {heading:"**🎖️ Mareşal**",rows:active.filter((character)=>character.role==="COMMANDER"&&character.is_marshal).map(characterLine)},
+      {heading:"**⚔️ Komutanlar**",rows:active.filter((character)=>character.role==="COMMANDER"&&!character.is_marshal&&!character.is_admiral).map(characterLine)}
+    ]});
+  }
+  if(view==="archive"){
+    const dismissed=characters.filter((character)=>character.character_status==="DISMISSED").sort((left,right)=>left.name.localeCompare(right.name,"tr"));
+    const dead=characters.filter((character)=>character.character_status==="DEAD")
+      .sort((left,right)=>new Date(right.died_at??0).getTime()-new Date(left.died_at??0).getTime()||left.name.localeCompare(right.name,"tr"));
+    return characterGroupEmbeds({countryName,title:"Karakter Arşivi",sections:[
+      {heading:"**🗃️ Görevden Alınmış Karakterler**",rows:dismissed.map(characterLine)},
+      {heading:"**💀 Ölü Karakterler**",rows:dead.map(deadCharacterLine)}
+    ]});
+  }
+  const filters:Record<Exclude<CharacterDashboardView,"overview"|"command"|"archive">,(character:CharacterView)=>boolean>={
+    admiral:(character)=>character.role==="COMMANDER"&&character.is_admiral,
+    diplomat:(character)=>character.role==="DIPLOMAT",
+    spy:(character)=>character.role==="SPY",
+    merchant:(character)=>character.role==="MERCHANT",
+    missionary:(character)=>character.role==="MISSIONARY"
+  };
+  const definition=CHARACTER_DASHBOARD_VIEWS[view];
+  return characterGroupEmbeds({
+    countryName,title:definition.label,
+    sections:[{heading:`**${definition.emoji} ${definition.label}**`,rows:active.filter(filters[view]).map(characterLine)}]
+  });
+}
+
+export function characterDashboardEmbeds(
+  countryName:string,characters:CharacterView[],capacity:CharacterCapacitySummary,view:CharacterDashboardView="overview"
+):EmbedBuilder[]{
+  return[characterDashboardSummary(countryName,characters,capacity),...characterDashboardDetailEmbeds(countryName,characters,view).slice(0,9)];
+}
+
+function characterDashboardComponents(countryId:string,view:CharacterDashboardView){
+  const compactCountryId=compactUuid(countryId);
+  return[
+    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(`chv|${compactCountryId}`)
+        .setPlaceholder("Karakter türünü veya arşivi seç")
+        .addOptions((Object.entries(CHARACTER_DASHBOARD_VIEWS) as Array<[CharacterDashboardView,(typeof CHARACTER_DASHBOARD_VIEWS)[CharacterDashboardView]]>).map(([value,item])=>({
+          label:item.label,description:item.description,value,emoji:item.emoji,default:value===view
+        })))
+    ),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(`chr|${compactCountryId}|${view}`).setLabel("Yenile").setEmoji("🔄").setStyle(ButtonStyle.Success)
+    )
+  ];
+}
+
+export async function characterDashboardPayload(
+  countryId:string,view:CharacterDashboardView="overview",content:string|null=null,countryNameOverride?:string
+){
+  const [characters,capacity]=await Promise.all([characterService.list(countryId),cityService.academyCapacity(countryId)]);
+  const countryName=countryNameOverride??capacity.countryName??"Devlet";
+  return{content,embeds:characterDashboardEmbeds(countryName,characters,capacity,view),components:characterDashboardComponents(countryId,view)};
+}
+
+export async function handleCharacterSelect(interaction:StringSelectMenuInteraction):Promise<boolean>{
+  const [kind,countryValue]=interaction.customId.split("|");
+  if(kind!=="chv")return false;
+  if(!interaction.guildId||!countryValue)throw new GameError("Karakter paneli etkileşimi geçersiz.");
+  const countryId=expandUuid(countryValue);
+  const view=safeCharacterDashboardView(interaction.values[0]);
+  await interaction.deferUpdate();
+  await assertCountryAccess(interaction,countryId);
+  await interaction.editReply(await characterDashboardPayload(countryId,view));
+  return true;
+}
+
+export async function handleCharacterButton(interaction:ButtonInteraction):Promise<boolean>{
+  const [kind,countryValue,viewValue]=interaction.customId.split("|");
+  if(kind!=="chr")return false;
+  if(!interaction.guildId||!countryValue)throw new GameError("Karakter paneli düğmesi geçersiz.");
+  const countryId=expandUuid(countryValue);
+  await interaction.deferUpdate();
+  await assertCountryAccess(interaction,countryId);
+  await interaction.editReply(await characterDashboardPayload(countryId,safeCharacterDashboardView(viewValue)));
+  return true;
 }
 
 export type CharacterLogPublishState = "NO_LOGS" | "NO_CHANNEL" | "CHANNEL_UNAVAILABLE" | "PUBLISHED" | "FAILED";
@@ -441,14 +624,7 @@ export async function handleCharacterCommand(interaction: ChatInputCommandIntera
   if (interaction.commandName === "karakterlerim") {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const country = await resolveCountry(interaction);
-    const [characters,capacity] = await Promise.all([
-      characterService.list(country.id),cityService.academyCapacity(country.id)
-    ]);
-    const embeds=characterEmbeds(country.name,characters,capacity);
-    await interaction.editReply({ embeds: [embeds[0]!] });
-    for(const embed of embeds.slice(1)){
-      await interaction.followUp({embeds:[embed],flags:MessageFlags.Ephemeral});
-    }
+    await interaction.editReply(await characterDashboardPayload(country.id,"overview",null,country.name));
     await logCharacterCommand(interaction,country.name,"Karakter listesini görüntüledi.");
     return true;
   }

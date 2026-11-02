@@ -7,7 +7,9 @@ vi.hoisted(() => {
 });
 
 import { commandBuilders } from "./commands.js";
-import { characterAvailableForCommand, characterEmbeds, charactersEmbed, cultureChangeSettlementChoices } from "./character-ui.js";
+import {
+  characterAvailableForCommand,characterDashboardEmbeds,characterEmbeds,charactersEmbed,cultureChangeSettlementChoices
+} from "./character-ui.js";
 
 const availableCharacter = {
   role:"DIPLOMAT", assignment:"NONE", operation_status:null, character_status:"ACTIVE",
@@ -226,19 +228,58 @@ describe("Akademi karakter komutları", () => {
       {...base,id:"diplomat",name:"Roxana",role:"DIPLOMAT",skill_bonus:2},
       {...base,id:"spy",name:"Spitamenes",role:"SPY",skill_bonus:1},
       {...base,id:"merchant",name:"Bagabuxsa",role:"MERCHANT",skill_bonus:0},
-      {...base,id:"missionary",name:"Anahita",role:"MISSIONARY",skill_bonus:1}
-    ] as any,{academies:10,characters:7,pending:0,capacity:50}).map((embed)=>embed.toJSON());
+      {...base,id:"missionary",name:"Anahita",role:"MISSIONARY",skill_bonus:1},
+      {...base,id:"dismissed",name:"Eski Roxana",role:"DIPLOMAT",skill_bonus:1,character_status:"DISMISSED"}
+    ] as any,{academies:10,characters:7,dismissed:1,pending:0,capacity:50}).map((embed)=>embed.toJSON());
 
     expect(embeds.map((embed)=>embed.title)).toEqual([
       "🎓 Persis • Komuta Kadrosu","🎓 Persis • Amiraller","🎓 Persis • Diplomatlar",
-      "🎓 Persis • Casuslar","🎓 Persis • Tüccarlar","🎓 Persis • Misyonerler"
+      "🎓 Persis • Casuslar","🎓 Persis • Tüccarlar","🎓 Persis • Misyonerler",
+      "🎓 Persis • Görevden Alınmış Karakterler"
     ]);
     expect(embeds[0]?.description).toContain("Akademi Kapasitesi");
     expect(embeds[0]?.description).toContain("Alpyne");
     expect(embeds[0]?.description).toContain("Artaban");
     expect(embeds[0]?.description).not.toContain("Roxana");
     expect(embeds[2]?.description).toContain("Roxana");
+    expect(embeds[2]?.description).not.toContain("Eski Roxana");
     expect(embeds[2]?.description).not.toContain("Spitamenes");
+    expect(embeds[6]?.description).toContain("Eski Roxana");
+    expect(embeds[0]?.description).toContain("Görevden alınmış: **1**");
+  });
+
+  it("butonlu karakter panelinde Akademi yerleşkelerini ve arşivi ayrı görünümde gösterir",()=>{
+    const base={
+      country_id:"00000000-0000-4000-8000-000000000050",age:28,trained_turn:43,assignment:"NONE",assignment_ready_turn:null,
+      doctrine:null,commander_victories:0,specialization:null,specialization_progress:0,specialization_level:0,
+      is_admiral:false,is_marshal:false,unavailable_until_turn:null,trained_settlement_name:"Roma",
+      assigned_settlement_name:null,assigned_country_name:null,assigned_army_name:null,assigned_fleet_name:null,
+      operation_type:null,operation_status:null,operation_progress:null,operation_goal:null,target_country_name:null,
+      target_settlement_name:null,kidnapped:false
+    } as const;
+    const characters=[
+      {...base,id:"active",name:"Marcus",role:"COMMANDER" as const,skill_bonus:2,character_status:"ACTIVE" as const},
+      {...base,id:"dismissed",name:"Titus",role:"DIPLOMAT" as const,skill_bonus:1,character_status:"DISMISSED" as const},
+      {...base,id:"dead",name:"Cassia",role:"SPY" as const,skill_bonus:3,character_status:"DEAD" as const,died_at:"2026-10-01T00:00:00Z",death_settlement_name:"Roma"}
+    ];
+    const capacity={
+      academies:2,characters:1,dismissed:1,pending:1,capacity:15,modifierBonus:5,
+      academySettlements:[
+        {id:"roma",name:"Roma",level:3,status:"ACTIVE",capacity:5},
+        {id:"capua",name:"Capua",level:1,status:"ACTIVE",capacity:5}
+      ]
+    };
+    const overview=characterDashboardEmbeds("Roma",characters,capacity,"overview").map((embed)=>embed.toJSON());
+    expect(overview[0]?.title).toBe("🎓 Roma • Karakter Yönetimi");
+    expect(overview[0]?.description).toContain("Doluluk **2/15**");
+    expect(overview[0]?.fields?.map((field)=>field.value).join("\n")).toContain("Roma** — Akademi Sv3");
+    expect(overview[0]?.fields?.map((field)=>field.value).join("\n")).toContain("+5** toplam karakter kapasitesi");
+
+    const archive=characterDashboardEmbeds("Roma",characters,capacity,"archive").map((embed)=>embed.toJSON());
+    expect(archive[1]?.title).toBe("🎓 Roma • Karakter Arşivi");
+    expect(archive[1]?.description).toContain("Titus");
+    expect(archive[1]?.description).toContain("Cassia");
+    expect(archive[1]?.description).not.toContain("Marcus");
   });
 
   it("tutsak casusun tutulduğu şehri açıkça gösterir",()=>{

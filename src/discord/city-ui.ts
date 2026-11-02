@@ -184,7 +184,7 @@ export async function handleCityCommand(interaction: ChatInputCommandInteraction
       const [characters,capacity] = await Promise.all([characterService.list(country.id),cityService.academyCapacity(country.id)]);
       const embed = charactersEmbed(country.name,characters).addFields({
         name:"🏛️ Akademi Kapasitesi",
-        value:`**${capacity.characters}/${capacity.capacity}** etkin karakter${capacity.pending ? ` • **${capacity.pending}** eğitimde` : ""}\n**${capacity.academies} Akademi × 5** karakter sınırı`
+        value:`**${capacity.characters}/${capacity.capacity}** etkin karakter${capacity.pending ? ` • **${capacity.pending}** eğitimde` : ""}\n**${capacity.academies} Akademi × 5** karakter sınırı${capacity.dismissed ? `\n🗃️ **${capacity.dismissed}** görevden alınmış kayıt • kapasitede sayılmaz` : ""}`
       });
       await interaction.editReply({embeds:[embed]});
       await logAcademyAction(interaction,country.name,"Akademi karakterlerini görüntüledi.");
@@ -192,8 +192,8 @@ export async function handleCityCommand(interaction: ChatInputCommandInteraction
     }
     if (sub === "gorevden-al") {
       const character = await cityService.unassignCharacter({ guildId: interaction.guildId, actorId: interaction.user.id, countryId: country.id, characterName: interaction.options.getString("karakter", true) });
-      await interaction.editReply({ content: `✅ **${character.name}** mevcut görevinden alındı.` });
-      await logAcademyAction(interaction,country.name,"**"+character.name+"** görevden alındı.");
+      await interaction.editReply({ content: `✅ **${character.name}** bina görevinden alındı ve müsait duruma geçti.\n⚠️ Karakter hâlâ **aktif Akademi kadrosundadır** ve kapasite kullanır. Kalıcı olarak kadrodan çıkarmak için **/akademi karakteri-gorevden-al** komutunu kullanın.` });
+      await logAcademyAction(interaction,country.name,"**"+character.name+"** bina görevinden alındı; aktif Akademi kadrosunda kaldı.");
       return true;
     }
     if (sub === "karakteri-gorevden-al") {

@@ -64,22 +64,49 @@ function ensureAcademyRole(value: string | null | undefined): CharacterRole | nu
 }
 
 export const cityService = {
-  async academyCapacity(countryId: string): Promise<{ academies: number; characters: number; pending: number; capacity: number }> {
-    const row = (await pool.query<{ academies: number; characters: number; pending: number }>(
+  async academyCapacity(countryId: string): Promise<{
+    countryName: string;
+    academies: number;
+    characters: number;
+    dismissed: number;
+    pending: number;
+    capacity: number;
+    modifierBonus: number;
+    academySettlements: Array<{ id: string; name: string; level: number; status: string; capacity: number }>;
+  }> {
+    const [summaryResult,academyResult,projectModifiers] = await Promise.all([
+      pool.query<{ country_name: string; academies: number; characters: number; dismissed: number; pending: number }>(
       `SELECT
+         (SELECT name FROM countries WHERE id=$1) AS country_name,
          (SELECT COUNT(*)::integer FROM buildings building
            JOIN settlements settlement ON settlement.id=building.settlement_id
           WHERE settlement.country_id=$1 AND building.building_type='academy' AND building.level>0) AS academies,
          (SELECT COUNT(*)::integer FROM country_characters
           WHERE country_id=$1 AND character_status='ACTIVE' AND role<>'MISSIONARY') AS characters,
+         (SELECT COUNT(*)::integer FROM country_characters
+          WHERE country_id=$1 AND character_status='DISMISSED' AND role<>'MISSIONARY') AS dismissed,
          (SELECT COUNT(*)::integer FROM academy_training_sessions
           WHERE country_id=$1 AND status IN ('PENDING_ROLL','AWAITING_NAME')) AS pending`,
       [countryId]
-    )).rows[0]??{academies:0,characters:0,pending:0};
-    const projectModifiers=await activeCountryModifiers(pool,countryId);
+      ),
+      pool.query<{ id: string; name: string; level: number; status: string }>(
+        `SELECT settlement.id,settlement.name,building.level,building.status
+           FROM buildings building
+           JOIN settlements settlement ON settlement.id=building.settlement_id
+          WHERE settlement.country_id=$1 AND building.building_type='academy' AND building.level>0
+          ORDER BY settlement.name`,
+        [countryId]
+      ),
+      activeCountryModifiers(pool,countryId)
+    ]);
+    const row=summaryResult.rows[0]??{country_name:"",academies:0,characters:0,dismissed:0,pending:0};
+    const modifierBonus=Number(projectModifiers.characterCapacity??0);
     return {
-      academies:Number(row.academies),characters:Number(row.characters),pending:Number(row.pending),
-      capacity:Number(row.academies)*5+Number(projectModifiers.characterCapacity??0)
+      countryName:row.country_name,
+      academies:Number(row.academies),characters:Number(row.characters),dismissed:Number(row.dismissed),pending:Number(row.pending),
+      capacity:Number(row.academies)*5+modifierBonus,
+      modifierBonus,
+      academySettlements:academyResult.rows.map((academy)=>({...academy,level:Number(academy.level),capacity:5}))
     };
   },
 

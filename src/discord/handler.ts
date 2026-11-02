@@ -83,7 +83,9 @@ import {
   publishPendingEspionageLogs,publishPendingEspionagePublications
 } from "./espionage-ui.js";
 import { espionageService, resolveDueEspionageOperations } from "../services/espionage-service.js";
-import { handleCharacterAutocomplete, handleCharacterCommand, publishCharacterTurnLogs } from "./character-ui.js";
+import {
+  handleCharacterAutocomplete,handleCharacterButton,handleCharacterCommand,handleCharacterSelect,publishCharacterTurnLogs
+} from "./character-ui.js";
 import { characterService, processCharacterTurn } from "../services/character-service.js";
 import { handleDynastyAutocomplete,handleDynastyButton,handleDynastyCommand,handleDynastyModal,processDynastyAutomation } from "./dynasty-ui.js";
 import { publishPendingDeathPublications } from "./death-publication-ui.js";
@@ -1572,6 +1574,7 @@ async function handleSelect(interaction: StringSelectMenuInteraction): Promise<v
   if(await handleArmyControlSelect(interaction))return;
   if(await handleFleetControlSelect(interaction))return;
   if(await handleDocumentSelect(interaction))return;
+  if(await handleCharacterSelect(interaction))return;
   if (await handleGovernorshipSelect(interaction)) return;
   if (await handleWarDeclarationSelect(interaction)) return;
   if (await handleRomanRepublicSelect(interaction)) return;
@@ -1684,6 +1687,7 @@ async function handleButton(interaction: ButtonInteraction): Promise<void> {
   if(await handleArmyControlButton(interaction))return;
   if(await handleFleetControlButton(interaction))return;
   if(await handleDocumentButton(interaction))return;
+  if(await handleCharacterButton(interaction))return;
   if (await handleGovernorshipButton(interaction)) return;
   if (await handleRomanRepublicButton(interaction)) return;
   if (await handleSteppeHegemonyButton(interaction)) return;

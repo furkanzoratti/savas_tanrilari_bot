@@ -767,7 +767,7 @@ export const commandBuilders = [
       .addStringOption((o) => o.setName("yerleske").setDescription("Atanacağı yerleşke").setRequired(true).setAutocomplete(true))
       .addStringOption((o) => o.setName("gorev-yeri").setDescription("Atanacağı bina").setRequired(true).addChoices({ name: "Curia", value: "CURIA" }, { name: "Agora / Forum", value: "AGORA" }))
       .addStringOption(countryOption))
-    .addSubcommand((sub) => sub.setName("gorevden-al").setDescription("Karakterin bina atamasını kaldırır")
+    .addSubcommand((sub) => sub.setName("gorevden-al").setDescription("Karakteri yalnızca bina görevinden alır; aktif kadroda bırakır")
       .addStringOption((o) => o.setName("karakter").setDescription("Curia veya Agora görevinden alınacak karakter").setRequired(true).setAutocomplete(true))
       .addStringOption(countryOption))
     .addSubcommand((sub) => sub.setName("karakteri-gorevden-al").setDescription("Müsait bir Akademi karakterini kalıcı olarak görevden alır")
