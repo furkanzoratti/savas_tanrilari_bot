@@ -217,8 +217,6 @@ export function renderDocument(document: CountryDocument,scope?:DocumentSettleme
         ...sects.filter((sect)=>sect.percent>0).map((sect)=>`↳ ${sect.label}: **%${number(sect.percent)}** (${number(sect.believerCount)} kişi)`)
       ];
     });
-    const religionPopulationLines=(settlement.religionDistribution??[])
-      .map((share)=>`• ${share.religionLabel}: **${number(share.believerCount??Math.round(settlement.population*Number(share.familyPercent??(share.primaryPercent+share.secondaryPercent))/100))}**`);
     const producedResource = RESOURCES[settlement.resource_type].label;
     const fixedGarrison = renderLandForces(settlement, "GARRISON", document.country.mobilization, document.manpowerPenaltyActive, document.greatProjectModifiers);
     const army = renderLandForces(settlement, "ARMY", document.country.mobilization, document.manpowerPenaltyActive, document.greatProjectModifiers);
@@ -291,21 +289,17 @@ export function renderDocument(document: CountryDocument,scope?:DocumentSettleme
         },
         {
           name: "👥 Nüfus",
-          value: spacedSection([
-            `Özgür: **${number(settlement.population)}**`,
-            `Köle: ${number(settlement.slave_population)}`,
-            "",
-            "⛩️ **İnanç Dağılımı**",
-            ...(religionPopulationLines.length?religionPopulationLines:["Kayıt bulunmuyor."]),
-            "",
-            "🎖️ **Ordu Limiti**",
-            `Mevcut: **${number(settlement.militaryUsed)}**`,
-            `Kapasite: **${number(settlement.militaryLimit)}**`,
-            "",
-            "🏋️ **Eğitim Kapasitesi**",
-            `Bu Alım Turu: **${number(settlement.trainingUsed ?? 0)}/${number(settlement.trainingCapacity ?? 0)}**`,
-            `Kalan: **${number(settlement.trainingRemaining ?? 0)}**`
-          ].join("\n")),
+          value: spacedSection(`Özgür: **${number(settlement.population)}**\nKöle: ${number(settlement.slave_population)}`),
+          inline: true
+        },
+        {
+          name: "🎖️ Ordu Limiti",
+          value: spacedSection(`Mevcut: **${number(settlement.militaryUsed)}**\nKapasite: **${number(settlement.militaryLimit)}**`),
+          inline: true
+        },
+        {
+          name: "🏋️ Eğitim Kapasitesi",
+          value: spacedSection(`Bu Alım Turu: **${number(settlement.trainingUsed ?? 0)}/${number(settlement.trainingCapacity ?? 0)}**\nKalan: **${number(settlement.trainingRemaining ?? 0)}**`),
           inline: true
         },
         { name: "💰 Gelir Kalemleri", value: spacedSection(incomes), inline: true },
@@ -392,7 +386,7 @@ export function renderDocument(document: CountryDocument,scope?:DocumentSettleme
       const productionHarbor = settlement.pendingShips
         .reduce((sum, ship) => sum + shipHarborRequirement(ship.ship_type, ship.quantity), 0);
       embed.addFields({
-        name: "⚓ Liman Kapasitesi",
+        name: "⚓ Rıhtım Kapasitesi",
         value: spacedSection(`Kullanım: **${number(reserveHarbor + productionHarbor)}/${number(portShipCapacity(portLevel))} rıhtım puanı**\nRezerv: ${number(reserveHarbor)} • Üretim: ${number(productionHarbor)}`),
         inline: true
       });

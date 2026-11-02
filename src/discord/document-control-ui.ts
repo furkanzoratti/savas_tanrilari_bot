@@ -18,8 +18,8 @@ import { assertCountryAccess, assertCountryExecutiveAccess } from "./auth.js";
 import { buildingChoices, unitChoices } from "./commands.js";
 import {compactUuid,expandUuid} from "./document-component-id.js";
 import { renderDocument } from "./document.js";
+import { matchesDocumentView, type DocumentView } from "./document-view.js";
 
-type DocumentView = "general" | "economy" | "military" | "development";
 type ComponentRow = ActionRowBuilder<StringSelectMenuBuilder> | ActionRowBuilder<ButtonBuilder>;
 
 const VIEW_LABELS:Record<DocumentView,string>={
@@ -60,19 +60,12 @@ function countrySummary(document:CountryDocument):EmbedBuilder{
     .setFooter({text:"Aşağıdan yerleşke ve görünüm seç; işlemleri aynı ekrandan yönet."});
 }
 
-function matchesView(fieldName:string,view:DocumentView):boolean{
-  if(view==="general")return ["Kültür","Din ve Mezhep","Yerel Hazine","Nüfus","Refah ve İstikrar","Aktif Yerleşke Olayları","Süreli Gelir Cezası"].some((name)=>fieldName.includes(name));
-  if(view==="economy")return ["Yerel Hazine","Gelir Kalemleri","Yerleşke Giderleri","Etkin Kaynaklar","Süreli Gelir Cezası"].some((name)=>fieldName.includes(name));
-  if(view==="military")return ["Nüfus","Garnizon","Eğitilmiş Askerler","Paralı Askerler","Donanma","Tamir","Kuşatma"].some((name)=>fieldName.includes(name));
-  return ["Binalar ve İnşaatlar","Şehir Politikaları","Aktif Yerleşke Olayları","Refah ve İstikrar","Büyük Proje"].some((name)=>fieldName.includes(name));
-}
-
 function settlementCard(document:CountryDocument,settlementId:string,view:DocumentView):EmbedBuilder{
   const rendered=renderDocument(document,{visibleSettlementIds:[settlementId],roleLabel:"Yerleşke Yönetimi"});
   const source=rendered[1];
   if(!source)throw new GameError("Yerleşke belgesi oluşturulamadı.");
   const json=source.toJSON();
-  const matching=(json.fields??[]).filter((field)=>matchesView(field.name,view));
+  const matching=(json.fields??[]).filter((field)=>matchesDocumentView(field.name,view));
   let remainingFieldText=3_800;
   const fields=matching.flatMap((field)=>{
     const name=field.name.slice(0,256);

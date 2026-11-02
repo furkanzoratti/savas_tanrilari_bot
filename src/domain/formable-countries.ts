@@ -251,7 +251,7 @@ export const FORMABLE_COUNTRIES = {
     ],
     effectScales: ["MAJOR", "MAJOR", "MEDIUM", "MINOR"],
     modifiers: { buildingDiscount: 0.15, buildingDiscountTypes: ["walls", "engineering"], siegeAssetDiscount: 0.15, starvationBonus: 2, wallSiegeDamageMultiplier: 0.85, portFlatIncome: 150, shipDiscount: 0.05 },
-    requiredActiveFormables: ["CILICIA_CYPRUS", "LYDIA_IONIA", "CAPPADOCIA"]
+    requiredActiveFormables: ["CILICIA_CYPRUS", "LYDIA_IONIA", "CAPPADOCIA", "MEDITERRANEAN_LEAGUE"]
   },
   CARTHAGE: {
     name: "Büyük Kartaca",

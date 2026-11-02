@@ -171,6 +171,12 @@ describe("kurulabilir ülkeler", () => {
     expect(income.gross.seaTrade).toBe(1_100);
   });
 
+  it("Akdeniz Ligi'ni Anadolu Krallığı kuruluş yoluna dahil eder", () => {
+    expect(FORMABLE_COUNTRIES.ANATOLIAN_KINGDOM.requiredActiveFormables).toEqual([
+      "CILICIA_CYPRUS", "LYDIA_IONIA", "CAPPADOCIA", "MEDITERRANEAN_LEAGUE"
+    ]);
+  });
+
   it("Büyük Britanya yalnızca kendi dört Tier 2 etkisini taşır ve Tier 1 ile birikmez", () => {
     const definition = FORMABLE_COUNTRIES.GREAT_BRITAIN;
     expect(definition.buffs).toHaveLength(4);

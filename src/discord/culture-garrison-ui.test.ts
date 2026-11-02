@@ -44,9 +44,10 @@ describe("kültür ve yerleşke kartı", () => {
         militaryUsed: 1_400, militaryLimit: 7_500, slotLimit: 10, effectiveResources: ["GRAIN"],
         buildings: [
           { building_type: "academy", level: 1, status: "ACTIVE" },
-          { building_type: "trade_guild", level: 1, status: "ACTIVE" }
-        ], ships: [], siegeAssets: [],
-        pendingRecruitment: [], pendingShips: [],
+          { building_type: "trade_guild", level: 1, status: "ACTIVE" },
+          { building_type: "port", level: 1, status: "ACTIVE" }
+        ], ships: [{ ship_type: "trireme", quantity: 2, status: "RESERVE" }], siegeAssets: [],
+        pendingRecruitment: [], pendingShips: [{ ship_type: "kerkouros", quantity: 3, ordered_turn: 3, completion_turn: 5 }],
         units: [
           { unit_type: "light_infantry", quantity: 400, status: "GARRISON", force_type: "GARRISON" },
           { unit_type: "heavy_infantry", quantity: 200, status: "GARRISON", force_type: "GARRISON" },
@@ -82,13 +83,18 @@ describe("kültür ve yerleşke kartı", () => {
     expect(fields.find((field) => field.name === "💰 Gelir Kalemleri")?.value).not.toContain("Tahsil edilecek");
     expect(fields.find((field) => field.name === "🏦 Yerel Hazine")?.value).toContain("500 Altın");
     expect(fields.find((field) => field.name === "🏦 Yerel Hazine")?.value).toContain("Yerel Hammadde");
-    expect(fields.slice(0,6).map((field)=>field.name)).toEqual([
+    expect(fields.slice(0,8).map((field)=>field.name)).toEqual([
       "🏺 Kültür","⛩️ Din ve Mezhep","🏦 Yerel Hazine",
-      "👥 Nüfus","💰 Gelir Kalemleri","🧾 Yerleşke Giderleri"
+      "👥 Nüfus","🎖️ Ordu Limiti","🏋️ Eğitim Kapasitesi",
+      "💰 Gelir Kalemleri","🧾 Yerleşke Giderleri"
     ]);
-    expect(fields.find((field) => field.name === "👥 Nüfus")?.value).toContain("🎖️ **Ordu Limiti**");
-    expect(fields.find((field) => field.name === "👥 Nüfus")?.value).toContain("7.500");
-    expect(fields.find((field) => field.name === "💰 Gelir Kalemleri")?.value).not.toContain("Deniz Ticareti");
+    expect(fields.find((field) => field.name === "👥 Nüfus")?.value).not.toContain("İnanç Dağılımı");
+    expect(fields.find((field) => field.name === "👥 Nüfus")?.value).not.toContain("Ordu Limiti");
+    expect(fields.find((field) => field.name === "👥 Nüfus")?.value).not.toContain("Eğitim Kapasitesi");
+    expect(fields.find((field) => field.name === "🎖️ Ordu Limiti")?.value).toContain("7.500");
+    expect(fields.find((field) => field.name === "💰 Gelir Kalemleri")?.value).toContain("Deniz Ticareti");
+    expect(fields.find((field) => field.name === "⚓ Rıhtım Kapasitesi")?.value).toContain("7/30 rıhtım puanı");
+    expect(fields.find((field) => field.name === "⚓ Rıhtım Kapasitesi")?.value).toContain("Rezerv: 4 • Üretim: 3");
 
     const scopedDocument={...document,settlements:[
       document.settlements[0]!,
