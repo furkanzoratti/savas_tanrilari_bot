@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { compactUuid, expandUuid } from "./document-component-id.js";
-import { matchesDocumentView } from "./document-view.js";
+import { matchesDocumentView, orderDocumentViewFields } from "./document-view.js";
 
 describe("yerleşke belge görünümleri", () => {
   it("Discord bileşenlerinde UUID kimliklerini güvenle kısaltır", () => {
@@ -15,6 +15,19 @@ describe("yerleşke belge görünümleri", () => {
     expect(matchesDocumentView("👥 Nüfus", "general")).toBe(true);
     expect(matchesDocumentView("🎖️ Ordu Limiti", "general")).toBe(false);
     expect(matchesDocumentView("🏋️ Eğitim Kapasitesi", "general")).toBe(false);
+    expect(orderDocumentViewFields([
+      { name: "⛩️ Din ve Mezhep" },
+      { name: "🏦 Yerel Hazine" },
+      { name: "👥 Nüfus" },
+      { name: "🌿 Refah ve İstikrar" },
+      { name: "🏺 Kültür" }
+    ], "general").map((field) => field.name)).toEqual([
+      "🏺 Kültür",
+      "👥 Nüfus",
+      "🌿 Refah ve İstikrar",
+      "⛩️ Din ve Mezhep",
+      "🏦 Yerel Hazine"
+    ]);
   });
 
   it("askerî görünümde inanç yerine kapasite alanlarını gösterir", () => {

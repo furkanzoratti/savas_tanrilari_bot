@@ -18,7 +18,7 @@ import { assertCountryAccess, assertCountryExecutiveAccess } from "./auth.js";
 import { buildingChoices, unitChoices } from "./commands.js";
 import {compactUuid,expandUuid} from "./document-component-id.js";
 import { renderDocument } from "./document.js";
-import { matchesDocumentView, type DocumentView } from "./document-view.js";
+import { matchesDocumentView, orderDocumentViewFields, type DocumentView } from "./document-view.js";
 
 type ComponentRow = ActionRowBuilder<StringSelectMenuBuilder> | ActionRowBuilder<ButtonBuilder>;
 
@@ -65,7 +65,7 @@ function settlementCard(document:CountryDocument,settlementId:string,view:Docume
   const source=rendered[1];
   if(!source)throw new GameError("Yerleşke belgesi oluşturulamadı.");
   const json=source.toJSON();
-  const matching=(json.fields??[]).filter((field)=>matchesDocumentView(field.name,view));
+  const matching=orderDocumentViewFields((json.fields??[]).filter((field)=>matchesDocumentView(field.name,view)),view);
   let remainingFieldText=3_800;
   const fields=matching.flatMap((field)=>{
     const name=field.name.slice(0,256);
