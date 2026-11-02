@@ -5,7 +5,7 @@ vi.hoisted(() => {
   process.env.DISCORD_CLIENT_ID = "test-client";
   process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
 });
-import { battleEmbed, battleRollEmbed, fleetStatusEmbedPages, playerFleetStatusEmbeds, refreshChangedBattleCards, siegeDetailEmbed } from "./battle-ui.js";
+import { battleButtonLabel, battleEmbed, battleRollEmbed, fleetStatusEmbedPages, playerFleetStatusEmbeds, refreshChangedBattleCards, siegeDetailEmbed } from "./battle-ui.js";
 import { battleService, type BattleView, type PlayerBattleFleetStatus } from "../services/battle-service.js";
 import { DISCORD_EMBED_TEXT_LIMIT, embedTextLength } from "./embed-limits.js";
 
@@ -162,6 +162,13 @@ describe("kuşatma bilgi gizliliği", () => {
     const embed=battleEmbed(view);
     expect(embedTextLength(embed)).toBeLessThanOrEqual(DISCORD_EMBED_TEXT_LIMIT);
     expect(embed.toJSON().thumbnail?.url).toContain("attachment://");
+  });
+
+  it("çok taraflı cephe adını Discord düğme sınırına sığdırır",()=>{
+    const coalition="Baykal Devleti + Dingling Konfederasyonu + Kaşgar + Khentii Devleti + Usunlar + Sayan Devleti";
+    const label=battleButtonLabel(`${coalition} Savaş Zarlarını At`);
+    expect(label.length).toBeLessThanOrEqual(80);
+    expect(label.endsWith("…")).toBe(true);
   });
 });
 

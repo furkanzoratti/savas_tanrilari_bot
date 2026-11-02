@@ -24,6 +24,10 @@ const orderLabels: Record<string, string> = { ORDERED: "Düzenli", WORN: "Baskı
 const tierLabels: Record<string, string> = { BALANCED: "Dengeli Çarpışma", MINOR: "Hafif Üstünlük", CLEAR: "Belirgin Üstünlük", CRUSHING: "Ezici Üstünlük" };
 const navalConditionLabels = { OPERATIONAL:"Savaşabilir", DAMAGED:"Hasarlı", CRITICAL:"Zorunlu geri çekilme", OUT:"Savaş dışı" } as const;
 
+export function battleButtonLabel(value:string):string{
+  return truncateEmbedText(value,80);
+}
+
 function currentAttackerDismountments(view: BattleView): BattleComposition {
   const selectedDismountments: BattleComposition = {};
   if (view.battle.terrain === "SIEGE") {
@@ -156,7 +160,7 @@ export function battleEmbed(view: BattleView, roundResult?: BattleRoundResult,fl
     ?`**Kuşatma · ${view.battle.siege_phase==="BOMBARDMENT"?"Bombardıman":"Hücum"}**`
     :`**${terrain.label}** · ${frontage}`;
   const embed = new EmbedBuilder().setColor(view.battle.status === "FINISHED" ? 0x8b1a1a : 0xb68b36)
-    .setTitle(`⚔️ ${titleAFlag?`${titleAFlag} `:""}${view.sides.A.country_name} — ${titleBFlag?`${titleBFlag} `:""}${view.sides.B.country_name}`)
+    .setTitle(truncateEmbedText(`⚔️ ${titleAFlag?`${titleAFlag} `:""}${view.sides.A.country_name} — ${titleBFlag?`${titleBFlag} `:""}${view.sides.B.country_name}`,256))
     .setDescription(`**${number(view.battle.round_number)}. Muharebe Turu**\n> ${truncateEmbedText(view.battle.narrative || "İki ordu savaş alanında karşı karşıya geldi.",3_500)}\n\n🗺️ ${terrainSummary}\n🎲 ${nextAction}`)
     .addFields({name:"⚔️ Cephe Durumu",value:`${sideBlock("A")}\n\n${sideBlock("B")}`,inline:false});
   if (view.battle.terrain === "AMBUSH") embed.addFields({ name: "🌲 Pusu Düzeni", value: "A tarafı pusuyu kuran taraftır. İlk turda çarpışma +%25 ve hasar +%10 uygulanır." });
@@ -257,8 +261,8 @@ function components(view: BattleView) {
         new StringSelectMenuBuilder().setCustomId(`battle_naval_order|${view.battle.id}`).setPlaceholder("Taraf ve gizli filo emrini seç").addOptions(orderOptions)
       );
       const lockRow=new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId(`battle_naval_lock_A|${view.battle.id}`).setLabel(`${view.sides.A.country_name} Emrini Kilitle`.slice(0,80)).setStyle(ButtonStyle.Primary).setDisabled(view.sides.A.naval_order_locked),
-        new ButtonBuilder().setCustomId(`battle_naval_lock_B|${view.battle.id}`).setLabel(`${view.sides.B.country_name} Emrini Kilitle`.slice(0,80)).setStyle(ButtonStyle.Primary).setDisabled(view.sides.B.naval_order_locked),
+        new ButtonBuilder().setCustomId(`battle_naval_lock_A|${view.battle.id}`).setLabel(battleButtonLabel(`${view.sides.A.country_name} Emrini Kilitle`)).setStyle(ButtonStyle.Primary).setDisabled(view.sides.A.naval_order_locked),
+        new ButtonBuilder().setCustomId(`battle_naval_lock_B|${view.battle.id}`).setLabel(battleButtonLabel(`${view.sides.B.country_name} Emrini Kilitle`)).setStyle(ButtonStyle.Primary).setDisabled(view.sides.B.naval_order_locked),
         ...fleetButtons()
       );
       return [selectRow,lockRow];
@@ -269,15 +273,15 @@ function components(view: BattleView) {
       ...fleetButtons()
     )];
     const actionButton=expected
-      ?new ButtonBuilder().setCustomId(`battle_roll|${view.battle.id}`).setLabel(`${view.sides[expected].country_name} Savaş Zarlarını At`.slice(0,80)).setEmoji("🎲").setStyle(ButtonStyle.Primary)
+      ?new ButtonBuilder().setCustomId(`battle_roll|${view.battle.id}`).setLabel(battleButtonLabel(`${view.sides[expected].country_name} Savaş Zarlarını At`)).setEmoji("🎲").setStyle(ButtonStyle.Primary)
       :new ButtonBuilder().setCustomId(`battle_resolve|${view.battle.id}`).setLabel("Yönetici: Değerlendirmeyi Çöz").setEmoji("⚖️").setStyle(ButtonStyle.Success);
     return [new ActionRowBuilder<ButtonBuilder>().addComponents(actionButton,...fleetButtons())];
   }
   if (view.battle.terrain === "SIEGE" && view.battle.siege_phase === "BOMBARDMENT") return [new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(`battle_bombard|${view.battle.id}`).setLabel(((view.battle.bombardments_this_turn ?? 0) >= MAX_BOMBARDMENTS_PER_GAME_TURN ? "Bombardıman Hakkı Doldu" : `${view.sides.A.country_name} Katapult Bombardımanı Yap`).slice(0, 80)).setEmoji("💥").setStyle(ButtonStyle.Primary).setDisabled((view.battle.bombardments_this_turn ?? 0) >= MAX_BOMBARDMENTS_PER_GAME_TURN),
+    new ButtonBuilder().setCustomId(`battle_bombard|${view.battle.id}`).setLabel(battleButtonLabel((view.battle.bombardments_this_turn ?? 0) >= MAX_BOMBARDMENTS_PER_GAME_TURN ? "Bombardıman Hakkı Doldu" : `${view.sides.A.country_name} Katapult Bombardımanı Yap`)).setEmoji("💥").setStyle(ButtonStyle.Primary).setDisabled((view.battle.bombardments_this_turn ?? 0) >= MAX_BOMBARDMENTS_PER_GAME_TURN),
     new ButtonBuilder().setCustomId(`battle_retreat|${view.battle.id}`).setLabel("Geri Çekil").setEmoji("🏳️").setStyle(ButtonStyle.Danger)
   )];
-  const label = expected ? `${view.sides[expected].country_name} Savaş Zarlarını At` : "Tur Çözümü Bekleniyor";
+  const label = battleButtonLabel(expected ? `${view.sides[expected].country_name} Savaş Zarlarını At` : "Tur Çözümü Bekleniyor");
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(`battle_roll|${view.battle.id}`).setLabel(label).setEmoji("🎲").setStyle(ButtonStyle.Primary).setDisabled(!expected),
     new ButtonBuilder().setCustomId(`battle_retreat|${view.battle.id}`).setLabel("Geri Çekil").setEmoji("🏳️").setStyle(ButtonStyle.Danger).setDisabled(!expected)
