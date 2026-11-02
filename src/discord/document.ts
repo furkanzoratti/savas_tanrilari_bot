@@ -187,7 +187,7 @@ export function renderDocument(document: CountryDocument,scope?:DocumentSettleme
       { name: "🏛️ Üye Olunan Paktlar", value: spacedSection((document.pacts ?? []).length
         ? (document.pacts ?? []).map((pact) => `• **${pact.name}** — ${pact.purpose}`).join("\n")
         : "Herhangi bir pakta üye değil.") },
-      { name: "🤝 Ticaret Antlaşmaları", value: spacedSection(tradeSummary) }
+      { name: "🤝 Ticaret Antlaşmaları", value: spacedSection(`Kullanım: **${number(document.tradeAgreements.length)}/${number(document.tradeAgreementLimit)}**\n\n${tradeSummary}`) }
       ,...(scope?[{
         name:"🏕️ Bozkır Toprak Yetkisi",
         value:spacedSection(`**${scope.roleLabel}**\nDevlet toplamları ${document.settlements.length} yerleşkenin tamamını kapsar. Ayrıntılı yerleşke belgesi: **${detailedSettlements.length}**.${hiddenSettlementCount>0?`\n🔒 **${hiddenSettlementCount}** bağlı yerleşkenin ayrıntıları bu makam için kapalıdır.`:""}`)

@@ -23,6 +23,7 @@ import {activeCountryModifiers} from "./country-modifier-service.js";
 import {dynastyDeathFailureMaximum,dynastyDeathSaveFailed} from "../domain/dynasty.js";
 import {markCharacterDead} from "./character-death-service.js";
 import {MISSIONARY_BASE_PROGRESS,missionaryBeliefPenalty,missionaryPopulationPenalty} from "../domain/missionary.js";
+import {countryTradeAgreementLimit} from "./resource-service.js";
 
 export const MISSIONARY_PURCHASE_COST = 2_000;
 export const MISSIONARY_LIMIT_PER_COUNTRY = 5;
@@ -747,11 +748,7 @@ export const characterService = {
       if (input.task === "PURCHASE_AGENT" && !input.purchaseCategory) throw new GameError("Satın alma temsilciliği için alım kategorisi seçilmelidir.");
       if (input.task === "BLACK_MARKET" && !target.black_market_active) throw new GameError("Seçilen yerleşkede etkin Karaborsa olayı bulunmuyor.");
       if (input.task === "FOREIGN_CONCESSION") {
-        const resources = (await client.query<{ resource_type: string }>(
-          "SELECT resource_type FROM settlements WHERE country_id=$1",
-          [input.countryId]
-        )).rows;
-        const outboundLimit = resources.some((row) => row.resource_type === "PURPLE_DYE") ? 3 : 2;
+        const outboundLimit = await countryTradeAgreementLimit(client,input.countryId);
         const count = Number((await client.query<{ count: number }>(
           "SELECT COUNT(*)::integer AS count FROM merchant_operations WHERE country_id=$1 AND task_type='FOREIGN_CONCESSION' AND status IN ('PENDING_ACCEPTANCE','TRAVELING','ACTIVE')",
           [input.countryId]

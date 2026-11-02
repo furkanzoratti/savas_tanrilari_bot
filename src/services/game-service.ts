@@ -9,7 +9,7 @@ import { currentRolePeriodRange, type RoleReportPeriod } from "../domain/role-pe
 import type { CultureGroup } from "../domain/cultures.js";
 import type { CharacterRole, ForceType, Mobilization, RuinStage, ShipStatus, UnitStatus } from "../domain/types.js";
 import { RESOURCES, buildingCostMultiplier, buildingDurationReduction, shipCostMultiplier, siegeCostMultiplier, unitCostMultiplier, type ResourceType } from "../domain/resources.js";
-import { countryResourceAccess, settlementResourceAccess, settlementResourceStates } from "./resource-service.js";
+import { countryResourceAccess, countryTradeAgreementLimit, settlementResourceAccess, settlementResourceStates } from "./resource-service.js";
 import { MERCENARY_COMPANIES, MERCENARY_CONTRACT_LIMITS, importedMercenarySchedule, mercenaryContractSchedule, mercenaryPriceTerms, mercenarySlotCost, mercenarySlotsUsed, mercenaryTerminationUpkeep, type MercenaryCompanyKey, type MercenaryPriceTerms } from "../domain/mercenaries.js";
 import { cancelActiveGarrisonReplenishment, completeDueGarrisonReplenishments, scheduleAllMissingGarrisons, scheduleMandatoryGarrisonReplenishment, type GarrisonReplenishmentReason } from "./garrison-service.js";
 import { isSpecialUnitType, type SpecialUnitType } from "../domain/special-units.js";
@@ -278,6 +278,7 @@ export interface CountryDocument {
   greatProjectModifiers?: GreatProjectModifiers;
   greatProjects:Array<{projectKey:string;name:string;settlementName:string;status:"BUILDING"|"ACTIVE";completionTurn:number|null;effects:readonly string[]}>;
   lastStand?:{startedTurn:number;deadlineTurn:number;status:"ACTIVE"|"RECOVERED"|"FAILED"}|null;
+  tradeAgreementLimit: number;
   tradeAgreements: Array<{ id: string; route: "LAND" | "SEA"; status: "PENDING" | "ACTIVE"; partner_name: string; proposer_settlement_name: string; receiver_settlement_name: string; proposer_resource: ResourceType; receiver_resource: ResourceType }>;
   settlements: Array<SettlementRow & {
     isCapital: boolean;
@@ -2115,6 +2116,7 @@ export const gameService = {
          WHERE (ta.proposer_country_id=$1 OR ta.receiver_country_id=$1) AND ta.status IN ('PENDING','ACTIVE')
          ORDER BY ta.status,partner_name`, [countryId]
       )).rows;
+      const tradeLimit = await countryTradeAgreementLimit(client,countryId);
       const allies = (await client.query<CountryDocument["allies"][number]>(
         `SELECT partner.id,partner.name FROM country_alliances alliance
           JOIN countries partner ON partner.id=CASE WHEN alliance.proposer_country_id=$1
@@ -2323,6 +2325,7 @@ export const gameService = {
         greatProjectModifiers:projectModifiers,
         greatProjects,
         lastStand,
+        tradeAgreementLimit:tradeLimit,
         tradeAgreements,
         settlements: enriched
       };

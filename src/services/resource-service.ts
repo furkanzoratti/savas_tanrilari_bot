@@ -1,6 +1,6 @@
 import type { DbClient } from "../db/pool.js";
 import { rawMaterialProduction } from "../domain/catalog.js";
-import { isResourceType, type ResourceType } from "../domain/resources.js";
+import { isResourceType, tradeAgreementLimit, type ResourceType } from "../domain/resources.js";
 
 export interface SettlementResourceState {
   localResource: ResourceType;
@@ -74,4 +74,16 @@ export async function settlementResourceAccess(client: DbClient, countryId: stri
 export async function countryResourceAccess(client: DbClient, countryId: string): Promise<ResourceType[]> {
   const map = await settlementResourceAccess(client, countryId);
   return [...new Set([...map.values()].flat())];
+}
+
+export async function countryTradeAgreementLimit(client: DbClient, countryId: string): Promise<number> {
+  const resources = await countryResourceAccess(client, countryId);
+  if (!resources.includes("PURPLE_DYE")) {
+    const ownedPurpleDye = await client.query(
+      "SELECT 1 FROM settlements WHERE country_id=$1 AND resource_type='PURPLE_DYE' LIMIT 1",
+      [countryId]
+    );
+    if (ownedPurpleDye.rowCount) resources.push("PURPLE_DYE");
+  }
+  return tradeAgreementLimit(resources);
 }

@@ -24,7 +24,7 @@ describe("kültür ve yerleşke kartı", () => {
         { name: "Cassia", role: "SPY", skill_bonus: 2, assignment: "ESPIONAGE", assigned_country_name: "Kartaca", assigned_settlement_name: "Kartaca" }
       ],
       totalGrossIncome: 1_000, totalPayableIncome: 1_000, totalIncomeBreakdown: emptyIncome,
-      totalUpkeep: 100, netIncome: 900, tradeAgreements: [],
+      totalUpkeep: 100, netIncome: 900, tradeAgreementLimit: 3, tradeAgreements: [],
       allies: [{ id: "kartaca", name: "Kartaca" }],
       pacts: [{ id: "pakt", name: "Akdeniz Birliği", purpose: "Ticaret güvenliği", founder_name: "Roma" }],
       armies: [{ id: "army", name: "Roma Merkez Ordusu" }],
@@ -77,6 +77,7 @@ describe("kültür ve yerleşke kartı", () => {
     expect(fields.find((field) => field.name === "🏗️ Binalar ve İnşaatlar")?.value).not.toContain("Yüzdesel Ekonomi");
     expect(countryFields.find((field) => field.name === "🛡️ Müttefikler")?.value).toContain("Kartaca");
     expect(countryFields.find((field) => field.name === "🏛️ Üye Olunan Paktlar")?.value).toContain("Akdeniz Birliği");
+    expect(countryFields.find((field) => field.name === "🤝 Ticaret Antlaşmaları")?.value).toContain("Kullanım: **0/3**");
     expect(countryFields.find((field) => field.name === "🎓 Devlet Görevlileri")).toBeUndefined();
     expect(fields.find((field) => field.name === "👥 Nüfus")?.value).not.toContain("Sonraki Alım");
     expect(fields.find((field) => field.name === "💰 Gelir Kalemleri")?.value).toContain("Toplam:");

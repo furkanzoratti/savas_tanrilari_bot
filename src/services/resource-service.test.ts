@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { DbClient } from "../db/pool.js";
-import { localResourceProduction, localResourceState, settlementResourceStates } from "./resource-service.js";
+import { countryTradeAgreementLimit, localResourceProduction, localResourceState, settlementResourceStates } from "./resource-service.js";
 
 describe("yerel hammadde ticaret tüketimi", () => {
   it("binasız yerleşkenin iki aktif ticaretinde yerel etkiyi kapatır", () => {
@@ -55,5 +55,18 @@ describe("yerel hammadde ticaret tüketimi", () => {
 
     expect(states.get("a")).toMatchObject({ ownResourceActive: false, remaining: 0, resources: ["TIMBER"] });
     expect(states.get("b")).toMatchObject({ ownResourceActive: true, remaining: 2, resources: ["WINE", "GLASS"] });
+  });
+
+  it("tamamı ticarette kullanılan Mor Boyanın ülke ticaret hakkını korur", async () => {
+    const query = vi.fn()
+      .mockResolvedValueOnce({ rows: [
+        { id: "purple", resource_type: "PURPLE_DYE", resource_production_minimum: null, raw_material_level: 0, active_trade_usage: 3 }
+      ] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ exists: 1 }], rowCount: 1 });
+
+    const limit = await countryTradeAgreementLimit({ query } as unknown as DbClient, "country");
+
+    expect(limit).toBe(3);
   });
 });

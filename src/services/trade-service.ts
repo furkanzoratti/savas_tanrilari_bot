@@ -1,7 +1,7 @@
 import { pool, withTransaction, type DbClient } from "../db/pool.js";
 import { TRADE_INCOME_PER_COUNTRY, type TradeRoute, type TradeStatus } from "../domain/trade.js";
-import { RESOURCES, isResourceType, tradeAgreementLimit, type ResourceType } from "../domain/resources.js";
-import { countryResourceAccess, localResourceProduction } from "./resource-service.js";
+import { RESOURCES, isResourceType, type ResourceType } from "../domain/resources.js";
+import { countryTradeAgreementLimit, localResourceProduction } from "./resource-service.js";
 import { GameError } from "./game-service.js";
 
 export interface TradeAgreementView {
@@ -64,7 +64,7 @@ async function assertTradeCapacity(client: DbClient, countryId: string): Promise
     "SELECT COUNT(*)::integer AS count FROM trade_agreements WHERE status IN ('PENDING','ACTIVE') AND (proposer_country_id=$1 OR receiver_country_id=$1)",
     [countryId]
   )).rows[0]?.count ?? 0);
-  const limit = tradeAgreementLimit(await countryResourceAccess(client, countryId));
+  const limit = await countryTradeAgreementLimit(client, countryId);
   if (used >= limit) throw new GameError(`Ticaret sözleşmesi sınırı dolu (${used}/${limit}). Mor Boya erişimi sınırı 1 artırır.`);
 }
 
