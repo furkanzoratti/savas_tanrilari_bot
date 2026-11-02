@@ -479,6 +479,17 @@ function publicPayload(view: BattleView, result?: Parameters<typeof battleEmbed>
   return { embeds: [battleEmbed(view, result,flagResolver)], components: [...visibleComponents,reportComponents(view)], files: [new AttachmentBuilder(asset.path, { name: asset.name })] };
 }
 
+async function sendExpiredInteractionBattleCard(
+  interaction:ChatInputCommandInteraction,
+  payload:ReturnType<typeof publicPayload>
+){
+  const channel=await interaction.client.channels.fetch(interaction.channelId!);
+  if(!channel?.isTextBased()||channel.isDMBased()||!("send" in channel)){
+    throw new GameError("Discord etkileşimi zaman aşımına uğradı ve savaş kanalı doğrudan gönderim için açılamadı.");
+  }
+  return channel.send(payload);
+}
+
 export function battleRollEmbed(view: BattleView, side: BattleSideKey): EmbedBuilder {
   const roll = view.rolls.find((item) => item.side_key === side)!;
   const factor = (value: number) => value.toFixed(2).replace(".", ",");
@@ -607,7 +618,17 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
   const sub = interaction.options.getSubcommand();
   if (!["saha-aleti-al", "suvari-indir"].includes(sub)) requireGameMaster(interaction);
   const publicCommands = new Set(["bombardiman", "yayinla", "tur-oynat", "bitir", "iptal"]);
-  await interaction.deferReply({ ephemeral: !publicCommands.has(sub) });
+  let expiredPublishInteraction=false;
+  try{
+    await interaction.deferReply({ ephemeral: !publicCommands.has(sub) });
+  }catch(error){
+    const code=Number((error as {code?:number|string}|null)?.code??0);
+    if(code!==10_062||sub!=="yayinla")throw error;
+    // Discord bazen yoğun gateway anında komutu üç saniyelik etkileşim süresi
+    // dolduktan sonra ulaştırabiliyor. Yayın işlemi kaybolmasın; aşağıda kart
+    // doğrudan kanala gönderilecek.
+    expiredPublishInteraction=true;
+  }
   if (sub === "baslat") {
     requireGameMaster(interaction);
     const view = await battleService.create({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id,
@@ -810,7 +831,10 @@ export async function handleBattleCommand(interaction: ChatInputCommandInteracti
   } else if (sub === "yayinla") {
     requireGameMaster(interaction);
     const view = await battleService.publish({ guildId: interaction.guildId, channelId: interaction.channelId, actorId: interaction.user.id });
-    const reply = await interaction.editReply(publicPayload(view,undefined,interaction.guild));
+    const payload=publicPayload(view,undefined,interaction.guild);
+    const reply = expiredPublishInteraction
+      ?await sendExpiredInteractionBattleCard(interaction,payload)
+      :await interaction.editReply(payload);
     await retireBattleCard(interaction.client,view,reply.id);
     await battleService.setPublicMessage(view.battle.id, reply.id);
   } else if (sub === "tur-oynat") {
