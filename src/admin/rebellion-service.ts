@@ -19,6 +19,7 @@ import { adminConfig } from "./config.js";
 import { adminPool, type AdminDbClient, withAdminTransaction } from "./db.js";
 import { rebelLeaderProfile } from "../domain/rebel-leaders.js";
 import {FORMABLE_COUNTRIES,formableModifiers,type FormableCountryKey} from "../domain/formable-countries.js";
+import {suppressSettlementRebellion} from "../services/rebellion-suppression-service.js";
 
 const factionTypes = ["POPULAR", "SEPARATIST", "RELIGIOUS", "SLAVE"] as const;
 const liveStatuses = ["ORGANIZING", "ACTIVE", "OCCUPYING"] as const;
@@ -74,11 +75,18 @@ interface RebellionRow {
   recent_uprising_until_turn: number | null;
   ruin_stage: number;
   is_conquered: boolean;
+  conquered_turn:number|null;
+  suppressed_rebellion_faction_type:RebelFactionType|null;
+  suppressed_rebellion_faction_until_turn:number|null;
   unrest_active: boolean;
   rebellion_active: boolean;
   epidemic_active: boolean;
   famine_active: boolean;
   war_exhaustion: number;
+  recent_battle_losses:number;
+  recent_settlements_lost:number;
+  current_land_personnel:number;
+  capital_occupied:boolean;
   active_missionary: boolean;
   besieged: boolean;
   recent_land_raid_tier: string | null;
@@ -137,9 +145,20 @@ async function loadRows(client: Queryable, settlementId?: string): Promise<Rebel
             ) AS imported_amber,
             settlement.religion_key,settlement.prosperity,settlement.rebellion_progress,
             settlement.rebellion_faction_type,settlement.rebellion_name_override,settlement.rebellion_personnel_override,
-            settlement.recent_uprising_until_turn,settlement.ruin_stage,
-            settlement.is_conquered,settlement.unrest_active,settlement.rebellion_active,
+            settlement.recent_uprising_until_turn,settlement.suppressed_rebellion_faction_type,
+            settlement.suppressed_rebellion_faction_until_turn,settlement.ruin_stage,
+            settlement.is_conquered,settlement.conquered_turn,settlement.unrest_active,settlement.rebellion_active,
             settlement.epidemic_active,settlement.famine_active,country.war_exhaustion,
+            COALESCE((SELECT SUM(turn.new_battle_losses) FROM country_war_exhaustion_turns turn
+              WHERE turn.country_id=country.id AND turn.game_turn BETWEEN GREATEST(0,guild.current_turn-1) AND guild.current_turn),0)::bigint AS recent_battle_losses,
+            COALESCE((SELECT SUM(turn.settlements_lost) FROM country_war_exhaustion_turns turn
+              WHERE turn.country_id=country.id AND turn.game_turn BETWEEN GREATEST(0,guild.current_turn-1) AND guild.current_turn),0)::integer AS recent_settlements_lost,
+            (COALESCE((SELECT SUM(stack.quantity) FROM unit_stacks stack JOIN settlements origin ON origin.id=stack.settlement_id
+              WHERE origin.country_id=country.id),0)+COALESCE((SELECT SUM(unit.quantity) FROM army_units unit
+              JOIN armies army ON army.id=unit.army_id JOIN settlements origin ON origin.id=unit.settlement_id
+              WHERE army.country_id=country.id AND origin.country_id<>country.id),0))::bigint AS current_land_personnel,
+            EXISTS(SELECT 1 FROM settlement_occupations occupation WHERE occupation.legal_owner_country_id=country.id
+              AND occupation.settlement_id=country.capital_settlement_id AND occupation.status='ACTIVE') AS capital_occupied,
             EXISTS(SELECT 1 FROM missionary_operations mission
               WHERE mission.target_settlement_id=settlement.id AND mission.status IN ('TRAVELING','ACTIVE')) AS active_missionary,
             EXISTS(SELECT 1 FROM battles battle WHERE battle.defender_settlement_id=settlement.id
@@ -184,7 +203,7 @@ async function loadRows(client: Queryable, settlementId?: string): Promise<Rebel
 
 function projectedProsperity(row: RebellionRow, rebellionAfter: number): number {
   const before = Number(row.prosperity);
-  if (row.rebellion_active || Number(row.ruin_stage) === 2 || row.is_conquered) return 0;
+  if (row.rebellion_active || Number(row.ruin_stage) === 2) return 0;
   if (row.besieged) return Math.max(0, before - 10);
   if (row.recent_land_raid_tier || row.recent_naval_raid) return Math.max(0, before - (row.recent_land_raid_tier === "TOP" ? 25 : 15));
   if (rebellionAfter >= 60) return Math.max(0, before - 5);
@@ -196,19 +215,26 @@ function view(row: RebellionRow, history: StabilityHistoryRow[] = []) {
   const buildings = row.buildings ?? {};
   const slaveRatio = Number(row.slave_population) / Math.max(1, Number(row.population) + Number(row.slave_population));
   const stabilityReduction=formableModifiers(row.active_formable_key).stabilityRiskReduction??0;
+  const recentLosses=Number(row.recent_battle_losses);
+  const recentMilitaryLossRatio=recentLosses/Math.max(1,recentLosses+Number(row.current_land_personnel));
+  const nextTurn = Number(row.current_turn) + 1;
+  const blockedFaction=row.suppressed_rebellion_faction_until_turn!==null&&
+    Number(row.suppressed_rebellion_faction_until_turn)>=nextTurn?row.suppressed_rebellion_faction_type:null;
   const pressure = assessRebellionPressure({
     prosperity:Number(row.prosperity),unrestActive:row.unrest_active,conquered:row.is_conquered,
+    conqueredTurns:row.is_conquered&&row.conquered_turn!==null?nextTurn-Number(row.conquered_turn):null,
     foreignCulture:row.culture_group!==row.primary_culture_group,activeMissionary:row.active_missionary,
     strictTaxation:row.strict_taxation,epidemicActive:row.epidemic_active,famineActive:row.famine_active,
     besieged:row.besieged,ruinStage:Number(row.ruin_stage),slaveCampLevel:Number(buildings.slave_camp??0),slaveRatio,
     recentRaid:Boolean(row.recent_land_raid_tier)||row.recent_naval_raid,warExhaustion:Number(row.war_exhaustion),
+    recentMilitaryLossRatio,recentSettlementsLost:Number(row.recent_settlements_lost),capitalOccupied:row.capital_occupied,
+    blockedFactionType:blockedFaction,
     curiaLevel:Number(buildings.curia??0),innsBathsLevel:Number(buildings.inns_baths??0),hasPantheon:Number(buildings.pantheon??0)>0,
     hasAmber:row.resource_type==="AMBER"||row.imported_amber,stabilityRiskReduction:stabilityReduction,
     stabilityRiskReductionLabel:row.active_formable_key
       ?FORMABLE_COUNTRIES[row.active_formable_key]?.name??"Ülke etkisi"
       :"Ülke etkisi"
   });
-  const nextTurn = Number(row.current_turn) + 1;
   const immune = row.recent_uprising_until_turn !== null && Number(row.recent_uprising_until_turn) >= nextTurn;
   const projection = projectRebellionTurn({
     before:Number(row.rebellion_progress),active:row.rebellion_active,immune,pressure
@@ -241,11 +267,15 @@ function view(row: RebellionRow, history: StabilityHistoryRow[] = []) {
     rebellionProgress:Number(row.rebellion_progress),factionType,
     factionLabel:factionType?REBEL_FACTION_LABELS[factionType]:null,unrestActive:row.unrest_active,
     rebellionActive:row.rebellion_active,recentUprisingUntilTurn:row.recent_uprising_until_turn,
+    suppressedFactionType:row.suppressed_rebellion_faction_type,
+    suppressedFactionUntilTurn:row.suppressed_rebellion_faction_until_turn,
     immuneNextTurn:immune,risk:pressure.risk,eligible:pressure.eligible,factors:pressure.factors,
     scores:pressure.scores,conditions:{conquered:row.is_conquered,foreignCulture:row.culture_group!==row.primary_culture_group,
       missionary:row.active_missionary,besieged:row.besieged,epidemic:row.epidemic_active,famine:row.famine_active,
       recentRaid:Boolean(row.recent_land_raid_tier)||row.recent_naval_raid,strictTaxation:row.strict_taxation,
-      ruinStage:Number(row.ruin_stage),warExhaustion:Number(row.war_exhaustion),slaveRatio:Math.round(slaveRatio*1000)/10},
+      ruinStage:Number(row.ruin_stage),warExhaustion:Number(row.war_exhaustion),
+      recentMilitaryLossPercent:Math.round(recentMilitaryLossRatio*1000)/10,recentSettlementsLost:Number(row.recent_settlements_lost),
+      capitalOccupied:row.capital_occupied,slaveRatio:Math.round(slaveRatio*1000)/10},
     projection:{...projection,nextTurn,outbreakChance,
       prosperityOnSuccess:projectedProsperity(row,projection.onSuccess),
       prosperityOnFailure:projectedProsperity(row,projection.onFailure)},
@@ -301,8 +331,9 @@ export const adminRebellionService={
     const [rows,histories]=await Promise.all([loadRows(adminPool),historyMap()]);
     const settlements=rows.map((row)=>view(row,histories.get(row.id)??[]));
     return {settlements,summary:{total:settlements.length,active:settlements.filter((item)=>item.rebellionActive).length,
-      critical:settlements.filter((item)=>!item.rebellionActive&&item.rebellionProgress>=70).length,
-      threatened:settlements.filter((item)=>!item.rebellionActive&&item.risk>=25).length,
+      recovering:settlements.filter((item)=>item.immuneNextTurn).length,
+      critical:settlements.filter((item)=>!item.rebellionActive&&!item.immuneNextTurn&&item.rebellionProgress>=70).length,
+      threatened:settlements.filter((item)=>!item.rebellionActive&&!item.immuneNextTurn&&item.risk>=25).length,
       projectedOutbreaks:settlements.filter((item)=>item.projection.outbreakChance>0).length}};
   },
 
@@ -381,11 +412,10 @@ export const adminRebellionService={
         const faction=row.rebellion_faction_type??view(row).predictedFaction.type??"POPULAR";
         await client.query("UPDATE settlements SET rebellion_progress=$1,rebellion_faction_type=CASE WHEN $1>=40 THEN $2 ELSE rebellion_faction_type END WHERE id=$3",[progress,faction,settlementId]);
       }else if(input.action==="CLEAR_PROTECTION"){
-        await client.query("UPDATE settlements SET recent_uprising_until_turn=NULL WHERE id=$1",[settlementId]);
+        await client.query("UPDATE settlements SET recent_uprising_until_turn=NULL,suppressed_rebellion_faction_type=NULL,suppressed_rebellion_faction_until_turn=NULL WHERE id=$1",[settlementId]);
       }else if(input.action==="SUPPRESS"){
         if(!row.rebellion_active&&!row.live_faction_id)throw new Error("Bastırılacak açık bir isyan bulunmuyor.");
-        await client.query("UPDATE rebel_factions SET status='SUPPRESSED',updated_at=NOW() WHERE settlement_id=$1 AND status IN ('ORGANIZING','ACTIVE','OCCUPYING')",[settlementId]);
-        await client.query("UPDATE settlements SET rebellion_active=FALSE,unrest_active=TRUE,rebellion_progress=0,rebellion_faction_type=NULL,recent_uprising_until_turn=$1,rebellion_name_override=NULL,rebellion_personnel_override=NULL WHERE id=$2",[currentTurn+3,settlementId]);
+        await suppressSettlementRebellion(client,settlementId,currentTurn);
       }else{
         if(row.rebellion_active||row.live_faction_id)throw new Error("Yerleşkede zaten etkin bir isyancı grup bulunuyor.");
         const preview=view(row);

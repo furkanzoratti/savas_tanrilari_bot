@@ -17,10 +17,11 @@ describe("stability domain",()=>{
   it("advances or calms rebellion without leaving 0..100",()=>{
     expect(nextRebellionProgress({before:90,eligible:true,risk:50,roll:20,immune:false})).toBe(100);
     expect(nextRebellionProgress({before:5,eligible:false,risk:0,roll:null,immune:false})).toBe(0);
-    expect(nextRebellionProgress({before:40,eligible:true,risk:10,roll:80,immune:false})).toBe(30);
-    expect(nextRebellionProgress({before:40,eligible:true,risk:20,roll:80,immune:false})).toBe(40);
-    expect(nextRebellionProgress({before:40,eligible:true,risk:25,roll:80,immune:false})).toBe(50);
-    expect(nextRebellionProgress({before:40,eligible:true,risk:25,roll:20,immune:false})).toBe(70);
+    expect(nextRebellionProgress({before:40,eligible:true,risk:10,roll:80,immune:false})).toBe(25);
+    expect(nextRebellionProgress({before:40,eligible:true,risk:20,roll:80,immune:false})).toBe(25);
+    expect(nextRebellionProgress({before:40,eligible:true,risk:25,roll:80,immune:false})).toBe(35);
+    expect(nextRebellionProgress({before:40,eligible:true,risk:25,roll:20,immune:false})).toBe(60);
+    expect(nextRebellionProgress({before:80,eligible:true,risk:70,roll:90,immune:false})).toBe(85);
   });
 
   it("creates contextual names for every rebel faction type",()=>{
@@ -67,12 +68,37 @@ describe("stability domain",()=>{
     expect(pressure.eligible).toBe(true);
     expect(pressure.recommendedFaction).toBe("SEPARATIST");
     const projection=projectRebellionTurn({before:60,active:false,immune:false,pressure});
-    expect(projection).toEqual({onSuccess:90,onFailure:70,expected:81,successChance:55});
+    expect(projection).toEqual({onSuccess:85,onFailure:60,expected:74,successChance:55});
   });
 
-  it("projects immunity as a deterministic twenty point regression",()=>{
+  it("locks recovery at zero regardless of potential pressure",()=>{
     const projection=projectRebellionTurn({before:65,active:false,immune:true,pressure:{eligible:true,risk:75}});
-    expect(projection).toEqual({onSuccess:45,onFailure:45,expected:45,successChance:0});
+    expect(projection).toEqual({onSuccess:0,onFailure:0,expected:0,successChance:0});
+  });
+
+  it("keeps foreign culture as pressure without making it a permanent trigger",()=>{
+    const pressure=assessRebellionPressure({
+      prosperity:60,unrestActive:false,conquered:false,foreignCulture:true,activeMissionary:false,
+      strictTaxation:false,epidemicActive:false,famineActive:false,besieged:false,ruinStage:0,
+      slaveCampLevel:0,slaveRatio:0,recentRaid:false,warExhaustion:0,curiaLevel:0,
+      innsBathsLevel:0,hasPantheon:false
+    });
+    expect(pressure.risk).toBe(15);
+    expect(pressure.eligible).toBe(false);
+  });
+
+  it("turns military collapse and territorial losses into national crisis pressure",()=>{
+    const pressure=assessRebellionPressure({
+      prosperity:20,unrestActive:false,conquered:false,foreignCulture:true,activeMissionary:false,
+      strictTaxation:false,epidemicActive:false,famineActive:false,besieged:false,ruinStage:0,
+      slaveCampLevel:0,slaveRatio:0,recentRaid:false,warExhaustion:70,recentMilitaryLossRatio:0.16,
+      recentSettlementsLost:2,capitalOccupied:true,curiaLevel:0,innsBathsLevel:0,hasPantheon:false
+    });
+    expect(pressure.risk).toBe(67);
+    expect(pressure.eligible).toBe(true);
+    expect(pressure.factors).toContainEqual({label:"Yakın asker kayıpları",adjustment:10});
+    expect(pressure.factors).toContainEqual({label:"Yakın yerleşke kayıpları",adjustment:10});
+    expect(pressure.factors).toContainEqual({label:"Başkent işgali",adjustment:10});
   });
 
   it("applies amber and country stability reductions to persistent rebellion risk",()=>{

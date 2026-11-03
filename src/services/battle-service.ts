@@ -35,6 +35,7 @@ import { loadSettlementReligionModifiers } from "./religion-service.js";
 import { applyBattleNavalCargoLosses } from "./naval-cargo-loss-service.js";
 import { rebelMilitaryPower } from "../domain/stability.js";
 import { assertSettlementNotOccupied, linkOfficialWarToBattle, recordOfficialWarBattleOutcome } from "./war-occupation-service.js";
+import {suppressSettlementRebellion} from "./rebellion-suppression-service.js";
 
 export type BattleStatus = "DRAFT" | "WAITING_FIRST_ROLL" | "WAITING_SECOND_ROLL" | "READY_TO_RESOLVE" | "FINISHED" | "CANCELLED";
 
@@ -1159,11 +1160,10 @@ async function applyLossesToDocuments(client: DbClient, battleId: string, guildI
         const currentTurn=Number((await client.query<{current_turn:number}>(
           "SELECT current_turn FROM guilds WHERE discord_id=$1",[guildId]
         )).rows[0]?.current_turn??1);
-        await client.query(
-          `UPDATE settlements SET rebellion_active=FALSE,unrest_active=TRUE,rebellion_progress=0,
-             rebellion_faction_type=NULL,recent_uprising_until_turn=$1
-           WHERE id=(SELECT settlement_id FROM rebel_factions WHERE id=$2)`,[currentTurn+3,side.rebel_faction_id]
-        );
+        const rebelSettlement=(await client.query<{settlement_id:string}>(
+          "SELECT settlement_id FROM rebel_factions WHERE id=$1",[side.rebel_faction_id]
+        )).rows[0];
+        if(rebelSettlement)await suppressSettlementRebellion(client,rebelSettlement.settlement_id,currentTurn);
       }
       continue;
     }

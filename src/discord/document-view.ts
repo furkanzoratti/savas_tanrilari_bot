@@ -10,7 +10,7 @@ export function matchesDocumentView(fieldName: string, view: DocumentView): bool
       .some((name) => fieldName.includes(name));
   }
   if (view === "military") {
-    return ["Nüfus", "Ordu Limiti", "Eğitim Kapasitesi", "Rıhtım Kapasitesi", "Garnizon", "Eğitilmiş Askerler", "Paralı Askerler", "Donanma", "Tamir", "Kuşatma"]
+    return ["Nüfus", "Ordu Limiti", "Eğitim Kapasitesi", "Eğitimdeki Birlikler", "Rıhtım Kapasitesi", "Garnizon", "Hazırlanan Garnizon", "Eğitilmiş Askerler", "Paralı Askerler", "Donanma", "İnşadaki Gemiler", "Tamir", "Kuşatma", "Üretimdeki Kuşatma Aletleri"]
       .some((name) => fieldName.includes(name));
   }
   return ["Binalar ve İnşaatlar", "Şehir Politikaları", "Aktif Yerleşke Olayları", "Refah ve İstikrar", "Büyük Proje"]
@@ -26,6 +26,22 @@ const FIELD_ORDER: Partial<Record<DocumentView, string[]>> = {
     "Yerel Hazine",
     "Aktif Yerleşke Olayları",
     "Süreli Gelir Cezası"
+  ],
+  military: [
+    "Nüfus",
+    "Ordu Limiti",
+    "Eğitim Kapasitesi",
+    "Eğitimdeki Birlikler",
+    "Hazırlanan Garnizon",
+    "Garnizon",
+    "Eğitilmiş Askerler",
+    "Paralı Askerler",
+    "Donanma",
+    "İnşadaki Gemiler",
+    "Rıhtım Kapasitesi",
+    "Tamir",
+    "Üretimdeki Kuşatma Aletleri",
+    "Kuşatma"
   ]
 };
 

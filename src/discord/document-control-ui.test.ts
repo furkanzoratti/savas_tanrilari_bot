@@ -34,6 +34,10 @@ describe("yerleşke belge görünümleri", () => {
     expect(matchesDocumentView("⛩️ Din ve Mezhep", "military")).toBe(false);
     expect(matchesDocumentView("🎖️ Ordu Limiti", "military")).toBe(true);
     expect(matchesDocumentView("🏋️ Eğitim Kapasitesi", "military")).toBe(true);
+    expect(matchesDocumentView("⏳ Eğitimdeki Birlikler", "military")).toBe(true);
+    expect(matchesDocumentView("⚓ İnşadaki Gemiler", "military")).toBe(true);
+    expect(matchesDocumentView("🛠️ Üretimdeki Kuşatma Aletleri", "military")).toBe(true);
+    expect(matchesDocumentView("🛡️ Hazırlanan Garnizon", "military")).toBe(true);
     expect(matchesDocumentView("⚓ Rıhtım Kapasitesi", "military")).toBe(true);
   });
 });

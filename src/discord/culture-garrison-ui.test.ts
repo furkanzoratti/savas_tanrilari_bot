@@ -47,7 +47,8 @@ describe("kültür ve yerleşke kartı", () => {
           { building_type: "trade_guild", level: 1, status: "ACTIVE" },
           { building_type: "port", level: 1, status: "ACTIVE" }
         ], ships: [{ ship_type: "trireme", quantity: 2, status: "RESERVE" }], siegeAssets: [],
-        pendingRecruitment: [], pendingShips: [{ ship_type: "kerkouros", quantity: 3, ordered_turn: 3, completion_turn: 5 }],
+        pendingRecruitment: [{unit_type:"heavy_infantry",quantity:500,due_turn:4}],
+        pendingShips: [{ ship_type: "kerkouros", quantity: 3, ordered_turn: 3, completion_turn: 5 }],
         units: [
           { unit_type: "light_infantry", quantity: 400, status: "GARRISON", force_type: "GARRISON" },
           { unit_type: "heavy_infantry", quantity: 200, status: "GARRISON", force_type: "GARRISON" },
@@ -96,6 +97,8 @@ describe("kültür ve yerleşke kartı", () => {
     expect(fields.find((field) => field.name === "💰 Gelir Kalemleri")?.value).toContain("Deniz Ticareti");
     expect(fields.find((field) => field.name === "⚓ Rıhtım Kapasitesi")?.value).toContain("7/30 rıhtım puanı");
     expect(fields.find((field) => field.name === "⚓ Rıhtım Kapasitesi")?.value).toContain("Rezerv: 4 • Üretim: 3");
+    expect(fields.find((field) => field.name === "⏳ Eğitimdeki Birlikler")?.value).toContain("Tur 4: **500** Ağır Piyade");
+    expect(fields.find((field) => field.name === "⚓ İnşadaki Gemiler")?.value).toContain("Tur 5: **3** Kerkouros");
 
     const scopedDocument={...document,settlements:[
       document.settlements[0]!,

@@ -9,6 +9,7 @@ import {RELIGIONS,type ReligionKey} from "../domain/religions.js";
 import { rebelLeaderProfile } from "../domain/rebel-leaders.js";
 import {FORMABLE_COUNTRIES,formableModifiers,type FormableCountryKey} from "../domain/formable-countries.js";
 import {activeCountryModifiers} from "./country-modifier-service.js";
+import {suppressSettlementRebellion} from "./rebellion-suppression-service.js";
 
 interface CountryStabilityRow {
   id: string; name: string; primary_culture_group: string; war_exhaustion: number;
@@ -21,11 +22,20 @@ interface SettlementStabilityRow {
   prosperity: number; rebellion_progress: number; rebellion_faction_type: RebelFactionType | null;
   rebellion_name_override: string | null; rebellion_personnel_override: number | null;
   recent_uprising_until_turn: number | null; ruin_stage: number; is_conquered: boolean;
+  conquered_turn:number|null;
+  suppressed_rebellion_faction_type:RebelFactionType|null;
+  suppressed_rebellion_faction_until_turn:number|null;
   unrest_active: boolean; rebellion_active: boolean; epidemic_active: boolean; famine_active: boolean;
   tax_rate_percent: number; war_exhaustion: number; primary_culture_group: string;
   active_formable_key:FormableCountryKey|null;resource_type:string;imported_amber:boolean;
   religion_key:ReligionKey;
   live_faction_id: string | null;
+}
+
+interface CountryCrisisSnapshot{
+  recentMilitaryLossRatio:number;
+  recentSettlementsLost:number;
+  capitalOccupied:boolean;
 }
 
 export interface WarExhaustionTurnDetail {
@@ -131,17 +141,48 @@ async function restorationCountry(client: DbClient, settlementId: string, curren
   )).rows[0]??null;
 }
 
+async function countryCrisisSnapshots(client:DbClient,guildId:string,newTurn:number):Promise<Map<string,CountryCrisisSnapshot>>{
+  const rows=(await client.query<{
+    country_id:string;recent_losses:number;recent_settlements_lost:number;current_land_personnel:number;capital_occupied:boolean;
+  }>(
+    `SELECT country.id AS country_id,
+            COALESCE((SELECT SUM(turn.new_battle_losses) FROM country_war_exhaustion_turns turn
+              WHERE turn.country_id=country.id AND turn.game_turn BETWEEN GREATEST(0,$2::integer-1) AND $2::integer),0)::bigint AS recent_losses,
+            COALESCE((SELECT SUM(turn.settlements_lost) FROM country_war_exhaustion_turns turn
+              WHERE turn.country_id=country.id AND turn.game_turn BETWEEN GREATEST(0,$2::integer-1) AND $2::integer),0)::integer AS recent_settlements_lost,
+            (COALESCE((SELECT SUM(stack.quantity) FROM unit_stacks stack
+              JOIN settlements origin ON origin.id=stack.settlement_id WHERE origin.country_id=country.id),0)+
+             COALESCE((SELECT SUM(unit.quantity) FROM army_units unit
+              JOIN armies army ON army.id=unit.army_id JOIN settlements origin ON origin.id=unit.settlement_id
+              WHERE army.country_id=country.id AND origin.country_id<>country.id),0))::bigint AS current_land_personnel,
+            EXISTS(SELECT 1 FROM settlement_occupations occupation
+              WHERE occupation.legal_owner_country_id=country.id AND occupation.settlement_id=country.capital_settlement_id
+                AND occupation.status='ACTIVE') AS capital_occupied
+       FROM countries country WHERE country.guild_id=$1 AND country.status='ACTIVE'`,[guildId,newTurn]
+  )).rows;
+  return new Map(rows.map((row)=>{
+    const losses=Number(row.recent_losses);
+    const current=Number(row.current_land_personnel);
+    return [row.country_id,{
+      recentMilitaryLossRatio:losses/Math.max(1,current+losses),
+      recentSettlementsLost:Number(row.recent_settlements_lost),capitalOccupied:Boolean(row.capital_occupied)
+    }];
+  }));
+}
+
 export async function processStabilityTurn(client: DbClient, guildId: string, newTurn: number, actorId: string): Promise<StabilityTurnResult> {
   const guild = (await client.query<{ stability_system_enabled: boolean }>(
     "SELECT stability_system_enabled FROM guilds WHERE discord_id=$1", [guildId]
   )).rows[0];
   if (!guild?.stability_system_enabled) return {enabled:false,warExhaustion:[],settlements:[]};
   const warExhaustion = await processWarExhaustion(client,guildId,newTurn);
+  const crisisByCountry=await countryCrisisSnapshots(client,guildId,newTurn);
   const settlements = (await client.query<SettlementStabilityRow>(
     `SELECT s.id,s.country_id,c.name AS country_name,s.name,s.population,s.slave_population,s.culture_group,
             s.prosperity,s.rebellion_progress,s.rebellion_faction_type,s.rebellion_name_override,
             s.rebellion_personnel_override,s.recent_uprising_until_turn,
-            s.ruin_stage,s.is_conquered,s.unrest_active,s.rebellion_active,s.epidemic_active,s.famine_active,
+            s.suppressed_rebellion_faction_type,s.suppressed_rebellion_faction_until_turn,
+            s.ruin_stage,s.is_conquered,s.conquered_turn,s.unrest_active,s.rebellion_active,s.epidemic_active,s.famine_active,
             s.tax_rate_percent,c.war_exhaustion,c.primary_culture_group,c.active_formable_key,s.resource_type,s.religion_key,
             EXISTS(
               SELECT 1 FROM trade_agreements trade
@@ -162,9 +203,11 @@ export async function processStabilityTurn(client: DbClient, guildId: string, ne
     const existingTurn = await client.query("SELECT 1 FROM settlement_stability_turns WHERE settlement_id=$1 AND game_turn=$2", [settlement.id,newTurn]);
     if (existingTurn.rowCount) continue;
     if (settlement.live_faction_id && !settlement.rebellion_active) {
-      await client.query("UPDATE rebel_factions SET status='SUPPRESSED',updated_at=NOW() WHERE id=$1", [settlement.live_faction_id]);
-      await client.query("UPDATE settlements SET rebellion_progress=0,rebellion_faction_type=NULL,recent_uprising_until_turn=$1 WHERE id=$2", [newTurn+3,settlement.id]);
-      settlement.rebellion_progress=0; settlement.rebellion_faction_type=null; settlement.recent_uprising_until_turn=newTurn+3;
+      const suppression=await suppressSettlementRebellion(client,settlement.id,newTurn);
+      settlement.rebellion_progress=0; settlement.rebellion_faction_type=null; settlement.unrest_active=false;
+      settlement.recent_uprising_until_turn=suppression.recoveryUntilTurn;
+      settlement.suppressed_rebellion_faction_type=suppression.factionType;
+      settlement.suppressed_rebellion_faction_until_turn=suppression.sameFactionBlockedUntilTurn;
     }
     const buildingRows = (await client.query<{ building_type: string; level: number }>(
       "SELECT building_type,level FROM buildings WHERE settlement_id=$1 AND status IN ('ACTIVE','BUILDING') AND level>0", [settlement.id]
@@ -187,14 +230,20 @@ export async function processStabilityTurn(client: DbClient, guildId: string, ne
     )).rowCount);
     const slaveRatio = Number(settlement.slave_population)/Math.max(1,Number(settlement.population)+Number(settlement.slave_population));
     const foreignCulture = settlement.culture_group!==settlement.primary_culture_group;
+    const crisis=crisisByCountry.get(settlement.country_id)??{recentMilitaryLossRatio:0,recentSettlementsLost:0,capitalOccupied:false};
+    const blockedFaction=settlement.suppressed_rebellion_faction_until_turn!==null&&
+      settlement.suppressed_rebellion_faction_until_turn>=newTurn?settlement.suppressed_rebellion_faction_type:null;
     const projectModifiers=await activeCountryModifiers(client,settlement.country_id);
     const stabilityReduction=(formableModifiers(settlement.active_formable_key).stabilityRiskReduction??0)+Number(projectModifiers.rebellionResistance??0);
     const pressure=assessRebellionPressure({
       prosperity:Number(settlement.prosperity),unrestActive:settlement.unrest_active,conquered:settlement.is_conquered,
+      conqueredTurns:settlement.is_conquered&&settlement.conquered_turn!==null?newTurn-Number(settlement.conquered_turn):null,
       foreignCulture,activeMissionary:Boolean(activeMissionary),strictTaxation:policies.has("STRICT_TAXATION"),
       epidemicActive:settlement.epidemic_active,famineActive:settlement.famine_active,besieged,
       ruinStage:Number(settlement.ruin_stage),slaveCampLevel:buildings.get("slave_camp")??0,slaveRatio,
       recentRaid:Boolean(landRaid)||navalRaid,warExhaustion:Number(settlement.war_exhaustion),
+      recentMilitaryLossRatio:crisis.recentMilitaryLossRatio,recentSettlementsLost:crisis.recentSettlementsLost,
+      capitalOccupied:crisis.capitalOccupied,blockedFactionType:blockedFaction,
       curiaLevel:buildings.get("curia")??0,innsBathsLevel:buildings.get("inns_baths")??0,
       hasPantheon:buildings.has("pantheon"),hasAmber:settlement.resource_type==="AMBER"||settlement.imported_amber,
       stabilityRiskReduction:stabilityReduction,
@@ -209,7 +258,7 @@ export async function processStabilityTurn(client: DbClient, guildId: string, ne
     const afterProgress=settlement.rebellion_active?100:nextRebellionProgress({before:beforeProgress,eligible,risk,roll,immune});
     const factionType=settlement.rebellion_faction_type??(afterProgress>=40?pressure.recommendedFaction:null);
     let prosperityAfter=Number(settlement.prosperity);
-    if(settlement.rebellion_active||settlement.ruin_stage===2||settlement.is_conquered)prosperityAfter=0;
+    if(settlement.rebellion_active||settlement.ruin_stage===2)prosperityAfter=0;
     else if(besieged)prosperityAfter=clamp(prosperityAfter-10,0,100);
     else if(landRaid||navalRaid)prosperityAfter=clamp(prosperityAfter-(landRaid?.result_tier==="TOP"?25:15),0,100);
     else if(afterProgress>=60)prosperityAfter=clamp(prosperityAfter-5,0,100);
@@ -251,7 +300,7 @@ export async function processStabilityTurn(client: DbClient, guildId: string, ne
          rebellion_before,rebellion_after,rebellion_roll,faction_type,factors,outcome)
        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11)`,
       [settlement.id,newTurn,settlement.prosperity,prosperityAfter,risk,beforeProgress,afterProgress,roll,factionType,
-        JSON.stringify(factors),outbreak?"OUTBREAK":immune?"IMMUNE":afterProgress>beforeProgress?"ESCALATED":afterProgress<beforeProgress?"CALMED":"UNCHANGED"]
+        JSON.stringify(factors),outbreak?"OUTBREAK":immune?"RECOVERY":afterProgress>beforeProgress?"ESCALATED":afterProgress<beforeProgress?"CALMED":"UNCHANGED"]
     );
     await client.query(
       `UPDATE settlements SET prosperity=$1,rebellion_progress=$2,rebellion_faction_type=$3,

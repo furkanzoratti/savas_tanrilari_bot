@@ -24,6 +24,7 @@ import {dynastyDeathFailureMaximum,dynastyDeathSaveFailed} from "../domain/dynas
 import {markCharacterDead} from "./character-death-service.js";
 import {MISSIONARY_BASE_PROGRESS,missionaryBeliefPenalty,missionaryPopulationPenalty} from "../domain/missionary.js";
 import {countryTradeAgreementLimit} from "./resource-service.js";
+import {suppressSettlementRebellion} from "./rebellion-suppression-service.js";
 
 export const MISSIONARY_PURCHASE_COST = 2_000;
 export const MISSIONARY_LIMIT_PER_COUNTRY = 5;
@@ -1411,10 +1412,8 @@ export async function processCharacterTurn(
           : operation.target_event_type === "EPIDEMIC" ? "epidemic_active"
           : operation.target_event_type === "BLACK_MARKET" ? "black_market_active"
           : "unrest_active";
-        await client.query(
-          "UPDATE settlements SET "+column+"=FALSE"+(column==="rebellion_active"?",unrest_active=TRUE":"")+" WHERE id=$1",
-          [operation.target_settlement_id]
-        );
+        if(column==="rebellion_active")await suppressSettlementRebellion(client,operation.target_settlement_id!,turn);
+        else await client.query("UPDATE settlements SET "+column+"=FALSE WHERE id=$1",[operation.target_settlement_id]);
         await client.query(
           "UPDATE diplomat_operations SET status='COMPLETED',progress=goal,last_resolved_turn=$1,updated_at=NOW() WHERE id=$2",
           [turn,operation.id]

@@ -11,6 +11,7 @@ import { GameError } from "./game-service.js";
 import { formableModifiers, type FormableCountryKey } from "../domain/formable-countries.js";
 import { dominantReligionFromDistributions, religionDistributionModifiers, type ReligionKey } from "../domain/religions.js";
 import { fallbackReligionDistribution, loadReligionDistributions } from "./religion-service.js";
+import {suppressSettlementRebellion} from "./rebellion-suppression-service.js";
 
 interface EventSettlementRow extends SettlementEventState {
   id: string;
@@ -425,14 +426,7 @@ export const eventService = {
       const guild = (await client.query<{ current_turn: number }>("SELECT current_turn FROM guilds WHERE discord_id=$1", [input.guildId])).rows[0];
       if (!guild) throw new GameError("Sunucu oyun ayarları bulunamadı.");
       if(input.eventType==="REBELLION"){
-        await client.query(
-          "UPDATE rebel_factions SET status='SUPPRESSED',updated_at=NOW() WHERE settlement_id=$1 AND status IN ('ORGANIZING','ACTIVE','OCCUPYING')",
-          [settlement.id]
-        );
-        await client.query(
-          "UPDATE settlements SET rebellion_progress=0,rebellion_faction_type=NULL,recent_uprising_until_turn=$1 WHERE id=$2",
-          [guild.current_turn+3,settlement.id]
-        );
+        await suppressSettlementRebellion(client,settlement.id,guild.current_turn);
       }
       await writeAudit(client, input.guildId, input.actorId, "SETTLEMENT_EVENT_RESOLVE", settlement.id,
         { eventType: input.eventType, turn: guild.current_turn });

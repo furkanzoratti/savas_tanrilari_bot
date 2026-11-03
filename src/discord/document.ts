@@ -309,7 +309,7 @@ export function renderDocument(document: CountryDocument,scope?:DocumentSettleme
           `İsyan Gerilimi: **${settlement.rebellion_progress}/100**`,
           ...(settlement.rebellion_faction_type?[`Olası Fraksiyon: **${rebellionLabel}**`]:[]),
           ...(settlement.recent_uprising_until_turn!==null&&settlement.recent_uprising_until_turn>=document.guild.current_turn
-            ?[`🕊️ Yeni ayaklanma koruması: **Tur ${settlement.recent_uprising_until_turn} sonuna kadar**`]:[]),
+            ?[`🕊️ Toparlanma dönemi: **Tur ${settlement.recent_uprising_until_turn} sonuna kadar**\n↳ Bu sürede yeni isyan örgütlenemez.`]:[]),
           ...(settlement.rebellion_active?["🔥 **Açık isyan: gelir ve nüfus artışı durmuştur.**"]:[])
         ].join("\n")), inline: true },
         { name: "🌐 Etkin Kaynaklar ve Etkileri", value: spacedSection(resourceDetails || "Etkin hammadde etkisi bulunmuyor.") },
@@ -395,15 +395,19 @@ export function renderDocument(document: CountryDocument,scope?:DocumentSettleme
       const assets = settlement.siegeAssets.map((asset) => `• **${asset.quantity}** ${SIEGE_ASSETS[asset.asset_type as keyof typeof SIEGE_ASSETS]?.name ?? asset.asset_type}`).join("\n");
       embed.addFields({ name: "🛠️ Kuşatma Aletleri", value: spacedSection(assets), inline: true });
     }
-    const pending = [
-      ...settlement.pendingRecruitment.map((wave) => wave.unit_type === "observer"
-        ? `👁️ Tur ${wave.due_turn}: **1 Gözcü Birliği** (${number(wave.quantity)} personel)`
-        : `⚔️ Tur ${wave.due_turn}: **${number(wave.quantity)}** ${UNITS[wave.unit_type]?.name ?? wave.unit_type}`),
-      ...settlement.pendingShips.map((ship) => `🚢 Tur ${ship.completion_turn}: **${ship.quantity}** ${SHIPS[ship.ship_type]?.name ?? ship.ship_type}`),
-      ...(settlement.pendingSiege ?? []).map((order) => `🛠️ Tur ${order.completion_turn}: **${order.quantity}** ${SIEGE_ASSETS[order.asset_type]?.name ?? order.asset_type}`),
-      ...(settlement.pendingGarrison ?? []).map((order) => `🛡️ Tur ${order.completion_turn}: **${number(order.personnel_reserved)}** zorunlu garnizon • ${gold(order.paid_amount)} ödendi`)
-    ];
-    if (pending.length) embed.addFields({ name: "⚙️ Üretim", value: spacedSection(pending.join("\n")) });
+    const pendingRecruitment=settlement.pendingRecruitment.map((wave) => wave.unit_type === "observer"
+      ? `👁️ Tur ${wave.due_turn}: **1 Gözcü Birliği** (${number(wave.quantity)} personel)`
+      : `⚔️ Tur ${wave.due_turn}: **${number(wave.quantity)}** ${UNITS[wave.unit_type]?.name ?? wave.unit_type}`);
+    const pendingShips=settlement.pendingShips.map((ship) =>
+      `🚢 Tur ${ship.completion_turn}: **${ship.quantity}** ${SHIPS[ship.ship_type]?.name ?? ship.ship_type}`);
+    const pendingSiege=(settlement.pendingSiege ?? []).map((order) =>
+      `🛠️ Tur ${order.completion_turn}: **${order.quantity}** ${SIEGE_ASSETS[order.asset_type]?.name ?? order.asset_type}`);
+    const pendingGarrison=(settlement.pendingGarrison ?? []).map((order) =>
+      `🛡️ Tur ${order.completion_turn}: **${number(order.personnel_reserved)}** zorunlu garnizon • ${gold(order.paid_amount)} ödendi`);
+    if(pendingRecruitment.length)embed.addFields({name:"⏳ Eğitimdeki Birlikler",value:spacedSection(pendingRecruitment.join("\n"))});
+    if(pendingShips.length)embed.addFields({name:"⚓ İnşadaki Gemiler",value:spacedSection(pendingShips.join("\n"))});
+    if(pendingSiege.length)embed.addFields({name:"🛠️ Üretimdeki Kuşatma Aletleri",value:spacedSection(pendingSiege.join("\n"))});
+    if(pendingGarrison.length)embed.addFields({name:"🛡️ Hazırlanan Garnizon",value:spacedSection(pendingGarrison.join("\n"))});
 
     return embed;
   });

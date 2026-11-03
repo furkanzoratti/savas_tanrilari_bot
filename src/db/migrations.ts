@@ -122,6 +122,8 @@ import { battleTurnArchiveMigration } from "./battle-turn-archive-migration.js";
 import { religionSectMissionaryReworkMigration } from "./religion-sect-missionary-rework-migration.js";
 import { religionSectLiveDataRepairMigration } from "./religion-sect-live-data-repair-migration.js";
 import { greatGamesBetLimitMigration } from "./great-games-bet-limit-migration.js";
+import { rebellionRecoveryMigration } from "./rebellion-recovery-migration.js";
+import { cultureMilitaryPenaltyActivationMigration } from "./culture-military-penalty-activation-migration.js";
 import { countryMarshalsMigration } from "./country-marshals-migration.js";
 import { formableCountryCatalogSyncMigration } from "./formable-country-catalog-sync-migration.js";
 import { mountedArcherSeparationMigration } from "./mounted-archer-separation-migration.js";
@@ -2553,5 +2555,7 @@ export const migrations = [
   battleTurnArchiveMigration,
   religionSectMissionaryReworkMigration,
   religionSectLiveDataRepairMigration,
-  greatGamesBetLimitMigration
+  greatGamesBetLimitMigration,
+  rebellionRecoveryMigration,
+  cultureMilitaryPenaltyActivationMigration
 ] as const;

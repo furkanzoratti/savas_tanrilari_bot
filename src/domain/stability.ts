@@ -22,6 +22,7 @@ export interface RebellionPressureInput {
   prosperity: number;
   unrestActive: boolean;
   conquered: boolean;
+  conqueredTurns?: number | null;
   foreignCulture: boolean;
   activeMissionary: boolean;
   strictTaxation: boolean;
@@ -33,6 +34,10 @@ export interface RebellionPressureInput {
   slaveRatio: number;
   recentRaid: boolean;
   warExhaustion: number;
+  recentMilitaryLossRatio?: number;
+  recentSettlementsLost?: number;
+  capitalOccupied?: boolean;
+  blockedFactionType?: RebelFactionType | null;
   curiaLevel: number;
   innsBathsLevel: number;
   hasPantheon: boolean;
@@ -65,8 +70,16 @@ export function rebellionRisk(factors: readonly StabilityFactor[]): number {
 export function assessRebellionPressure(input: RebellionPressureInput): RebellionPressureAssessment {
   const factors: StabilityFactor[] = [{ label: "Temel gerilim", adjustment: 5 }];
   const add = (label: string, adjustment: number): void => { if (adjustment) factors.push({ label, adjustment }); };
+  const conqueredTurns=input.conqueredTurns===null||input.conqueredTurns===undefined?0:Math.max(0,Math.floor(input.conqueredTurns));
+  const conquestPressure=input.conquered?(conqueredTurns<=2?15:conqueredTurns<=4?10:5):0;
+  const militaryLossRatio=Math.max(0,input.recentMilitaryLossRatio??0);
+  const militaryLossPressure=militaryLossRatio>=0.15?10:militaryLossRatio>=0.075?6:militaryLossRatio>=0.03?3:0;
+  const recentSettlementsLost=Math.max(0,Math.floor(input.recentSettlementsLost??0));
+  const territorialLossPressure=recentSettlementsLost>=2?10:recentSettlementsLost===1?5:0;
+  const warExhaustion=Math.max(0,Math.floor(input.warExhaustion));
+  const warExhaustionPressure=warExhaustion>=80?18:warExhaustion>=60?12:warExhaustion>=40?7:warExhaustion>=20?3:0;
   add("Aktif huzursuzluk", input.unrestActive ? 15 : 0);
-  add("Fethedilmiş yerleşke", input.conquered ? 15 : 0);
+  add("Fetih sonrası uyum", conquestPressure);
   add("Yabancı kültür", input.foreignCulture ? 10 : 0);
   add("Misyoner faaliyeti", input.activeMissionary ? 15 : 0);
   add("Vergi sıkılaştırması", input.strictTaxation ? 10 : 0);
@@ -77,7 +90,10 @@ export function assessRebellionPressure(input: RebellionPressureInput): Rebellio
   add("Köle kampı", Math.max(0, input.slaveCampLevel) * 6);
   add("Köle nüfusu", input.slaveRatio >= 0.25 ? 15 : input.slaveRatio >= 0.15 ? 8 : 0);
   add("Yakın yağma", input.recentRaid ? 10 : 0);
-  add("Savaş yorgunluğu", Math.min(15, Math.floor(Math.max(0, input.warExhaustion) / 10)));
+  add("Savaş yorgunluğu", warExhaustionPressure);
+  add("Yakın asker kayıpları",militaryLossPressure);
+  add("Yakın yerleşke kayıpları",territorialLossPressure);
+  add("Başkent işgali",input.capitalOccupied?10:0);
   add(`Refah: ${prosperityTier(input.prosperity).label}`, prosperityTier(input.prosperity).unrestAdjustment);
   add("Curia", -Math.max(0, input.curiaLevel) * 2);
   add("Hanlar ve Hamamlar", -(input.innsBathsLevel >= 3 ? 10 : input.innsBathsLevel === 2 ? 6 : input.innsBathsLevel === 1 ? 3 : 0));
@@ -86,14 +102,17 @@ export function assessRebellionPressure(input: RebellionPressureInput): Rebellio
   add(input.stabilityRiskReductionLabel?.trim()||"Ülke etkisi",-Math.max(0,Math.floor(input.stabilityRiskReduction??0)));
 
   const scores: Record<RebelFactionType, number> = {
-    POPULAR: 5 + (input.unrestActive ? 15 : 0) + (input.strictTaxation ? 10 : 0),
-    SEPARATIST: (input.conquered ? 25 : 0) + (input.foreignCulture ? 20 : 0),
+    POPULAR: 5 + (input.unrestActive ? 15 : 0) + (input.strictTaxation ? 10 : 0)
+      +warExhaustionPressure+militaryLossPressure+territorialLossPressure+(input.capitalOccupied?10:0),
+    SEPARATIST: conquestPressure + (input.foreignCulture ? 20 : 0),
     RELIGIOUS: input.activeMissionary ? 35 : 0,
     SLAVE: Math.round(Math.max(0, input.slaveRatio) * 100) + Math.max(0, input.slaveCampLevel) * 8
   };
-  const eligible = input.unrestActive || input.conquered || input.foreignCulture || input.activeMissionary || input.besieged ||
-    input.epidemicActive || input.famineActive || input.slaveRatio >= 0.15 || input.recentRaid || input.warExhaustion >= 20;
-  return { factors, risk: rebellionRisk(factors), eligible, scores, recommendedFaction: chooseRebelFaction(scores) };
+  const eligible = input.unrestActive || input.conquered || input.activeMissionary || input.besieged ||
+    input.epidemicActive || input.famineActive || input.slaveRatio >= 0.15 || input.recentRaid || warExhaustion >= 20 ||
+    militaryLossPressure>0 || recentSettlementsLost>0 || Boolean(input.capitalOccupied);
+  return { factors, risk: rebellionRisk(factors), eligible, scores,
+    recommendedFaction: chooseRebelFaction(scores,input.blockedFactionType??null) };
 }
 
 export function projectRebellionTurn(input: {
@@ -117,13 +136,13 @@ export function projectRebellionTurn(input: {
 }
 
 export function nextRebellionProgress(input: { before: number; eligible: boolean; risk: number; roll: number | null; immune: boolean }): number {
-  if (input.immune) return Math.max(0, input.before - 20);
+  if (input.immune) return 0;
   if (!input.eligible) return Math.max(0, input.before - 20);
   const successful=input.roll!==null&&input.roll<=input.risk;
-  if(input.risk>=25)return Math.min(100,input.before+(successful?30:10));
-  if(successful)return Math.min(100,input.before+20);
-  if(input.risk<15)return Math.max(0,input.before-10);
-  return input.before;
+  if(input.risk<25)return Math.max(0,Math.min(100,input.before+(successful?15:-15)));
+  if(input.risk<50)return Math.max(0,Math.min(100,input.before+(successful?20:-5)));
+  if(input.risk<65)return Math.min(100,input.before+(successful?25:0));
+  return Math.min(100,input.before+(successful?30:5));
 }
 
 export function rebelFactionName(input:{
@@ -139,9 +158,10 @@ export function rebelFactionName(input:{
   return `${input.settlementName} Halk Birliği`;
 }
 
-export function chooseRebelFaction(scores: Record<RebelFactionType, number>): RebelFactionType {
+export function chooseRebelFaction(scores: Record<RebelFactionType, number>,blockedFactionType:RebelFactionType|null=null): RebelFactionType {
   const priority: RebelFactionType[] = ["SEPARATIST", "RELIGIOUS", "SLAVE", "POPULAR"];
-  return priority.reduce((best, key) => scores[key] > scores[best] ? key : best, "POPULAR" as RebelFactionType);
+  const available=priority.filter((key)=>key!==blockedFactionType);
+  return available.reduce((best, key) => scores[key] > scores[best] ? key : best, available[available.length-1]??"POPULAR");
 }
 
 const REBEL_COMPOSITION: Record<RebelFactionType, Readonly<Record<string, number>>> = {
