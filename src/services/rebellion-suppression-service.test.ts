@@ -15,6 +15,7 @@ describe("rebellion suppression",()=>{
     const settlementUpdate=queries.find((entry)=>entry.sql.includes("UPDATE settlements SET"));
     expect(settlementUpdate?.sql).toContain("unrest_active=FALSE");
     expect(settlementUpdate?.sql).toContain("rebellion_progress=0");
+    expect(settlementUpdate?.sql).toContain("NULL::integer ELSE $3::integer");
     expect(settlementUpdate?.params).toEqual([56,"SEPARATIST",58,"settlement"]);
   });
 });

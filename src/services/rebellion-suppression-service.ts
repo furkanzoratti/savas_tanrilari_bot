@@ -27,7 +27,8 @@ export async function suppressSettlementRebellion(
   await client.query(
     `UPDATE settlements SET rebellion_active=FALSE,unrest_active=FALSE,rebellion_progress=0,
        rebellion_faction_type=NULL,recent_uprising_until_turn=$1,
-       suppressed_rebellion_faction_type=$2,suppressed_rebellion_faction_until_turn=CASE WHEN $2::text IS NULL THEN NULL ELSE $3 END,
+       suppressed_rebellion_faction_type=$2,
+       suppressed_rebellion_faction_until_turn=CASE WHEN $2::text IS NULL THEN NULL::integer ELSE $3::integer END,
        rebellion_name_override=NULL,rebellion_personnel_override=NULL WHERE id=$4`,
     [recoveryUntilTurn,factionType,sameFactionBlockedUntilTurn,settlementId]
   );
