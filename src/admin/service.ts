@@ -5035,8 +5035,17 @@ export const adminPanelService = {
     const rowParams=[...params,limit,offset];
     const rows=(await adminPool.query(
       `SELECT log.id,log.action,log.entity_type,log.entity_id,log.actor_user_id,log.details,log.created_at,
-              COALESCE(log.game_turn,CASE WHEN log.details->>'completionTurn' ~ '^[0-9]+$'
-                THEN (log.details->>'completionTurn')::integer END) AS game_turn,
+              COALESCE(
+                CASE WHEN log.details->>'completionTurn' ~ '^[0-9]+$' THEN (log.details->>'completionTurn')::integer END,
+                (SELECT (turn_log.details->>'to')::integer FROM audit_logs turn_log
+                  WHERE turn_log.guild_id=log.guild_id AND turn_log.action='TURN_ADVANCE'
+                    AND turn_log.created_at<=log.created_at AND turn_log.details->>'to' ~ '^[0-9]+$'
+                  ORDER BY turn_log.created_at DESC LIMIT 1),
+                (SELECT (turn_log.details->>'from')::integer FROM audit_logs turn_log
+                  WHERE turn_log.guild_id=log.guild_id AND turn_log.action='TURN_ADVANCE'
+                    AND turn_log.created_at>log.created_at AND turn_log.details->>'from' ~ '^[0-9]+$'
+                  ORDER BY turn_log.created_at ASC LIMIT 1)
+              ) AS game_turn,
               country.id AS country_id,COALESCE(country.name,'Bilinmeyen devlet') AS country_name,
               COALESCE(army.name,fleet.name,log.details->>'formationName',log.details->>'targetArmyName',log.details->>'targetFleetName') AS formation_name,
               COALESCE(settlement.name,detail_settlement.name,log.details->>'settlementName') AS settlement_name

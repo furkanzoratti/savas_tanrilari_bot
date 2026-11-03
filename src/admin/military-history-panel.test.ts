@@ -17,7 +17,8 @@ describe("askeri işlem geçmişi paneli",()=>{
     expect(service).toContain("log.action LIKE 'fleet.%'");
     expect(service).toContain("UNIT_PURCHASE");
     expect(service).toContain("SHIP_PURCHASE");
-    expect(service).toContain("log.game_turn");
+    expect(service).toContain("turn_log.action='TURN_ADVANCE'");
+    expect(service).not.toContain("COALESCE(log.game_turn");
     expect(service).toContain("detail_settlement.name");
     const app=read("./public/app.js");
     expect(app).toContain("military-history-country");
