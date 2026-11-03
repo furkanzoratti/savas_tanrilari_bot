@@ -9,6 +9,7 @@ describe("toplu ordu işlemleri",()=>{
     expect(service).toContain("stock.quantity-COALESCE(allocated.quantity,0)");
     expect(service).toContain("stock.unit_type<>'militia'");
     expect(service).toContain("origin_settlement_name,unit_type,quantity");
+    expect(service).toContain("const origins = [...new Set(available.map((row) => row.settlement_name))]");
     expect(service).toContain("'army.pool.allocate'");
   });
 
@@ -18,6 +19,7 @@ describe("toplu ordu işlemleri",()=>{
     expect(service).toContain("SELECT $1,settlement_id,asset_type,quantity,enhanced_quantity FROM army_siege_assets WHERE army_id=$2");
     expect(service).toContain("UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL");
     expect(service).toContain("SELECT 1 FROM fleet_cargo_armies WHERE army_id IN ($1,$2)");
+    expect(service).toContain("source.units.map((unit)=>unit.settlement_name)");
     expect(service).toContain("DELETE FROM armies WHERE id=$1");
     expect(service).toContain("'army.merge'");
   });

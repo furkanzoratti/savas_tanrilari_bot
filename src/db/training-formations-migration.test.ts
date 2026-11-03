@@ -16,5 +16,8 @@ describe("otomatik eğitim orduları ve filoları migrationı",()=>{
   it("askeri geçmişi indeksler ve mevcut kayıtların devletini kalıcılaştırır",()=>{
     expect(migration?.sql).toContain("audit_logs_military_history_idx");
     expect(migration?.sql).toContain("jsonb_set(log.details,'{countryId}'");
+    expect(migration?.sql).toContain("ADD COLUMN IF NOT EXISTS game_turn INTEGER");
+    expect(migration?.sql).toContain("capture_audit_log_game_turn");
+    expect(migration?.sql).toContain("turn_log.action='TURN_ADVANCE'");
   });
 });

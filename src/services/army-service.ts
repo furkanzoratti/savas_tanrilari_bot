@@ -397,10 +397,11 @@ export const armyService = {
       const allocated = available.reduce((sum,row) => sum+Number(row.available),0);
       const settlements = new Set(available.map((row) => row.settlement_id)).size;
       const unitTypes = new Set(available.map((row) => row.unit_type)).size;
+      const origins = [...new Set(available.map((row) => row.settlement_name))];
       await client.query("UPDATE armies SET updated_at=NOW() WHERE id=$1", [army.id]);
       await client.query(
         "INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'army.pool.allocate','army',$3,$4::jsonb)",
-        [input.guildId,input.actorId,army.id,JSON.stringify({countryId:input.countryId,allocated,settlements,unitTypes})]
+        [input.guildId,input.actorId,army.id,JSON.stringify({countryId:input.countryId,allocated,settlements,unitTypes,origins})]
       );
       return { army: await loadArmy(client,army.id,input.countryId), allocated, settlements, unitTypes };
     });
@@ -440,6 +441,7 @@ export const armyService = {
       );
       const movedPersonnel=source.total;
       const movedSiegeAssets=source.siegeAssets.reduce((sum,item)=>sum+item.quantity,0);
+      const origins=[...new Set(source.units.map((unit)=>unit.settlement_name))];
       if(source.commander_character_id){
         await client.query("UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL WHERE id=$1",[source.commander_character_id]);
       }
@@ -449,7 +451,7 @@ export const armyService = {
         "INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'army.merge','army',$3,$4::jsonb)",
         [input.guildId,input.actorId,target.id,JSON.stringify({
           countryId:input.countryId,sourceArmyId:source.id,sourceArmyName:source.name,movedPersonnel,movedSiegeAssets,
-          targetArmyName:target.name,
+          targetArmyName:target.name,origins,
           releasedCommanderId:source.commander_character_id
         })]
       );

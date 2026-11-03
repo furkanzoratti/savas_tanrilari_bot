@@ -23,16 +23,16 @@
 .military-history-toolbar{display:grid;grid-template-columns:minmax(180px,1fr) 190px minmax(240px,1.4fr) auto;gap:12px;align-items:end;margin-bottom:18px}
 .military-history-toolbar label{display:grid;gap:6px;color:var(--muted);font-size:12px}
 .military-history-list{display:grid;gap:10px}
-.military-history-row{display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:13px;align-items:center;padding:14px 16px;background:var(--card);border:1px solid var(--line);border-left:4px solid #8a4f2f;border-radius:12px;box-shadow:var(--shadow-soft)}
+.military-history-row{display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:14px;align-items:start;padding:15px 16px;background:var(--card);border:1px solid var(--line);border-left:4px solid #8a4f2f;border-radius:12px;box-shadow:var(--shadow-soft)}
 .military-history-row.naval{border-left-color:#182b48}
 .military-history-icon{display:grid;place-items:center;width:38px;height:38px;border-radius:10px;background:rgba(138,79,47,.10);font-size:18px}
 .military-history-row.naval .military-history-icon{background:rgba(24,43,72,.10)}
-.military-history-row strong{display:block;color:var(--ink);font-family:Georgia,serif;font-size:15px}
-.military-history-row span{display:inline-block;margin-top:2px;color:#8a4f2f;font-size:12px;font-weight:700}
+.military-history-main{min-width:0}.military-history-title strong{display:block;color:var(--ink);font-family:Georgia,serif;font-size:15px}.military-history-title>span{display:inline-block;margin-top:2px;color:#8a4f2f;font-size:12px;font-weight:700}
+.military-history-facts{display:flex;flex-wrap:wrap;gap:7px;margin-top:9px}.military-history-facts span{display:grid;gap:1px;min-width:92px;padding:6px 9px;border:1px solid rgba(128,82,56,.18);border-radius:8px;background:rgba(128,82,56,.055)}.military-history-facts small{color:var(--muted);font-size:9px;letter-spacing:.06em;text-transform:uppercase}.military-history-facts b{color:var(--ink);font-size:12px;overflow-wrap:anywhere}.military-history-row.naval .military-history-facts span{border-color:rgba(24,43,72,.18);background:rgba(24,43,72,.05)}
 .military-history-row p{margin:5px 0 0;color:var(--muted);font-size:13px}
-.military-history-meta{text-align:right;display:grid;gap:4px;color:var(--muted)}
+.military-history-meta{text-align:right;display:grid;gap:4px;color:var(--muted);white-space:nowrap}
 .military-history-meta b{color:var(--ink);font-size:12px}.military-history-meta small{font-size:11px}
-@media(max-width:900px){.military-history-toolbar{grid-template-columns:1fr 1fr}.military-history-toolbar label:nth-child(3){grid-column:1/-1}.military-history-row{grid-template-columns:38px minmax(0,1fr)}.military-history-meta{grid-column:2;text-align:left}}
+@media(max-width:900px){.military-history-toolbar{grid-template-columns:1fr 1fr}.military-history-toolbar label:nth-child(3){grid-column:1/-1}.military-history-row{grid-template-columns:38px minmax(0,1fr)}.military-history-meta{grid-column:2;text-align:left;white-space:normal}}
 
 /* Büyük Oyunlar yönetim merkezi */
 .great-games-hero { position: relative; overflow: hidden; align-items: center; padding: 22px 24px; border: 1px solid rgba(128,82,56,.22); border-radius: 16px; background: radial-gradient(circle at 92% 10%,rgba(184,132,84,.24),transparent 27%),linear-gradient(120deg,#f8f1e6 0%,#eadcca 64%,#d8c1a7 100%); box-shadow: 0 14px 34px rgba(35,38,49,.09); }

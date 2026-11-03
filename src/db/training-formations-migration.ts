@@ -2,6 +2,19 @@ export const trainingFormationsMigration = {
   version: 241,
   name: "automatic_training_armies_and_fleets",
   sql: `
+    ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS game_turn INTEGER;
+    CREATE OR REPLACE FUNCTION capture_audit_log_game_turn() RETURNS TRIGGER AS $$
+    BEGIN
+      IF NEW.game_turn IS NULL THEN
+        SELECT current_turn INTO NEW.game_turn FROM guilds WHERE discord_id=NEW.guild_id;
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+    DROP TRIGGER IF EXISTS audit_logs_capture_game_turn ON audit_logs;
+    CREATE TRIGGER audit_logs_capture_game_turn
+      BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION capture_audit_log_game_turn();
+
     ALTER TABLE armies
       ADD COLUMN IF NOT EXISTS formation_kind TEXT NOT NULL DEFAULT 'PERMANENT',
       ADD COLUMN IF NOT EXISTS origin_settlement_id UUID REFERENCES settlements(id) ON DELETE SET NULL,
@@ -37,5 +50,22 @@ export const trainingFormationsMigration = {
       FROM fleets fleet
      WHERE log.entity_type='fleet' AND log.entity_id=fleet.id::text
        AND log.details->>'countryId' IS NULL;
+    UPDATE audit_logs SET game_turn=(details->>'completionTurn')::integer
+     WHERE game_turn IS NULL AND details->>'completionTurn' ~ '^[0-9]+$';
+    UPDATE audit_logs log SET game_turn=COALESCE(
+      (SELECT (turn_log.details->>'to')::integer
+         FROM audit_logs turn_log
+        WHERE turn_log.guild_id=log.guild_id AND turn_log.action='TURN_ADVANCE'
+          AND turn_log.created_at<=log.created_at AND turn_log.details->>'to' ~ '^[0-9]+$'
+        ORDER BY turn_log.created_at DESC LIMIT 1),
+      (SELECT (turn_log.details->>'from')::integer
+         FROM audit_logs turn_log
+        WHERE turn_log.guild_id=log.guild_id AND turn_log.action='TURN_ADVANCE'
+          AND turn_log.created_at>log.created_at AND turn_log.details->>'from' ~ '^[0-9]+$'
+        ORDER BY turn_log.created_at ASC LIMIT 1)
+    )
+     WHERE log.game_turn IS NULL
+       AND (log.action LIKE 'army.%' OR log.action LIKE 'fleet.%'
+         OR log.action IN ('UNIT_PURCHASE','SHIP_PURCHASE'));
   `
 } as const;

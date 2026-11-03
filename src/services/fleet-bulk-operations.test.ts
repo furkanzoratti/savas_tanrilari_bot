@@ -15,6 +15,7 @@ describe("toplu filo işlemleri",()=>{
     expect(source).toContain("async allocateEntirePool");
     expect(source).toContain("pg_advisory_xact_lock");
     expect(source).toContain("INSERT INTO fleet_ships(fleet_id,settlement_id,ship_type,quantity)");
+    expect(source).toContain("const origins=[...new Set(available.map((row)=>row.settlement_name))]");
     expect(source).toContain("'fleet.pool.allocate'");
     expect(source).toContain("await assertMutable(client,fleet.id)");
   });
@@ -24,6 +25,7 @@ describe("toplu filo işlemleri",()=>{
     expect(source).toContain("SELECT $1,settlement_id,ship_type,quantity FROM fleet_ships WHERE fleet_id=$2");
     expect(source).toContain("UPDATE naval_ship_damage SET fleet_id=$1");
     expect(source).toContain("UPDATE fleet_cargo_armies SET fleet_id=$1");
+    expect(source).toContain("source.ships.map((ship)=>ship.settlement_name)");
     expect(source).toContain("DELETE FROM fleets WHERE id=$1");
     expect(source).toContain("'fleet.merge'");
   });

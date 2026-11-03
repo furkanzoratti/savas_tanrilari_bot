@@ -5018,7 +5018,7 @@ export const adminPanelService = {
       log.action LIKE 'army.%' OR log.action LIKE 'fleet.%'
       OR log.action IN ('UNIT_PURCHASE','SHIP_PURCHASE')
     )`];
-    if(countryId){params.push(countryId);filters.push(`COALESCE(log.details->>'countryId',army.country_id::text,fleet.country_id::text,settlement.country_id::text)=$${params.length}`);}
+    if(countryId){params.push(countryId);filters.push(`COALESCE(log.details->>'countryId',army.country_id::text,fleet.country_id::text,settlement.country_id::text,detail_settlement.country_id::text)=$${params.length}`);}
     if(category==="LAND")filters.push("(log.action LIKE 'army.%' OR log.action='UNIT_PURCHASE')");
     if(category==="NAVAL")filters.push("(log.action LIKE 'fleet.%' OR log.action='SHIP_PURCHASE')");
     if(search){params.push(`%${search}%`);filters.push(`(log.action ILIKE $${params.length} OR log.details::text ILIKE $${params.length} OR country.name ILIKE $${params.length})`);}
@@ -5026,7 +5026,8 @@ export const adminPanelService = {
       LEFT JOIN armies army ON log.entity_type='army' AND army.id::text=log.entity_id
       LEFT JOIN fleets fleet ON log.entity_type='fleet' AND fleet.id::text=log.entity_id
       LEFT JOIN settlements settlement ON log.entity_type='settlement' AND settlement.id::text=log.entity_id
-      LEFT JOIN countries country ON country.id::text=COALESCE(log.details->>'countryId',army.country_id::text,fleet.country_id::text,settlement.country_id::text)`;
+      LEFT JOIN settlements detail_settlement ON detail_settlement.id::text=log.details->>'settlementId'
+      LEFT JOIN countries country ON country.id::text=COALESCE(log.details->>'countryId',army.country_id::text,fleet.country_id::text,settlement.country_id::text,detail_settlement.country_id::text)`;
     const where=filters.join(" AND ");
     const total=Number((await adminPool.query<{count:number}>(
       `SELECT COUNT(*)::integer AS count FROM audit_logs log ${joins} WHERE ${where}`,params
@@ -5034,9 +5035,11 @@ export const adminPanelService = {
     const rowParams=[...params,limit,offset];
     const rows=(await adminPool.query(
       `SELECT log.id,log.action,log.entity_type,log.entity_id,log.actor_user_id,log.details,log.created_at,
+              COALESCE(log.game_turn,CASE WHEN log.details->>'completionTurn' ~ '^[0-9]+$'
+                THEN (log.details->>'completionTurn')::integer END) AS game_turn,
               country.id AS country_id,COALESCE(country.name,'Bilinmeyen devlet') AS country_name,
               COALESCE(army.name,fleet.name,log.details->>'formationName',log.details->>'targetArmyName',log.details->>'targetFleetName') AS formation_name,
-              COALESCE(settlement.name,log.details->>'settlementName') AS settlement_name
+              COALESCE(settlement.name,detail_settlement.name,log.details->>'settlementName') AS settlement_name
          FROM audit_logs log ${joins} WHERE ${where}
         ORDER BY log.created_at DESC,log.id DESC LIMIT $${rowParams.length-1} OFFSET $${rowParams.length}`,
       rowParams

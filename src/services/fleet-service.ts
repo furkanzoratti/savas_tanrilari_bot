@@ -354,10 +354,11 @@ export const fleetService = {
       const allocated=available.reduce((sum,row)=>sum+Number(row.available),0);
       const settlements=new Set(available.map((row)=>row.settlement_id)).size;
       const shipTypes=new Set(available.map((row)=>row.ship_type)).size;
+      const origins=[...new Set(available.map((row)=>row.settlement_name))];
       await client.query("UPDATE fleets SET updated_at=NOW() WHERE id=$1",[fleet.id]);
       await client.query(
         "INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'fleet.pool.allocate','fleet',$3,$4::jsonb)",
-        [input.guildId,input.actorId,fleet.id,JSON.stringify({countryId:input.countryId,allocated,settlements,shipTypes})]
+        [input.guildId,input.actorId,fleet.id,JSON.stringify({countryId:input.countryId,allocated,settlements,shipTypes,origins})]
       );
       return{fleet:await loadFleet(client,fleet.id,input.countryId),allocated,settlements,shipTypes};
     });
@@ -383,6 +384,7 @@ export const fleetService = {
       await client.query("UPDATE naval_ship_damage SET fleet_id=$1,updated_at=NOW() WHERE fleet_id=$2",[target.id,source.id]);
       await client.query("UPDATE fleet_cargo_armies SET fleet_id=$1 WHERE fleet_id=$2",[target.id,source.id]);
       const movedShips=source.totalShips;
+      const origins=[...new Set(source.ships.map((ship)=>ship.settlement_name))];
       if(source.commander_character_id){
         await client.query("UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL WHERE id=$1",[source.commander_character_id]);
       }
@@ -392,7 +394,7 @@ export const fleetService = {
         "INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'fleet.merge','fleet',$3,$4::jsonb)",
         [input.guildId,input.actorId,target.id,JSON.stringify({
           countryId:input.countryId,sourceFleetId:source.id,sourceFleetName:source.name,movedShips,
-          releasedCommanderId:source.commander_character_id,targetFleetName:target.name
+          releasedCommanderId:source.commander_character_id,targetFleetName:target.name,origins
         })]
       );
       return{
