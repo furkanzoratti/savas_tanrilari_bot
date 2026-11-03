@@ -124,6 +124,7 @@ import { religionSectLiveDataRepairMigration } from "./religion-sect-live-data-r
 import { greatGamesBetLimitMigration } from "./great-games-bet-limit-migration.js";
 import { rebellionRecoveryMigration } from "./rebellion-recovery-migration.js";
 import { cultureMilitaryPenaltyActivationMigration } from "./culture-military-penalty-activation-migration.js";
+import { trainingFormationsMigration } from "./training-formations-migration.js";
 import { countryMarshalsMigration } from "./country-marshals-migration.js";
 import { formableCountryCatalogSyncMigration } from "./formable-country-catalog-sync-migration.js";
 import { mountedArcherSeparationMigration } from "./mounted-archer-separation-migration.js";
@@ -2557,5 +2558,6 @@ export const migrations = [
   religionSectLiveDataRepairMigration,
   greatGamesBetLimitMigration,
   rebellionRecoveryMigration,
-  cultureMilitaryPenaltyActivationMigration
+  cultureMilitaryPenaltyActivationMigration,
+  trainingFormationsMigration
 ] as const;

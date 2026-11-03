@@ -264,7 +264,7 @@ export const fleetService = {
         throw error;
       }
       if (input.commanderId) await this.assignCommanderInTransaction(client,input.countryId,fleetId,input.commanderId);
-      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'fleet.create','fleet',$3,$4::jsonb)", [input.guildId,input.actorId,fleetId,JSON.stringify({ name })]);
+      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'fleet.create','fleet',$3,$4::jsonb)", [input.guildId,input.actorId,fleetId,JSON.stringify({ countryId:input.countryId,name })]);
       return loadFleet(client,fleetId,input.countryId);
     });
   },
@@ -303,7 +303,7 @@ export const fleetService = {
         [fleet.id,settlement.id,input.shipType,input.quantity]
       );
       await client.query("UPDATE fleets SET updated_at=NOW() WHERE id=$1", [fleet.id]);
-      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'fleet.ships.add','fleet',$3,$4::jsonb)", [input.guildId,input.actorId,fleet.id,JSON.stringify({ settlementId:settlement.id,shipType:input.shipType,quantity:input.quantity })]);
+      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'fleet.ships.add','fleet',$3,$4::jsonb)", [input.guildId,input.actorId,fleet.id,JSON.stringify({ countryId:input.countryId,settlementId:settlement.id,shipType:input.shipType,quantity:input.quantity })]);
       return loadFleet(client,fleet.id,input.countryId);
     });
   },
@@ -357,9 +357,48 @@ export const fleetService = {
       await client.query("UPDATE fleets SET updated_at=NOW() WHERE id=$1",[fleet.id]);
       await client.query(
         "INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'fleet.pool.allocate','fleet',$3,$4::jsonb)",
-        [input.guildId,input.actorId,fleet.id,JSON.stringify({allocated,settlements,shipTypes})]
+        [input.guildId,input.actorId,fleet.id,JSON.stringify({countryId:input.countryId,allocated,settlements,shipTypes})]
       );
       return{fleet:await loadFleet(client,fleet.id,input.countryId),allocated,settlements,shipTypes};
+    });
+  },
+
+  async merge(input:{
+    guildId:string;countryId:string;actorId:string;targetFleet:string;sourceFleet:string;
+  }):Promise<{fleet:FleetView;sourceName:string;movedShips:number;releasedCommander:string|null}>{
+    return withTransaction(async(client)=>{
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))",[`fleet-merge:${input.countryId}`]);
+      const target=await resolveFleet(client,input.countryId,input.targetFleet,true);
+      const source=await resolveFleet(client,input.countryId,input.sourceFleet,true);
+      if(target.id===source.id)throw new GameError("Bir filo kendisiyle birleştirilemez. Farklı bir kaynak filo seçin.");
+      await assertMutable(client,target.id);
+      await assertMutable(client,source.id);
+      await client.query(
+        `INSERT INTO fleet_ships(fleet_id,settlement_id,ship_type,quantity)
+         SELECT $1,settlement_id,ship_type,quantity FROM fleet_ships WHERE fleet_id=$2
+         ON CONFLICT(fleet_id,settlement_id,ship_type) DO UPDATE
+           SET quantity=fleet_ships.quantity+EXCLUDED.quantity`,
+        [target.id,source.id]
+      );
+      await client.query("UPDATE naval_ship_damage SET fleet_id=$1,updated_at=NOW() WHERE fleet_id=$2",[target.id,source.id]);
+      await client.query("UPDATE fleet_cargo_armies SET fleet_id=$1 WHERE fleet_id=$2",[target.id,source.id]);
+      const movedShips=source.totalShips;
+      if(source.commander_character_id){
+        await client.query("UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL WHERE id=$1",[source.commander_character_id]);
+      }
+      await client.query("DELETE FROM fleets WHERE id=$1",[source.id]);
+      await client.query("UPDATE fleets SET updated_at=NOW() WHERE id=$1",[target.id]);
+      await client.query(
+        "INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'fleet.merge','fleet',$3,$4::jsonb)",
+        [input.guildId,input.actorId,target.id,JSON.stringify({
+          countryId:input.countryId,sourceFleetId:source.id,sourceFleetName:source.name,movedShips,
+          releasedCommanderId:source.commander_character_id,targetFleetName:target.name
+        })]
+      );
+      return{
+        fleet:await loadFleet(client,target.id,input.countryId),sourceName:source.name,movedShips,
+        releasedCommander:source.commander_name
+      };
     });
   },
 
@@ -388,7 +427,7 @@ export const fleetService = {
       if (!next) await client.query("DELETE FROM fleet_ships WHERE fleet_id=$1 AND settlement_id=$2 AND ship_type=$3", [fleet.id,row.settlement_id,input.shipType]);
       else await client.query("UPDATE fleet_ships SET quantity=$1 WHERE fleet_id=$2 AND settlement_id=$3 AND ship_type=$4", [next,fleet.id,row.settlement_id,input.shipType]);
       await client.query("UPDATE fleets SET updated_at=NOW() WHERE id=$1", [fleet.id]);
-      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'fleet.ships.remove','fleet',$3,$4::jsonb)", [input.guildId,input.actorId,fleet.id,JSON.stringify({ settlementId:row.settlement_id,shipType:input.shipType,quantity:input.quantity })]);
+      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'fleet.ships.remove','fleet',$3,$4::jsonb)", [input.guildId,input.actorId,fleet.id,JSON.stringify({ countryId:input.countryId,settlementId:row.settlement_id,shipType:input.shipType,quantity:input.quantity })]);
       return loadFleet(client,fleet.id,input.countryId);
     });
   },
@@ -414,7 +453,7 @@ export const fleetService = {
       const fleet = await resolveFleet(client,input.countryId,input.fleet,true);
       await assertMutable(client,fleet.id);
       await this.assignCommanderInTransaction(client,input.countryId,fleet.id,input.commanderId);
-      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'fleet.commander.assign','fleet',$3,$4::jsonb)", [input.guildId,input.actorId,fleet.id,JSON.stringify({ commanderId:input.commanderId })]);
+      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'fleet.commander.assign','fleet',$3,$4::jsonb)", [input.guildId,input.actorId,fleet.id,JSON.stringify({ countryId:input.countryId,commanderId:input.commanderId })]);
       return loadFleet(client,fleet.id,input.countryId);
     });
   },
@@ -425,7 +464,7 @@ export const fleetService = {
       await assertMutable(client,fleet.id);
       if (fleet.commander_character_id) await client.query("UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL WHERE id=$1", [fleet.commander_character_id]);
       await client.query("UPDATE fleets SET commander_character_id=NULL,updated_at=NOW() WHERE id=$1", [fleet.id]);
-      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'fleet.commander.remove','fleet',$3,'{}'::jsonb)", [input.guildId,input.actorId,fleet.id]);
+      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'fleet.commander.remove','fleet',$3,$4::jsonb)", [input.guildId,input.actorId,fleet.id,JSON.stringify({countryId:input.countryId})]);
       return loadFleet(client,fleet.id,input.countryId);
     });
   },
@@ -438,7 +477,7 @@ export const fleetService = {
         throw new GameError("Hasarlı gemileri bulunan filo dağıtılamaz; önce /filo tamir ile gemileri tamire gönderin.");
       if (fleet.commander_character_id) await client.query("UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL WHERE id=$1", [fleet.commander_character_id]);
       await client.query("DELETE FROM fleets WHERE id=$1", [fleet.id]);
-      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'fleet.disband','fleet',$3,$4::jsonb)", [input.guildId,input.actorId,fleet.id,JSON.stringify({ name:fleet.name,releasedShips:fleet.totalShips })]);
+      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'fleet.disband','fleet',$3,$4::jsonb)", [input.guildId,input.actorId,fleet.id,JSON.stringify({ countryId:input.countryId,name:fleet.name,releasedShips:fleet.totalShips })]);
       return fleet.name;
     });
   },

@@ -17,6 +17,7 @@ describe("toplu ordu işlemleri",()=>{
     expect(service).toContain("SELECT $1,settlement_id,origin_settlement_name,unit_type,quantity FROM army_units WHERE army_id=$2");
     expect(service).toContain("SELECT $1,settlement_id,asset_type,quantity,enhanced_quantity FROM army_siege_assets WHERE army_id=$2");
     expect(service).toContain("UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL");
+    expect(service).toContain("SELECT 1 FROM fleet_cargo_armies WHERE army_id IN ($1,$2)");
     expect(service).toContain("DELETE FROM armies WHERE id=$1");
     expect(service).toContain("'army.merge'");
   });

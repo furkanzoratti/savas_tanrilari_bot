@@ -5004,6 +5004,49 @@ export const adminPanelService = {
     )).rows;
   },
 
+  async militaryHistory(rawQuery:{countryId?:string;category?:string;search?:string;limit?:number;offset?:number}={}){
+    const countryId=String(rawQuery.countryId??"").trim();
+    const category=["LAND","NAVAL"].includes(String(rawQuery.category))?String(rawQuery.category):"ALL";
+    const search=String(rawQuery.search??"").trim().slice(0,100);
+    const limit=Math.min(100,Math.max(1,Math.floor(Number(rawQuery.limit)||60)));
+    const offset=Math.max(0,Math.floor(Number(rawQuery.offset)||0));
+    const countries=(await adminPool.query<{id:string;name:string}>(
+      "SELECT id,name FROM countries WHERE guild_id=$1 ORDER BY status,name",[adminConfig.guildId]
+    )).rows;
+    const params:unknown[]=[adminConfig.guildId];
+    const filters=[`log.guild_id=$1`,`(
+      log.action LIKE 'army.%' OR log.action LIKE 'fleet.%'
+      OR log.action IN ('UNIT_PURCHASE','SHIP_PURCHASE')
+    )`];
+    if(countryId){params.push(countryId);filters.push(`COALESCE(log.details->>'countryId',army.country_id::text,fleet.country_id::text,settlement.country_id::text)=$${params.length}`);}
+    if(category==="LAND")filters.push("(log.action LIKE 'army.%' OR log.action='UNIT_PURCHASE')");
+    if(category==="NAVAL")filters.push("(log.action LIKE 'fleet.%' OR log.action='SHIP_PURCHASE')");
+    if(search){params.push(`%${search}%`);filters.push(`(log.action ILIKE $${params.length} OR log.details::text ILIKE $${params.length} OR country.name ILIKE $${params.length})`);}
+    const joins=`
+      LEFT JOIN armies army ON log.entity_type='army' AND army.id::text=log.entity_id
+      LEFT JOIN fleets fleet ON log.entity_type='fleet' AND fleet.id::text=log.entity_id
+      LEFT JOIN settlements settlement ON log.entity_type='settlement' AND settlement.id::text=log.entity_id
+      LEFT JOIN countries country ON country.id::text=COALESCE(log.details->>'countryId',army.country_id::text,fleet.country_id::text,settlement.country_id::text)`;
+    const where=filters.join(" AND ");
+    const total=Number((await adminPool.query<{count:number}>(
+      `SELECT COUNT(*)::integer AS count FROM audit_logs log ${joins} WHERE ${where}`,params
+    )).rows[0]?.count??0);
+    const rowParams=[...params,limit,offset];
+    const rows=(await adminPool.query(
+      `SELECT log.id,log.action,log.entity_type,log.entity_id,log.actor_user_id,log.details,log.created_at,
+              country.id AS country_id,COALESCE(country.name,'Bilinmeyen devlet') AS country_name,
+              COALESCE(army.name,fleet.name,log.details->>'formationName',log.details->>'targetArmyName',log.details->>'targetFleetName') AS formation_name,
+              COALESCE(settlement.name,log.details->>'settlementName') AS settlement_name
+         FROM audit_logs log ${joins} WHERE ${where}
+        ORDER BY log.created_at DESC,log.id DESC LIMIT $${rowParams.length-1} OFFSET $${rowParams.length}`,
+      rowParams
+    )).rows;
+    const currentTurn=Number((await adminPool.query<{current_turn:number}>(
+      "SELECT current_turn FROM guilds WHERE discord_id=$1",[adminConfig.guildId]
+    )).rows[0]?.current_turn??0);
+    return{countries,rows,total,limit,offset,currentTurn};
+  },
+
   async audit(rawQuery: AdminAuditQuery = {}) {
     const safeLimit = Math.min(100, Math.max(1, Math.floor(Number(rawQuery.limit) || 50)));
     const safeOffset = Math.max(0, Math.floor(Number(rawQuery.offset) || 0));

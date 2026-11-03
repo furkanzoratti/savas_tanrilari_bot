@@ -4,7 +4,7 @@ import { number } from "../domain/format.js";
 import type { MobileSiegeAssetType } from "../services/army-service.js";
 import { armyService } from "../services/army-service.js";
 import { GameError } from "../services/game-service.js";
-import { assertCountryExecutiveAccess,resolveCountry } from "./auth.js";
+import { assertCountryExecutiveAccess,requireGameMaster,resolveCountry } from "./auth.js";
 import { renderArmyEmbed } from "./army-embed.js";
 import { queueCharacterLog } from "./character-ui.js";
 import {sendArmyDashboard} from "./army-control-ui.js";
@@ -25,7 +25,9 @@ export async function handleArmyCommand(interaction: ChatInputCommandInteraction
   }
   const sub = interaction.options.getSubcommand();
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const country = await resolveCountry(interaction);
+  const country = sub==="birlestir"
+    ?(requireGameMaster(interaction),await resolveCountry(interaction,interaction.options.getString("ulke",true)))
+    :await resolveCountry(interaction);
 
   await assertCountryExecutiveAccess(interaction,country.id);
 

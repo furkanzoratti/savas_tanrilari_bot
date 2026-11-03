@@ -379,6 +379,15 @@ const server = createServer(async (request, response) => {
         limit: Number(url.searchParams.get("limit") ?? 50)
       }));
     }
+    if(request.method==="GET"&&url.pathname==="/api/military-history"){
+      if(!requireSession(request,response))return;
+      return json(response,200,await adminPanelService.militaryHistory({
+        countryId:url.searchParams.get("countryId")??"",
+        category:url.searchParams.get("category")??"ALL",
+        search:url.searchParams.get("search")??"",
+        limit:Number(url.searchParams.get("limit")??60),offset:Number(url.searchParams.get("offset")??0)
+      }));
+    }
     if (request.method === "GET" && url.pathname === "/api/ai-governance") {
       if (!requireSession(request, response)) return;
       return json(response, 200, await aiCountryGovernanceService.dashboard());

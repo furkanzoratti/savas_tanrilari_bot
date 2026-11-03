@@ -18,7 +18,14 @@ describe("kalıcı ordu komutları", () => {
     expect(army?.options?.find((option)=>option.name==="havuzu-ekle")?.options?.find((option)=>option.name==="ordu"))
       .toMatchObject({required:true,autocomplete:true});
     expect(army?.options?.find((option)=>option.name==="birlestir")?.options?.map((option)=>option.name))
-      .toEqual(["hedef-ordu","kaynak-ordu","onay"]);
+      .toEqual(["ulke","hedef-ordu","kaynak-ordu","onay"]);
+    expect(army?.options?.find((option)=>option.name==="birlestir")?.description).toContain("Yalnızca yönetici");
+    expect(army?.options?.find((option)=>option.name==="birlestir")?.options?.slice(0,3))
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({name:"ulke",required:true,autocomplete:true}),
+        expect.objectContaining({name:"hedef-ordu",required:true,autocomplete:true}),
+        expect.objectContaining({name:"kaynak-ordu",required:true,autocomplete:true})
+      ]));
     expect(army?.options?.find((option)=>option.name==="birlestir")?.options?.find((option)=>option.name==="onay"))
       .toMatchObject({required:true});
   });

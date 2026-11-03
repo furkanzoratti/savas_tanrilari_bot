@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BASE_SIEGE_STARVATION_TURNS, MAX_BOMBARDMENTS_PER_GAME_TURN, activeSiegeAssaultAssets, advantageTier, applyRestrictedBattleLoss, automaticSiegeDismountments, remainingBombardments, baseRetreatRate, battleEnds, commanderClashBonus, compositionTotal, engagedComposition, fieldPressureAfterRound, orderState, resolveRound, restoreSiegeAttackerCasualtyTypes, rollBattlePool, rollNavalPool, rollSiegeSupport, siegeAssaultAccess, siegeAssaultComposition, siegeAttackerBreaks, siegeAttackerDismountedComposition, siegeAttackerRetreatExposure, siegeDefenderCaptured, siegeDefenderComposition, siegeDefenderGroups, siegeDefenderReserveBonus, siegeDefenseModifiers, siegeFrontageProfile, siegeOrderState, siegePressureAfterRound } from "./battle.js";
+import { BASE_SIEGE_STARVATION_TURNS, MAX_BOMBARDMENTS_PER_GAME_TURN, activeSiegeAssaultAssets, advantageTier, applyRestrictedBattleLoss, automaticSiegeDismountments, remainingBombardments, baseRetreatRate, battleEnds, commanderClashBonus, compositionTotal, engagedComposition, fieldPressureAfterRound, orderState, resolveRound, restoreSiegeAttackerCasualtyTypes, rollBattlePool, rollNavalPool, rollSiegeSupport, siegeAssaultAccess, siegeAssaultComposition, siegeAssaultGroups, siegeAttackerBreaks, siegeAttackerDismountedComposition, siegeAttackerRetreatExposure, siegeDefenderCaptured, siegeDefenderComposition, siegeDefenderGroups, siegeDefenderReserveBonus, siegeDefenseModifiers, siegeFrontageProfile, siegeOrderState, siegePressureAfterRound } from "./battle.js";
 
 describe("savaş motoru", () => {
   it("kuşatma açlığının temel süresini altı oyun turu kabul eder", () => {
@@ -263,6 +263,19 @@ describe("savaş motoru", () => {
     expect(compositionTotal(bothBreached)).toBe(35_000);
   });
 
+  it("Chariot kuşatma saldırısında yalnız menzilli kapasiteyi kullanır", () => {
+    const groups = siegeAssaultGroups(
+      { heavy_infantry: 30_000, archer: 2_000, egyptian_war_chariot: 8_000 },
+      {}, 0, 0
+    );
+    expect(compositionTotal(groups.infantry)).toBe(30_000);
+    expect(groups.infantry.egyptian_war_chariot ?? 0).toBe(0);
+    expect(compositionTotal(groups.ranged)).toBe(5_000);
+    expect(groups.ranged.archer).toBe(1_000);
+    expect(groups.ranged.egyptian_war_chariot).toBe(4_000);
+    expect(compositionTotal(groups.combined)).toBe(35_000);
+  });
+
   it("savunucu cephesini tahkimat durumuna göre ayrı piyade ve menzilli havuzlardan doldurur", () => {
     const composition = { heavy_infantry: 30_000, archer: 15_000 };
     const intact = siegeDefenderGroups(composition, 30_000, 1_000);
@@ -274,6 +287,18 @@ describe("savaş motoru", () => {
     const wall = siegeDefenderGroups(composition, 0, 1_000);
     expect(compositionTotal(wall.infantry)).toBe(23_000);
     expect(compositionTotal(wall.ranged)).toBe(10_000);
+  });
+
+  it("Chariot kuşatma savunmasında normal cepheye değil menzilli kapasiteye girer", () => {
+    const groups = siegeDefenderGroups(
+      { heavy_infantry: 30_000, archer: 2_000, egyptian_war_chariot: 8_000 },
+      30_000, 1_000
+    );
+    expect(compositionTotal(groups.infantry)).toBe(18_000);
+    expect(groups.infantry.egyptian_war_chariot ?? 0).toBe(0);
+    expect(compositionTotal(groups.ranged)).toBe(5_000);
+    expect(groups.ranged.archer).toBe(1_000);
+    expect(groups.ranged.egyptian_war_chariot).toBe(4_000);
   });
 
   it("gedik veya açık kapı yokken kaybı yalnız hücuma erişen birliklerden düşer", () => {

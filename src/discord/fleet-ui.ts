@@ -3,7 +3,7 @@ import type { NavalUnitType } from "../domain/battle.js";
 import { fleetService } from "../services/fleet-service.js";
 import { navalRepairService } from "../services/naval-repair-service.js";
 import { GameError } from "../services/game-service.js";
-import { assertCountryExecutiveAccess,resolveCountry } from "./auth.js";
+import { assertCountryExecutiveAccess,requireGameMaster,resolveCountry } from "./auth.js";
 import { queueCharacterLog } from "./character-ui.js";
 import { renderFleetEmbed } from "./fleet-embed.js";
 import { renderRepairFleetEmbed } from "./repair-fleet-embed.js";
@@ -26,7 +26,9 @@ export async function handleFleetCommand(interaction: ChatInputCommandInteractio
   }
   const sub = interaction.options.getSubcommand();
   await interaction.deferReply({ ephemeral:true });
-  const country = await resolveCountry(interaction);
+  const country = sub==="birlestir"
+    ?(requireGameMaster(interaction),await resolveCountry(interaction,interaction.options.getString("ulke",true)))
+    :await resolveCountry(interaction);
   if(sub!=="tamir-bilgi")await assertCountryExecutiveAccess(interaction,country.id);
   if (sub === "olustur") {
     const fleet = await fleetService.create({
@@ -35,6 +37,22 @@ export async function handleFleetCommand(interaction: ChatInputCommandInteractio
     });
     await interaction.editReply({ content:"✅ Filo oluşturuldu.",embeds:[renderFleetEmbed(fleet)] });
     if (fleet.commander_name) await logCommanderAssignment(interaction,country.name,`**${fleet.commander_name}**, **${fleet.name}** filosunun başına atandı.`);
+    return;
+  }
+  if(sub==="birlestir"){
+    if(interaction.options.getString("onay",true).trim().toLocaleUpperCase("tr-TR")!=="BIRLESTIR")
+      throw new GameError("Filoları birleştirmek için onay alanına BIRLESTIR yazın.");
+    const result=await fleetService.merge({
+      guildId:interaction.guildId,countryId:country.id,actorId:interaction.user.id,
+      targetFleet:interaction.options.getString("hedef-filo",true),
+      sourceFleet:interaction.options.getString("kaynak-filo",true)
+    });
+    await interaction.editReply({
+      content:`✅ **${result.sourceName}**, **${result.fleet.name}** filosuna birleştirildi. Kaynak filo kaydı kapatıldı.\n`+
+        `Aktarılan gemi: **${result.movedShips}**`+
+        (result.releasedCommander?`\nKaynak filonun Amirali **${result.releasedCommander}** görevden alındı ve yeniden müsait duruma geçti.`:""),
+      embeds:[renderFleetEmbed(result.fleet)]
+    });
     return;
   }
   if(sub==="tamir-bilgi"){

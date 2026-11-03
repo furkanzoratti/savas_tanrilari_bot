@@ -14,7 +14,7 @@ import { MERCENARY_COMPANIES, MERCENARY_CONTRACT_LIMITS, importedMercenarySchedu
 import { cancelActiveGarrisonReplenishment, completeDueGarrisonReplenishments, scheduleAllMissingGarrisons, scheduleMandatoryGarrisonReplenishment, type GarrisonReplenishmentReason } from "./garrison-service.js";
 import { isSpecialUnitType, type SpecialUnitType } from "../domain/special-units.js";
 import { applyFormableShipUpkeepDiscount, FORMABLE_COUNTRIES, formableBuildingDiscount, formableEffectLines, formableModifiers, formableTier, formableUnitDiscount, isFormableCountryKey, missingFormableTerritories, type FormableCountryDefinition, type FormableCountryKey, type FormableTier } from "../domain/formable-countries.js";
-import { assessArmyComposition, type BattleComposition, type BattleUnitType } from "../domain/battle.js";
+import { assessArmyComposition, type BattleComposition, type BattleUnitType, type NavalUnitType } from "../domain/battle.js";
 import { isSteppeArmyUnitType, STEPPE_ARMY_UNIT_TYPES } from "../domain/steppe-army.js";
 import { isScandinavianArmyUnitType, SCANDINAVIAN_ARMY_UNIT_TYPES } from "../domain/scandinavian-army.js";
 import { countryCanPurchaseShip } from "../domain/scandinavian-navy.js";
@@ -53,6 +53,7 @@ import { applyCapitalIncomeBonus, applyCapitalPopulationBonus } from "../domain/
 import {applyGreatProjectIncome,greatProjectByKey,greatProjectShipPurchaseDiscount,greatProjectUnitPurchaseDiscount,greatProjectUnitUpkeepDiscount,type GreatProjectModifiers} from "../domain/great-projects.js";
 import {completeDueGreatProjects} from "./great-project-service.js";
 import {activeCountryModifiers} from "./country-modifier-service.js";
+import {assignCompletedShipsToFleet,assignCompletedTrainingToArmy} from "./training-formation-service.js";
 import { activeGovernorForSettlement, forceEndGovernorshipForSettlement, processGovernorshipTurn } from "./governorship-service.js";
 import { governorAdministration, governorModifiers } from "../domain/governorship.js";
 import { assertSettlementNotOccupied, isSettlementOccupied } from "./war-occupation-service.js";
@@ -3334,27 +3335,37 @@ export const gameService = {
          RETURNING s.name AS settlement_name,b.building_type,b.level`, [guildId, newTurn]
       );
       const completedGreatProjects=await completeDueGreatProjects(client,guildId,newTurn);
-      const dueWaves = await client.query<{ id: string; order_id: string; settlement_id: string; settlement_name: string; unit_type: keyof typeof UNITS; quantity: number }>(
-        `SELECT rw.id,rw.order_id,ro.settlement_id,s.name AS settlement_name,ro.unit_type,rw.quantity FROM recruitment_waves rw
+      const dueWaves = await client.query<{ id: string; order_id: string; country_id:string; settlement_id: string; settlement_name: string; unit_type: keyof typeof UNITS; quantity: number }>(
+        `SELECT rw.id,rw.order_id,ro.country_id,ro.settlement_id,s.name AS settlement_name,ro.unit_type,rw.quantity FROM recruitment_waves rw
           JOIN recruitment_orders ro ON ro.id=rw.order_id JOIN countries c ON c.id=ro.country_id JOIN settlements s ON s.id=ro.settlement_id
          WHERE c.guild_id=$1 AND rw.processed_at IS NULL AND rw.due_turn<=$2
          FOR UPDATE OF rw`, [guildId, newTurn]
       );
       for (const wave of dueWaves.rows) {
         await client.query(`INSERT INTO unit_stacks(settlement_id,unit_type,quantity,status,force_type) VALUES($1,$2,$3,'GARRISON','ARMY') ON CONFLICT(settlement_id,unit_type,status,force_type) DO UPDATE SET quantity=unit_stacks.quantity+EXCLUDED.quantity`, [wave.settlement_id, wave.unit_type, wave.quantity]);
+        if(wave.unit_type!=="observer"&&wave.unit_type!=="militia"){
+          await assignCompletedTrainingToArmy(client,{
+            guildId,countryId:wave.country_id,settlementId:wave.settlement_id,settlementName:wave.settlement_name,
+            turn:newTurn,unitType:wave.unit_type as BattleUnitType,quantity:Number(wave.quantity),actorId
+          });
+        }
         await client.query("UPDATE recruitment_waves SET processed_at=NOW() WHERE id=$1", [wave.id]);
         await client.query("UPDATE recruitment_orders SET remaining_quantity=remaining_quantity-$1 WHERE id=$2", [wave.quantity, wave.order_id]);
       }
       await client.query("UPDATE recruitment_orders SET status='COMPLETED' WHERE status='TRAINING' AND remaining_quantity=0");
 
-      const dueShips = await client.query<{ id: string; settlement_id: string; settlement_name: string; ship_type: keyof typeof SHIPS; quantity: number }>(
-        `SELECT no.id,no.settlement_id,s.name AS settlement_name,no.ship_type,no.quantity FROM naval_orders no JOIN countries c ON c.id=no.country_id JOIN settlements s ON s.id=no.settlement_id
+      const dueShips = await client.query<{ id: string; country_id:string; settlement_id: string; settlement_name: string; ship_type: keyof typeof SHIPS; quantity: number }>(
+        `SELECT no.id,no.country_id,no.settlement_id,s.name AS settlement_name,no.ship_type,no.quantity FROM naval_orders no JOIN countries c ON c.id=no.country_id JOIN settlements s ON s.id=no.settlement_id
          WHERE c.guild_id=$1 AND no.status='BUILDING' AND no.completion_turn<=$2
            AND NOT EXISTS (SELECT 1 FROM battles b WHERE b.defender_settlement_id=s.id AND b.terrain='SIEGE' AND b.status NOT IN ('FINISHED','CANCELLED'))
          FOR UPDATE OF no`, [guildId, newTurn]
       );
       for (const order of dueShips.rows) {
         await client.query(`INSERT INTO naval_units(settlement_id,ship_type,quantity,status) VALUES($1,$2,$3,'RESERVE') ON CONFLICT(settlement_id,ship_type,status) DO UPDATE SET quantity=naval_units.quantity+EXCLUDED.quantity`, [order.settlement_id, order.ship_type, order.quantity]);
+        await assignCompletedShipsToFleet(client,{
+          guildId,countryId:order.country_id,settlementId:order.settlement_id,settlementName:order.settlement_name,
+          turn:newTurn,shipType:order.ship_type as NavalUnitType,quantity:Number(order.quantity),actorId
+        });
         await client.query("UPDATE naval_orders SET status='COMPLETED' WHERE id=$1", [order.id]);
       }
       const completedRepairDetails=await completeDueFleetRepairs(client,guildId,newTurn);

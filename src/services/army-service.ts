@@ -314,7 +314,7 @@ export const armyService = {
         throw error;
       }
       if (input.commanderId) await this.assignCommanderInTransaction(client, input.countryId, armyId, input.commanderId);
-      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'army.create','army',$3,$4::jsonb)", [input.guildId, input.actorId, armyId, JSON.stringify({ name })]);
+      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'army.create','army',$3,$4::jsonb)", [input.guildId, input.actorId, armyId, JSON.stringify({ countryId:input.countryId,name })]);
       return loadArmy(client, armyId, input.countryId);
     });
   },
@@ -346,7 +346,7 @@ export const armyService = {
         [army.id,settlement.id,settlement.name,input.unitType,input.quantity]
       );
       await client.query("UPDATE armies SET updated_at=NOW() WHERE id=$1", [army.id]);
-      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'army.units.add','army',$3,$4::jsonb)", [input.guildId, input.actorId, army.id, JSON.stringify({ settlementId: settlement.id, unitType: input.unitType, quantity: input.quantity })]);
+      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'army.units.add','army',$3,$4::jsonb)", [input.guildId, input.actorId, army.id, JSON.stringify({ countryId:input.countryId,settlementId: settlement.id, unitType: input.unitType, quantity: input.quantity })]);
       return loadArmy(client, army.id, input.countryId);
     });
   },
@@ -400,7 +400,7 @@ export const armyService = {
       await client.query("UPDATE armies SET updated_at=NOW() WHERE id=$1", [army.id]);
       await client.query(
         "INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'army.pool.allocate','army',$3,$4::jsonb)",
-        [input.guildId,input.actorId,army.id,JSON.stringify({allocated,settlements,unitTypes})]
+        [input.guildId,input.actorId,army.id,JSON.stringify({countryId:input.countryId,allocated,settlements,unitTypes})]
       );
       return { army: await loadArmy(client,army.id,input.countryId), allocated, settlements, unitTypes };
     });
@@ -416,6 +416,11 @@ export const armyService = {
       if(target.id===source.id)throw new GameError("Bir ordu kendisiyle birleştirilemez. Farklı bir kaynak ordu seçin.");
       await assertMutable(client,target.id);
       await assertMutable(client,source.id);
+      const transported=await client.query(
+        "SELECT 1 FROM fleet_cargo_armies WHERE army_id IN ($1,$2) LIMIT 1 FOR UPDATE",
+        [target.id,source.id]
+      );
+      if(transported.rowCount)throw new GameError("Bir filoda taşınan ordu birleştirilemez. Önce orduyu filodan indirin.");
 
       await client.query(
         `INSERT INTO army_units(army_id,settlement_id,origin_settlement_name,unit_type,quantity)
@@ -443,7 +448,8 @@ export const armyService = {
       await client.query(
         "INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'army.merge','army',$3,$4::jsonb)",
         [input.guildId,input.actorId,target.id,JSON.stringify({
-          sourceArmyId:source.id,sourceArmyName:source.name,movedPersonnel,movedSiegeAssets,
+          countryId:input.countryId,sourceArmyId:source.id,sourceArmyName:source.name,movedPersonnel,movedSiegeAssets,
+          targetArmyName:target.name,
           releasedCommanderId:source.commander_character_id
         })]
       );
@@ -481,7 +487,7 @@ export const armyService = {
       if (next === 0) await client.query("DELETE FROM army_units WHERE army_id=$1 AND settlement_id=$2 AND unit_type=$3", [army.id, row.settlement_id, input.unitType]);
       else await client.query("UPDATE army_units SET quantity=$1 WHERE army_id=$2 AND settlement_id=$3 AND unit_type=$4", [next, army.id, row.settlement_id, input.unitType]);
       await client.query("UPDATE armies SET updated_at=NOW() WHERE id=$1", [army.id]);
-      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'army.units.remove','army',$3,$4::jsonb)", [input.guildId,input.actorId,army.id,JSON.stringify({settlementId:row.settlement_id,unitType:input.unitType,quantity:input.quantity,restoredSettlementId})]);
+      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'army.units.remove','army',$3,$4::jsonb)", [input.guildId,input.actorId,army.id,JSON.stringify({countryId:input.countryId,settlementId:row.settlement_id,unitType:input.unitType,quantity:input.quantity,restoredSettlementId})]);
       return loadArmy(client,army.id,input.countryId);
     });
   },
@@ -517,7 +523,7 @@ export const armyService = {
         [army.id, settlement.id, input.assetType, input.quantity, enhancedToAdd]
       );
       await client.query("UPDATE armies SET updated_at=NOW() WHERE id=$1", [army.id]);
-      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'army.assets.add','army',$3,$4::jsonb)", [input.guildId, input.actorId, army.id, JSON.stringify({ settlementId: settlement.id, assetType: input.assetType, quantity: input.quantity, enhanced: enhancedToAdd })]);
+      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'army.assets.add','army',$3,$4::jsonb)", [input.guildId, input.actorId, army.id, JSON.stringify({ countryId:input.countryId,settlementId: settlement.id, assetType: input.assetType, quantity: input.quantity, enhanced: enhancedToAdd })]);
       return loadArmy(client, army.id, input.countryId);
     });
   },
@@ -540,7 +546,7 @@ export const armyService = {
       if (next === 0) await client.query("DELETE FROM army_siege_assets WHERE army_id=$1 AND settlement_id=$2 AND asset_type=$3", [army.id, row.settlement_id, input.assetType]);
       else await client.query("UPDATE army_siege_assets SET quantity=$1,enhanced_quantity=$2 WHERE army_id=$3 AND settlement_id=$4 AND asset_type=$5", [next, nextEnhanced, army.id, row.settlement_id, input.assetType]);
       await client.query("UPDATE armies SET updated_at=NOW() WHERE id=$1", [army.id]);
-      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'army.assets.remove','army',$3,$4::jsonb)", [input.guildId, input.actorId, army.id, JSON.stringify({ settlementId: row.settlement_id, assetType: input.assetType, quantity: input.quantity })]);
+      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'army.assets.remove','army',$3,$4::jsonb)", [input.guildId, input.actorId, army.id, JSON.stringify({ countryId:input.countryId,settlementId: row.settlement_id, assetType: input.assetType, quantity: input.quantity })]);
       return loadArmy(client, army.id, input.countryId);
     });
   },
@@ -566,7 +572,7 @@ export const armyService = {
       const army = await resolveArmy(client, input.countryId, input.army, true);
       await assertMutable(client, army.id);
       await this.assignCommanderInTransaction(client, input.countryId, army.id, input.commanderId);
-      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'army.commander.assign','army',$3,$4::jsonb)", [input.guildId, input.actorId, army.id, JSON.stringify({ commanderId: input.commanderId })]);
+      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'army.commander.assign','army',$3,$4::jsonb)", [input.guildId, input.actorId, army.id, JSON.stringify({ countryId:input.countryId,commanderId: input.commanderId })]);
       return loadArmy(client, army.id, input.countryId);
     });
   },
@@ -577,7 +583,7 @@ export const armyService = {
       await assertMutable(client, army.id);
       if (army.commander_character_id) await client.query("UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL WHERE id=$1", [army.commander_character_id]);
       await client.query("UPDATE armies SET commander_character_id=NULL,updated_at=NOW() WHERE id=$1", [army.id]);
-      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'army.commander.remove','army',$3,'{}'::jsonb)", [input.guildId, input.actorId, army.id]);
+      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'army.commander.remove','army',$3,$4::jsonb)", [input.guildId, input.actorId, army.id,JSON.stringify({countryId:input.countryId})]);
       return loadArmy(client, army.id, input.countryId);
     });
   },
@@ -601,7 +607,7 @@ export const armyService = {
       for (const unit of displaced) await depositArmyStock(client,destination!.id,unit.unit_type,Number(unit.quantity));
       if (army.commander_character_id) await client.query("UPDATE country_characters SET assignment='NONE',assigned_settlement_id=NULL WHERE id=$1", [army.commander_character_id]);
       await client.query("DELETE FROM armies WHERE id=$1", [army.id]);
-      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'army.disband','army',$3,$4::jsonb)", [input.guildId,input.actorId,army.id,JSON.stringify({name:army.name,releasedPersonnel:army.total,restoredDisplacedPersonnel:displaced.reduce((sum,row)=>sum+Number(row.quantity),0),restoredSettlementId:destination?.id??null})]);
+      await client.query("INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details) VALUES($1,$2,'army.disband','army',$3,$4::jsonb)", [input.guildId,input.actorId,army.id,JSON.stringify({countryId:input.countryId,name:army.name,releasedPersonnel:army.total,restoredDisplacedPersonnel:displaced.reduce((sum,row)=>sum+Number(row.quantity),0),restoredSettlementId:destination?.id??null})]);
       return army.name;
     });
   },

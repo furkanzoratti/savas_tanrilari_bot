@@ -1859,9 +1859,20 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
   }
   if (interaction.commandName === "ordu") {
     if (!interaction.guildId) { await interaction.respond([]); return; }
-    const country = await gameService.countryForUser(interaction.guildId, interaction.user.id);
-    if (!country) { await interaction.respond([]); return; }
+    const sub=interaction.options.getSubcommand(false)??"";
     const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
+    if(sub==="birlestir"&&focused.name==="ulke"){
+      if(!isGameMaster(interaction)){await interaction.respond([]);return;}
+      const countries=await gameService.listCountries(interaction.guildId);
+      await interaction.respond(countries.filter((item)=>item.status==="ACTIVE"&&(!query||item.name.toLocaleLowerCase("tr-TR").includes(query)))
+        .slice(0,25).map((item)=>({name:item.name.slice(0,100),value:item.name})));
+      return;
+    }
+    const requestedCountry=sub==="birlestir"?interaction.options.getString("ulke"):null;
+    const country=requestedCountry&&isGameMaster(interaction)
+      ?await gameService.countryByName(interaction.guildId,requestedCountry)
+      :await gameService.countryForUser(interaction.guildId, interaction.user.id);
+    if (!country) { await interaction.respond([]); return; }
     if (["ordu","hedef-ordu","kaynak-ordu"].includes(focused.name)) {
       const armies = await armyService.listCountry(country.id);
       const otherArmyId=focused.name==="hedef-ordu"
@@ -1954,9 +1965,20 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
   }
   if (interaction.commandName === "filo") {
     if (!interaction.guildId) { await interaction.respond([]); return; }
-    const country = await gameService.countryForUser(interaction.guildId,interaction.user.id);
-    if (!country) { await interaction.respond([]); return; }
+    const sub=interaction.options.getSubcommand(false)??"";
     const query = String(focused.value).toLocaleLowerCase("tr-TR").trim();
+    if(sub==="birlestir"&&focused.name==="ulke"){
+      if(!isGameMaster(interaction)){await interaction.respond([]);return;}
+      const countries=await gameService.listCountries(interaction.guildId);
+      await interaction.respond(countries.filter((item)=>item.status==="ACTIVE"&&(!query||item.name.toLocaleLowerCase("tr-TR").includes(query)))
+        .slice(0,25).map((item)=>({name:item.name.slice(0,100),value:item.name})));
+      return;
+    }
+    const requestedCountry=sub==="birlestir"?interaction.options.getString("ulke"):null;
+    const country=requestedCountry&&isGameMaster(interaction)
+      ?await gameService.countryByName(interaction.guildId,requestedCountry)
+      :await gameService.countryForUser(interaction.guildId,interaction.user.id);
+    if (!country) { await interaction.respond([]); return; }
     if(focused.name==="tamir-filosu"){
       const sub=interaction.options.getSubcommand(false)??"";
       const repairs=(await navalRepairService.listCountry(country.id)).filter((repair)=>
@@ -1966,9 +1988,13 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
         .map((repair)=>({name:`${repair.name} • ${repair.totalShips} gemi • ${repair.status==="READY"?"Hazır":`Tur ${repair.completion_turn}`}`.slice(0,100),value:repair.id})));
       return;
     }
-    if (focused.name === "filo") {
+    if (["filo","hedef-filo","kaynak-filo"].includes(focused.name)) {
       const fleets = await fleetService.listCountry(country.id);
-      await interaction.respond(fleets.filter((fleet) => !query || fleet.name.toLocaleLowerCase("tr-TR").includes(query)).slice(0,25)
+      const otherFleetId=focused.name==="hedef-filo"
+        ?interaction.options.getString("kaynak-filo")
+        :focused.name==="kaynak-filo"?interaction.options.getString("hedef-filo"):null;
+      await interaction.respond(fleets.filter((fleet)=>fleet.id!==otherFleetId)
+        .filter((fleet) => !query || fleet.name.toLocaleLowerCase("tr-TR").includes(query)).slice(0,25)
         .map((fleet) => ({ name:`${fleet.name} • ${number(fleet.totalShips)} gemi • ${number(fleet.transportCapacity)} asker kapasitesi${fleet.active_battle_id ? " • Savaşta" : ""}`.slice(0,100),value:fleet.id })));
       return;
     }

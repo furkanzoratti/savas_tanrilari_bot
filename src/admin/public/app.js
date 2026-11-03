@@ -1,4 +1,4 @@
-const state = { session: null, csrf: "", countries: [], catalog: [], characterCatalog: null, religionCatalog: null, battleSimulationCatalog: null, rebellionData: null, guidedOperations: null, previewToken: null, selectedCountry: null, editor: null, pendingPageScrollTop: null, dataCatalog: null, dataTable: null, dataRows: [], dataOffset: 0, dataSearch: "", auditRows: [], auditOffset: 0, auditSearch: "", auditSource: "ALL", auditKind: "ALL", auditFrom: "", auditTo: "", activeRoute: "overview", focusTarget: null, navigationId: 0, navigationController: null };
+const state = { session: null, csrf: "", countries: [], catalog: [], characterCatalog: null, religionCatalog: null, battleSimulationCatalog: null, rebellionData: null, guidedOperations: null, previewToken: null, selectedCountry: null, editor: null, pendingPageScrollTop: null, dataCatalog: null, dataTable: null, dataRows: [], dataOffset: 0, dataSearch: "", auditRows: [], auditOffset: 0, auditSearch: "", auditSource: "ALL", auditKind: "ALL", auditFrom: "", auditTo: "", militaryHistoryCountry: "", militaryHistoryCategory: "ALL", militaryHistorySearch: "", militaryHistoryOffset: 0, activeRoute: "overview", focusTarget: null, navigationId: 0, navigationController: null };
 const page = document.getElementById("page");
 const app = document.getElementById("app");
 const login = document.getElementById("login");
@@ -181,7 +181,7 @@ function toast(message, kind = "success") {
 }
 
 const routeTitles = {
-  overview: "Genel Bakış", workspace: "Çalışma Alanım", countries: "Devletler", settlements: "Yerleşkeler", armies: "Ordular & Filolar",
+  overview: "Genel Bakış", workspace: "Çalışma Alanım", countries: "Devletler", settlements: "Yerleşkeler", armies: "Ordular & Filolar", "military-history": "Askerî İşlem Geçmişi",
   characters: "Karakterler", dynasties: "Hanedanlar", "noble-traits": "Soylu Traitleri", "roman-politics": "Roma Siyaseti",
   "steppe-politics": "Bozkır Kurultayı", "diplomacy-control": "Diplomasi & Ticaret", assignments: "Görevler", governorships: "Valilikler", "espionage-publications": "Olay Yayınları", "gm-operations": "Rehberli İşlemler", "bulk-operations": "Toplu İşlemler", "economy-control": "Ekonomi & Üretim", "great-games": "Oyunlar", "great-projects": "Büyük Projeler", "npc-purchases": "NPC Alımları", "state-wars": "Savaşlar", battles: "Muharebeler", "battle-simulator": "Savaş Simülasyonu",
   rebellions: "İsyanlar", reports: "Raporlar", health: "Oyun Sağlığı", "data-control": "Tam Yetki", audit: "İşlem Geçmişi"
@@ -787,6 +787,44 @@ async function forcesPage() {
     openFleetHealthEditor(button.dataset.editFleet).catch((error) => toast(error.message, "error"));
   }));
   revealFocusedRecord();
+}
+
+const militaryActionLabels={
+  "army.training.complete":"Eğitim birliği orduya katıldı","fleet.training.complete":"Üretilen gemiler filoya katıldı",
+  "army.create":"Ordu oluşturuldu","army.merge":"Ordular birleştirildi","army.units.add":"Orduya asker eklendi",
+  "army.units.remove":"Ordudan asker çıkarıldı","army.pool.allocate":"Asker havuzu orduya aktarıldı","army.disband":"Ordu dağıtıldı",
+  "army.commander.assign":"Komutan atandı","army.commander.remove":"Komutan kaldırıldı",
+  "fleet.create":"Filo oluşturuldu","fleet.merge":"Filolar birleştirildi","fleet.ships.add":"Filoya gemi eklendi",
+  "fleet.ships.remove":"Filodan gemi çıkarıldı","fleet.pool.allocate":"Gemi havuzu filoya aktarıldı","fleet.disband":"Filo dağıtıldı",
+  "fleet.commander.assign":"Amiral atandı","fleet.commander.remove":"Amiral kaldırıldı",
+  UNIT_PURCHASE:"Asker eğitimi emri verildi",SHIP_PURCHASE:"Gemi üretim emri verildi"
+};
+function militaryEventSummary(row){
+  const d=row.details||{};
+  const parts=[];
+  if(row.formation_name)parts.push(row.formation_name);
+  if(row.settlement_name||d.settlementName)parts.push(row.settlement_name||d.settlementName);
+  const quantity=Number(d.quantity??d.allocated??d.movedPersonnel??d.movedShips??0);
+  if(quantity)parts.push(`${number(quantity)} ${row.action.startsWith("fleet.")||row.action==="SHIP_PURCHASE"?"gemi":"asker"}`);
+  if(d.unitType)parts.push(String(d.unitType).replaceAll("_"," "));
+  if(d.shipType)parts.push(String(d.shipType).replaceAll("_"," "));
+  if(d.sourceArmyName||d.sourceFleetName)parts.push(`Kaynak: ${d.sourceArmyName||d.sourceFleetName}`);
+  if(d.completionTurn)parts.push(`Tur ${number(d.completionTurn)}`);
+  return parts.join(" · ")||"İşlem ayrıntısı kayıtta tutuldu.";
+}
+async function militaryHistoryPage(){
+  setActiveRoute("military-history");loading();
+  const query=new URLSearchParams({countryId:state.militaryHistoryCountry,category:state.militaryHistoryCategory,search:state.militaryHistorySearch,offset:String(state.militaryHistoryOffset),limit:"60"});
+  const data=await api(`/api/military-history?${query}`);
+  const options=data.countries.map((country)=>`<option value="${country.id}" ${country.id===state.militaryHistoryCountry?"selected":""}>${escapeHtml(country.name)}</option>`).join("");
+  const end=Math.min(data.total,data.offset+data.rows.length);
+  const rows=data.rows.map((row)=>`<article class="military-history-row ${row.action.startsWith("fleet.")||row.action==="SHIP_PURCHASE"?"naval":"land"}"><div class="military-history-icon">${row.action.startsWith("fleet.")||row.action==="SHIP_PURCHASE"?"⚓":"⚔"}</div><div><strong>${escapeHtml(militaryActionLabels[row.action]||humanKey(row.action))}</strong><span>${escapeHtml(row.country_name)}</span><p>${escapeHtml(militaryEventSummary(row))}</p></div><div class="military-history-meta"><b>${date(row.created_at)}</b><small>${row.actor_user_id==="SYSTEM_TURN_ADVANCE"?"Otomatik tur işlemi":`Kullanıcı ${escapeHtml(row.actor_user_id)}`}</small></div></article>`).join("");
+  page.innerHTML=`<div class="page-head military-history-hero"><div><span class="overview-kicker">ASKERÎ KAYIT MERKEZİ</span><h1>Askerî İşlem Geçmişi</h1><p>Asker eğitiminden ordu birleşmesine, gemi üretiminden filo yönetimine kadar bütün hareketleri ülke ülke izle.</p></div><span class="pill neutral">Tur ${number(data.currentTurn)}</span></div><section class="card military-history-toolbar"><label>Devlet<select id="military-history-country"><option value="">Tüm devletler</option>${options}</select></label><label>Kapsam<select id="military-history-category"><option value="ALL" ${state.militaryHistoryCategory==="ALL"?"selected":""}>Kara ve deniz</option><option value="LAND" ${state.militaryHistoryCategory==="LAND"?"selected":""}>Yalnız kara</option><option value="NAVAL" ${state.militaryHistoryCategory==="NAVAL"?"selected":""}>Yalnız deniz</option></select></label><label>İşlem ara<input id="military-history-search" value="${escapeHtml(state.militaryHistorySearch)}" placeholder="Ordu, filo, yerleşke veya işlem..."></label><button class="button primary" id="military-history-apply">Filtrele</button></section><div class="section-title"><h2>Komut ve üretim kayıtları</h2><span>${number(data.total)} işlem</span></div><section class="military-history-list">${rows||'<div class="card empty">Seçilen filtrelerde askerî işlem bulunmuyor.</div>'}</section><div class="pagination"><button class="button" id="military-history-prev" ${data.offset<=0?"disabled":""}>← Önceki</button><span>${data.total?`${number(data.offset+1)}–${number(end)} / ${number(data.total)}`:"0 kayıt"}</span><button class="button" id="military-history-next" ${end>=data.total?"disabled":""}>Sonraki →</button></div>`;
+  const apply=()=>{state.militaryHistoryCountry=document.getElementById("military-history-country").value;state.militaryHistoryCategory=document.getElementById("military-history-category").value;state.militaryHistorySearch=document.getElementById("military-history-search").value.trim();state.militaryHistoryOffset=0;militaryHistoryPage().catch(showPageError);};
+  document.getElementById("military-history-apply").addEventListener("click",apply);
+  document.getElementById("military-history-search").addEventListener("keydown",(event)=>{if(event.key==="Enter")apply();});
+  document.getElementById("military-history-prev").addEventListener("click",()=>{state.militaryHistoryOffset=Math.max(0,state.militaryHistoryOffset-60);militaryHistoryPage().catch(showPageError);});
+  document.getElementById("military-history-next").addEventListener("click",()=>{state.militaryHistoryOffset+=60;militaryHistoryPage().catch(showPageError);});
 }
 
 async function charactersPage() {
@@ -2880,6 +2918,7 @@ async function navigate(route) {
     if (route === "countries") return await countries();
     if (route === "settlements") return await settlementsPage();
     if (route === "armies") return await forcesPage();
+    if (route === "military-history") return await militaryHistoryPage();
     if (route === "characters") return await charactersPage();
     if (route === "dynasties") return await dynastiesPage();
     if (route === "noble-traits") return await nobleTraitsPage();
@@ -2985,6 +3024,7 @@ const paletteCommands = [
   { route: "countries", label: "Devletler", detail: "Devlet kayıtlarını yönet" },
   { route: "settlements", label: "Yerleşkeler", detail: "Nüfus, ekonomi, kültür ve dini incele" },
   { route: "armies", label: "Ordular & Filolar", detail: "Kuvvetleri ve komutanları yönet" },
+  { route: "military-history", label: "Askerî İşlem Geçmişi", detail: "Asker, ordu, gemi ve filo hareketlerini ülke bazında izle" },
   { route: "characters", label: "Karakterler", detail: "Karakter ve uzmanlık kayıtlarını aç" },
   { route: "noble-traits", label: "Soylu Traitleri", detail: "Hanedan traitlerini görüntüle, değiştir, kaldır veya yeniden belirle" },
   { route: "governorships", label: "Valilikler", detail: "Yerleşke valilerini, etkilerini ve görev sonlandırmalarını yönet" },

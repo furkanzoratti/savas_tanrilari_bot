@@ -227,6 +227,10 @@ export const CAVALRY_UNIT_TYPES = [
   "mauryan_war_elephant", "desert_raider", "egyptian_war_chariot", "germanic_companion_cavalry", "steppe_cavalry"
 ] as const satisfies readonly BattleUnitType[];
 
+export const SIEGE_RANGED_UNIT_TYPES = [
+  "slinger", "archer", "oba_archer", "briton_longbow", "balearic_slinger", "egyptian_war_chariot"
+] as const satisfies readonly BattleUnitType[];
+
 export function assaultUnitTotal(composition: BattleComposition): number {
 
   return ASSAULT_UNIT_TYPES.reduce((sum, key) => sum + Math.max(0, composition[key] ?? 0), 0);
@@ -662,7 +666,7 @@ export function siegeAssaultGroups(
   const infantryFrontage = profile.state === "INTACT" ? access.capacity : profile.attackerInfantry;
   const infantry = engagedComposition(meleeSource, infantryFrontage);
   const rangedSource: BattleComposition = {};
-  for (const key of ["slinger", "archer", "oba_archer", "briton_longbow", "balearic_slinger"] as BattleUnitType[]) {
+  for (const key of SIEGE_RANGED_UNIT_TYPES) {
     const quantity = composition[key] ?? 0;
     if (quantity > 0) rangedSource[key] = quantity;
   }
@@ -739,7 +743,7 @@ export function siegeDefenderGroups(
   const dismounted = siegeDefenderComposition(composition);
   const rangedSource: BattleComposition = {};
   const infantrySource: BattleComposition = {};
-  const rangedTypes = new Set<BattleUnitType>(["slinger", "archer", "oba_archer", "briton_longbow", "balearic_slinger"]);
+  const rangedTypes = new Set<BattleUnitType>(SIEGE_RANGED_UNIT_TYPES);
   for (const key of unitKeys) {
     const quantity = Math.max(0, dismounted[key] ?? 0);
     if (quantity <= 0) continue;
