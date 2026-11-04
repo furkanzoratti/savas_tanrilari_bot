@@ -20,6 +20,8 @@ describe("görsel hareket haritası sunucu kapsamı",()=>{
     expect(source).toContain("settlement_occupations");
     expect(source).toContain("owner_changed");
     expect(source).toContain("legacyTransform");
+    expect(source).toContain("claimNearestAvailableLandHex");
+    expect(source).toContain("__MIGRATING__");
     expect(source).not.toContain("DELETE FROM visual_map_settlement_positions");
   });
 });

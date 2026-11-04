@@ -3,6 +3,7 @@ import {fileURLToPath} from "node:url";
 import {z} from "zod";
 import {adminPool} from "../admin/db.js";
 import {adminConfig} from "../admin/config.js";
+import {claimNearestAvailableLandHex} from "./movement-map-hex-allocation.js";
 
 type Scope={scope:"GM"|"PLAYER";countryId:string|null;userId:string};
 type MapHex={id:string;code:string;column:number;row:number;center:{pixelX:number;pixelY:number};type:"LAND"|"SEA"|"IMPASSABLE";playable:boolean;neighbors:string[];province?:string|null;regionKey?:string|null};
@@ -45,14 +46,33 @@ async function synchronizeMapVersion(map:MapCatalog):Promise<void>{
       const positions=(await client.query<{formation_kind:string;force_id:string;hex_code:string}>("SELECT formation_kind,force_id,hex_code FROM visual_map_force_positions WHERE guild_id=$1",[adminConfig.guildId])).rows;
       for(const position of positions){const shifted=shiftLegacyHexCode(map,position.hex_code,position.formation_kind as "ARMY"|"FLEET");if(shifted)await client.query("UPDATE visual_map_force_positions SET hex_code=$4,updated_at=NOW() WHERE guild_id=$1 AND formation_kind=$2 AND force_id=$3",[adminConfig.guildId,position.formation_kind,position.force_id,shifted]);}
       const settlementPositions=(await client.query<{settlement_id:string;hex_code:string}>("SELECT settlement_id,hex_code FROM visual_map_settlement_positions WHERE guild_id=$1",[adminConfig.guildId])).rows;
-      for(const position of settlementPositions){const shifted=shiftLegacyHexCode(map,position.hex_code,"ARMY");if(shifted)await client.query("UPDATE visual_map_settlement_positions SET hex_code=$3,updated_at=NOW() WHERE guild_id=$1 AND settlement_id=$2",[adminConfig.guildId,position.settlement_id,shifted]);}
+      const shiftedSettlements=settlementPositions.map((position)=>({...position,shifted:shiftLegacyHexCode(map,position.hex_code,"ARMY")}));
+      const occupied=new Set(shiftedSettlements.filter((position)=>!position.shifted).map((position)=>position.hex_code));
+      const assignments=shiftedSettlements
+        .filter((position):position is typeof position&{shifted:string}=>Boolean(position.shifted))
+        .sort((left,right)=>left.settlement_id.localeCompare(right.settlement_id))
+        .map((position)=>({...position,assigned:claimNearestAvailableLandHex(map.hexes,position.shifted,occupied)}))
+        .filter((position):position is typeof position&{assigned:string}=>Boolean(position.assigned));
+      for(const position of assignments)await client.query("UPDATE visual_map_settlement_positions SET hex_code=$3,updated_at=NOW() WHERE guild_id=$1 AND settlement_id=$2",[adminConfig.guildId,position.settlement_id,`__MIGRATING__${position.settlement_id}`]);
+      for(const position of assignments)await client.query("UPDATE visual_map_settlement_positions SET hex_code=$3,updated_at=NOW() WHERE guild_id=$1 AND settlement_id=$2",[adminConfig.guildId,position.settlement_id,position.assigned]);
       const routes=(await client.query<{id:string;formation_kind:"ARMY"|"FLEET";route:string[];start_hex_code:string;destination_hex_code:string}>("SELECT id,formation_kind,route,start_hex_code,destination_hex_code FROM visual_map_routes WHERE guild_id=$1 AND status='SUBMITTED'",[adminConfig.guildId])).rows;
       for(const route of routes){const kind=route.formation_kind as "ARMY"|"FLEET";const shiftedRoute=route.route.map((code)=>shiftLegacyHexCode(map,code,kind)).filter((code):code is string=>Boolean(code));const start=shiftLegacyHexCode(map,route.start_hex_code,kind);const destination=shiftLegacyHexCode(map,route.destination_hex_code,kind);if(start&&destination&&shiftedRoute.length===route.route.length)await client.query("UPDATE visual_map_routes SET start_hex_code=$2,destination_hex_code=$3,route=$4::jsonb,updated_at=NOW() WHERE id=$1",[route.id,start,destination,JSON.stringify(shiftedRoute)]);}
     }
-    const settlements=(await client.query<{id:string;name:string}>(`SELECT settlement.id,settlement.name FROM settlements settlement JOIN countries country ON country.id=settlement.country_id WHERE country.guild_id=$1`,[adminConfig.guildId])).rows;
+    const settlements=(await client.query<{id:string;name:string}>(`SELECT settlement.id,settlement.name FROM settlements settlement JOIN countries country ON country.id=settlement.country_id WHERE country.guild_id=$1 ORDER BY settlement.name,settlement.id`,[adminConfig.guildId])).rows;
     await client.query(`INSERT INTO visual_map_territory_baselines(settlement_id,guild_id,country_id) SELECT settlement.id,country.guild_id,settlement.country_id FROM settlements settlement JOIN countries country ON country.id=settlement.country_id WHERE country.guild_id=$1 ON CONFLICT(settlement_id) DO NOTHING`,[adminConfig.guildId]);
     const positions=new Map(Object.entries(map.settlements).map(([name,value])=>[normalize(name),value.hexCode]));
-    for(const settlement of settlements){const alias=normalizedAliases.get(normalize(settlement.name));const code=positions.get(normalize(alias??settlement.name));if(!code)continue;await client.query(`INSERT INTO visual_map_settlement_positions(settlement_id,guild_id,hex_code) VALUES($1,$2,$3) ON CONFLICT(settlement_id) DO UPDATE SET guild_id=EXCLUDED.guild_id,hex_code=EXCLUDED.hex_code,updated_at=NOW()`,[settlement.id,adminConfig.guildId,code]);}
+    const currentPositions=(await client.query<{settlement_id:string;hex_code:string}>("SELECT settlement_id,hex_code FROM visual_map_settlement_positions WHERE guild_id=$1",[adminConfig.guildId])).rows;
+    const positionedSettlements=new Set(currentPositions.map((position)=>position.settlement_id));
+    const occupiedHexes=new Set(currentPositions.map((position)=>position.hex_code));
+    for(const settlement of settlements){
+      if(positionedSettlements.has(settlement.id))continue;
+      const alias=normalizedAliases.get(normalize(settlement.name));
+      const requested=positions.get(normalize(alias??settlement.name));
+      if(!requested)continue;
+      const code=claimNearestAvailableLandHex(map.hexes,requested,occupiedHexes);
+      if(!code)continue;
+      await client.query(`INSERT INTO visual_map_settlement_positions(settlement_id,guild_id,hex_code) VALUES($1,$2,$3) ON CONFLICT(settlement_id) DO NOTHING`,[settlement.id,adminConfig.guildId,code]);
+    }
     await client.query(`INSERT INTO visual_map_configuration(guild_id,map_version) VALUES($1,$2) ON CONFLICT(guild_id) DO UPDATE SET map_version=EXCLUDED.map_version,updated_at=NOW()`,[adminConfig.guildId,map.mapVersion]);
     await client.query("COMMIT");
   }catch(error){await client.query("ROLLBACK").catch(()=>undefined);throw error;}finally{client.release();}

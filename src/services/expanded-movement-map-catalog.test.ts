@@ -18,6 +18,7 @@ describe("R56 Expanded hareket haritası kataloğu",()=>{
   it("yerleşkeleri geçilebilir kara hexlerine bağlar",()=>{
     const hexes=new Map(catalog.hexes.map((hex)=>[hex.code,hex]));
     expect(Object.values(catalog.settlements).every((item)=>hexes.get(item.hexCode)?.type==="LAND")).toBe(true);
+    expect(new Set(Object.values(catalog.settlements).map((item)=>item.hexCode)).size).toBe(Object.keys(catalog.settlements).length);
     expect(catalog.settlements.Camulodunon?.hexCode).toBe("L31");
     expect(catalog.settlements.Roma?.hexCode).toBe("U43");
     expect(catalog.settlements.Alexandria?.hexCode).toBe("AJ54");

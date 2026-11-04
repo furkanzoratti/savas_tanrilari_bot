@@ -131,11 +131,13 @@ def main() -> None:
         item["neighbors"] = [by_position[position]["id"] for position in adjacent]
         item["coastal"] = item["type"] == "LAND" and any(by_position[position]["type"] == "SEA" for position in adjacent)
 
-    def closest_playable(column: int, row: int, kind: str) -> dict[str, object] | None:
-        candidates = [item for (candidate_column, candidate_row), item in by_position.items() if item["type"] == kind and abs(candidate_column - column) <= 3 and abs(candidate_row - row) <= 3]
+    def closest_playable(column: int, row: int, kind: str, excluded_codes: set[str] | None = None) -> dict[str, object] | None:
+        excluded_codes = excluded_codes or set()
+        candidates = [item for (candidate_column, candidate_row), item in by_position.items() if item["type"] == kind and item["code"] not in excluded_codes and abs(candidate_column - column) <= 3 and abs(candidate_row - row) <= 3]
         return min(candidates, key=lambda item: (item["column"] - column) ** 2 + (item["row"] - row) ** 2, default=None)
 
     settlements: dict[str, dict[str, object]] = {}
+    claimed_settlement_hexes: set[str] = set()
     for name, settlement in legacy["settlements"].items():
         old_hex = next((item for item in legacy["hexes"] if item["id"] == settlement["hexId"]), None)
         if not old_hex:
@@ -146,10 +148,11 @@ def main() -> None:
         target_column = round((target_x - origin_x) / horizontal_step)
         target_row = round((target_y - origin_y - (vertical_step / 2 if target_column % 2 else 0)) / vertical_step)
         target = by_position.get((target_column, target_row))
-        if target and target["type"] != "LAND":
-            target = closest_playable(target_column, target_row, "LAND")
+        if target and (target["type"] != "LAND" or target["code"] in claimed_settlement_hexes):
+            target = closest_playable(target_column, target_row, "LAND", claimed_settlement_hexes)
         if not target:
             continue
+        claimed_settlement_hexes.add(str(target["code"]))
         settlements[name] = {
             "hexId": target["id"],
             "hexCode": target["code"],
