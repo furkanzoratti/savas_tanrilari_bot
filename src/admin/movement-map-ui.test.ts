@@ -21,4 +21,15 @@ describe("hareket haritası GM yerleştirme arayüzü",()=>{
     expect(script).toContain("drawFlagBadge");
     expect(script).toContain("r56-political-v8");
   });
+
+  it("siyasi haritayı gerçek bölge maskesiyle boyar ve işgali çapraz tarar",()=>{
+    expect(html).toContain("Siyasi Harita");
+    expect(html).not.toContain("Siyasi değişimler");
+    expect(script).toContain("politicalRegionMask");
+    expect(script).toContain("politicalCountryColor");
+    expect(script).toContain('mode==="OWNER"');
+    expect(script).toContain('politicalPatch(territory,"OCCUPATION"');
+    expect(script).toContain("refreshPoliticalState");
+    expect(script).not.toContain('territory.occupier_country_id?".42":".28"');
+  });
 });
