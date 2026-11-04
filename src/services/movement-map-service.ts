@@ -24,7 +24,13 @@ async function ensureVisualSeed():Promise<void>{
   const map=await catalog();
   const existing=Number((await adminPool.query<{count:number}>("SELECT COUNT(*)::integer AS count FROM visual_map_settlement_positions WHERE guild_id=$1",[adminConfig.guildId])).rows[0]?.count??0);
   if(existing<50){
-    const settlements=(await adminPool.query<{id:string;name:string}>("SELECT id,name FROM settlements WHERE guild_id=$1",[adminConfig.guildId])).rows;
+    const settlements=(await adminPool.query<{id:string;name:string}>(
+      `SELECT settlement.id,settlement.name
+       FROM settlements settlement
+       JOIN countries country ON country.id=settlement.country_id
+       WHERE country.guild_id=$1`,
+      [adminConfig.guildId]
+    )).rows;
     const positions=new Map(Object.entries(map.settlements).map(([name,value])=>[normalize(name),value.hexCode]));
     for(const settlement of settlements){
       const alias=aliases[normalize(settlement.name)];const code=positions.get(normalize(alias??settlement.name));if(!code)continue;
@@ -32,9 +38,9 @@ async function ensureVisualSeed():Promise<void>{
     }
   }
   const origins=(await adminPool.query<{kind:"ARMY"|"FLEET";id:string;country_id:string;hex_code:string}>(
-    `SELECT 'ARMY'::text AS kind,army.id,army.country_id,position.hex_code FROM armies army JOIN visual_map_settlement_positions position ON position.settlement_id=army.origin_settlement_id WHERE army.guild_id=$1
+    `SELECT 'ARMY'::text AS kind,army.id,army.country_id,position.hex_code FROM armies army JOIN countries country ON country.id=army.country_id JOIN visual_map_settlement_positions position ON position.settlement_id=army.origin_settlement_id WHERE country.guild_id=$1
      UNION ALL
-     SELECT 'FLEET'::text AS kind,fleet.id,fleet.country_id,position.hex_code FROM fleets fleet JOIN visual_map_settlement_positions position ON position.settlement_id=fleet.origin_settlement_id WHERE fleet.guild_id=$1`,[adminConfig.guildId]
+     SELECT 'FLEET'::text AS kind,fleet.id,fleet.country_id,position.hex_code FROM fleets fleet JOIN countries country ON country.id=fleet.country_id JOIN visual_map_settlement_positions position ON position.settlement_id=fleet.origin_settlement_id WHERE country.guild_id=$1`,[adminConfig.guildId]
   )).rows;
   const turn=Number((await adminPool.query<{current_turn:number}>("SELECT current_turn FROM guilds WHERE discord_id=$1",[adminConfig.guildId])).rows[0]?.current_turn??0);
   for(const origin of origins){
@@ -59,7 +65,13 @@ function validateRoute(map:MapCatalog,kind:"ARMY"|"FLEET",route:string[]):void{
 }
 async function force(kind:"ARMY"|"FLEET",id:string):Promise<{country_id:string;name:string}|null>{
   const table=kind==="ARMY"?"armies":"fleets";
-  return (await adminPool.query<{country_id:string;name:string}>(`SELECT country_id,name FROM ${table} WHERE id=$1 AND guild_id=$2`,[id,adminConfig.guildId])).rows[0]??null;
+  return (await adminPool.query<{country_id:string;name:string}>(
+    `SELECT source.country_id,source.name
+     FROM ${table} source
+     JOIN countries country ON country.id=source.country_id
+     WHERE source.id=$1 AND country.guild_id=$2`,
+    [id,adminConfig.guildId]
+  )).rows[0]??null;
 }
 
 export const movementMapService={
@@ -67,9 +79,9 @@ export const movementMapService={
     await ensureVisualSeed();const map=await catalog();const countryFilter=session.scope==="PLAYER"?session.countryId:null;const params=countryFilter?[adminConfig.guildId,countryFilter]:[adminConfig.guildId];const filter=countryFilter?"AND source.country_id=$2":"";
     const [countries,settlements,armies,fleets,routes,turn]=await Promise.all([
       adminPool.query(`SELECT id,name FROM countries WHERE guild_id=$1 AND status='ACTIVE' ${countryFilter?"AND id=$2":""} ORDER BY name`,params),
-      adminPool.query(`SELECT settlement.id,settlement.name,settlement.country_id,position.hex_code AS coordinate FROM settlements settlement JOIN visual_map_settlement_positions position ON position.settlement_id=settlement.id WHERE settlement.guild_id=$1 ${countryFilter?"AND settlement.country_id=$2":""} ORDER BY settlement.name`,params),
-      adminPool.query(`SELECT source.id,source.name,source.country_id,country.name AS country_name,position.hex_code AS coordinate,COALESCE(SUM(unit.quantity),0)::integer AS strength FROM armies source JOIN countries country ON country.id=source.country_id LEFT JOIN visual_map_force_positions position ON position.guild_id=source.guild_id AND position.formation_kind='ARMY' AND position.force_id=source.id LEFT JOIN army_units unit ON unit.army_id=source.id WHERE source.guild_id=$1 ${filter} GROUP BY source.id,country.name,position.hex_code ORDER BY country.name,source.name`,params),
-      adminPool.query(`SELECT source.id,source.name,source.country_id,country.name AS country_name,position.hex_code AS coordinate,COALESCE(SUM(ship.quantity),0)::integer AS strength FROM fleets source JOIN countries country ON country.id=source.country_id LEFT JOIN visual_map_force_positions position ON position.guild_id=source.guild_id AND position.formation_kind='FLEET' AND position.force_id=source.id LEFT JOIN fleet_ships ship ON ship.fleet_id=source.id WHERE source.guild_id=$1 ${filter} GROUP BY source.id,country.name,position.hex_code ORDER BY country.name,source.name`,params),
+      adminPool.query(`SELECT settlement.id,settlement.name,settlement.country_id,position.hex_code AS coordinate FROM settlements settlement JOIN countries country ON country.id=settlement.country_id JOIN visual_map_settlement_positions position ON position.settlement_id=settlement.id WHERE country.guild_id=$1 ${countryFilter?"AND settlement.country_id=$2":""} ORDER BY settlement.name`,params),
+      adminPool.query(`SELECT source.id,source.name,source.country_id,country.name AS country_name,position.hex_code AS coordinate,COALESCE(SUM(unit.quantity),0)::integer AS strength FROM armies source JOIN countries country ON country.id=source.country_id LEFT JOIN visual_map_force_positions position ON position.guild_id=country.guild_id AND position.formation_kind='ARMY' AND position.force_id=source.id LEFT JOIN army_units unit ON unit.army_id=source.id WHERE country.guild_id=$1 ${filter} GROUP BY source.id,country.name,position.hex_code ORDER BY country.name,source.name`,params),
+      adminPool.query(`SELECT source.id,source.name,source.country_id,country.name AS country_name,position.hex_code AS coordinate,COALESCE(SUM(ship.quantity),0)::integer AS strength FROM fleets source JOIN countries country ON country.id=source.country_id LEFT JOIN visual_map_force_positions position ON position.guild_id=country.guild_id AND position.formation_kind='FLEET' AND position.force_id=source.id LEFT JOIN fleet_ships ship ON ship.fleet_id=source.id WHERE country.guild_id=$1 ${filter} GROUP BY source.id,country.name,position.hex_code ORDER BY country.name,source.name`,params),
       adminPool.query(`SELECT route.id,route.country_id,country.name AS country_name,route.formation_kind,CASE WHEN route.formation_kind='ARMY' THEN army.name ELSE fleet.name END AS force_name,route.force_id,route.status,route.issued_turn,route.start_hex_code AS start_coordinate,route.destination_hex_code AS destination_coordinate,jsonb_build_object('route',route.route,'purpose',route.purpose) AS metadata,route.created_at FROM visual_map_routes route JOIN countries country ON country.id=route.country_id LEFT JOIN armies army ON route.formation_kind='ARMY' AND army.id=route.force_id LEFT JOIN fleets fleet ON route.formation_kind='FLEET' AND fleet.id=route.force_id WHERE route.guild_id=$1 ${countryFilter?"AND route.country_id=$2":""} AND route.status='SUBMITTED' ORDER BY route.created_at`,params),
       adminPool.query<{current_turn:number}>("SELECT current_turn FROM guilds WHERE discord_id=$1",[adminConfig.guildId])
     ]);
