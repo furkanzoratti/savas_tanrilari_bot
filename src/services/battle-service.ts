@@ -493,6 +493,7 @@ export interface NavalFleetReadiness {
   stockTotal:number;
   otherAllocated:number;
   disabled:number;
+  physicalAvailable:number;
   readyAvailable:number;
 }
 
@@ -517,9 +518,10 @@ export async function navalFleetReadiness(client:DbClient,fleetId:string):Promis
     const stockTotal=Number(row.stock_total);
     const otherAllocated=Number(row.other_allocated);
     const disabled=Number(row.disabled);
+    const physicalAvailable=Math.max(0,stockTotal-otherAllocated);
     return {
       settlementName:row.settlement_name,shipType:row.ship_type,quantity,stockTotal,otherAllocated,disabled,
-      readyAvailable:Math.max(0,stockTotal-otherAllocated-disabled)
+      physicalAvailable,readyAvailable:Math.max(0,physicalAvailable-disabled)
     };
   });
 }
@@ -2099,11 +2101,10 @@ export const battleService = {
       const existingFleetUse = await participantUsesFleets(client,battle.id,fleet.country_id);
       if (!existingFleetUse && compositionTotal(participant.composition) > 0) throw new GameError("Bu ülkenin manuel deniz savaşı kadrosu zaten girilmiş. Kalıcı filo kullanmak için önce manuel kadroyu temizleyin.");
       const readiness = await navalFleetReadiness(client,fleet.id);
-      const unavailable = readiness.find((row) => row.quantity > row.readyAvailable);
+      // İş göremez gemiler filo tahsisinde kalır ve savaş gövdesine dâhil edilir;
+      // zar üretirken battleHullComposition yalnız operasyonel gemileri kullanır.
+      const unavailable = readiness.find((row) => row.quantity > row.physicalAvailable);
       if (unavailable) {
-        if (unavailable.disabled > 0) throw new GameError(
-          `**${unavailable.settlementName}** limanına bağlı ${unavailable.shipType} gemilerinin **${unavailable.disabled}** tanesi iş göremez. Önce bu gemileri tamire gönderin.`
-        );
         if (unavailable.otherAllocated > 0) throw new GameError(
           `**${unavailable.settlementName}** limanındaki ${unavailable.shipType} gemilerinin **${unavailable.otherAllocated}** tanesi başka filolara ayrılmış. Filo tahsislerini kontrol edin.`
         );

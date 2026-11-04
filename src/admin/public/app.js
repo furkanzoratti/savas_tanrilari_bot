@@ -181,7 +181,7 @@ function toast(message, kind = "success") {
 }
 
 const routeTitles = {
-  overview: "Genel Bakış", workspace: "Çalışma Alanım", countries: "Devletler", settlements: "Yerleşkeler", armies: "Ordular & Filolar", "military-history": "Askerî İşlem Geçmişi",
+  overview: "Genel Bakış", workspace: "Çalışma Alanım", countries: "Devletler", settlements: "Yerleşkeler", armies: "Ordular & Filolar", "movement-map":"Hareket Haritası", "military-history": "Askerî İşlem Geçmişi",
   characters: "Karakterler", dynasties: "Hanedanlar", "noble-traits": "Soylu Traitleri", "roman-politics": "Roma Siyaseti",
   "steppe-politics": "Bozkır Kurultayı", "diplomacy-control": "Diplomasi & Ticaret", assignments: "Görevler", governorships: "Valilikler", "espionage-publications": "Olay Yayınları", "gm-operations": "Rehberli İşlemler", "bulk-operations": "Toplu İşlemler", "economy-control": "Ekonomi & Üretim", "great-games": "Oyunlar", "great-projects": "Büyük Projeler", "npc-purchases": "NPC Alımları", "state-wars": "Savaşlar", battles: "Muharebeler", "battle-simulator": "Savaş Simülasyonu",
   rebellions: "İsyanlar", reports: "Raporlar", health: "Oyun Sağlığı", "data-control": "Tam Yetki", audit: "İşlem Geçmişi"
@@ -2934,6 +2934,7 @@ function bindPageActions() {
 }
 
 async function navigate(route) {
+  if(route==="movement-map"){window.location.assign("/movement-map");return;}
   const navigationId = ++state.navigationId;
   state.navigationController?.abort();
   const controller = new AbortController();

@@ -16,4 +16,5 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --prod --frozen-lockfile
 COPY --from=build /app/dist ./dist
 COPY assets ./assets
+COPY maps/r56/NEWHEXMAP.png ./maps/r56/NEWHEXMAP.png
 CMD ["pnpm", "start"]

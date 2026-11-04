@@ -35,6 +35,7 @@ import { armyService, type MobileSiegeAssetType } from "../services/army-service
 import { fleetService } from "../services/fleet-service.js";
 import { navalRepairService } from "../services/naval-repair-service.js";
 import { adminPanelLoginService } from "../services/admin-panel-login-service.js";
+import {movementMapLoginService} from "../services/movement-map-login-service.js";
 import { cityService } from "../services/city-service.js";
 import { commandLogService } from "../services/command-log-service.js";
 import { greatPowerService } from "../services/great-power-service.js";
@@ -1174,6 +1175,16 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
       components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel("Operasyon Masası'nı Aç").setURL(login.url)
       )]
+    });
+    return;
+  }
+  if(interaction.commandName==="hareket-haritasi"){
+    if(!interaction.guildId)throw new GameError("Sunucu bulunamadı.");
+    await interaction.deferReply({flags:MessageFlags.Ephemeral});
+    const login=await movementMapLoginService.issue({guildId:interaction.guildId,userId:interaction.user.id,username:interaction.user.globalName?.trim()||interaction.user.username,avatar:interaction.user.avatar});
+    await interaction.editReply({
+      content:`🗺️ **${login.countryName} Hareket Haritası** bağlantın hazır. Yalnızca kendi devletinin birliklerini görebilirsin; bağlantı **5 dakika** ve **tek kullanım** için geçerlidir.`,
+      components:[new ActionRowBuilder<ButtonBuilder>().addComponents(new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel("Hareket Haritasını Aç").setURL(login.url))]
     });
     return;
   }

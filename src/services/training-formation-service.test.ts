@@ -23,4 +23,13 @@ describe("eğitimden otomatik ordu ve filo oluşturma",()=>{
     expect(game).toContain("await assignCompletedShipsToFleet(client");
     expect(game).toContain('wave.unit_type!=="observer"&&wave.unit_type!=="militia"');
   });
+
+  it("yeni eğitim oluşumunu üretim yerleşkesinin harita hexine koyar",()=>{
+    expect(service).toContain("INSERT INTO army_map_positions");
+    expect(service).toContain("INSERT INTO fleet_map_positions");
+    expect(service).toContain("FROM settlement_map_positions position");
+    expect(service).toContain("target.domain='SEA'");
+    expect(service).toContain("ON CONFLICT(army_id) DO NOTHING");
+    expect(service).toContain("ON CONFLICT(fleet_id) DO NOTHING");
+  });
 });

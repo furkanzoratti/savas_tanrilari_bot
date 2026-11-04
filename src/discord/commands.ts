@@ -1088,6 +1088,8 @@ export const commandBuilders = [
   new SlashCommandBuilder()
     .setName("operasyon-masasi").setDescription("Yalnızca yönetici: GM Operasyon Masası için tek kullanımlık giriş bağlantısı üretir"),
   new SlashCommandBuilder()
+    .setName("hareket-haritasi").setDescription("Ordularının ve filolarının konumlarını, rotalarını ve hareket emirlerini açar"),
+  new SlashCommandBuilder()
     .setName("kultur-askeri-ceza").setDescription("Yalnızca yönetici: yabancı kültürün askerî limit cezasını açar veya kapatır")
     .addBooleanOption((option) => option
       .setName("aktif")

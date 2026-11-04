@@ -27,6 +27,8 @@ import {adminGreatProjectService} from "./great-project-admin-service.js";
 import { adminGovernorshipService } from "./governorship-admin-service.js";
 import { adminStateWarService } from "./state-war-admin-service.js";
 import { adminGreatGamesService } from "./great-games-admin-service.js";
+import {assertMovementMapMutation,completeMovementMapLogin,movementMapSessionFromRequest,type MovementMapSession} from "./movement-map-auth.js";
+import {movementMapService} from "../services/movement-map-service.js";
 
 const logger = pino({ level: adminConfig.logLevel });
 const responseStartedAt = new WeakMap<ServerResponse, number>();
@@ -36,7 +38,10 @@ const MUTATION_WINDOW_MS = 60_000;
 const publicFiles = {
   "/": { path: fileURLToPath(new URL("./public/index.html", import.meta.url)), type: "text/html; charset=utf-8" },
   "/app.css": { path: fileURLToPath(new URL("./public/app.css", import.meta.url)), type: "text/css; charset=utf-8" },
-  "/app.js": { path: fileURLToPath(new URL("./public/app.js", import.meta.url)), type: "text/javascript; charset=utf-8" }
+  "/app.js": { path: fileURLToPath(new URL("./public/app.js", import.meta.url)), type: "text/javascript; charset=utf-8" },
+  "/movement-map": { path: fileURLToPath(new URL("./public/movement-map.html", import.meta.url)), type: "text/html; charset=utf-8" },
+  "/movement-map.css": { path: fileURLToPath(new URL("./public/movement-map.css", import.meta.url)), type: "text/css; charset=utf-8" },
+  "/movement-map.js": { path: fileURLToPath(new URL("./public/movement-map.js", import.meta.url)), type: "text/javascript; charset=utf-8" }
 } as const;
 const DEATH_PUBLICATION_IMAGE_KEYS=[
   "dynasty-deaths-banner.png","dynasty-death-male-banner.png","dynasty-death-female-banner.png"
@@ -113,6 +118,17 @@ function requireMutation(request: IncomingMessage, response: ServerResponse): Ad
   return session;
 }
 
+function requireMapSession(request:IncomingMessage,response:ServerResponse):MovementMapSession|null{
+  const session=movementMapSessionFromRequest(request);
+  if(!session)json(response,401,{error:"AUTH_REQUIRED",message:"Discord üzerinden yeni bir hareket haritası bağlantısı oluşturun."});
+  return session;
+}
+function requireMapMutation(request:IncomingMessage,response:ServerResponse):MovementMapSession|null{
+  const session=requireMapSession(request,response);if(!session)return null;
+  if(!assertMovementMapMutation(request,session)){json(response,403,{error:"CSRF_REJECTED",message:"İşlem güvenlik doğrulamasından geçemedi."});return null;}
+  return session;
+}
+
 async function serveStatic(pathname: keyof typeof publicFiles, response: ServerResponse): Promise<void> {
   const file = publicFiles[pathname];
   const content = await readFile(file.path);
@@ -144,6 +160,14 @@ async function serveDeathEventAsset(filename:string,response:ServerResponse):Pro
   response.end(content);
 }
 
+async function serveMapAsset(kind:"catalog"|"image",response:ServerResponse):Promise<void>{
+  const file=kind==="catalog"
+    ?fileURLToPath(new URL("../../assets/hex-map-r56.json",import.meta.url))
+    :fileURLToPath(new URL("../../maps/r56/NEWHEXMAP.png",import.meta.url));
+  const content=await readFile(file);securityHeaders(response);responseTiming(response);
+  response.writeHead(200,{"content-type":kind==="catalog"?"application/json; charset=utf-8":"image/png","cache-control":"public, max-age=3600"});response.end(content);
+}
+
 const server = createServer(async (request, response) => {
   const requestId = randomUUID();
   const startedAt = performance.now();
@@ -165,6 +189,9 @@ const server = createServer(async (request, response) => {
       await completeDiscordLinkLogin(response, url);
       return redirect(response, "/");
     }
+    if(request.method==="GET"&&url.pathname==="/auth/movement-map"){
+      await completeMovementMapLogin(response,url);return redirect(response,"/movement-map");
+    }
     if (request.method === "POST" && url.pathname === "/auth/logout") {
       const session = requireMutation(request, response);
       if (!session) return;
@@ -176,6 +203,26 @@ const server = createServer(async (request, response) => {
       if (!session) return;
       return json(response, 200, { user: { id: session.sub, username: session.username, avatar: session.avatar }, csrf: session.csrf });
     }
+    if(request.method==="GET"&&url.pathname==="/api/movement-map/session"){
+      const session=requireMapSession(request,response);if(!session)return;
+      return json(response,200,{user:{id:session.sub,username:session.username,avatar:session.avatar},scope:session.scope,countryId:session.countryId,csrf:session.csrf});
+    }
+    if(request.method==="GET"&&url.pathname==="/api/movement-map/dashboard"){
+      const session=requireMapSession(request,response);if(!session)return;
+      return json(response,200,await movementMapService.dashboard({scope:session.scope,countryId:session.countryId,userId:session.sub}));
+    }
+    if(request.method==="POST"&&url.pathname==="/api/movement-map/orders"){
+      const session=requireMapMutation(request,response);if(!session)return;
+      return json(response,200,await movementMapService.submitOrder({scope:session.scope,countryId:session.countryId,userId:session.sub},await body(request)));
+    }
+    const resolveMovementMatch=request.method==="POST"?url.pathname.match(/^\/api\/movement-map\/orders\/([0-9a-f-]+)\/resolve$/iu):null;
+    if(resolveMovementMatch){const session=requireMapMutation(request,response);if(!session)return;return json(response,200,await movementMapService.resolveOrder({scope:session.scope,countryId:session.countryId,userId:session.sub},resolveMovementMatch[1]!));}
+    const cancelMovementMatch=request.method==="POST"?url.pathname.match(/^\/api\/movement-map\/orders\/([0-9a-f-]+)\/cancel$/iu):null;
+    if(cancelMovementMatch){const session=requireMapMutation(request,response);if(!session)return;return json(response,200,await movementMapService.cancelOrder({scope:session.scope,countryId:session.countryId,userId:session.sub},cancelMovementMatch[1]!));}
+    const positionMovementMatch=request.method==="PATCH"?url.pathname.match(/^\/api\/movement-map\/forces\/(ARMY|FLEET)\/([0-9a-f-]+)\/position$/u):null;
+    if(positionMovementMatch){const session=requireMapMutation(request,response);if(!session)return;return json(response,200,await movementMapService.setPosition({scope:session.scope,countryId:session.countryId,userId:session.sub},positionMovementMatch[1] as "ARMY"|"FLEET",positionMovementMatch[2]!,await body(request)));}
+    if(request.method==="GET"&&url.pathname==="/movement-map-data.json"){if(!requireMapSession(request,response))return;return serveMapAsset("catalog",response);}
+    if(request.method==="GET"&&url.pathname==="/movement-map-image.png"){if(!requireMapSession(request,response))return;return serveMapAsset("image",response);}
     if (request.method === "GET" && url.pathname === "/api/overview") {
       if (!requireSession(request, response)) return;
       return json(response, 200, await adminPanelService.overview());

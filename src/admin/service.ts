@@ -784,6 +784,7 @@ type AdminFleetReadiness = {
   stockTotal:number;
   otherAllocated:number;
   disabled:number;
+  physicalAvailable:number;
   readyAvailable:number;
 };
 
@@ -811,18 +812,18 @@ async function adminFleetReadiness(client: Pick<AdminDbClient,"query">, fleetId:
     const stockTotal=Number(row.stock_total);
     const otherAllocated=Number(row.other_allocated);
     const disabled=Number(row.disabled);
+    const physicalAvailable=Math.max(0,stockTotal-otherAllocated);
     return {
       settlementName:row.settlement_name,shipType:row.ship_type,quantity,stockTotal,otherAllocated,disabled,
-      readyAvailable:Math.max(0,stockTotal-otherAllocated-disabled)
+      physicalAvailable,readyAvailable:Math.max(0,physicalAvailable-disabled)
     };
   });
 }
 
 function fleetReadinessError(rows: AdminFleetReadiness[]): string | null {
-  const unavailable=rows.find((row)=>row.quantity>row.readyAvailable);
+  const unavailable=rows.find((row)=>row.quantity>row.physicalAvailable);
   if(!unavailable)return null;
   const label=NAVAL_UNIT_STATS[unavailable.shipType]?.label??unavailable.shipType;
-  if(unavailable.disabled>0)return `${unavailable.settlementName} limanına bağlı ${label} gemilerinin ${unavailable.disabled} tanesi iş göremez.`;
   if(unavailable.otherAllocated>0)return `${unavailable.settlementName} limanındaki ${label} gemilerinin ${unavailable.otherAllocated} tanesi başka filolara ayrılmış.`;
   return `${unavailable.settlementName} limanındaki ${label} stoku filo kaydıyla uyuşmuyor.`;
 }
