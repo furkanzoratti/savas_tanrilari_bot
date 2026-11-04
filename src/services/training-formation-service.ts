@@ -52,12 +52,6 @@ export async function assignCompletedTrainingToArmy(client:DbClient,input:{
     [army.id,input.settlementId,input.settlementName,input.unitType,input.quantity]
   );
   await client.query(
-    `INSERT INTO army_map_positions(army_id,hex_id,arrived_turn)
-     SELECT $1,position.hex_id,$2 FROM settlement_map_positions position WHERE position.settlement_id=$3
-     ON CONFLICT(army_id) DO NOTHING`,
-    [army.id,input.turn,input.settlementId]
-  );
-  await client.query(
     `INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details)
      VALUES($1,$2,'army.training.complete','army',$3,$4::jsonb)`,
     [input.guildId,input.actorId??SYSTEM_ACTOR,army.id,JSON.stringify({
@@ -93,20 +87,6 @@ export async function assignCompletedShipsToFleet(client:DbClient,input:{
      ON CONFLICT(fleet_id,settlement_id,ship_type) DO UPDATE
        SET quantity=fleet_ships.quantity+EXCLUDED.quantity`,
     [fleet.id,input.settlementId,input.shipType,input.quantity]
-  );
-  await client.query(
-    `INSERT INTO fleet_map_positions(fleet_id,hex_id,arrived_turn)
-     SELECT $1,sea.hex_id,$2
-     FROM settlement_map_positions position
-     JOIN LATERAL (
-       SELECT edge.to_hex_id AS hex_id FROM map_hex_edges edge
-       JOIN map_hexes target ON target.id=edge.to_hex_id
-       WHERE edge.from_hex_id=position.hex_id AND target.domain='SEA' AND target.passable=TRUE
-       ORDER BY edge.movement_cost,target.coordinate LIMIT 1
-     ) sea ON TRUE
-     WHERE position.settlement_id=$3
-     ON CONFLICT(fleet_id) DO NOTHING`,
-    [fleet.id,input.turn,input.settlementId]
   );
   await client.query(
     `INSERT INTO audit_logs(guild_id,actor_user_id,action,entity_type,entity_id,details)

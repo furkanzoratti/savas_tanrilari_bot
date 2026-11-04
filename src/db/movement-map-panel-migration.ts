@@ -16,7 +16,5 @@ export const movementMapPanelMigration = {
     CREATE INDEX IF NOT EXISTS movement_map_login_tokens_expiry_idx
       ON movement_map_login_tokens(expires_at) WHERE used_at IS NULL;
 
-    CREATE INDEX IF NOT EXISTS movement_orders_country_status_idx
-      ON movement_orders(guild_id,country_id,status,created_at DESC);
   `
 } as const;
