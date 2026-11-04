@@ -29,7 +29,7 @@ describe("R56 Expanded deploy paketi",()=>{
   it("yeni arka planı paketler ve eksik varlıkta paneli çökertmez",()=>{
     const dockerfile=readFileSync(new URL("../../Dockerfile",import.meta.url),"utf8");
     const server=readFileSync(new URL("../admin/server.ts",import.meta.url),"utf8");
-    expect(dockerfile).toContain("COPY maps/r56/R56-EXPANDED-v7.png ./maps/r56/R56-EXPANDED-v7.png");
+    expect(dockerfile).toContain("COPY maps/r56/R56-POLITICAL-v8.png ./maps/r56/R56-POLITICAL-v8.png");
     expect(server).toContain("MAP_ASSET_UNAVAILABLE");
     expect(server).toContain("try{content=await readFile(file);}");
   });

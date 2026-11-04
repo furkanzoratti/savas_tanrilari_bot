@@ -4,6 +4,7 @@ import {z} from "zod";
 import {adminPool} from "../admin/db.js";
 import {adminConfig} from "../admin/config.js";
 import {claimNearestAvailableLandHex} from "./movement-map-hex-allocation.js";
+import {movementMapFlagUrl} from "../domain/movement-map-flags.js";
 
 type Scope={scope:"GM"|"PLAYER";countryId:string|null;userId:string};
 type MapHex={id:string;code:string;column:number;row:number;center:{pixelX:number;pixelY:number};type:"LAND"|"SEA"|"IMPASSABLE";playable:boolean;neighbors:string[];province?:string|null;regionKey?:string|null};
@@ -132,7 +133,9 @@ export const movementMapService={
       adminPool.query(`SELECT settlement.id,settlement.name,settlement.country_id,owner.name AS owner_country_name,settlement.is_conquered,position.hex_code AS coordinate,baseline.country_id AS baseline_country_id,(baseline.country_id IS DISTINCT FROM settlement.country_id) AS owner_changed,occupation.occupier_country_id,occupier.name AS occupier_country_name FROM settlements settlement JOIN countries owner ON owner.id=settlement.country_id JOIN visual_map_settlement_positions position ON position.settlement_id=settlement.id LEFT JOIN visual_map_territory_baselines baseline ON baseline.settlement_id=settlement.id LEFT JOIN LATERAL(SELECT active.occupier_country_id FROM settlement_occupations active WHERE active.settlement_id=settlement.id AND active.status='ACTIVE' ORDER BY active.started_turn DESC LIMIT 1) occupation ON TRUE LEFT JOIN countries occupier ON occupier.id=occupation.occupier_country_id WHERE owner.guild_id=$1 ORDER BY settlement.name`,[adminConfig.guildId])
     ]);
     const codeMap=new Map(map.hexes.map((hex)=>[hex.code,hex.center]));const decorate=(row:Record<string,unknown>)=>{const point=typeof row.coordinate==="string"?codeMap.get(row.coordinate):null;return {...row,pixel_x:point?.pixelX??null,pixel_y:point?.pixelY??null};};
-    return {scope:session.scope,map:{version:map.mapVersion,...map.grid},turn:Number(turn.rows[0]?.current_turn??0),countries:countries.rows,settlements:settlements.rows.map((row)=>decorate(row as Record<string,unknown>)),territories:territories.rows,forces:[...armies.rows.map((row)=>({...decorate(row as Record<string,unknown>),kind:"ARMY"})),...fleets.rows.map((row)=>({...decorate(row as Record<string,unknown>),kind:"FLEET"}))],orders:routes.rows};
+    const decorateForce=(row:Record<string,unknown>,kind:"ARMY"|"FLEET")=>({...decorate(row),kind,flag_url:movementMapFlagUrl(String(row.country_name??""))});
+    const countryRows=(countries.rows as {id:string;name:string}[]).map((country)=>({...country,flag_url:movementMapFlagUrl(country.name)}));
+    return {scope:session.scope,map:{version:map.mapVersion,...map.grid},turn:Number(turn.rows[0]?.current_turn??0),countries:countryRows,settlements:settlements.rows.map((row)=>decorate(row as Record<string,unknown>)),territories:territories.rows,forces:[...armies.rows.map((row)=>decorateForce(row as Record<string,unknown>,"ARMY")),...fleets.rows.map((row)=>decorateForce(row as Record<string,unknown>,"FLEET"))],orders:routes.rows};
   },
 
   async submitOrder(session:Scope,raw:unknown){

@@ -29,6 +29,7 @@ import { adminStateWarService } from "./state-war-admin-service.js";
 import { adminGreatGamesService } from "./great-games-admin-service.js";
 import {assertMovementMapMutation,completeMovementMapLogin,movementMapSessionFromRequest,type MovementMapSession} from "./movement-map-auth.js";
 import {movementMapService} from "../services/movement-map-service.js";
+import {MOVEMENT_MAP_FLAG_FILENAMES} from "../domain/movement-map-flags.js";
 
 const logger = pino({ level: adminConfig.logLevel });
 const responseStartedAt = new WeakMap<ServerResponse, number>();
@@ -163,7 +164,7 @@ async function serveDeathEventAsset(filename:string,response:ServerResponse):Pro
 async function serveMapAsset(kind:"catalog"|"image",response:ServerResponse):Promise<void>{
   const file=kind==="catalog"
     ?fileURLToPath(new URL("../../assets/hex-map-r56-expanded.json",import.meta.url))
-    :fileURLToPath(new URL("../../maps/r56/R56-EXPANDED-v7.png",import.meta.url));
+    :fileURLToPath(new URL("../../maps/r56/R56-POLITICAL-v8.png",import.meta.url));
   let content:Buffer;
   try{content=await readFile(file);}
   catch(error){
@@ -172,6 +173,19 @@ async function serveMapAsset(kind:"catalog"|"image",response:ServerResponse):Pro
   }
   securityHeaders(response);responseTiming(response);
   response.writeHead(200,{"content-type":kind==="catalog"?"application/json; charset=utf-8":"image/png","cache-control":"public, max-age=3600"});response.end(content);
+}
+
+async function serveMovementMapFlagAsset(filename:string,response:ServerResponse):Promise<void>{
+  if(!MOVEMENT_MAP_FLAG_FILENAMES.has(filename))return json(response,404,{error:"NOT_FOUND"});
+  try{
+    const content=await readFile(fileURLToPath(new URL(`../../assets/movement-map-flags/${filename}`,import.meta.url)));
+    securityHeaders(response);responseTiming(response);
+    response.writeHead(200,{"content-type":"image/webp","cache-control":"public, max-age=86400, immutable"});
+    response.end(content);
+  }catch(error){
+    logger.error({error,filename},"Hareket haritası bayrağı okunamadı");
+    return json(response,503,{error:"FLAG_ASSET_UNAVAILABLE",message:"Ülke bayrağı yüklenemedi."});
+  }
 }
 
 const server = createServer(async (request, response) => {
@@ -229,6 +243,8 @@ const server = createServer(async (request, response) => {
     if(positionMovementMatch){const session=requireMapMutation(request,response);if(!session)return;return json(response,200,await movementMapService.setPosition({scope:session.scope,countryId:session.countryId,userId:session.sub},positionMovementMatch[1] as "ARMY"|"FLEET",positionMovementMatch[2]!,await body(request)));}
     if(request.method==="GET"&&url.pathname==="/movement-map-data.json"){if(!requireMapSession(request,response))return;return serveMapAsset("catalog",response);}
     if(request.method==="GET"&&url.pathname==="/movement-map-image.png"){if(!requireMapSession(request,response))return;return serveMapAsset("image",response);}
+    const movementMapFlagMatch=request.method==="GET"?url.pathname.match(/^\/movement-map-flags\/([a-z0-9-]+\.webp)$/u):null;
+    if(movementMapFlagMatch){if(!requireMapSession(request,response))return;return serveMovementMapFlagAsset(movementMapFlagMatch[1]!,response);}
     if (request.method === "GET" && url.pathname === "/api/overview") {
       if (!requireSession(request, response)) return;
       return json(response, 200, await adminPanelService.overview());
