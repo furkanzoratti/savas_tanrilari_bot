@@ -164,7 +164,13 @@ async function serveMapAsset(kind:"catalog"|"image",response:ServerResponse):Pro
   const file=kind==="catalog"
     ?fileURLToPath(new URL("../../assets/hex-map-r56-expanded.json",import.meta.url))
     :fileURLToPath(new URL("../../maps/r56/R56-EXPANDED-v7.png",import.meta.url));
-  const content=await readFile(file);securityHeaders(response);responseTiming(response);
+  let content:Buffer;
+  try{content=await readFile(file);}
+  catch(error){
+    logger.error({error,kind,file},"Hareket haritası varlığı okunamadı");
+    return json(response,503,{error:"MAP_ASSET_UNAVAILABLE",message:"Hareket haritası varlığı deploy paketinde bulunamadı."});
+  }
+  securityHeaders(response);responseTiming(response);
   response.writeHead(200,{"content-type":kind==="catalog"?"application/json; charset=utf-8":"image/png","cache-control":"public, max-age=3600"});response.end(content);
 }
 
