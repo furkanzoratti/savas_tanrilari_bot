@@ -7,11 +7,12 @@ import type {NavalUnitType} from "../domain/battle.js";
 import {SHIPS} from "../domain/catalog.js";
 import {number} from "../domain/format.js";
 import {fleetService,type FleetPoolView,type FleetView} from "../services/fleet-service.js";
-import {navalRepairService} from "../services/naval-repair-service.js";
+import {navalRepairService,type RepairFleetView} from "../services/naval-repair-service.js";
 import {gameService,GameError} from "../services/game-service.js";
 import {assertCountryAccess,assertCountryExecutiveAccess} from "./auth.js";
 import {compactUuid,expandUuid} from "./document-component-id.js";
 import {renderFleetEmbed} from "./fleet-embed.js";
+import {renderRepairFleetEmbed} from "./repair-fleet-embed.js";
 
 type ComponentRow=ActionRowBuilder<StringSelectMenuBuilder>|ActionRowBuilder<ButtonBuilder>;
 const trim=(value:string,limit:number)=>value.length<=limit?value:`${value.slice(0,Math.max(0,limit-2))}…`;
@@ -19,7 +20,7 @@ const shipLabel=(shipType:NavalUnitType)=>SHIPS[shipType]?.name??shipType;
 
 function fleetSummary(input:{
   countryName:string;fleets:FleetView[];pool:FleetPoolView;selectedFleetId:string|null;
-  repairCount:number;repairShips:number;
+  repairs:RepairFleetView[];selectedRepairId:string|null;
 }):EmbedBuilder{
   const fleetShips=input.fleets.reduce((sum,fleet)=>sum+fleet.totalShips,0);
   const crew=input.fleets.reduce((sum,fleet)=>sum+fleet.crew,0);
@@ -30,18 +31,27 @@ function fleetSummary(input:{
     fleet.id===input.selectedFleetId?"▶":"•",fleet.id===input.selectedFleetId?`**${fleet.name}**`:fleet.name,
     `— **${number(fleet.totalShips)}** gemi`,fleet.active_battle_id?"• ⚔️ Savaşta":""
   ].filter(Boolean).join(" ")).join("\n"):"Kurulmuş bir filo bulunmuyor.";
+  const repairShips=input.repairs.reduce((sum,repair)=>sum+repair.totalShips,0);
+  const repairLines=input.repairs.length?input.repairs.map((repair)=>[
+    repair.id===input.selectedRepairId?"▶":"•",repair.id===input.selectedRepairId?`**${repair.name}**`:repair.name,
+    `— **${number(repair.totalShips)}** gemi`,repair.status==="READY"?"• ✅ Tamamlandı":`• 🛠️ Tur ${repair.completion_turn}`
+  ].join(" ")).join("\n"):"Etkin bir tamir filosu bulunmuyor.";
   return new EmbedBuilder().setColor(disabled?0xa9483d:0x2878a8)
     .setTitle(`⚓ ${input.countryName} • Filo Komuta Merkezi`)
     .setDescription("Devletin filoları, gemi durumları ve henüz bir filoya bağlanmamış liman rezervleri.")
     .addFields(
       {name:"🚢 Donanma",value:`Filo sayısı: **${number(input.fleets.length)}**\nFilolara bağlı: **${number(fleetShips)}**\nBoş liman rezervi: **${number(input.pool.grandTotal)}**`,inline:true},
-      {name:"🛠️ Gemi Durumu",value:`Hasarlı: **${number(damaged)}**\nİş göremez: **${number(disabled)}**\nTamir filosu: **${number(input.repairCount)}** • ${number(input.repairShips)} gemi`,inline:true},
+      {name:"🛠️ Gemi Durumu",value:`Hasarlı: **${number(damaged)}**\nİş göremez: **${number(disabled)}**\nTamir filosu: **${number(input.repairs.length)}** • ${number(repairShips)} gemi`,inline:true},
       {name:"👥 Kapasite",value:`Mürettebat: **${number(crew)}**\nAsker taşıma: **${number(transport)}**`,inline:true},
-      {name:"📋 Filolar",value:trim(lines,700)}
-    ).setFooter({text:"Aşağıdan filo seç; liman rezervi aktarımını aynı ekrandan yönet."});
+      {name:"📋 Filolar",value:trim(lines,700)},
+      {name:"🛠️ Tamir Filoları",value:trim(repairLines,700)}
+    ).setFooter({text:"Aşağıdan normal veya tamir filosu seç; liman rezervi aktarımını aynı ekrandan yönet."});
 }
 
-function controls(countryId:string,fleets:FleetView[],selected:FleetView|null,pool:FleetPoolView):ComponentRow[]{
+function controls(
+  countryId:string,fleets:FleetView[],selected:FleetView|null,pool:FleetPoolView,
+  repairs:RepairFleetView[],selectedRepair:RepairFleetView|null
+):ComponentRow[]{
   const country=compactUuid(countryId);
   const fleet=selected?compactUuid(selected.id):null;
   const rows:ComponentRow[]=[];
@@ -51,6 +61,13 @@ function controls(countryId:string,fleets:FleetView[],selected:FleetView|null,po
         label:item.name.slice(0,100),description:`${number(item.totalShips)} gemi${item.active_battle_id?" • Savaşta":""}`.slice(0,100),
         value:item.id,default:item.id===selected?.id
       })))
+  ));
+  if(repairs.length)rows.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+    new StringSelectMenuBuilder().setCustomId(`frs|${country}|${fleet??"none"}`).setPlaceholder("Detayı gösterilecek tamir filosunu seç")
+      .addOptions(repairs.slice(0,25).map((repair)=>(
+        {label:repair.name.slice(0,100),description:`${number(repair.totalShips)} gemi • ${repair.status==="READY"?"Tamamlandı":`Tur ${repair.completion_turn}`}`.slice(0,100),
+          value:repair.id,default:repair.id===selectedRepair?.id}
+      )))
   ));
   rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(`fc|${country}|${fleet??"none"}|prev`).setLabel("Önceki").setEmoji("◀️").setStyle(ButtonStyle.Secondary).setDisabled(fleets.length<2||!selected),
@@ -62,7 +79,9 @@ function controls(countryId:string,fleets:FleetView[],selected:FleetView|null,po
   return rows;
 }
 
-export async function fleetDashboardPayload(countryId:string,fleetValue?:string|null,content:string|null=null){
+export async function fleetDashboardPayload(
+  countryId:string,fleetValue?:string|null,content:string|null=null,repairValue?:string|null
+){
   const [document,fleets,pool,repairs]=await Promise.all([
     gameService.document(countryId,{includeArmies:false}),fleetService.listCountry(countryId),
     fleetService.unallocatedPool(countryId),navalRepairService.listCountry(countryId)
@@ -70,14 +89,17 @@ export async function fleetDashboardPayload(countryId:string,fleetValue?:string|
   const selected=fleetValue
     ?fleets.find((fleet)=>fleet.id===fleetValue||fleet.name.toLocaleLowerCase("tr-TR")===fleetValue.toLocaleLowerCase("tr-TR"))??fleets[0]??null
     :fleets[0]??null;
+  const selectedRepair=repairValue
+    ?repairs.find((repair)=>repair.id===repairValue||repair.name.toLocaleLowerCase("tr-TR")===repairValue.toLocaleLowerCase("tr-TR"))??repairs[0]??null
+    :repairs[0]??null;
   return{
     content,
     embeds:[
       fleetSummary({
         countryName:document.country.name,fleets,pool,selectedFleetId:selected?.id??null,
-        repairCount:repairs.length,repairShips:repairs.reduce((sum,repair)=>sum+repair.totalShips,0)
-      }),...(selected?[renderFleetEmbed(selected)]:[])
-    ],components:controls(countryId,fleets,selected,pool)
+        repairs,selectedRepairId:selectedRepair?.id??null
+      }),...(selected?[renderFleetEmbed(selected)]:[]),...(selectedRepair?[renderRepairFleetEmbed(selectedRepair)]:[])
+    ],components:controls(countryId,fleets,selected,pool,repairs,selectedRepair)
   };
 }
 
@@ -93,13 +115,20 @@ function backButton(countryId:string,fleetId:string):ActionRowBuilder<ButtonBuil
 
 export async function handleFleetControlSelect(interaction:StringSelectMenuInteraction):Promise<boolean>{
   const [kind,countryValue,fleetValue,settlementValue]=interaction.customId.split("|");
-  if(!["fs","fps","fpu"].includes(kind??""))return false;
+  if(!["fs","frs","fps","fpu"].includes(kind??""))return false;
   if(!interaction.guildId||!countryValue)throw new GameError("Filo kontrol bilgisi geçersiz.");
   const countryId=expandUuid(countryValue);
   if(kind==="fs"){
     await interaction.deferUpdate();
     await assertCountryAccess(interaction,countryId);
     await interaction.editReply(await fleetDashboardPayload(countryId,interaction.values[0]));
+    return true;
+  }
+  if(kind==="frs"){
+    await interaction.deferUpdate();
+    await assertCountryAccess(interaction,countryId);
+    const selectedFleetId=fleetValue&&fleetValue!=="none"?expandUuid(fleetValue):null;
+    await interaction.editReply(await fleetDashboardPayload(countryId,selectedFleetId,null,interaction.values[0]));
     return true;
   }
   if(!fleetValue)throw new GameError("Filo bilgisi eksik.");

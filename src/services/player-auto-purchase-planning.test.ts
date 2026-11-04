@@ -55,10 +55,11 @@ describe("oyuncu otomatik alım planlaması", () => {
     expect(Math.max(...quantities) - Math.min(...quantities)).toBeLessThanOrEqual(1);
   });
 
-  it("gemi planları İskandinav özel donanma kısıtını aşmaz", () => {
-    const plan = planPlayerPurchases("guild", 30, "MIXED_SHIPS", documentFixture({ naval: true, scandinavian: true }));
+  it.each(["HEAVY_SHIPS", "MIXED_SHIPS"] as const)("%s planında İskandinav devletine yalnız Hjortspring üretir", (mode) => {
+    const plan = planPlayerPurchases("guild", 30, mode, documentFixture({ naval: true, scandinavian: true }));
     expect(plan.unitActions).toHaveLength(0);
-    expect(plan.shipActions).toHaveLength(0);
+    expect(plan.shipActions.length).toBeGreaterThan(0);
+    expect(plan.shipActions.every((action) => action.shipType === "hjortspring")).toBe(true);
   });
 
   it("ağır ordu planını ağır standartlar ve onları karşılayan özel birliklerden kurar", () => {

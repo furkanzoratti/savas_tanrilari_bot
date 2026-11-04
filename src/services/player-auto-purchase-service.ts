@@ -154,11 +154,14 @@ export function planPlayerPurchases(
   const config = planningConfig(guildId);
   let base: NpcCountryPurchasePlan;
   if (mode === "HEAVY_SHIPS" || mode === "MIXED_SHIPS") {
+    const shipCandidates = document.isScandinavianState
+      ? (["hjortspring"] as const)
+      : mode === "HEAVY_SHIPS"
+        ? (["quinquereme", "trireme"] as const)
+        : (["quinquereme", "trireme", "kerkouros"] as const);
     base = planCountryPurchases(document, config, "NAVAL_FOCUS", 0, {
       unitCandidates: [],
-      shipCandidates: mode === "HEAVY_SHIPS"
-        ? ["quinquereme", "trireme"]
-        : ["quinquereme", "trireme", "kerkouros"],
+      shipCandidates,
       shipSelection: mode === "MIXED_SHIPS" ? "BALANCED" : "PRIORITY"
     });
     base = { ...base, notes: base.notes.filter((note) => !note.includes("kişilik hedef") && !note.includes("Hedef askerî doluluk")) };

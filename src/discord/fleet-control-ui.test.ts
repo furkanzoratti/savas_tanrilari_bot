@@ -17,6 +17,9 @@ describe("filolarım kontrol merkezi",()=>{
     expect(source).toContain("allocateEntirePool");
     expect(source).toContain("availableSettlementShips");
     expect(source).toContain("Gemi Seçerek Aktar");
+    expect(source).toContain("🛠️ Tamir Filoları");
+    expect(source).toContain("renderRepairFleetEmbed(selectedRepair)");
+    expect(source).toContain('kind==="frs"');
   });
 
   it("filolarım komutunu filo yöneticisine ve yönetici ülke seçimine bağlar",()=>{
