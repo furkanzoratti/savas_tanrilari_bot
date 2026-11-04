@@ -5,13 +5,14 @@ import {adminPool} from "../admin/db.js";
 import {adminConfig} from "../admin/config.js";
 
 type Scope={scope:"GM"|"PLAYER";countryId:string|null;userId:string};
-type MapHex={id:string;code:string;center:{pixelX:number;pixelY:number};type:"LAND"|"SEA"|"IMPASSABLE";playable:boolean;neighbors:string[]};
-type MapCatalog={mapVersion:string;grid:{width:number;height:number;radius:number};settlements:Record<string,{hexCode:string}>;hexes:MapHex[]};
+type MapHex={id:string;code:string;column:number;row:number;center:{pixelX:number;pixelY:number};type:"LAND"|"SEA"|"IMPASSABLE";playable:boolean;neighbors:string[];province?:string|null;regionKey?:string|null};
+type MapCatalog={mapVersion:string;grid:{width:number;height:number;radius:number;horizontalStep:number;verticalStep:number;originX:number;originY:number;columns:number;rows:number};legacyTransform?:{scaleX:number;scaleY:number;translateX:number;translateY:number;coordinateSystem:"pixel"};settlements:Record<string,{hexCode:string}>;hexes:MapHex[]};
 let catalogPromise:Promise<MapCatalog>|null=null;
+let aliasesPromise:Promise<Record<string,string>>|null=null;
 let seeded=false;
-const catalog=():Promise<MapCatalog>=>catalogPromise??=readFile(fileURLToPath(new URL("../../assets/hex-map-r56.json",import.meta.url)),"utf8").then((text)=>JSON.parse(text) as MapCatalog);
+const catalog=():Promise<MapCatalog>=>catalogPromise??=readFile(fileURLToPath(new URL("../../assets/hex-map-r56-expanded.json",import.meta.url)),"utf8").then((text)=>JSON.parse(text) as MapCatalog);
+const settlementAliases=():Promise<Record<string,string>>=>aliasesPromise??=readFile(fileURLToPath(new URL("../../assets/hex-settlement-aliases.json",import.meta.url)),"utf8").then((text)=>JSON.parse(text) as Record<string,string>);
 const normalize=(value:string):string=>value.normalize("NFD").replace(/[\u0300-\u036f]/gu,"").toLocaleLowerCase("en-US").replace(/[^a-z0-9]/gu,"");
-const aliases:Record<string,string>={atina:"Athenai",iskenderiye:"Alexandria",kartaca:"Carthago",bergama:"Pergamon",efes:"Ephesus",ikonion:"Iconium",pantikapaion:"Panticapaeum",sinop:"Sinope",sirakuza:"Syracusae",rodos:"Rhodos"};
 
 function nearestSeaCode(map:MapCatalog,landCode:string):string|null{
   const byCode=new Map(map.hexes.map((hex)=>[hex.code,hex]));const byId=new Map(map.hexes.map((hex)=>[hex.id,hex]));
@@ -19,24 +20,48 @@ function nearestSeaCode(map:MapCatalog,landCode:string):string|null{
   return land.neighbors.map((id)=>byId.get(id)).find((hex)=>hex?.type==="SEA"&&hex.playable)?.code??null;
 }
 
+function shiftLegacyHexCode(map:MapCatalog,value:string,kind:"ARMY"|"FLEET"):string|null{
+  const match=/^([A-Z]+)(\d+)$/u.exec(value.toUpperCase());if(!match||!map.legacyTransform)return null;
+  let column=0;for(const character of match[1]!)column=column*26+character.charCodeAt(0)-64;
+  const legacyColumn=column-1,legacyRow=Number(match[2])-1,legacyVertical=96.994845;
+  const sourceX=legacyColumn*84,sourceY=legacyRow*legacyVertical+(legacyColumn%2?legacyVertical/2:0);
+  const targetX=sourceX*map.legacyTransform.scaleX+map.legacyTransform.translateX,targetY=sourceY*map.legacyTransform.scaleY+map.legacyTransform.translateY;
+  const targetColumn=Math.round((targetX-map.grid.originX)/map.grid.horizontalStep),targetRow=Math.round((targetY-map.grid.originY-(targetColumn%2?map.grid.verticalStep/2:0))/map.grid.verticalStep),domain=kind==="ARMY"?"LAND":"SEA";
+  const candidates=map.hexes.filter((hex)=>hex.type===domain&&hex.playable&&Math.abs(hex.column-targetColumn)<=3&&Math.abs(hex.row-targetRow)<=3);
+  candidates.sort((a,b)=>(a.center.pixelX-targetX)**2+(a.center.pixelY-targetY)**2-((b.center.pixelX-targetX)**2+(b.center.pixelY-targetY)**2));
+  return candidates[0]?.code??null;
+}
+
+async function synchronizeMapVersion(map:MapCatalog):Promise<void>{
+  const aliases=await settlementAliases();
+  const normalizedAliases=new Map(Object.entries(aliases).map(([name,target])=>[normalize(name),target]));
+  const client=await adminPool.connect();
+  try{
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))",[`visual-map-version:${adminConfig.guildId}`]);
+    const configured=(await client.query<{map_version:string}>("SELECT map_version FROM visual_map_configuration WHERE guild_id=$1",[adminConfig.guildId])).rows[0]?.map_version??null;
+    const legacy=configured!==null&&configured!==map.mapVersion;
+    if(legacy){
+      const positions=(await client.query<{formation_kind:string;force_id:string;hex_code:string}>("SELECT formation_kind,force_id,hex_code FROM visual_map_force_positions WHERE guild_id=$1",[adminConfig.guildId])).rows;
+      for(const position of positions){const shifted=shiftLegacyHexCode(map,position.hex_code,position.formation_kind as "ARMY"|"FLEET");if(shifted)await client.query("UPDATE visual_map_force_positions SET hex_code=$4,updated_at=NOW() WHERE guild_id=$1 AND formation_kind=$2 AND force_id=$3",[adminConfig.guildId,position.formation_kind,position.force_id,shifted]);}
+      const settlementPositions=(await client.query<{settlement_id:string;hex_code:string}>("SELECT settlement_id,hex_code FROM visual_map_settlement_positions WHERE guild_id=$1",[adminConfig.guildId])).rows;
+      for(const position of settlementPositions){const shifted=shiftLegacyHexCode(map,position.hex_code,"ARMY");if(shifted)await client.query("UPDATE visual_map_settlement_positions SET hex_code=$3,updated_at=NOW() WHERE guild_id=$1 AND settlement_id=$2",[adminConfig.guildId,position.settlement_id,shifted]);}
+      const routes=(await client.query<{id:string;formation_kind:"ARMY"|"FLEET";route:string[];start_hex_code:string;destination_hex_code:string}>("SELECT id,formation_kind,route,start_hex_code,destination_hex_code FROM visual_map_routes WHERE guild_id=$1 AND status='SUBMITTED'",[adminConfig.guildId])).rows;
+      for(const route of routes){const kind=route.formation_kind as "ARMY"|"FLEET";const shiftedRoute=route.route.map((code)=>shiftLegacyHexCode(map,code,kind)).filter((code):code is string=>Boolean(code));const start=shiftLegacyHexCode(map,route.start_hex_code,kind);const destination=shiftLegacyHexCode(map,route.destination_hex_code,kind);if(start&&destination&&shiftedRoute.length===route.route.length)await client.query("UPDATE visual_map_routes SET start_hex_code=$2,destination_hex_code=$3,route=$4::jsonb,updated_at=NOW() WHERE id=$1",[route.id,start,destination,JSON.stringify(shiftedRoute)]);}
+    }
+    const settlements=(await client.query<{id:string;name:string}>(`SELECT settlement.id,settlement.name FROM settlements settlement JOIN countries country ON country.id=settlement.country_id WHERE country.guild_id=$1`,[adminConfig.guildId])).rows;
+    await client.query(`INSERT INTO visual_map_territory_baselines(settlement_id,guild_id,country_id) SELECT settlement.id,country.guild_id,settlement.country_id FROM settlements settlement JOIN countries country ON country.id=settlement.country_id WHERE country.guild_id=$1 ON CONFLICT(settlement_id) DO NOTHING`,[adminConfig.guildId]);
+    const positions=new Map(Object.entries(map.settlements).map(([name,value])=>[normalize(name),value.hexCode]));
+    for(const settlement of settlements){const alias=normalizedAliases.get(normalize(settlement.name));const code=positions.get(normalize(alias??settlement.name));if(!code)continue;await client.query(`INSERT INTO visual_map_settlement_positions(settlement_id,guild_id,hex_code) VALUES($1,$2,$3) ON CONFLICT(settlement_id) DO UPDATE SET guild_id=EXCLUDED.guild_id,hex_code=EXCLUDED.hex_code,updated_at=NOW()`,[settlement.id,adminConfig.guildId,code]);}
+    await client.query(`INSERT INTO visual_map_configuration(guild_id,map_version) VALUES($1,$2) ON CONFLICT(guild_id) DO UPDATE SET map_version=EXCLUDED.map_version,updated_at=NOW()`,[adminConfig.guildId,map.mapVersion]);
+    await client.query("COMMIT");
+  }catch(error){await client.query("ROLLBACK").catch(()=>undefined);throw error;}finally{client.release();}
+}
+
 async function ensureVisualSeed():Promise<void>{
   if(seeded)return;
   const map=await catalog();
-  const existing=Number((await adminPool.query<{count:number}>("SELECT COUNT(*)::integer AS count FROM visual_map_settlement_positions WHERE guild_id=$1",[adminConfig.guildId])).rows[0]?.count??0);
-  if(existing<50){
-    const settlements=(await adminPool.query<{id:string;name:string}>(
-      `SELECT settlement.id,settlement.name
-       FROM settlements settlement
-       JOIN countries country ON country.id=settlement.country_id
-       WHERE country.guild_id=$1`,
-      [adminConfig.guildId]
-    )).rows;
-    const positions=new Map(Object.entries(map.settlements).map(([name,value])=>[normalize(name),value.hexCode]));
-    for(const settlement of settlements){
-      const alias=aliases[normalize(settlement.name)];const code=positions.get(normalize(alias??settlement.name));if(!code)continue;
-      await adminPool.query(`INSERT INTO visual_map_settlement_positions(settlement_id,guild_id,hex_code) VALUES($1,$2,$3) ON CONFLICT(settlement_id) DO UPDATE SET hex_code=EXCLUDED.hex_code,updated_at=NOW()`,[settlement.id,adminConfig.guildId,code]);
-    }
-  }
+  await synchronizeMapVersion(map);
   const origins=(await adminPool.query<{kind:"ARMY"|"FLEET";id:string;country_id:string;hex_code:string}>(
     `SELECT 'ARMY'::text AS kind,army.id,army.country_id,position.hex_code FROM armies army JOIN countries country ON country.id=army.country_id JOIN visual_map_settlement_positions position ON position.settlement_id=army.origin_settlement_id WHERE country.guild_id=$1
      UNION ALL
@@ -77,16 +102,17 @@ async function force(kind:"ARMY"|"FLEET",id:string):Promise<{country_id:string;n
 export const movementMapService={
   async dashboard(session:Scope){
     await ensureVisualSeed();const map=await catalog();const countryFilter=session.scope==="PLAYER"?session.countryId:null;const params=countryFilter?[adminConfig.guildId,countryFilter]:[adminConfig.guildId];const filter=countryFilter?"AND source.country_id=$2":"";
-    const [countries,settlements,armies,fleets,routes,turn]=await Promise.all([
+    const [countries,settlements,armies,fleets,routes,turn,territories]=await Promise.all([
       adminPool.query(`SELECT id,name FROM countries WHERE guild_id=$1 AND status='ACTIVE' ${countryFilter?"AND id=$2":""} ORDER BY name`,params),
       adminPool.query(`SELECT settlement.id,settlement.name,settlement.country_id,position.hex_code AS coordinate FROM settlements settlement JOIN countries country ON country.id=settlement.country_id JOIN visual_map_settlement_positions position ON position.settlement_id=settlement.id WHERE country.guild_id=$1 ${countryFilter?"AND settlement.country_id=$2":""} ORDER BY settlement.name`,params),
       adminPool.query(`SELECT source.id,source.name,source.country_id,country.name AS country_name,position.hex_code AS coordinate,COALESCE(SUM(unit.quantity),0)::integer AS strength FROM armies source JOIN countries country ON country.id=source.country_id LEFT JOIN visual_map_force_positions position ON position.guild_id=country.guild_id AND position.formation_kind='ARMY' AND position.force_id=source.id LEFT JOIN army_units unit ON unit.army_id=source.id WHERE country.guild_id=$1 ${filter} GROUP BY source.id,country.name,position.hex_code ORDER BY country.name,source.name`,params),
       adminPool.query(`SELECT source.id,source.name,source.country_id,country.name AS country_name,position.hex_code AS coordinate,COALESCE(SUM(ship.quantity),0)::integer AS strength FROM fleets source JOIN countries country ON country.id=source.country_id LEFT JOIN visual_map_force_positions position ON position.guild_id=country.guild_id AND position.formation_kind='FLEET' AND position.force_id=source.id LEFT JOIN fleet_ships ship ON ship.fleet_id=source.id WHERE country.guild_id=$1 ${filter} GROUP BY source.id,country.name,position.hex_code ORDER BY country.name,source.name`,params),
       adminPool.query(`SELECT route.id,route.country_id,country.name AS country_name,route.formation_kind,CASE WHEN route.formation_kind='ARMY' THEN army.name ELSE fleet.name END AS force_name,route.force_id,route.status,route.issued_turn,route.start_hex_code AS start_coordinate,route.destination_hex_code AS destination_coordinate,jsonb_build_object('route',route.route,'purpose',route.purpose) AS metadata,route.created_at FROM visual_map_routes route JOIN countries country ON country.id=route.country_id LEFT JOIN armies army ON route.formation_kind='ARMY' AND army.id=route.force_id LEFT JOIN fleets fleet ON route.formation_kind='FLEET' AND fleet.id=route.force_id WHERE route.guild_id=$1 ${countryFilter?"AND route.country_id=$2":""} AND route.status='SUBMITTED' ORDER BY route.created_at`,params),
-      adminPool.query<{current_turn:number}>("SELECT current_turn FROM guilds WHERE discord_id=$1",[adminConfig.guildId])
+      adminPool.query<{current_turn:number}>("SELECT current_turn FROM guilds WHERE discord_id=$1",[adminConfig.guildId]),
+      adminPool.query(`SELECT settlement.id,settlement.name,settlement.country_id,owner.name AS owner_country_name,settlement.is_conquered,position.hex_code AS coordinate,baseline.country_id AS baseline_country_id,(baseline.country_id IS DISTINCT FROM settlement.country_id) AS owner_changed,occupation.occupier_country_id,occupier.name AS occupier_country_name FROM settlements settlement JOIN countries owner ON owner.id=settlement.country_id JOIN visual_map_settlement_positions position ON position.settlement_id=settlement.id LEFT JOIN visual_map_territory_baselines baseline ON baseline.settlement_id=settlement.id LEFT JOIN LATERAL(SELECT active.occupier_country_id FROM settlement_occupations active WHERE active.settlement_id=settlement.id AND active.status='ACTIVE' ORDER BY active.started_turn DESC LIMIT 1) occupation ON TRUE LEFT JOIN countries occupier ON occupier.id=occupation.occupier_country_id WHERE owner.guild_id=$1 ORDER BY settlement.name`,[adminConfig.guildId])
     ]);
     const codeMap=new Map(map.hexes.map((hex)=>[hex.code,hex.center]));const decorate=(row:Record<string,unknown>)=>{const point=typeof row.coordinate==="string"?codeMap.get(row.coordinate):null;return {...row,pixel_x:point?.pixelX??null,pixel_y:point?.pixelY??null};};
-    return {scope:session.scope,map:{version:map.mapVersion,...map.grid},turn:Number(turn.rows[0]?.current_turn??0),countries:countries.rows,settlements:settlements.rows.map((row)=>decorate(row as Record<string,unknown>)),forces:[...armies.rows.map((row)=>({...decorate(row as Record<string,unknown>),kind:"ARMY"})),...fleets.rows.map((row)=>({...decorate(row as Record<string,unknown>),kind:"FLEET"}))],orders:routes.rows};
+    return {scope:session.scope,map:{version:map.mapVersion,...map.grid},turn:Number(turn.rows[0]?.current_turn??0),countries:countries.rows,settlements:settlements.rows.map((row)=>decorate(row as Record<string,unknown>)),territories:territories.rows,forces:[...armies.rows.map((row)=>({...decorate(row as Record<string,unknown>),kind:"ARMY"})),...fleets.rows.map((row)=>({...decorate(row as Record<string,unknown>),kind:"FLEET"}))],orders:routes.rows};
   },
 
   async submitOrder(session:Scope,raw:unknown){

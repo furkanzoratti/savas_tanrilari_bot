@@ -127,6 +127,7 @@ import { cultureMilitaryPenaltyActivationMigration } from "./culture-military-pe
 import { trainingFormationsMigration } from "./training-formations-migration.js";
 import { movementMapPanelMigration } from "./movement-map-panel-migration.js";
 import {visualMovementBoardMigration} from "./visual-movement-board-migration.js";
+import {expandedVisualMapMigration} from "./expanded-visual-map-migration.js";
 import { countryMarshalsMigration } from "./country-marshals-migration.js";
 import { formableCountryCatalogSyncMigration } from "./formable-country-catalog-sync-migration.js";
 import { mountedArcherSeparationMigration } from "./mounted-archer-separation-migration.js";
@@ -2563,5 +2564,6 @@ export const migrations = [
   cultureMilitaryPenaltyActivationMigration,
   trainingFormationsMigration,
   movementMapPanelMigration,
-  visualMovementBoardMigration
+  visualMovementBoardMigration,
+  expandedVisualMapMigration
 ] as const;

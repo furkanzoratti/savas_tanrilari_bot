@@ -162,8 +162,8 @@ async function serveDeathEventAsset(filename:string,response:ServerResponse):Pro
 
 async function serveMapAsset(kind:"catalog"|"image",response:ServerResponse):Promise<void>{
   const file=kind==="catalog"
-    ?fileURLToPath(new URL("../../assets/hex-map-r56.json",import.meta.url))
-    :fileURLToPath(new URL("../../maps/r56/NEWHEXMAP.png",import.meta.url));
+    ?fileURLToPath(new URL("../../assets/hex-map-r56-expanded.json",import.meta.url))
+    :fileURLToPath(new URL("../../maps/r56/R56-EXPANDED-v7.png",import.meta.url));
   const content=await readFile(file);securityHeaders(response);responseTiming(response);
   response.writeHead(200,{"content-type":kind==="catalog"?"application/json; charset=utf-8":"image/png","cache-control":"public, max-age=3600"});response.end(content);
 }

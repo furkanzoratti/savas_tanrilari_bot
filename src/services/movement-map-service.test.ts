@@ -10,4 +10,16 @@ describe("görsel hareket haritası sunucu kapsamı",()=>{
     expect(source).toContain("JOIN countries country ON country.id=settlement.country_id");
     expect(source).toContain("WHERE country.guild_id=$1");
   });
+
+  it("genişletilmiş R56 kataloğunu ve siyasi değişim katmanını kullanır",()=>{
+    const source=readFileSync(new URL("./movement-map-service.ts",import.meta.url),"utf8");
+
+    expect(source).toContain("hex-map-r56-expanded.json");
+    expect(source).toContain("hex-settlement-aliases.json");
+    expect(source).toContain("visual_map_territory_baselines");
+    expect(source).toContain("settlement_occupations");
+    expect(source).toContain("owner_changed");
+    expect(source).toContain("legacyTransform");
+    expect(source).not.toContain("DELETE FROM visual_map_settlement_positions");
+  });
 });
