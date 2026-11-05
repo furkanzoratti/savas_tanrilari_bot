@@ -34,10 +34,11 @@ describe("hareket haritası GM yerleştirme arayüzü",()=>{
     expect(html).toContain("Siyasi Harita");
     expect(html).not.toContain("Siyasi değişimler");
     expect(script).toContain("politicalRegionMask");
-    expect(script).toContain("politicalCountryColor");
+    expect(script).toContain("territory.owner_map_color");
     expect(script).toContain('mode==="OWNER"');
     expect(script).toContain('politicalPatch(territory,"OCCUPATION"');
     expect(script).toContain("ownerColorMismatch");
+    expect(script).not.toContain("politicalCountryColorInfo");
     expect(script).toContain('current.type==="COAST"?"Kıyı • Kara ve deniz"');
     expect(script).toContain("refreshPoliticalState");
     expect(script).not.toContain('territory.occupier_country_id?".42":".28"');

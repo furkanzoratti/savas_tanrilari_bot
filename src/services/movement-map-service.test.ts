@@ -20,6 +20,8 @@ describe("görsel hareket haritası sunucu kapsamı",()=>{
     expect(source).toContain("settlement_occupations");
     expect(source).toContain("active_war.status='ACTIVE'");
     expect(source).toContain("owner_changed");
+    expect(source).toContain("owner.map_color AS owner_map_color");
+    expect(source).toContain("countryMapColor(country.name)");
     expect(source).toContain("supportsFormation");
     expect(source).toContain('hex.type==="COAST"');
     expect(source).toContain("(owner.capital_settlement_id=settlement.id) AS is_capital");

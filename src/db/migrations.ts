@@ -129,6 +129,7 @@ import { movementMapPanelMigration } from "./movement-map-panel-migration.js";
 import {visualMovementBoardMigration} from "./visual-movement-board-migration.js";
 import {expandedVisualMapMigration} from "./expanded-visual-map-migration.js";
 import {politicalMapBaselineMigration} from "./political-map-baseline-migration.js";
+import {countryMapColorsMigration} from "./country-map-colors-migration.js";
 import { countryMarshalsMigration } from "./country-marshals-migration.js";
 import { formableCountryCatalogSyncMigration } from "./formable-country-catalog-sync-migration.js";
 import { mountedArcherSeparationMigration } from "./mounted-archer-separation-migration.js";
@@ -2567,5 +2568,6 @@ export const migrations = [
   movementMapPanelMigration,
   visualMovementBoardMigration,
   expandedVisualMapMigration,
-  politicalMapBaselineMigration
+  politicalMapBaselineMigration,
+  countryMapColorsMigration
 ] as const;

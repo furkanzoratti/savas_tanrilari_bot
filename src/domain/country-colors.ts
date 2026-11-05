@@ -239,4 +239,31 @@ export function countryRoleColor(countryName: string): number | null {
   return COUNTRY_COLORS.get(normalizeCountryColorKey(countryName)) ?? null;
 }
 
+const CURRENT_COUNTRY_MAP_COLORS=new Map<string,number>([
+  ["akdenizligi",0xad2a65],["anadolukralligi",0xad2a65],
+  ["buyukkartaca",0xe4d9c7],["buyukbritanya",0xe11b22],
+  ["nilimparatorlugu",0x2552b1],["iberya",0xe4a244],
+  ["iransahr",0x16872c],["persis",0x16872c],["satraplar",0x724f37],
+  ["saketler",0xc79f13],["sarmatya",0xcd79d8],["trakya",0xba7148],
+  ["bosporoskralligi",0x6d075a],["gautkralligi",0x54ed16],
+  ["hedinkralligi",0x123ee7],["kimbrikralligi",0xb100f0],["svegekralligi",0x241174],
+  ["xianbeikonfederasyonu",0xef1616],["kangkukonfederasyonu",0x805c43],
+  ["grekobaktriya",0x13821c]
+]);
+
+function stableFallbackColor(key:string):number{
+  let hash=2166136261;
+  for(const character of key){hash^=character.charCodeAt(0);hash=Math.imul(hash,16777619);}
+  const hue=(hash>>>0)%360,saturation=.52,lightness=.44;
+  const chroma=(1-Math.abs(2*lightness-1))*saturation,part=chroma*(1-Math.abs((hue/60)%2-1)),offset=lightness-chroma/2;
+  const [r,g,b]=hue<60?[chroma,part,0]:hue<120?[part,chroma,0]:hue<180?[0,chroma,part]:hue<240?[0,part,chroma]:hue<300?[part,0,chroma]:[chroma,0,part];
+  return (Math.round((r+offset)*255)<<16)|(Math.round((g+offset)*255)<<8)|Math.round((b+offset)*255);
+}
+
+export function countryMapColor(countryName:string):string{
+  const key=normalizeCountryColorKey(countryName);
+  const color=CURRENT_COUNTRY_MAP_COLORS.get(key)??COUNTRY_COLORS.get(key)??stableFallbackColor(key);
+  return `#${color.toString(16).padStart(6,"0").toUpperCase()}`;
+}
+
 export const COUNTRY_ROLE_COLOR_COUNT = COUNTRY_COLORS.size;
