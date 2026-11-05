@@ -22,6 +22,13 @@ describe("hareket haritası GM yerleştirme arayüzü",()=>{
     expect(script).toContain("r56-political-v8");
   });
 
+  it("işgal maskesi üretilemezse yerleşke hexini çizgili yedek olarak kullanır",()=>{
+    expect(script).toContain("politicalHexFallback");
+    expect(script).toContain("const fallback=politicalHexFallback(territory)");
+    expect(script).toContain('mode==="OWNER"');
+    expect(script).toContain("stripeContext.strokeStyle=color");
+  });
+
   it("siyasi haritayı gerçek bölge maskesiyle boyar ve işgali çapraz tarar",()=>{
     expect(html).toContain("Siyasi Harita");
     expect(html).not.toContain("Siyasi değişimler");
