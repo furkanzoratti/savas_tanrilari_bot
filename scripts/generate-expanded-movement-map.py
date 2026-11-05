@@ -73,7 +73,16 @@ def neighbors(column: int, row: int, columns: int, rows: int) -> list[tuple[int,
 
 
 def classify(image: np.ndarray, x: float, y: float, scale: float) -> tuple[str, str]:
-    sample_offsets = ((0, -22), (0, 22), (-18, -14), (18, -14), (-18, 14), (18, 14), (-26, 0), (26, 0))
+    # Sample the usable interior of the whole hex.  A centre-only vote makes
+    # coastal hexes flip between land and sea and lets naval paths cut across
+    # peninsulas.  COAST is deliberately a first-class movement domain: both
+    # armies and fleets may use a hex that visibly contains meaningful shares
+    # of land and water.
+    sample_offsets = (
+        (0, 0), (0, -24), (0, 24), (-12, -20), (12, -20), (-12, 20), (12, 20),
+        (-24, -12), (24, -12), (-24, 12), (24, 12), (-30, 0), (30, 0),
+        (-16, 0), (16, 0), (0, -12), (0, 12),
+    )
     sea = np.array((35, 107, 169), dtype=np.int16)
     gray = np.array((64, 64, 64), dtype=np.int16)
     votes: list[tuple[str, np.ndarray]] = []
@@ -90,7 +99,10 @@ def classify(image: np.ndarray, x: float, y: float, scale: float) -> tuple[str, 
             continue
         if np.max(np.abs(color - gray)) < 12 and abs(int(color[0]) - int(color[1])) < 6:
             votes.append(("IMPASSABLE", color))
-        elif np.max(np.abs(color - sea)) < 30:
+        # The sea is a stable bitmap colour.  A broad tolerance also catches
+        # dark-blue country fills (notably the Nile realm) and incorrectly
+        # turns inland hexes into water.
+        elif np.max(np.abs(color - sea)) < 14:
             votes.append(("SEA", color))
         else:
             votes.append(("LAND", color))
@@ -99,8 +111,12 @@ def classify(image: np.ndarray, x: float, y: float, scale: float) -> tuple[str, 
     if not votes:
         return "IMPASSABLE", "#404040"
     counts = {kind: sum(1 for vote, _ in votes if vote == kind) for kind in ("SEA", "LAND", "IMPASSABLE")}
-    kind = max(counts, key=counts.get)
-    colors = np.array([color for vote, color in votes if vote == kind])
+    if counts["SEA"] >= 2 and counts["LAND"] >= 2:
+        kind = "COAST"
+        colors = np.array([color for vote, color in votes if vote in ("SEA", "LAND")])
+    else:
+        kind = max(counts, key=counts.get)
+        colors = np.array([color for vote, color in votes if vote == kind])
     median = np.median(colors, axis=0).astype(int)
     return kind, f"#{median[0]:02x}{median[1]:02x}{median[2]:02x}"
 
@@ -166,7 +182,7 @@ def marker_overlap_hex(marker_x: int, marker_y: int, radius: float,
         estimate_row = round((marker_y - origin_y - offset) / vertical_step)
         for row in range(estimate_row - 2, estimate_row + 3):
             item = by_position.get((column, row))
-            if item and item["type"] == "LAND":
+            if item and item["type"] in ("LAND", "COAST"):
                 candidates.append(item)
     samples = [(dx, dy) for dx in range(-SETTLEMENT_MARKER_RADIUS, SETTLEMENT_MARKER_RADIUS + 1, 2)
                for dy in range(-SETTLEMENT_MARKER_RADIUS, SETTLEMENT_MARKER_RADIUS + 1, 2)
@@ -299,10 +315,11 @@ def main() -> None:
             legacy_column = round((column - LEGACY_TRANSLATE_X) / LEGACY_SCALE_X)
             legacy_row = round((row - LEGACY_TRANSLATE_Y) / LEGACY_SCALE_Y)
             inherited = legacy_by_position.get((legacy_column, legacy_row), {}) if legacy_row >= 0 else {}
-            # Preserve known legacy land/sea topology, but let the political
-            # image activate areas that the old catalog labelled IMPASSABLE.
-            inherited_kind = inherited.get("type")
-            kind = inherited_kind if inherited_kind in ("LAND", "SEA") else detected_kind
+            # The political bitmap is authoritative for the present coastline.
+            # The legacy topology belongs to an older map revision and caused
+            # sea routes to cross current land, so it must not override the
+            # freshly sampled LAND / SEA / COAST result.
+            kind = detected_kind
             item: dict[str, object] = {
                 "id": f"R56X-Q{column}-R{row}",
                 "code": code(column, row),
@@ -328,7 +345,7 @@ def main() -> None:
     for (column, row), item in by_position.items():
         adjacent = neighbors(column, row, columns, rows)
         item["neighbors"] = [by_position[position]["id"] for position in adjacent]
-        item["coastal"] = item["type"] == "LAND" and any(by_position[position]["type"] == "SEA" for position in adjacent)
+        item["coastal"] = item["type"] == "COAST" or (item["type"] == "LAND" and any(by_position[position]["type"] in ("SEA", "COAST") for position in adjacent))
 
     def closest_playable(column: int, row: int, kind: str, excluded_codes: set[str] | None = None) -> dict[str, object] | None:
         excluded_codes = excluded_codes or set()
@@ -369,7 +386,12 @@ def main() -> None:
         marker = markers[marker_assignment[source_index]]
         target = marker_overlap_hex(marker[0], marker[1], radius, by_position, origin_x, origin_y, horizontal_step, vertical_step)
         if target and target["code"] in claimed_settlement_hexes:
-            target = closest_playable(target["column"], target["row"], "LAND", claimed_settlement_hexes)
+            candidates = [item for (candidate_column, candidate_row), item in by_position.items()
+                          if item["type"] in ("LAND", "COAST")
+                          and item["code"] not in claimed_settlement_hexes
+                          and abs(candidate_column - target["column"]) <= 3
+                          and abs(candidate_row - target["row"]) <= 3]
+            target = min(candidates, key=lambda item: (item["column"] - target["column"]) ** 2 + (item["row"] - target["row"]) ** 2, default=None)
         if not target:
             raise RuntimeError(f"No playable hex found for {name}")
         claimed_settlement_hexes.add(str(target["code"]))
@@ -387,7 +409,7 @@ def main() -> None:
         target["settlements"].append({"name": name, "regionKey": settlement.get("regionKey")})
 
     result = {
-        "mapVersion": "r56-political-v8-marker-grid-v2",
+        "mapVersion": "r56-political-v8-coastal-grid-v3",
         "grid": {
             "orientation": "flat-top",
             "radius": round(radius, 6),

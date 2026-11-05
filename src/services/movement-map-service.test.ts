@@ -19,6 +19,9 @@ describe("görsel hareket haritası sunucu kapsamı",()=>{
     expect(source).toContain("visual_map_territory_baselines");
     expect(source).toContain("settlement_occupations");
     expect(source).toContain("owner_changed");
+    expect(source).toContain("supportsFormation");
+    expect(source).toContain('hex.type==="COAST"');
+    expect(source).toContain("(owner.capital_settlement_id=settlement.id) AS is_capital");
     expect(source).toContain("legacyTransform");
     expect(source).toContain("claimNearestAvailableLandHex");
     expect(source).toContain("__MIGRATING__");

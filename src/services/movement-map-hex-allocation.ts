@@ -1,6 +1,6 @@
 export type SettlementMapHex={
   code:string;
-  type:"LAND"|"SEA"|"IMPASSABLE";
+  type:"LAND"|"SEA"|"COAST"|"IMPASSABLE";
   playable:boolean;
   center:{pixelX:number;pixelY:number};
 };
@@ -15,7 +15,7 @@ export function claimNearestAvailableLandHex(
   let selected:SettlementMapHex|null=null;
   let selectedDistance=Number.POSITIVE_INFINITY;
   for(const candidate of hexes){
-    if(candidate.type!=="LAND"||!candidate.playable||occupied.has(candidate.code))continue;
+    if((candidate.type!=="LAND"&&candidate.type!=="COAST")||!candidate.playable||occupied.has(candidate.code))continue;
     const distance=(candidate.center.pixelX-requested.center.pixelX)**2+(candidate.center.pixelY-requested.center.pixelY)**2;
     if(distance<selectedDistance||(distance===selectedDistance&&candidate.code.localeCompare(selected?.code??"")<0)){
       selected=candidate;

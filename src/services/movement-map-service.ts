@@ -7,7 +7,7 @@ import {claimNearestAvailableLandHex} from "./movement-map-hex-allocation.js";
 import {movementMapFlagUrl} from "../domain/movement-map-flags.js";
 
 type Scope={scope:"GM"|"PLAYER";countryId:string|null;userId:string};
-type MapHex={id:string;code:string;column:number;row:number;center:{pixelX:number;pixelY:number};type:"LAND"|"SEA"|"IMPASSABLE";playable:boolean;neighbors:string[];province?:string|null;regionKey?:string|null};
+type MapHex={id:string;code:string;column:number;row:number;center:{pixelX:number;pixelY:number};type:"LAND"|"SEA"|"COAST"|"IMPASSABLE";playable:boolean;neighbors:string[];province?:string|null;regionKey?:string|null};
 type MapCatalog={mapVersion:string;grid:{width:number;height:number;radius:number;horizontalStep:number;verticalStep:number;originX:number;originY:number;columns:number;rows:number};legacyTransform?:{scaleX:number;scaleY:number;translateX:number;translateY:number;coordinateSystem:"pixel"};settlements:Record<string,{hexCode:string}>;hexes:MapHex[]};
 let catalogPromise:Promise<MapCatalog>|null=null;
 let aliasesPromise:Promise<Record<string,string>>|null=null;
@@ -19,7 +19,12 @@ const normalize=(value:string):string=>value.normalize("NFD").replace(/[\u0300-\
 function nearestSeaCode(map:MapCatalog,landCode:string):string|null{
   const byCode=new Map(map.hexes.map((hex)=>[hex.code,hex]));const byId=new Map(map.hexes.map((hex)=>[hex.id,hex]));
   const land=byCode.get(landCode);if(!land)return null;
-  return land.neighbors.map((id)=>byId.get(id)).find((hex)=>hex?.type==="SEA"&&hex.playable)?.code??null;
+  if(land.type==="COAST"&&land.playable)return land.code;
+  return land.neighbors.map((id)=>byId.get(id)).find((hex)=>hex?.playable&&(hex.type==="SEA"||hex.type==="COAST"))?.code??null;
+}
+
+function supportsFormation(hex:MapHex,kind:"ARMY"|"FLEET"):boolean{
+  return hex.playable&&(hex.type==="COAST"||(kind==="ARMY"?hex.type==="LAND":hex.type==="SEA"));
 }
 
 function shiftLegacyHexCode(map:MapCatalog,value:string,kind:"ARMY"|"FLEET"):string|null{
@@ -28,8 +33,8 @@ function shiftLegacyHexCode(map:MapCatalog,value:string,kind:"ARMY"|"FLEET"):str
   const legacyColumn=column-1,legacyRow=Number(match[2])-1,legacyVertical=96.994845;
   const sourceX=legacyColumn*84,sourceY=legacyRow*legacyVertical+(legacyColumn%2?legacyVertical/2:0);
   const targetX=sourceX*map.legacyTransform.scaleX+map.legacyTransform.translateX,targetY=sourceY*map.legacyTransform.scaleY+map.legacyTransform.translateY;
-  const targetColumn=Math.round((targetX-map.grid.originX)/map.grid.horizontalStep),targetRow=Math.round((targetY-map.grid.originY-(targetColumn%2?map.grid.verticalStep/2:0))/map.grid.verticalStep),domain=kind==="ARMY"?"LAND":"SEA";
-  const candidates=map.hexes.filter((hex)=>hex.type===domain&&hex.playable&&Math.abs(hex.column-targetColumn)<=3&&Math.abs(hex.row-targetRow)<=3);
+  const targetColumn=Math.round((targetX-map.grid.originX)/map.grid.horizontalStep),targetRow=Math.round((targetY-map.grid.originY-(targetColumn%2?map.grid.verticalStep/2:0))/map.grid.verticalStep);
+  const candidates=map.hexes.filter((hex)=>supportsFormation(hex,kind)&&Math.abs(hex.column-targetColumn)<=3&&Math.abs(hex.row-targetRow)<=3);
   candidates.sort((a,b)=>(a.center.pixelX-targetX)**2+(a.center.pixelY-targetY)**2-((b.center.pixelX-targetX)**2+(b.center.pixelY-targetY)**2));
   return candidates[0]?.code??null;
 }
@@ -103,8 +108,8 @@ const routeSchema=z.object({kind:z.enum(["ARMY","FLEET"]),forceId:z.string().uui
 const positionSchema=z.object({coordinate:z.string().min(2).max(16)});
 
 function validateCoordinate(map:MapCatalog,kind:"ARMY"|"FLEET",coordinate:string):MapHex{
-  const hex=map.hexes.find((item)=>item.code===coordinate);const domain=kind==="ARMY"?"LAND":"SEA";
-  if(!hex||!hex.playable||hex.type!==domain)throw new Error(kind==="ARMY"?"Ordu yalnızca geçilebilir kara hexine yerleştirilebilir.":"Filo yalnızca geçilebilir deniz hexine yerleştirilebilir.");
+  const hex=map.hexes.find((item)=>item.code===coordinate);
+  if(!hex||!supportsFormation(hex,kind))throw new Error(kind==="ARMY"?"Ordu yalnızca geçilebilir kara veya kıyı hexine yerleştirilebilir.":"Filo yalnızca geçilebilir deniz veya kıyı hexine yerleştirilebilir.");
   return hex;
 }
 function validateRoute(map:MapCatalog,kind:"ARMY"|"FLEET",route:string[]):void{
@@ -133,7 +138,7 @@ export const movementMapService={
       adminPool.query(`SELECT source.id,source.name,source.country_id,country.name AS country_name,position.hex_code AS coordinate,COALESCE(SUM(ship.quantity),0)::integer AS strength FROM fleets source JOIN countries country ON country.id=source.country_id LEFT JOIN visual_map_force_positions position ON position.guild_id=country.guild_id AND position.formation_kind='FLEET' AND position.force_id=source.id LEFT JOIN fleet_ships ship ON ship.fleet_id=source.id WHERE country.guild_id=$1 ${filter} GROUP BY source.id,country.name,position.hex_code ORDER BY country.name,source.name`,params),
       adminPool.query(`SELECT route.id,route.country_id,country.name AS country_name,route.formation_kind,CASE WHEN route.formation_kind='ARMY' THEN army.name ELSE fleet.name END AS force_name,route.force_id,route.status,route.issued_turn,route.start_hex_code AS start_coordinate,route.destination_hex_code AS destination_coordinate,jsonb_build_object('route',route.route,'purpose',route.purpose) AS metadata,route.created_at FROM visual_map_routes route JOIN countries country ON country.id=route.country_id LEFT JOIN armies army ON route.formation_kind='ARMY' AND army.id=route.force_id LEFT JOIN fleets fleet ON route.formation_kind='FLEET' AND fleet.id=route.force_id WHERE route.guild_id=$1 ${countryFilter?"AND route.country_id=$2":""} AND route.status='SUBMITTED' ORDER BY route.created_at`,params),
       adminPool.query<{current_turn:number}>("SELECT current_turn FROM guilds WHERE discord_id=$1",[adminConfig.guildId]),
-      adminPool.query(`SELECT settlement.id,settlement.name,settlement.country_id,owner.name AS owner_country_name,settlement.is_conquered,position.hex_code AS coordinate,baseline.country_id AS baseline_country_id,(baseline.country_id IS DISTINCT FROM settlement.country_id) AS owner_changed,occupation.occupier_country_id,occupier.name AS occupier_country_name FROM settlements settlement JOIN countries owner ON owner.id=settlement.country_id JOIN visual_map_settlement_positions position ON position.settlement_id=settlement.id LEFT JOIN visual_map_territory_baselines baseline ON baseline.settlement_id=settlement.id LEFT JOIN LATERAL(SELECT active.occupier_country_id FROM settlement_occupations active WHERE active.settlement_id=settlement.id AND active.status='ACTIVE' ORDER BY active.started_turn DESC LIMIT 1) occupation ON TRUE LEFT JOIN countries occupier ON occupier.id=occupation.occupier_country_id WHERE owner.guild_id=$1 ORDER BY settlement.name`,[adminConfig.guildId])
+      adminPool.query(`SELECT settlement.id,settlement.name,settlement.country_id,owner.name AS owner_country_name,settlement.is_conquered,(owner.capital_settlement_id=settlement.id) AS is_capital,position.hex_code AS coordinate,baseline.country_id AS baseline_country_id,(baseline.country_id IS DISTINCT FROM settlement.country_id) AS owner_changed,occupation.occupier_country_id,occupier.name AS occupier_country_name FROM settlements settlement JOIN countries owner ON owner.id=settlement.country_id JOIN visual_map_settlement_positions position ON position.settlement_id=settlement.id LEFT JOIN visual_map_territory_baselines baseline ON baseline.settlement_id=settlement.id LEFT JOIN LATERAL(SELECT active.occupier_country_id FROM settlement_occupations active WHERE active.settlement_id=settlement.id AND active.status='ACTIVE' ORDER BY active.started_turn DESC LIMIT 1) occupation ON TRUE LEFT JOIN countries occupier ON occupier.id=occupation.occupier_country_id WHERE owner.guild_id=$1 ORDER BY settlement.name`,[adminConfig.guildId])
     ]);
     const codeMap=new Map(map.hexes.map((hex)=>[hex.code,hex.center]));const decorate=(row:Record<string,unknown>)=>{const point=typeof row.coordinate==="string"?codeMap.get(row.coordinate):null;return {...row,pixel_x:point?.pixelX??null,pixel_y:point?.pixelY??null};};
     const decorateForce=(row:Record<string,unknown>,kind:"ARMY"|"FLEET")=>({...decorate(row),kind,flag_url:movementMapFlagUrl(String(row.country_name??""))});
