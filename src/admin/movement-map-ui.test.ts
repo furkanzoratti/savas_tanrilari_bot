@@ -22,9 +22,10 @@ describe("hareket haritası GM yerleştirme arayüzü",()=>{
     expect(script).toContain("r56-political-v8-coastal-grid-v3");
   });
 
-  it("işgal maskesi üretilemezse yerleşke hexini çizgili yedek olarak kullanır",()=>{
-    expect(script).toContain("politicalHexFallback");
-    expect(script).toContain("const fallback=politicalHexFallback(territory)");
+  it("işgal maskesine deniz veya boş alanı dahil etmez",()=>{
+    expect(script).toContain("isPoliticalFill");
+    expect(script).toContain("POLITICAL_SEA");
+    expect(script).toContain("state.territoryMaskCache.set(cacheKey,null)");
     expect(script).toContain('mode==="OWNER"');
     expect(script).toContain('strokeStyle="rgba(0,0,0,.92)"');
   });

@@ -18,6 +18,7 @@ describe("görsel hareket haritası sunucu kapsamı",()=>{
     expect(source).toContain("hex-settlement-aliases.json");
     expect(source).toContain("visual_map_territory_baselines");
     expect(source).toContain("settlement_occupations");
+    expect(source).toContain("active_war.status='ACTIVE'");
     expect(source).toContain("owner_changed");
     expect(source).toContain("supportsFormation");
     expect(source).toContain('hex.type==="COAST"');
